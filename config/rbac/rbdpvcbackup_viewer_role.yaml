@@ -1,0 +1,27 @@
+# permissions for end users to view rbdpvcbackups.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/instance: rbdpvcbackup-viewer-role
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: rbd-backup-system
+    app.kubernetes.io/part-of: rbd-backup-system
+    app.kubernetes.io/managed-by: kustomize
+  name: rbdpvcbackup-viewer-role
+rules:
+- apiGroups:
+  - backup.cybozu.com
+  resources:
+  - rbdpvcbackups
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - backup.cybozu.com
+  resources:
+  - rbdpvcbackups/status
+  verbs:
+  - get
