@@ -1,0 +1,64 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.13.0
+  name: rbdpvcbackups.backup.cybozu.com
+spec:
+  group: backup.cybozu.com
+  names:
+    kind: RBDPVCBackup
+    listKind: RBDPVCBackupList
+    plural: rbdpvcbackups
+    singular: rbdpvcbackup
+  scope: Namespaced
+  versions:
+  - name: v1
+    schema:
+      openAPIV3Schema:
+        description: RBDPVCBackup is the Schema for the rbdpvcbackups API
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: RBDPVCBackupSpec defines the desired state of RBDPVCBackup
+            properties:
+              namespace:
+                description: '''namespace'' specifies backup target Namespace'
+                type: string
+              pvc:
+                description: '''pvc'' specifies backup target PVC'
+                type: string
+            type: object
+          status:
+            description: RBDPVCBackupStatus defines the observed state of RBDPVCBackup
+            properties:
+              conditions:
+                description: '''conditions'' specifies current backup conditions'
+                enum:
+                - Creating
+                - Bound
+                - Failed
+                - Deleting
+                type: string
+              createdAt:
+                description: '''createdAt'' specifies the creation date and time'
+                format: date-time
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -1,0 +1,7 @@
+bin/*
+tmp/*
+testdata/cluster.yaml
+cni-plugins.tgz
+cri-dockerd.deb
+crictl.tar.gz
+controller-container.tar
