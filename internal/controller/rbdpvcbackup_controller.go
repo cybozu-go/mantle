@@ -2,14 +2,21 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"os/exec"
+	"syscall"
+	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	backupv1 "github.com/cybozu-go/rbd-backup-system/api/v1"
 )
@@ -18,6 +25,14 @@ import (
 type RBDPVCBackupReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+}
+
+type Snapshot struct {
+	Id        int       `json:"id,omitempty"`
+	Name      string    `json:"name,omitempty"`
+	Size      int       `json:"size,omitempty"`
+	Protected bool      `json:"protected,omitempty"`
+	Timestamp time.Time `json:"timestamp,omitempty"`
 }
 
 const (
@@ -66,6 +81,8 @@ func executeCommand(command []string, input io.Reader) ([]byte, error) {
 //+kubebuilder:rbac:groups=backup.cybozu.com,resources=rbdpvcbackups/finalizers,verbs=update
 //+kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch
 //+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
+//+kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch
+//+kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -77,52 +94,143 @@ func executeCommand(command []string, input io.Reader) ([]byte, error) {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.16.3/pkg/reconcile
 func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	var rpBackup backupv1.RBDPVCBackup
-	err := r.Get(ctx, req.NamespacedName, &rpBackup)
+	var backup backupv1.RBDPVCBackup
+	err := r.Get(ctx, req.NamespacedName, &backup)
 	if errors.IsNotFound(err) {
+		logger.Info("RBDPVCBackup is not found", "name", backup.Name, "error", err)
 		return ctrl.Result{}, nil
 	}
 	if err != nil {
-		logger.Error("unable to get RBDPVCBackup", "name", req.NamespacedName, "error", err)
+		logger.Error("failed to get RBDPVCBackup", "name", req.NamespacedName, "error", err)
 		return ctrl.Result{}, err
 	}
 
-	if !rpBackup.ObjectMeta.DeletionTimestamp.IsZero() {
-		if controllerutil.ContainsFinalizer(&rpBackup, RBDPVCBackupFinalizerName) {
-			// TODO delete rbd snapshot.
+	pvcNamespace := backup.Namespace
+	pvcName := backup.Spec.PVC
+	var pvc corev1.PersistentVolumeClaim
+	err = r.Get(ctx, types.NamespacedName{Namespace: pvcNamespace, Name: pvcName}, &pvc)
+	if err != nil {
+		logger.Error("failed to get PVC", "namespace", pvcNamespace, "name", pvcName, "error", err)
+		return reconcile.Result{}, err
+	}
+	for pvc.Status.Phase == "Pending" {
+		logger.Info("waiting for PVC bound.")
+		time.Sleep(1 * time.Second)
 
-			controllerutil.RemoveFinalizer(&rpBackup, RBDPVCBackupFinalizerName)
-			err = r.Update(ctx, &rpBackup)
+		err = r.Get(ctx, types.NamespacedName{Namespace: pvcNamespace, Name: pvcName}, &pvc)
+		if err != nil {
+			logger.Error("failed to get PVC", "namespace", pvcNamespace, "name", pvcName, "error", err)
+			return reconcile.Result{}, err
+		}
+	}
+
+	pvName := pvc.Spec.VolumeName
+	var pv corev1.PersistentVolume
+	err = r.Get(ctx, types.NamespacedName{Namespace: req.NamespacedName.Namespace, Name: pvName}, &pv)
+	if err != nil {
+		logger.Error("failed to get PV", "namespace", req.NamespacedName.Namespace, "name", pvName, "error", err)
+		return reconcile.Result{}, err
+	}
+
+	imageName := pv.Spec.CSI.VolumeAttributes["imageName"]
+	poolName := pv.Spec.CSI.VolumeAttributes["pool"]
+
+	if !backup.ObjectMeta.DeletionTimestamp.IsZero() {
+		backup.Status.Conditions = backupv1.RBDPVCBackupConditionsDeleting
+		err = r.Status().Update(ctx, &backup)
+		if err != nil {
+			logger.Error("failed to update status", "conditions", backup.Status.Conditions, "error", err)
+			return ctrl.Result{}, err
+		}
+
+		if controllerutil.ContainsFinalizer(&backup, RBDPVCBackupFinalizerName) {
+			command := []string{"rbd", "snap", "rm", poolName + "/" + imageName + "@" + backup.Name}
+			_, err = executeCommand(command, nil)
 			if err != nil {
+				if exitError, ok := err.(*exec.ExitError); ok {
+					waitStatus := exitError.Sys().(syscall.WaitStatus)
+					exitCode := waitStatus.ExitStatus()
+					if exitCode != int(syscall.ENOENT) {
+						logger.Error("failed to remove rbd snapshot", "poolName", poolName, "imageName", imageName, "snapshotName", backup.Name, "exitCode", exitCode, "error", err)
+						return ctrl.Result{Requeue: true}, nil
+					}
+				}
+				logger.Info("rbd snapshot has already been removed", "poolName", poolName, "imageName", imageName, "snapshotName", backup.Name, "error", err)
+			}
+
+			controllerutil.RemoveFinalizer(&backup, RBDPVCBackupFinalizerName)
+			err = r.Update(ctx, &backup)
+			if err != nil {
+				logger.Error("failed to remove finalizer", "finalizer", RBDPVCBackupFinalizerName, "error", err)
 				return ctrl.Result{}, err
 			}
 		}
 
 		return ctrl.Result{}, nil
 	}
-	logger.Info("sat: foo!")
-	command := []string{"ceph", "-s"}
-	out, err := executeCommand(command, nil)
-	if err != nil {
-		logger.Error("unable to run ceph -s", "error", err)
-	}
-	logger.Info(string(out))
 
-	if !controllerutil.ContainsFinalizer(&rpBackup, RBDPVCBackupFinalizerName) {
-		controllerutil.AddFinalizer(&rpBackup, RBDPVCBackupFinalizerName)
-		err = r.Update(ctx, &rpBackup)
+	// TODO Cephクラスタの状態確認は消しても良いかも(残しても良いかもしれないが)
+	command := []string{"ceph", "-s"}
+	_, err = executeCommand(command, nil)
+	if err != nil {
+		logger.Error("failed to run ceph -s", "error", err)
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	if !controllerutil.ContainsFinalizer(&backup, RBDPVCBackupFinalizerName) {
+		controllerutil.AddFinalizer(&backup, RBDPVCBackupFinalizerName)
+		err = r.Update(ctx, &backup)
 		if err != nil {
+			logger.Error("failed to add finalizer", "finalizer", RBDPVCBackupFinalizerName, "error", err)
 			return ctrl.Result{}, err
 		}
 	}
 
-	if rpBackup.Status.Conditions != "" {
+	if backup.Status.Conditions == backupv1.RBDPVCBackupConditionsBound || backup.Status.Conditions == backupv1.RBDPVCBackupConditionsDeleting {
 		return ctrl.Result{}, nil
 	}
 
-	rpBackup.Status.Conditions = backupv1.RBDPVCBackupConditionsCreating
-	err = r.Status().Update(ctx, &rpBackup)
+	backup.Status.Conditions = backupv1.RBDPVCBackupConditionsCreating
+	err = r.Status().Update(ctx, &backup)
 	if err != nil {
+		logger.Error("failed to update status", "conditions", backup.Status.Conditions, "error", err)
+		return ctrl.Result{}, err
+	}
+
+	command = []string{"rbd", "snap", "create", poolName + "/" + imageName + "@" + backup.Name}
+	_, err = executeCommand(command, nil)
+	if err != nil {
+		// TODO EEXISTと比較できないか？
+		command = []string{"rbd", "snap", "ls", poolName + "/" + imageName, "--format=json"}
+		out, err := executeCommand(command, nil)
+		if err != nil {
+			logger.Info("failed to run `rbd snap ls`", "poolName", poolName, "imageName", imageName, "error", err)
+			return ctrl.Result{Requeue: true}, nil
+		}
+		var snapshots []Snapshot
+		err = json.Unmarshal([]byte(out), &snapshots)
+		if err != nil {
+			logger.Error("failed to unmarshal json", "json", out, "error", err)
+			return ctrl.Result{Requeue: true}, err
+		}
+		existSnapshot := false
+		for _, s := range snapshots {
+			if s.Name == backup.Name {
+				existSnapshot = true
+				break
+			}
+		}
+		if !existSnapshot {
+			logger.Info("snapshot not exists", "snapshotName", backup.Name)
+			return ctrl.Result{Requeue: true}, nil
+		}
+	}
+
+	backup.Status.CreatedAt = metav1.NewTime(time.Now())
+	backup.Status.Conditions = backupv1.RBDPVCBackupConditionsBound
+	err = r.Status().Update(ctx, &backup)
+	if err != nil {
+		logger.Error("failed to update status", "conditions", backup.Status.Conditions, "error", err)
 		return ctrl.Result{}, err
 	}
 

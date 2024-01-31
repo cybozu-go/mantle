@@ -15,6 +15,10 @@ type RBDPVCBackupSpec struct {
 	// 'pvc' specifies backup target PVC
 	// +kubebuilder:validation:Required
 	PVC string `json:"pvc,omitempty"`
+
+	// 'namespace' specifies backup target Namespace
+	// +kubebuilder:validation:Required
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // RBDPVCBackupStatus defines the observed state of RBDPVCBackup
