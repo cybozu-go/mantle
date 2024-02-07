@@ -18,6 +18,7 @@ DOMAIN_NAME := cybozu.com
 .PHONY: test
 test:
 	$(MAKE) launch-minikube
+	$(MAKE) launch-rook-ceph
 	$(MAKE) common/test
 
 .PHONY: clean
@@ -79,8 +80,21 @@ launch-minikube:
 delete-minikube:
 	$(SUDO) -E $(BINDIR)/minikube delete || true
 
+.PHONY: launch-rook-ceph
+launch-rook-ceph:
+	$(KUBECTL) apply -f testdata/common.yaml
+	$(KUBECTL) apply -f testdata/crds.yaml
+	$(KUBECTL) apply -f testdata/operator.yaml
+
+.PHONY: delete-rook-ceph
+delete-rook-ceph:
+	$(KUBECTL) delete -f testdata/operator.yaml
+	$(KUBECTL) delete -f testdata/crds.yaml
+	$(KUBECTL) delete -f testdata/common.yaml
+
 .PHONY: common/test
 common/test: $(GINKGO)
 	$(SUDO) -E env \
+	PATH=${PATH} \
 	KUBECTL=$(KUBECTL) \
 	$(GINKGO) --fail-fast -v $(GINKGO_FLAGS) .
