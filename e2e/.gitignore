@@ -1,0 +1,4 @@
+bin/*
+cni-plugins.tgz
+cri-dockerd.deb
+crictl.tar.gz
