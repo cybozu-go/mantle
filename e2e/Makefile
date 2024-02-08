@@ -81,23 +81,27 @@ setup-minikube: | $(BINDIR)
 
 .PHONY: launch-minikube
 launch-minikube:
-	ifneq ($(shell $(MINIKUBE) status),)
-		$(SUDO) -E $(MINIKUBE) start \
-			--driver=none \
-			--container-runtime=containerd \
-			--kubernetes-version=v$(KUBERNETES_VERSION) \
-			--extra-config=kubelet.read-only-port=10255 \
-			--extra-config=kubeadm.node-name=$(CLUSTER_NAME)-worker \
-			--extra-config=kubelet.hostname-override=$(CLUSTER_NAME)-worker \
+	# TODO: Is there any better way to verify whether k8s cluster is available or not?
+	kubectl get pod >/dev/null 2>&1; \
+	RET=$$? ; \
+	if [ $$RET -eq 0 ] ; then exit; fi ; \
+	$(SUDO) -E $(MINIKUBE) start \
+		--driver=none \
+		--container-runtime=containerd \
+		--kubernetes-version=v$(KUBERNETES_VERSION) \
+		--extra-config=kubelet.read-only-port=10255 \
+		--extra-config=kubeadm.node-name=$(CLUSTER_NAME)-worker \
+		--extra-config=kubelet.hostname-override=$(CLUSTER_NAME)-worker \
 			--cni=calico
-		$(SUDO) chown -R $$USER $$HOME/.kube $(MINIKUBE_HOME)/.minikube
-		$(SUDO) chmod -R a+r $$HOME/.kube $(MINIKUBE_HOME)/.minikube
-		$(SUDO) find $(MINIKUBE_HOME)/.minikube -name id_rsa -exec chmod 600 {} ';'
-	endif
+	$(SUDO) chown -R $$USER $$HOME/.kube $(MINIKUBE_HOME)/.minikube
+	$(SUDO) chmod -R a+r $$HOME/.kube $(MINIKUBE_HOME)/.minikube
+	$(SUDO) find $(MINIKUBE_HOME)/.minikube -name id_rsa -exec chmod 600 {} ';'
 
 .PHONY: delete-minikube
 delete-minikube:
 	$(SUDO) -E $(MINIKUBE) delete || true
+	# Is it really OK to remove these files?
+	rm -rf /tmp/juju-*
 
 .PHONY: create-loop-dev
 create-loop-dev: | $(TMPDIR)
