@@ -34,6 +34,9 @@ spec:
           spec:
             description: RBDPVCBackupSpec defines the desired state of RBDPVCBackup
             properties:
+              namespace:
+                description: '''namespace'' specifies backup target Namespace'
+                type: string
               pvc:
                 description: '''pvc'' specifies backup target PVC'
                 type: string
