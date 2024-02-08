@@ -39,6 +39,9 @@ setup: setup-minikube
 $(BINDIR):
 	mkdir -p $@
 
+$(TMPDIR):
+	mkdir -p $@
+
 $(GINKGO): | $(BINDIR)
 	GOBIN=$(BINDIR) go install github.com/onsi/ginkgo/v2/ginkgo@$(GINKGO_VERSION)
 	mv $(BINDIR)/ginkgo $@
@@ -87,7 +90,7 @@ delete-minikube:
 	$(SUDO) -E $(BINDIR)/minikube delete || true
 
 .PHONY: create-loop-dev
-create-loop-dev:
+create-loop-dev: | $(TMPDIR)
 	$(DD) if=/dev/zero of=$(LOOP_FILE) bs=1G seek=32 count=0
 	$(SUDO) $(LOSETUP) $(LOOP_DEV) $(LOOP_FILE)
 
