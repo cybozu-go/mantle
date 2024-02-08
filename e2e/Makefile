@@ -14,7 +14,15 @@ SUDO := sudo
 DD := dd
 LOOP_FILE := $(TMPDIR)/loop.img
 LOSETUP := losetup
-LOOP_DEV := $(shell $(LOSETUP) -f)
+LOOP_DEV := $(shell loop_dev=$$($(LOSETUP) | grep $(LOOP_FILE) | cut -d ' ' -f 1); \
+		if [ -z "$$loop_dev" ]; then \
+			$(LOSETUP) -f; \
+		else \
+			echo $$loop_dev; \
+		fi)
+
+all:
+	echo $(LOOP_DEV)
 
 export MINIKUBE_HOME
 
@@ -94,17 +102,31 @@ create-loop-dev: | $(TMPDIR)
 	$(DD) if=/dev/zero of=$(LOOP_FILE) bs=1G seek=32 count=0
 	$(SUDO) $(LOSETUP) $(LOOP_DEV) $(LOOP_FILE)
 
+.PHONY: delete-loop-dev
+delete-loop-dev: | $(TMPDIR)
+	$(SUDO) $(LOSETUP) -d $(LOOP_DEV)
+	$(SUDO) rm -f $(LOOP_FILE)
+
 .PHONY: launch-rook-ceph
 launch-rook-ceph: create-loop-dev
 	$(KUBECTL) apply -f testdata/common.yaml
 	$(KUBECTL) apply -f testdata/crds.yaml
 	$(KUBECTL) apply -f testdata/operator.yaml
+	sed "s%LOOP_DEV%$(LOOP_DEV)%" testdata/cluster.yaml.template > testdata/cluster.yaml
+	$(KUBECTL) apply -f testdata/cluster.yaml
+	$(KUBECTL) apply -f testdata/toolbox.yaml
 
 .PHONY: delete-rook-ceph
 delete-rook-ceph:
+	$(KUBECTL) delete -f testdata/toolbox.yaml
+	$(KUBECTL) delete -f testdata/cluster.yaml
+	$(SUDO) rm -rf /var/lib/rook
+	ls /dev/mapper/ceph-* | xargs -I% -- sudo dmsetup remove %
+	$(SUDO) rm -rf /dev/mapper/ceph-*
 	$(KUBECTL) delete -f testdata/operator.yaml
 	$(KUBECTL) delete -f testdata/crds.yaml
 	$(KUBECTL) delete -f testdata/common.yaml
+	$(MAKE) delete-loop-dev
 
 .PHONY: common/test
 common/test: $(GINKGO)

@@ -26,7 +26,7 @@ data:
   ROOK_LOG_LEVEL: "INFO"
 
   # Allow using loop devices for osds in test clusters.
-  ROOK_CEPH_ALLOW_LOOP_DEVICES: "false"
+  ROOK_CEPH_ALLOW_LOOP_DEVICES: "true"
 
   # Enable the CSI driver.
   # To run the non-default version of the CSI driver, see the override-able image properties in operator.yaml
