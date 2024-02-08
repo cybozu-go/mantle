@@ -6,7 +6,7 @@ CURL := curl -sSLf
 GINKGO := $(BINDIR)/ginkgo-$(GINKGO_VERSION)
 GINKGO_FLAGS :=
 GO_FILES := $(shell find .. -path ../e2e -prune -o -name '*.go' -print)
-MINIKUBE := bin/minikube
+MINIKUBE := $(BINDIR)/minikube
 KUBECTL := $(BINDIR)/kubectl-$(KUBERNETES_VERSION)
 MINIKUBE_HOME = $(BINDIR)
 CLUSTER_NAME := minikube
@@ -20,9 +20,6 @@ LOOP_DEV := $(shell loop_dev=$$($(LOSETUP) | grep $(LOOP_FILE) | cut -d ' ' -f 1
 		else \
 			echo $$loop_dev; \
 		fi)
-
-all:
-	echo $(LOOP_DEV)
 
 export MINIKUBE_HOME
 
