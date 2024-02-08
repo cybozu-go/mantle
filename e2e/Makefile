@@ -67,6 +67,7 @@ setup-minikube: | $(BINDIR)
 launch-minikube:
 	$(SUDO) -E $(BINDIR)/minikube start \
 		--driver=none \
+		--container-runtime=containerd \
 		--kubernetes-version=v$(KUBERNETES_VERSION) \
 		--extra-config=kubelet.read-only-port=10255 \
 		--extra-config=kubeadm.node-name=$(CLUSTER_NAME)-worker \
