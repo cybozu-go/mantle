@@ -1,6 +1,7 @@
 include ../versions.mk
 
 BINDIR := $(shell pwd)/bin
+TMPDIR := $(shell pwd)/tmp
 CURL := curl -sSLf
 GINKGO := $(BINDIR)/ginkgo-$(GINKGO_VERSION)
 GINKGO_FLAGS :=
@@ -10,6 +11,10 @@ KUBECTL := $(BINDIR)/kubectl-$(KUBERNETES_VERSION)
 MINIKUBE_HOME = $(BINDIR)
 CLUSTER_NAME := minikube
 SUDO := sudo
+DD := dd
+LOOP_FILE := $(TMPDIR)/loop.img
+LOSETUP := losetup
+LOOP_DEV := $(shell $(LOSETUP) -f)
 
 export MINIKUBE_HOME
 
@@ -81,8 +86,13 @@ launch-minikube:
 delete-minikube:
 	$(SUDO) -E $(BINDIR)/minikube delete || true
 
+.PHONY: create-loop-dev
+create-loop-dev:
+	$(DD) if=/dev/zero of=$(LOOP_FILE) bs=1G seek=32 count=0
+	$(SUDO) $(LOSETUP) $(LOOP_DEV) $(LOOP_FILE)
+
 .PHONY: launch-rook-ceph
-launch-rook-ceph:
+launch-rook-ceph: create-loop-dev
 	$(KUBECTL) apply -f testdata/common.yaml
 	$(KUBECTL) apply -f testdata/crds.yaml
 	$(KUBECTL) apply -f testdata/operator.yaml
