@@ -1,0 +1,12 @@
+apiVersion: backup.cybozu.com/v1
+kind: RBDPVCBackup
+metadata:
+  labels:
+    app.kubernetes.io/name: rbdpvcbackup
+    app.kubernetes.io/instance: %s
+    app.kubernetes.io/part-of: rbd-backup-system
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: rbd-backup-system
+  name: %s
+spec:
+  pvc: %s

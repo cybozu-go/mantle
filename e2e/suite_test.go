@@ -13,17 +13,27 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/yaml"
 )
 
-/*
-var (
-	ns string
 
-	//go:embed testdata/dummyStorageClass.yaml
-	dummyStorageClassYaml []byte
+var (
+	//go:embed testdata/pvc-pod-template.yaml
+	dummyPVCPodTemplate string
+
+	//go:embed testdata/rook-pool-sc-template.yaml
+	dummyRookPoolSCTemplate string
+
+	//go:embed testdata/rbdpvcbackup-template.yaml
+	dummyRBDPVCBackupTemplate string
 )
-*/
+
+const (
+	pvcName = "rbd-pvc"
+	podName = "test-pod"
+	rbdPVCBackupName = "rbdpvcbackup-test"
+)
 
 func execAtLocal(cmd string, input []byte, args ...string) ([]byte, []byte, error) {
 	var stdout, stderr bytes.Buffer
@@ -79,7 +89,6 @@ var _ = BeforeSuite(func() {
 		return nil
 	}).Should(Succeed())
 
-	// TODO: waiting for ceph cluster to get ready
 	By("[BeforeSuite] Waiting for ceph cluster to get ready")
 	Eventually(func() error {
 		stdout, stderr, err := kubectl("-n", operatorNamespace, "get", "deploy", "rook-ceph-osd-0", "-o", "json")
@@ -100,18 +109,83 @@ var _ = BeforeSuite(func() {
 		return nil
 	}).Should(Succeed())
 
-	// TODO: create PVC
+	By("[BeforeSuite] Creating Rook Pool and SC")
+	Eventually(func() error {
+		manifest := fmt.Sprintf(dummyRookPoolSCTemplate, operatorNamespace, operatorNamespace, operatorNamespace, operatorNamespace)
+		_, _, err := kubectlWithInput([]byte(manifest), "apply", "-n", operatorNamespace, "-f", "-")
+		if err != nil {
+			return err
+		}
+
+		return nil
+	}).Should(Succeed())
+
+	By("[BeforeSuite] Creating PVC and Pod")
+	Eventually(func() error {
+		manifest := fmt.Sprintf(dummyPVCPodTemplate, pvcName, podName, pvcName)
+		_, _, err := kubectlWithInput([]byte(manifest), "apply", "-n", operatorNamespace, "-f", "-")
+		if err != nil {
+			return err
+		}
+
+		return nil
+	}).Should(Succeed())
+
+	By("[BeforeSuite] Waiting for PVC to get bound")
+	Eventually(func() error {
+		stdout, stderr, err := kubectl("-n", operatorNamespace, "get", "pvc", pvcName, "-o", "json")
+		if err != nil {
+			return fmt.Errorf("kubectl get pvc failed. stderr: %s, err: %w", string(stderr), err)
+		}
+
+		var pvc corev1.PersistentVolumeClaim
+		err = yaml.Unmarshal(stdout, &pvc)
+		if err != nil {
+			return err
+		}
+
+		if pvc.Status.Phase != "Bound" {
+			return errors.New("PVC is not bound yet")
+		}
+
+		return nil
+	}).Should(Succeed())
 })
 
 var _ = Describe("rbd backup system", func() {
-	It("should create rbdbackup resource", func() {
+	It("should create rbdpvcbackup resource", func() {
 		fmt.Fprintln(os.Stderr, "TODO")
-		// TODO: create RBDBackup resource
+
+		By("Creating RBDPVCBackup")
+		manifest := fmt.Sprintf(dummyRBDPVCBackupTemplate, rbdPVCBackupName, rbdPVCBackupName, pvcName)
+		_, _, err := kubectlWithInput([]byte(manifest), "apply", "-f", "-")
+		Expect(err).NotTo(HaveOccurred())
+
 		// TODO: confirm the existence of snapshot
+		By("Waiting for RBD snapshot to be created")
+		// Eventually(func() error {
+		// 	stdout, stderr, err := kubectl("-n", operatorNamespace, "get", "pvc", pvcName, "-o", "json")
+		// 	if err != nil {
+		// 		return fmt.Errorf("kubectl get pvc failed. stderr: %s, err: %w", string(stderr), err)
+		// 	}
+	
+		// 	var pvc corev1.PersistentVolumeClaim
+		// 	err = yaml.Unmarshal(stdout, &pvc)
+		// 	if err != nil {
+		// 		return err
+		// 	}
+	
+		// 	if pvc.Status.Phase != "Bound" {
+		// 		return errors.New("PVC is not bound yet")
+		// 	}
+	
+		// 	return nil
+		// }).Should(Succeed())
+
 		// TODO: delete the
 		/*
 			wg := sync.WaitGroup{}
-			/*ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(context.Background())
 			defer func() {
 				cancel()
 				wg.Wait()

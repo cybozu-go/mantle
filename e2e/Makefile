@@ -12,8 +12,8 @@ MINIKUBE_HOME = $(BINDIR)
 CLUSTER_NAME := minikube
 SUDO := sudo
 DD := dd
-LOOP_FILE := $(TMPDIR)/loop.img
 LOSETUP := losetup
+LOOP_FILE := $(TMPDIR)/loop.img
 LOOP_DEV := $(shell loop_dev=$$($(LOSETUP) | grep $(LOOP_FILE) | cut -d ' ' -f 1); \
 		if [ -z "$$loop_dev" ]; then \
 			$(LOSETUP) -f; \
@@ -103,8 +103,12 @@ delete-minikube:
 
 .PHONY: create-loop-dev
 create-loop-dev: | $(TMPDIR)
-	$(DD) if=/dev/zero of=$(LOOP_FILE) bs=1G seek=32 count=0
-	$(SUDO) $(LOSETUP) $(LOOP_DEV) $(LOOP_FILE)
+	$(LOSETUP) | grep -q $(LOOP_FILE); \
+	RET=$$? ; \
+	if [ $$RET -ne 0 ]; then \
+		$(DD) if=/dev/zero of=$(LOOP_FILE) bs=1G seek=32 count=0; \
+		$(SUDO) $(LOSETUP) $(LOOP_DEV) $(LOOP_FILE); \
+	fi
 
 .PHONY: delete-loop-dev
 delete-loop-dev: | $(TMPDIR)
@@ -116,7 +120,7 @@ launch-rook-ceph: create-loop-dev
 	$(KUBECTL) apply -f testdata/common.yaml
 	$(KUBECTL) apply -f testdata/crds.yaml
 	$(KUBECTL) apply -f testdata/operator.yaml
-	sed "s%LOOP_DEV%$(LOOP_DEV)%" testdata/cluster.yaml.template > testdata/cluster.yaml
+	sed "s%LOOP_DEV%$(LOOP_DEV)%" testdata/cluster-template.yaml > testdata/cluster.yaml
 	$(KUBECTL) apply -f testdata/cluster.yaml
 	$(KUBECTL) apply -f testdata/toolbox.yaml
 
