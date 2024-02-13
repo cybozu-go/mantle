@@ -50,11 +50,6 @@ func kubectlWithInput(input []byte, args ...string) ([]byte, []byte, error) {
 var operatorNamespace = "rook-ceph"
 
 func TestMtest(t *testing.T) {
-	if os.Getenv("E2ETEST") == "" {
-		t.Skip("Run under e2e/")
-		return
-	}
-
 	RegisterFailHandler(Fail)
 
 	SetDefaultEventuallyPollingInterval(time.Second)
@@ -85,6 +80,7 @@ var _ = BeforeSuite(func() {
 	}).Should(Succeed())
 
 	// TODO: waiting for ceph cluster to get ready
+	By("[BeforeSuite] Waiting for ceph cluster to get ready")
 	Eventually(func() error {
 		stdout, stderr, err := kubectl("-n", operatorNamespace, "get", "deploy", "rook-ceph-osd-0", "-o", "json")
 		if err != nil {

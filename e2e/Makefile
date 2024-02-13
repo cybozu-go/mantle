@@ -33,6 +33,7 @@ test:
 
 .PHONY: clean
 clean:
+	$(MAKE) delete-rook-ceph
 	$(MAKE) delete-minikube
 
 .PHONY: setup
