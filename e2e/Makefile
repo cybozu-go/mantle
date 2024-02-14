@@ -29,10 +29,12 @@ DOMAIN_NAME := cybozu.com
 test:
 	$(MAKE) launch-minikube
 	$(MAKE) launch-rook-ceph
+	$(MAKE) common/setup-components
 	$(MAKE) common/test
 
 .PHONY: clean
 clean:
+	rm -f controller-container.tar
 	$(MAKE) delete-rook-ceph
 	$(MAKE) delete-minikube
 
@@ -135,6 +137,15 @@ delete-rook-ceph:
 	$(KUBECTL) delete -f testdata/crds.yaml
 	$(KUBECTL) delete -f testdata/common.yaml
 	$(MAKE) delete-loop-dev
+
+.PHONY: common/setup-components
+common/setup-components:
+	$(KUBECTL) apply -f https://github.com/cert-manager/cert-manager/releases/download/$(CERT_MANAGER_VERSION)/cert-manager.yaml
+	$(MAKE) -C .. docker-build
+	docker save controller:latest > controller-container.tar
+	$(SUDO) ctr -n k8s.io images import controller-container.tar
+	$(MAKE) -C .. install
+	$(MAKE) -C .. deploy
 
 .PHONY: common/test
 common/test: $(GINKGO)

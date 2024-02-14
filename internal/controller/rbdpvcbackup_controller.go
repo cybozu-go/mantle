@@ -31,8 +31,8 @@ type Snapshot struct {
 	Id        int       `json:"id,omitempty"`
 	Name      string    `json:"name,omitempty"`
 	Size      int       `json:"size,omitempty"`
-	Protected bool      `json:"protected,omitempty"`
-	Timestamp time.Time `json:"timestamp,omitempty"`
+	Protected bool      `json:"protected,string,omitempty"`
+	Timestamp string    `json:"timestamp,omitempty"`
 }
 
 const (

@@ -5,7 +5,6 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"testing"
 	"time"
@@ -15,12 +14,12 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/yaml"
+	"github.com/cybozu-go/rbd-backup-system/internal/controller"
 )
 
-
 var (
-	//go:embed testdata/pvc-pod-template.yaml
-	dummyPVCPodTemplate string
+	//go:embed testdata/pvc-template.yaml
+	dummyPVCTemplate string
 
 	//go:embed testdata/rook-pool-sc-template.yaml
 	dummyRookPoolSCTemplate string
@@ -31,7 +30,7 @@ var (
 
 const (
 	pvcName = "rbd-pvc"
-	podName = "test-pod"
+	poolName = "replicapool"
 	rbdPVCBackupName = "rbdpvcbackup-test"
 )
 
@@ -111,7 +110,7 @@ var _ = BeforeSuite(func() {
 
 	By("[BeforeSuite] Creating Rook Pool and SC")
 	Eventually(func() error {
-		manifest := fmt.Sprintf(dummyRookPoolSCTemplate, operatorNamespace, operatorNamespace, operatorNamespace, operatorNamespace)
+		manifest := fmt.Sprintf(dummyRookPoolSCTemplate, poolName, operatorNamespace, poolName, operatorNamespace, operatorNamespace, operatorNamespace)
 		_, _, err := kubectlWithInput([]byte(manifest), "apply", "-n", operatorNamespace, "-f", "-")
 		if err != nil {
 			return err
@@ -120,9 +119,9 @@ var _ = BeforeSuite(func() {
 		return nil
 	}).Should(Succeed())
 
-	By("[BeforeSuite] Creating PVC and Pod")
+	By("[BeforeSuite] Creating PVC")
 	Eventually(func() error {
-		manifest := fmt.Sprintf(dummyPVCPodTemplate, pvcName, podName, pvcName)
+		manifest := fmt.Sprintf(dummyPVCTemplate, pvcName)
 		_, _, err := kubectlWithInput([]byte(manifest), "apply", "-n", operatorNamespace, "-f", "-")
 		if err != nil {
 			return err
@@ -150,132 +149,113 @@ var _ = BeforeSuite(func() {
 
 		return nil
 	}).Should(Succeed())
+
+	By("[BeforeSuite] Waiting for rbd-backup-system-controller-manager to get ready")
+	Eventually(func() error {
+		stdout, stderr, err := kubectl("-n", operatorNamespace, "get", "deploy", "rbd-backup-system-controller-manager", "-o", "json")
+		if err != nil {
+			return fmt.Errorf("kubectl get deploy failed. stderr: %s, err: %w", string(stderr), err)
+		}
+
+		var deploy appsv1.Deployment
+		err = yaml.Unmarshal(stdout, &deploy)
+		if err != nil {
+			return err
+		}
+
+		if deploy.Status.AvailableReplicas != 1 {
+			return errors.New("rbd-backup-system-controller-manager is not available yet")
+		}
+
+		return nil
+	}).Should(Succeed())
 })
 
 var _ = Describe("rbd backup system", func() {
-	It("should create rbdpvcbackup resource", func() {
-		fmt.Fprintln(os.Stderr, "TODO")
+	var imageName string
 
+	It("should create rbdpvcbackup resource", func() {
 		By("Creating RBDPVCBackup")
-		manifest := fmt.Sprintf(dummyRBDPVCBackupTemplate, rbdPVCBackupName, rbdPVCBackupName, pvcName)
+		manifest := fmt.Sprintf(dummyRBDPVCBackupTemplate, rbdPVCBackupName, rbdPVCBackupName, operatorNamespace, pvcName)
 		_, _, err := kubectlWithInput([]byte(manifest), "apply", "-f", "-")
 		Expect(err).NotTo(HaveOccurred())
 
-		// TODO: confirm the existence of snapshot
 		By("Waiting for RBD snapshot to be created")
-		// Eventually(func() error {
-		// 	stdout, stderr, err := kubectl("-n", operatorNamespace, "get", "pvc", pvcName, "-o", "json")
-		// 	if err != nil {
-		// 		return fmt.Errorf("kubectl get pvc failed. stderr: %s, err: %w", string(stderr), err)
-		// 	}
+		Eventually(func() error {
+			stdout, stderr, err := kubectl("-n", operatorNamespace, "get", "pvc", pvcName, "-o", "json")
+			if err != nil {
+				return fmt.Errorf("kubectl get pvc failed. stderr: %s, err: %w", string(stderr), err)
+			}
+			var pvc corev1.PersistentVolumeClaim
+			err = yaml.Unmarshal(stdout, &pvc)
+			if err != nil {
+				return err
+			}
+			pvName := pvc.Spec.VolumeName
+
+			stdout, stderr, err = kubectl("get", "pv", pvName, "-o", "json")
+			if err != nil {
+				return fmt.Errorf("kubectl get pv failed. stderr: %s, err: %w", string(stderr), err)
+			}
+			var pv corev1.PersistentVolume
+			err = yaml.Unmarshal(stdout, &pv)
+			if err != nil {
+				return err
+			}
+			imageName = pv.Spec.CSI.VolumeAttributes["imageName"]
+
+			stdout, stderr, err = kubectl("-n", operatorNamespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "snap", "ls", poolName+"/"+imageName, "--format=json")
+			if err != nil {
+				return fmt.Errorf("rbd snap ls failed. stderr: %s, err: %w", string(stderr), err)
+			}
+			var snapshots []controller.Snapshot
+			err = yaml.Unmarshal(stdout, &snapshots)
+			if err != nil {
+				return err
+			}
+			existSnapshot := false
+			for _, s := range snapshots {
+				if s.Name == rbdPVCBackupName {
+					existSnapshot = true
+					break
+				}
+			}
+			if !existSnapshot {
+				return fmt.Errorf("snapshot not exists. snapshotName: %s", rbdPVCBackupName)
+			}
 	
-		// 	var pvc corev1.PersistentVolumeClaim
-		// 	err = yaml.Unmarshal(stdout, &pvc)
-		// 	if err != nil {
-		// 		return err
-		// 	}
-	
-		// 	if pvc.Status.Phase != "Bound" {
-		// 		return errors.New("PVC is not bound yet")
-		// 	}
-	
-		// 	return nil
-		// }).Should(Succeed())
-
-		// TODO: delete the
-		/*
-			wg := sync.WaitGroup{}
-			ctx, cancel := context.WithCancel(context.Background())
-			defer func() {
-				cancel()
-				wg.Wait()
-			}()
-				_, _, err := kubectlWithInput(dummyStorageClassYaml, "apply", "-f", "-")
-				Expect(err).NotTo(HaveOccurred())
-
-				_, _, err = kubectl("rollout", "restart", "-n", ns, "deploy/pie")
-				Expect(err).NotTo(HaveOccurred())
-
-				err = portForward(ctx, &wg, ns, "svc/pie", "8080:8080")
-				Expect(err).NotTo(HaveOccurred())
-
-				stdout, _, err := kubectl("get", "node", "-o=jsonpath={.items[*].metadata.name}")
-				Expect(err).NotTo(HaveOccurred())
-				nodeLabelKey := "node"
-				nodeLabelValue := string(stdout)
-				nodeLabelPair := io_prometheus_client.LabelPair{Name: &nodeLabelKey, Value: &nodeLabelValue}
-
-				standardSCLabelKey := "storage_class"
-				standardSCLabelValue := "standard"
-				standardSCLabelPair := io_prometheus_client.LabelPair{Name: &standardSCLabelKey, Value: &standardSCLabelValue}
-
-				dummySCLabelKey := "storage_class"
-				dummySCLabelValue := "dummy"
-				dummySCLabelPair := io_prometheus_client.LabelPair{Name: &dummySCLabelKey, Value: &dummySCLabelValue}
-
-				onTimeLabelKey := "on_time"
-				trueValue := "true"
-				falseValue := "false"
-				onTimeTrueLabelPair := io_prometheus_client.LabelPair{Name: &onTimeLabelKey, Value: &trueValue}
-				onTimeFalseLabelPair := io_prometheus_client.LabelPair{Name: &onTimeLabelKey, Value: &falseValue}
-
-				succeedLabelKey := "succeed"
-				succeedTrueLabelPair := io_prometheus_client.LabelPair{Name: &succeedLabelKey, Value: &trueValue}
-
-				Eventually(func(g Gomega) {
-					resp, err := http.Get("http://localhost:8080/metrics")
-					g.Expect(err).NotTo(HaveOccurred())
-					defer resp.Body.Close()
-
-					var parser expfmt.TextParser
-					metricFamilies, err := parser.TextToMetricFamilies(resp.Body)
-					g.Expect(err).NotTo(HaveOccurred())
-
-					By("checking latency metrics have node and storage_class labels and the storage_class label value is standard")
-					for _, metricName := range []string{
-						"pie_io_write_latency_seconds",
-						"pie_io_read_latency_seconds",
-					} {
-						g.Expect(metricName).Should(BeKeyOf(metricFamilies))
-						for _, metric := range metricFamilies[metricName].Metric {
-							g.Expect(metric.Label).Should(ContainElement(&nodeLabelPair))
-							g.Expect(metric.Label).Should(ContainElement(&standardSCLabelPair))
-						}
-					}
-
-					By("checking pie_create_probe_total have on_time=true for standard SC or on_time=false for dummy SC")
-					g.Expect("pie_create_probe_total").Should(BeKeyOf(metricFamilies))
-					metrics := metricFamilies["pie_create_probe_total"].Metric
-					g.Expect(metrics).Should(ContainElement(HaveField("Label", ContainElement(&standardSCLabelPair))))
-					g.Expect(metrics).Should(ContainElement(HaveField("Label", ContainElement(&dummySCLabelPair))))
-					for _, metric := range metrics {
-						for _, label := range metric.Label {
-							switch {
-							case reflect.DeepEqual(label, &standardSCLabelPair):
-								g.Expect(metric.Label).Should(ContainElement(&onTimeTrueLabelPair))
-							case reflect.DeepEqual(label, &dummySCLabelPair):
-								g.Expect(metric.Label).Should(ContainElement(&onTimeFalseLabelPair))
-							}
-						}
-					}
-
-					By("checking pie_performance_probe_total with succeed=true is more than zero for standard SC")
-					g.Expect("pie_performance_probe_total").Should(BeKeyOf(metricFamilies))
-					metrics = metricFamilies["pie_performance_probe_total"].Metric
-					g.Expect(metrics).Should(ContainElement(HaveField("Label", ContainElement(&standardSCLabelPair))))
-					for _, metric := range metrics {
-						for _, label := range metric.Label {
-							if reflect.DeepEqual(label, &standardSCLabelPair) {
-								g.Expect(metric.Label).Should(ContainElement(&succeedTrueLabelPair))
-								g.Expect(metric.Counter).ShouldNot(BeZero())
-							}
-						}
-					}
-				}).Should(Succeed())
-		*/
+			return nil
+		}).Should(Succeed())
 	})
 
 	It("should delete rbdbackup resource", func() {
-		fmt.Fprintln(os.Stderr, "TODO")
+		By("Deleting RBDPVCBackup")
+		_, _, err := kubectl("-n", operatorNamespace, "delete", "rbdpvcbackups", rbdPVCBackupName)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("Waiting for RBD snapshot to be created")
+		Eventually(func() error {
+			stdout, stderr, err := kubectl("-n", operatorNamespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "snap", "ls", poolName+"/"+imageName, "--format=json")
+			if err != nil {
+				return fmt.Errorf("rbd snap ls failed. stderr: %s, err: %w", string(stderr), err)
+			}
+			var snapshots []controller.Snapshot
+			err = yaml.Unmarshal(stdout, &snapshots)
+			if err != nil {
+				return err
+			}
+			existSnapshot := false
+			for _, s := range snapshots {
+				if s.Name == rbdPVCBackupName {
+					existSnapshot = true
+					break
+				}
+			}
+			if existSnapshot {
+				return fmt.Errorf("snapshot exists. snapshotName: %s", rbdPVCBackupName)
+			}
+
+			return nil
+		}).Should(Succeed())
 	})
 })
