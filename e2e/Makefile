@@ -151,5 +151,6 @@ common/setup-components:
 common/test: $(GINKGO)
 	$(SUDO) -E env \
 	PATH=${PATH} \
+	E2ETEST=1 \
 	KUBECTL=$(KUBECTL) \
 	$(GINKGO) --fail-fast -v $(GINKGO_FLAGS) .

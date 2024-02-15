@@ -28,18 +28,26 @@ type RBDPVCBackupReconciler struct {
 }
 
 type Snapshot struct {
-	Id        int       `json:"id,omitempty"`
-	Name      string    `json:"name,omitempty"`
-	Size      int       `json:"size,omitempty"`
-	Protected bool      `json:"protected,string,omitempty"`
-	Timestamp string    `json:"timestamp,omitempty"`
+	Id        int    `json:"id,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Size      int    `json:"size,omitempty"`
+	Protected bool   `json:"protected,string,omitempty"`
+	Timestamp string `json:"timestamp,omitempty"`
 }
 
 const (
 	RBDPVCBackupFinalizerName = "rbdpvcbackup.backup.cybozu.com/finalizer"
 )
 
-func executeCommand(command []string, input io.Reader) ([]byte, error) {
+// NewRBDPVCBackupReconciler returns NodeReconciler.
+func NewRBDPVCBackupReconciler(client client.Client, scheme *runtime.Scheme) *RBDPVCBackupReconciler {
+	return &RBDPVCBackupReconciler{
+		Client: client,
+		Scheme: scheme,
+	}
+}
+
+func executeCommandImpl(command []string, input io.Reader) ([]byte, error) {
 	cmd := exec.Command(command[0], command[1:]...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -75,6 +83,8 @@ func executeCommand(command []string, input io.Reader) ([]byte, error) {
 
 	return r, nil
 }
+
+var executeCommand = executeCommandImpl
 
 //+kubebuilder:rbac:groups=backup.cybozu.com,resources=rbdpvcbackups,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=backup.cybozu.com,resources=rbdpvcbackups/status,verbs=get;update;patch
@@ -169,14 +179,6 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
-	// TODO Cephクラスタの状態確認は消しても良いかも(残しても良いかもしれないが)
-	command := []string{"ceph", "-s"}
-	_, err = executeCommand(command, nil)
-	if err != nil {
-		logger.Error("failed to run ceph -s", "error", err)
-		return ctrl.Result{Requeue: true}, nil
-	}
-
 	if !controllerutil.ContainsFinalizer(&backup, RBDPVCBackupFinalizerName) {
 		controllerutil.AddFinalizer(&backup, RBDPVCBackupFinalizerName)
 		err = r.Update(ctx, &backup)
@@ -197,7 +199,7 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
-	command = []string{"rbd", "snap", "create", poolName + "/" + imageName + "@" + backup.Name}
+	command := []string{"rbd", "snap", "create", poolName + "/" + imageName + "@" + backup.Name}
 	_, err = executeCommand(command, nil)
 	if err != nil {
 		// TODO EEXISTと比較できないか？

@@ -5,16 +5,17 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"testing"
 	"time"
 
+	"github.com/cybozu-go/rbd-backup-system/internal/controller"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/yaml"
-	"github.com/cybozu-go/rbd-backup-system/internal/controller"
 )
 
 var (
@@ -29,8 +30,8 @@ var (
 )
 
 const (
-	pvcName = "rbd-pvc"
-	poolName = "replicapool"
+	pvcName          = "rbd-pvc"
+	poolName         = "replicapool"
 	rbdPVCBackupName = "rbdpvcbackup-test"
 )
 
@@ -59,6 +60,10 @@ func kubectlWithInput(input []byte, args ...string) ([]byte, []byte, error) {
 var operatorNamespace = "rook-ceph"
 
 func TestMtest(t *testing.T) {
+	if os.Getenv("E2ETEST") == "" {
+		t.Skip("Run under e2e/")
+	}
+
 	RegisterFailHandler(Fail)
 
 	SetDefaultEventuallyPollingInterval(time.Second)
@@ -223,7 +228,7 @@ var _ = Describe("rbd backup system", func() {
 			if !existSnapshot {
 				return fmt.Errorf("snapshot not exists. snapshotName: %s", rbdPVCBackupName)
 			}
-	
+
 			return nil
 		}).Should(Succeed())
 	})
