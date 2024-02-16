@@ -61,7 +61,9 @@ var _ = Describe("RBDPVCBackup controller", func() {
 		ctx := context.Background()
 		ns := createNamespace()
 
-		pvSource := corev1.CSIPersistentVolumeSource{
+		csiPVSource := corev1.CSIPersistentVolumeSource{
+			Driver:       "driver",
+			VolumeHandle: "handle",
 			VolumeAttributes: map[string]string{
 				"imageName": "imageName",
 				"pool":      "pool",
@@ -76,7 +78,10 @@ var _ = Describe("RBDPVCBackup controller", func() {
 					"storage": resource.MustParse("5Gi"),
 				},
 				PersistentVolumeSource: corev1.PersistentVolumeSource{
-					CSI: &pvSource,
+					CSI: &csiPVSource,
+				},
+				AccessModes: []corev1.PersistentVolumeAccessMode{
+					corev1.ReadWriteOnce,
 				},
 			},
 		}
@@ -89,13 +94,22 @@ var _ = Describe("RBDPVCBackup controller", func() {
 				Namespace: ns,
 			},
 			Spec: corev1.PersistentVolumeClaimSpec{
+				AccessModes: []corev1.PersistentVolumeAccessMode{
+					corev1.ReadWriteOnce,
+				},
 				VolumeName: pv.Name,
-			},
-			Status: corev1.PersistentVolumeClaimStatus{
-				Phase: "Bound",
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceStorage: *resource.NewQuantity(1, resource.BinarySI),
+					},
+				},
 			},
 		}
 		err = k8sClient.Create(ctx, &pvc)
+		Expect(err).NotTo(HaveOccurred())
+
+		pvc.Status.Phase = corev1.ClaimBound
+		err = k8sClient.Status().Update(ctx, &pvc)
 		Expect(err).NotTo(HaveOccurred())
 
 		backup := backupv1.RBDPVCBackup{
