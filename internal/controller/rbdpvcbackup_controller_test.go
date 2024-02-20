@@ -124,17 +124,16 @@ var _ = Describe("RBDPVCBackup controller", func() {
 		err = k8sClient.Create(ctx, &backup)
 		Expect(err).NotTo(HaveOccurred())
 
-		req := ctrl.Request{
-			NamespacedName: types.NamespacedName{
+		Eventually(func() error {
+			namespacedName := types.NamespacedName{
 				Namespace: ns,
 				Name:      backup.Name,
-			},
-		}
-		result, err := reconciler.Reconcile(ctx, req)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(result).Should(Equal(ctrl.Result{}))
+			}
+			err = k8sClient.Get(ctx, namespacedName, &backup)
+			if err != nil {
+				return err
+			}
 
-		Eventually(func() error {
 			existFinalizer := false
 			for _, f := range backup.Finalizers {
 				if f == RBDPVCBackupFinalizerName {

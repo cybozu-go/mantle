@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"os/exec"
 	"syscall"
@@ -110,22 +109,24 @@ var executeCommand = executeCommandImpl
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.16.3/pkg/reconcile
 func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	fmt.Printf("Reconcile start\n")
+	logger.Info("Reconcile start")
+	defer logger.Info("Reconcile end")
+
 	var backup backupv1.RBDPVCBackup
 	err := r.Get(ctx, req.NamespacedName, &backup)
-	fmt.Printf("debug - 116\n")
+	logger.Info("debug - 116\n")
 	if errors.IsNotFound(err) {
 		logger.Info("RBDPVCBackup is not found", "name", backup.Name, "error", err)
-		fmt.Printf("err1\n")
+		logger.Info("err1\n")
 		return ctrl.Result{}, nil
 	}
 	if err != nil {
 		logger.Error("failed to get RBDPVCBackup", "name", req.NamespacedName, "error", err)
-		fmt.Printf("err2\n")
+		logger.Info("err2\n")
 		return ctrl.Result{}, err
 	}
 
-	fmt.Printf("debug - 127\n")
+	logger.Info("debug - 127\n")
 
 	pvcNamespace := backup.Namespace
 	pvcName := backup.Spec.PVC
@@ -133,7 +134,7 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	err = r.Get(ctx, types.NamespacedName{Namespace: pvcNamespace, Name: pvcName}, &pvc)
 	if err != nil {
 		logger.Error("failed to get PVC", "namespace", pvcNamespace, "name", pvcName, "error", err)
-		fmt.Printf("err3\n")
+		logger.Info("err3\n")
 		return reconcile.Result{}, err
 	}
 	for pvc.Status.Phase == "Pending" {
@@ -143,26 +144,26 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		err = r.Get(ctx, types.NamespacedName{Namespace: pvcNamespace, Name: pvcName}, &pvc)
 		if err != nil {
 			logger.Error("failed to get PVC", "namespace", pvcNamespace, "name", pvcName, "error", err)
-			fmt.Printf("err4\n")
+			logger.Info("err4\n")
 			return reconcile.Result{}, err
 		}
 	}
 
-	fmt.Printf("debug - 150\n")
+	logger.Info("debug - 150\n")
 
 	pvName := pvc.Spec.VolumeName
 	var pv corev1.PersistentVolume
 	err = r.Get(ctx, types.NamespacedName{Namespace: req.NamespacedName.Namespace, Name: pvName}, &pv)
 	if err != nil {
 		logger.Error("failed to get PV", "namespace", req.NamespacedName.Namespace, "name", pvName, "error", err)
-		fmt.Printf("err5\n")
+		logger.Info("err5\n")
 		return reconcile.Result{}, err
 	}
 
 	imageName := pv.Spec.CSI.VolumeAttributes["imageName"]
 	poolName := pv.Spec.CSI.VolumeAttributes["pool"]
 
-	fmt.Printf("debug - 164\n")
+	logger.Info("debug - 164\n")
 
 	if !backup.ObjectMeta.DeletionTimestamp.IsZero() {
 		if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsDeleting {
@@ -170,10 +171,10 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			err = r.Status().Update(ctx, &backup)
 			if err != nil {
 				logger.Error("failed to update status", "conditions", backup.Status.Conditions, "error", err)
-				fmt.Printf("err6\n")
+				logger.Info("err6\n")
 				return ctrl.Result{}, err
 			}
-			fmt.Printf("err6-2\n")
+			logger.Info("err6-2\n")
 			return ctrl.Result{Requeue: true}, nil
 		}
 
@@ -186,7 +187,7 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 					exitCode := waitStatus.ExitStatus()
 					if exitCode != int(syscall.ENOENT) {
 						logger.Error("failed to remove rbd snapshot", "poolName", poolName, "imageName", imageName, "snapshotName", backup.Name, "exitCode", exitCode, "error", err)
-						fmt.Printf("err7\n")
+						logger.Info("err7\n")
 						return ctrl.Result{Requeue: true}, nil
 					}
 				}
@@ -197,20 +198,20 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			err = r.Update(ctx, &backup)
 			if err != nil {
 				logger.Error("failed to remove finalizer", "finalizer", RBDPVCBackupFinalizerName, "error", err)
-				fmt.Printf("err8\n")
+				logger.Info("err8\n")
 				return ctrl.Result{}, err
 			}
 		}
 
-		fmt.Printf("err9\n")
+		logger.Info("err9\n")
 		return ctrl.Result{}, nil
 	}
 
-	fmt.Printf("debug - 208\n")
+	logger.Info("debug - 208\n")
 
 	if !controllerutil.ContainsFinalizer(&backup, RBDPVCBackupFinalizerName) {
 		controllerutil.AddFinalizer(&backup, RBDPVCBackupFinalizerName)
-		fmt.Printf("set finalizer\n")
+		logger.Info("set finalizer\n")
 		err = r.Update(ctx, &backup)
 		if err != nil {
 			logger.Error("failed to add finalizer", "finalizer", RBDPVCBackupFinalizerName, "error", err)
@@ -219,7 +220,7 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	fmt.Printf("debug1\n")
+	logger.Info("debug1\n")
 
 	if backup.Status.Conditions == backupv1.RBDPVCBackupConditionsBound || backup.Status.Conditions == backupv1.RBDPVCBackupConditionsDeleting {
 		return ctrl.Result{}, nil
