@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -11,6 +10,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -143,11 +143,11 @@ var _ = Describe("RBDPVCBackup controller", func() {
 				}
 			}
 			if !existFinalizer {
-				return errors.New("finalizer does not set yet")
+				return fmt.Errorf("finalizer does not set yet")
 			}
 
 			if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsCreating {
-				return errors.New("status.conditions does not set \"Creating\" yet")
+				return fmt.Errorf("status.conditions does not set \"Creating\" yet")
 			}
 
 			return nil
@@ -164,7 +164,7 @@ var _ = Describe("RBDPVCBackup controller", func() {
 			}
 
 			if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsBound {
-				return errors.New("status.conditions does not set \"Bound\" yet")
+				return fmt.Errorf("status.conditions does not set \"Bound\" yet")
 			}
 
 			timeDiff := time.Since(backup.Status.CreatedAt.Time).Seconds()
@@ -189,10 +189,25 @@ var _ = Describe("RBDPVCBackup controller", func() {
 			}
 
 			if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsDeleting {
-				return errors.New("status.conditions does not set \"Deleting\" yet")
+				return fmt.Errorf("status.conditions does not set \"Deleting\" yet")
 			}
 
 			return nil
+		}).Should(Succeed())
+
+		Eventually(func() error {
+			namespacedName := types.NamespacedName{
+				Namespace: ns,
+				Name:      backup.Name,
+			}
+			err = k8sClient.Get(ctx, namespacedName, &backup)
+			if errors.IsNotFound(err) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("\"%s\" does not deleted yet", backup.Name)
 		}).Should(Succeed())
 	})
 })
