@@ -91,6 +91,16 @@ func executeCommandImpl(command []string, input io.Reader) ([]byte, error) {
 
 var executeCommand = executeCommandImpl
 
+func (r *RBDPVCBackupReconciler) updateConditions(ctx context.Context, backup *backupv1.RBDPVCBackup, conditions string) error {
+	backup.Status.Conditions = conditions
+	err := r.Status().Update(ctx, backup)
+	if err != nil {
+		logger.Error("failed to update status", "conditions", backup.Status.Conditions, "error", err)
+		return err
+	}
+	return nil
+}
+
 //+kubebuilder:rbac:groups=backup.cybozu.com,resources=rbdpvcbackups,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=backup.cybozu.com,resources=rbdpvcbackups/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=backup.cybozu.com,resources=rbdpvcbackups/finalizers,verbs=update
@@ -134,7 +144,10 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	err = r.Get(ctx, types.NamespacedName{Namespace: pvcNamespace, Name: pvcName}, &pvc)
 	if err != nil {
 		logger.Error("failed to get PVC", "namespace", pvcNamespace, "name", pvcName, "error", err)
-		logger.Info("err3\n")
+		err2 := r.updateConditions(ctx, &backup, backupv1.RBDPVCBackupConditionsFailed)
+		if err2 != nil {
+			return ctrl.Result{}, err2
+		}
 		return reconcile.Result{}, err
 	}
 	for pvc.Status.Phase == "Pending" {
@@ -144,7 +157,10 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		err = r.Get(ctx, types.NamespacedName{Namespace: pvcNamespace, Name: pvcName}, &pvc)
 		if err != nil {
 			logger.Error("failed to get PVC", "namespace", pvcNamespace, "name", pvcName, "error", err)
-			logger.Info("err4\n")
+			err2 := r.updateConditions(ctx, &backup, backupv1.RBDPVCBackupConditionsFailed)
+			if err2 != nil {
+				return ctrl.Result{}, err2
+			}
 			return reconcile.Result{}, err
 		}
 	}
@@ -156,7 +172,10 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	err = r.Get(ctx, types.NamespacedName{Namespace: req.NamespacedName.Namespace, Name: pvName}, &pv)
 	if err != nil {
 		logger.Error("failed to get PV", "namespace", req.NamespacedName.Namespace, "name", pvName, "error", err)
-		logger.Info("err5\n")
+		err2 := r.updateConditions(ctx, &backup, backupv1.RBDPVCBackupConditionsFailed)
+		if err2 != nil {
+			return ctrl.Result{}, err2
+		}
 		return reconcile.Result{}, err
 	}
 
@@ -167,14 +186,10 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	if !backup.ObjectMeta.DeletionTimestamp.IsZero() {
 		if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsDeleting {
-			backup.Status.Conditions = backupv1.RBDPVCBackupConditionsDeleting
-			err = r.Status().Update(ctx, &backup)
+			err = r.updateConditions(ctx, &backup, backupv1.RBDPVCBackupConditionsDeleting)
 			if err != nil {
-				logger.Error("failed to update status", "conditions", backup.Status.Conditions, "error", err)
-				logger.Info("err6\n")
 				return ctrl.Result{}, err
 			}
-			logger.Info("err6-2\n")
 			return ctrl.Result{Requeue: true}, nil
 		}
 
@@ -187,7 +202,10 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 					exitCode := waitStatus.ExitStatus()
 					if exitCode != int(syscall.ENOENT) {
 						logger.Error("failed to remove rbd snapshot", "poolName", poolName, "imageName", imageName, "snapshotName", backup.Name, "exitCode", exitCode, "error", err)
-						logger.Info("err7\n")
+						err2 := r.updateConditions(ctx, &backup, backupv1.RBDPVCBackupConditionsFailed)
+						if err2 != nil {
+							return ctrl.Result{}, err2
+						}
 						return ctrl.Result{Requeue: true}, nil
 					}
 				}
@@ -198,7 +216,6 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			err = r.Update(ctx, &backup)
 			if err != nil {
 				logger.Error("failed to remove finalizer", "finalizer", RBDPVCBackupFinalizerName, "error", err)
-				logger.Info("err8\n")
 				return ctrl.Result{}, err
 			}
 		}
@@ -227,10 +244,8 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsCreating {
-		backup.Status.Conditions = backupv1.RBDPVCBackupConditionsCreating
-		err = r.Status().Update(ctx, &backup)
+		err := r.updateConditions(ctx, &backup, backupv1.RBDPVCBackupConditionsCreating)
 		if err != nil {
-			logger.Error("failed to update status", "conditions", backup.Status.Conditions, "error", err)
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{Requeue: true}, nil
@@ -250,6 +265,10 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		err = json.Unmarshal([]byte(out), &snapshots)
 		if err != nil {
 			logger.Error("failed to unmarshal json", "json", out, "error", err)
+			err2 := r.updateConditions(ctx, &backup, backupv1.RBDPVCBackupConditionsFailed)
+			if err2 != nil {
+				return ctrl.Result{}, err2
+			}
 			return ctrl.Result{Requeue: true}, err
 		}
 		existSnapshot := false
@@ -269,7 +288,7 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	backup.Status.Conditions = backupv1.RBDPVCBackupConditionsBound
 	err = r.Status().Update(ctx, &backup)
 	if err != nil {
-		logger.Error("failed to update status", "conditions", backup.Status.Conditions, "error", err)
+		logger.Error("failed to update status", "createdAt", backup.Status.CreatedAt, "conditions", backup.Status.Conditions, "error", err)
 		return ctrl.Result{}, err
 	}
 
