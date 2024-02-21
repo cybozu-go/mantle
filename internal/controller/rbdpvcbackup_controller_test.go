@@ -58,7 +58,7 @@ var _ = Describe("RBDPVCBackup controller", func() {
 		Expect(<-errCh).NotTo(HaveOccurred())
 	})
 
-	It("should set finalizer and status fields on RBDPVCBackup resource creation", func() {
+	It("should set finalizer and status fields on RBDPVCBackup resource creation and deletion", func() {
 		ctx := context.Background()
 		ns := createNamespace()
 
@@ -170,6 +170,26 @@ var _ = Describe("RBDPVCBackup controller", func() {
 			timeDiff := time.Since(backup.Status.CreatedAt.Time).Seconds()
 			if timeDiff > 5 {
 				return fmt.Errorf("invalid status.createdAt (time difference from createdAt(%f sec) exceeds 5 seconds.)", timeDiff)
+			}
+
+			return nil
+		}).Should(Succeed())
+
+		err = k8sClient.Delete(ctx, &backup)
+		Expect(err).NotTo(HaveOccurred())
+
+		Eventually(func() error {
+			namespacedName := types.NamespacedName{
+				Namespace: ns,
+				Name:      backup.Name,
+			}
+			err = k8sClient.Get(ctx, namespacedName, &backup)
+			if err != nil {
+				return err
+			}
+
+			if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsDeleting {
+				return errors.New("status.conditions does not set \"Deleting\" yet")
 			}
 
 			return nil
