@@ -57,7 +57,7 @@ var _ = Describe("RBDPVCBackup controller", func() {
 		Expect(<-errCh).NotTo(HaveOccurred())
 	})
 
-	It("should set finalizer on RBDPVCBackup resource creation", func() {
+	It("should set finalizer and \"Creating\" status on RBDPVCBackup resource creation", func() {
 		ctx := context.Background()
 		ns := createNamespace()
 
@@ -143,6 +143,10 @@ var _ = Describe("RBDPVCBackup controller", func() {
 			}
 			if !existFinalizer {
 				return errors.New("finalizer does not set yet")
+			}
+
+			if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsCreating {
+				return errors.New("status.conditions does not set \"Creating\" yet")
 			}
 
 			return nil
