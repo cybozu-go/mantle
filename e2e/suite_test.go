@@ -238,7 +238,7 @@ var _ = Describe("rbd backup system", func() {
 		_, _, err := kubectl("-n", operatorNamespace, "delete", "rbdpvcbackups", rbdPVCBackupName)
 		Expect(err).NotTo(HaveOccurred())
 
-		By("Waiting for RBD snapshot to be created")
+		By("Waiting for RBD snapshot to be deleted")
 		Eventually(func() error {
 			stdout, stderr, err := kubectl("-n", operatorNamespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "snap", "ls", poolName+"/"+imageName, "--format=json")
 			if err != nil {
