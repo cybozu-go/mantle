@@ -97,7 +97,11 @@ setup: setup-minikube
 	$(MAKE) $(KUBECTL)
 
 $(BINDIR):
+	echo "before mkdir -p $@"
+	ls -l /home/runner/work/rbd-backup-system/rbd-backup-system/e2e/
 	mkdir -p $@
+	echo "after mkdir -p $@"
+	ls -l /home/runner/work/rbd-backup-system/rbd-backup-system/e2e/
 
 $(TMPDIR):
 	mkdir -p $@
