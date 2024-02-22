@@ -88,6 +88,8 @@ $(TMPDIR):
 	mkdir -p $@
 
 $(GINKGO): | $(BINDIR)
+	ls -l /home/runner/work/rbd-backup-system/rbd-backup-system/e2e/
+	ls -l /home/runner/work/rbd-backup-system/rbd-backup-system/e2e/bin/
 	GOBIN=$(BINDIR) go install github.com/onsi/ginkgo/v2/ginkgo@$(GINKGO_VERSION)
 	mv $(BINDIR)/ginkgo $@
 
