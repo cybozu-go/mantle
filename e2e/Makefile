@@ -31,6 +31,9 @@ CNI_PLUGIN_INSTALL_DIR := /opt/cni/bin
 
 .PHONY: setup-minikube-upstream-rook
 setup-minikube-upstream-rook:
+	$(MAKE) $(GINKGO)
+	$(MAKE) $(KUBECTL)
+
 	echo aaaaa
 	ls -l /home/runner/work/rbd-backup-system/rbd-backup-system/e2e/
 
@@ -70,9 +73,6 @@ setup-minikube-upstream-rook:
 
 	echo ffffff
 	ls -l /home/runner/work/rbd-backup-system/rbd-backup-system/e2e/
-
-	$(MAKE) $(GINKGO)
-	$(MAKE) $(KUBECTL)
 
 .PHONY: test-upstream-rook
 test-upstream-rook:
