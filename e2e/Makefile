@@ -83,6 +83,7 @@ setup: setup-minikube
 
 $(BINDIR):
 	mkdir -p $@
+	$(SUDO) chown $(shell id -u):$(shell id -g) $@
 
 $(TMPDIR):
 	mkdir -p $@
