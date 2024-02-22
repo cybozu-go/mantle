@@ -53,6 +53,9 @@ setup-minikube-upstream-rook:
 
 	sudo -E minikube start --kubernetes-version="v$(KUBERNETES_VERSION)" --driver=none --memory 6g --cpus=2 --addons ingress --cni=calico
 
+	$(MAKE) $(GINKGO)
+	$(MAKE) $(KUBECTL)
+
 .PHONY: test-upstream-rook
 test-upstream-rook:
 	$(MAKE) launch-rook-ceph
