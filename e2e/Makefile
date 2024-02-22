@@ -25,6 +25,40 @@ export MINIKUBE_HOME
 
 DOMAIN_NAME := cybozu.com
 
+CNI_PLUGIN_VERSION := v1.4.0
+CNI_PLUGIN_TAR := cni-plugins-linux-amd64-$(CNI_PLUGIN_VERSION).tgz
+CNI_PLUGIN_INSTALL_DIR := /opt/cni/bin
+
+.PHONY: setup-minikube-upstream-rook
+setup-minikube-upstream-rook:
+	sudo apt update
+	sudo apt install -y conntrack socat
+	curl -LO https://storage.googleapis.com/minikube/releases/$(MINIKUBE_VERSION)/minikube_latest_amd64.deb
+	sudo dpkg -i minikube_latest_amd64.deb
+	rm -f minikube_latest_amd64.deb
+
+	curl -LO https://github.com/Mirantis/cri-dockerd/releases/download/v0.3.9/cri-dockerd_0.3.9.3-0.ubuntu-focal_amd64.deb
+	sudo dpkg -i cri-dockerd_0.3.9.3-0.ubuntu-focal_amd64.deb
+	rm -f cri-dockerd_0.3.9.3-0.ubuntu-focal_amd64.deb
+
+	wget https://github.com/kubernetes-sigs/cri-tools/releases/download/$(CRICTL_VERSION)/crictl-$(CRICTL_VERSION)-linux-amd64.tar.gz
+	sudo tar zxvf crictl-$(CRICTL_VERSION)-linux-amd64.tar.gz -C /usr/local/bin
+	rm -f crictl-$(CRICTL_VERSION)-linux-amd64.tar.gz
+	sudo sysctl fs.protected_regular=0
+
+	curl -LO "https://github.com/containernetworking/plugins/releases/download/$(CNI_PLUGIN_VERSION)/$(CNI_PLUGIN_TAR)"
+	sudo mkdir -p "$(CNI_PLUGIN_INSTALL_DIR)"
+	sudo tar -xf "$(CNI_PLUGIN_TAR)" -C "$(CNI_PLUGIN_INSTALL_DIR)"
+	rm "$(CNI_PLUGIN_TAR)"
+
+	sudo -E minikube start --kubernetes-version="v$(KUBERNETES_VERSION)" --driver=none --memory 6g --cpus=2 --addons ingress --cni=calico
+
+.PHONY: test-upstream-rook
+test-upstream-rook:
+	$(MAKE) launch-rook-ceph
+	$(MAKE) common/setup-components
+	$(MAKE) common/test
+
 .PHONY: test
 test:
 	$(MAKE) launch-minikube
