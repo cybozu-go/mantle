@@ -31,6 +31,8 @@ CNI_PLUGIN_INSTALL_DIR := /opt/cni/bin
 
 .PHONY: setup-minikube-upstream-rook
 setup-minikube-upstream-rook:
+	$(SUDO) rm -rf $(BINDIR) $(TMPDIR)
+
 	echo aaaaa
 	ls -l /home/runner/work/rbd-backup-system/rbd-backup-system/e2e/
 
