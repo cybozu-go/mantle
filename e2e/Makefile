@@ -31,8 +31,6 @@ CNI_PLUGIN_INSTALL_DIR := /opt/cni/bin
 
 .PHONY: setup-minikube-upstream-rook
 setup-minikube-upstream-rook:
-	$(SUDO) rm -rf $(BINDIR) $(TMPDIR)
-
 	echo aaaaa
 	ls -l /home/runner/work/rbd-backup-system/rbd-backup-system/e2e/
 
@@ -69,6 +67,9 @@ setup-minikube-upstream-rook:
 	ls -l /home/runner/work/rbd-backup-system/rbd-backup-system/e2e/
 
 	sudo -E minikube start --kubernetes-version="v$(KUBERNETES_VERSION)" --driver=none --memory 6g --cpus=2 --addons ingress --cni=calico
+
+	echo ffffff
+	ls -l /home/runner/work/rbd-backup-system/rbd-backup-system/e2e/
 
 	$(MAKE) $(GINKGO)
 	$(MAKE) $(KUBECTL)
@@ -109,8 +110,8 @@ $(TMPDIR):
 	mkdir -p $@
 
 $(GINKGO): | $(BINDIR)
+	echo gggggg
 	ls -l /home/runner/work/rbd-backup-system/rbd-backup-system/e2e/
-	ls -l /home/runner/work/rbd-backup-system/rbd-backup-system/e2e/bin/
 	GOBIN=$(BINDIR) go install github.com/onsi/ginkgo/v2/ginkgo@$(GINKGO_VERSION)
 	mv $(BINDIR)/ginkgo $@
 
