@@ -71,8 +71,9 @@ setup-minikube-upstream-rook:
 
 	sudo -E minikube start --kubernetes-version="v$(KUBERNETES_VERSION)" --driver=none --memory 6g --cpus=2 --addons ingress --cni=calico
 
-	echo ffffff
-	ls -l /home/runner/work/rbd-backup-system/rbd-backup-system/e2e/
+	$(SUDO) chown -R $$USER $$HOME/.kube $(MINIKUBE_HOME)/.minikube
+	$(SUDO) chmod -R a+r $$HOME/.kube $(MINIKUBE_HOME)/.minikube
+	$(SUDO) find $(MINIKUBE_HOME)/.minikube -name id_rsa -exec chmod 600 {} ';'
 
 .PHONY: test-upstream-rook
 test-upstream-rook:
@@ -154,12 +155,8 @@ launch-minikube:
 		--extra-config=kubeadm.node-name=$(CLUSTER_NAME)-worker \
 		--extra-config=kubelet.hostname-override=$(CLUSTER_NAME)-worker \
 			--cni=calico
-	ls -ld $$HOME/.kube
-	ls -l $$HOME/.kube
 	$(SUDO) chown -R $$USER $$HOME/.kube $(MINIKUBE_HOME)/.minikube
 	$(SUDO) chmod -R a+r $$HOME/.kube $(MINIKUBE_HOME)/.minikube
-	ls -ld $$HOME/.kube
-	ls -l $$HOME/.kube
 	$(SUDO) find $(MINIKUBE_HOME)/.minikube -name id_rsa -exec chmod 600 {} ';'
 
 .PHONY: delete-minikube
