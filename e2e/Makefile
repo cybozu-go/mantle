@@ -180,6 +180,7 @@ delete-loop-dev: | $(TMPDIR)
 
 .PHONY: launch-rook-ceph
 launch-rook-ceph: create-loop-dev
+	ls -l /home/runner/.kube
 	$(KUBECTL) apply -f testdata/common.yaml
 	$(KUBECTL) apply -f testdata/crds.yaml
 	$(KUBECTL) apply -f testdata/operator.yaml
