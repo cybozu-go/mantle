@@ -154,8 +154,12 @@ launch-minikube:
 		--extra-config=kubeadm.node-name=$(CLUSTER_NAME)-worker \
 		--extra-config=kubelet.hostname-override=$(CLUSTER_NAME)-worker \
 			--cni=calico
+	ls -ld $$HOME/.kube
+	ls -l $$HOME/.kube
 	$(SUDO) chown -R $$USER $$HOME/.kube $(MINIKUBE_HOME)/.minikube
 	$(SUDO) chmod -R a+r $$HOME/.kube $(MINIKUBE_HOME)/.minikube
+	ls -ld $$HOME/.kube
+	ls -l $$HOME/.kube
 	$(SUDO) find $(MINIKUBE_HOME)/.minikube -name id_rsa -exec chmod 600 {} ';'
 
 .PHONY: delete-minikube
@@ -180,7 +184,6 @@ delete-loop-dev: | $(TMPDIR)
 
 .PHONY: launch-rook-ceph
 launch-rook-ceph: create-loop-dev
-	ls -l /home/runner/.kube
 	$(KUBECTL) apply -f testdata/common.yaml
 	$(KUBECTL) apply -f testdata/crds.yaml
 	$(KUBECTL) apply -f testdata/operator.yaml
