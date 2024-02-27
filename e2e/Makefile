@@ -208,6 +208,8 @@ common/setup-components:
 	df -h
 	echo $(DOCKER_SAVE_PATH)/controller-container.tar
 	$(SUDO) sh -c "docker save controller:latest > $(DOCKER_SAVE_PATH)/controller-container.tar"
+	ls -l $(DOCKER_SAVE_PATH)/controller-container.tar
+	ls -hl $(DOCKER_SAVE_PATH)/controller-container.tar
 	$(SUDO) ctr -n k8s.io images import $(DOCKER_SAVE_PATH)/controller-container.tar
 	$(MAKE) -C .. install
 	$(MAKE) -C .. deploy
