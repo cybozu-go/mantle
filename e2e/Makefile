@@ -204,6 +204,7 @@ delete-rook-ceph:
 common/setup-components:
 	$(KUBECTL) apply -f https://github.com/cert-manager/cert-manager/releases/download/$(CERT_MANAGER_VERSION)/cert-manager.yaml
 	$(MAKE) -C .. docker-build
+	df -h
 	docker save controller:latest > controller-container.tar
 	$(SUDO) ctr -n k8s.io images import controller-container.tar
 	$(MAKE) -C .. install
