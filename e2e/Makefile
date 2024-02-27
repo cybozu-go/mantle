@@ -1,5 +1,6 @@
 include ../versions.mk
 
+DOCKER_SAVE_PATH ?= .
 BINDIR := $(shell pwd)/bin
 TMPDIR := $(shell pwd)/tmp
 CURL := curl -sSLf
@@ -205,8 +206,9 @@ common/setup-components:
 	$(KUBECTL) apply -f https://github.com/cert-manager/cert-manager/releases/download/$(CERT_MANAGER_VERSION)/cert-manager.yaml
 	$(MAKE) -C .. docker-build
 	df -h
-	docker save controller:latest > controller-container.tar
-	$(SUDO) ctr -n k8s.io images import controller-container.tar
+	echo $(DOCKER_SAVE_PATH)/controller-container.tar
+	docker save controller:latest > $(DOCKER_SAVE_PATH)/controller-container.tar
+	$(SUDO) ctr -n k8s.io images import $(DOCKER_SAVE_PATH)/controller-container.tar
 	$(MAKE) -C .. install
 	$(MAKE) -C .. deploy
 
