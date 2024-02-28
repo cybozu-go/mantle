@@ -50,4 +50,4 @@ jobs:
       - run: df -h; lsblk
       - run: make -C e2e setup-minikube-upstream-rook
       - run: df -h; lsblk
-      - run: make -C e2e test-upstream-rook DOCKER_SAVE_PATH=/mnt
+      - run: make -C e2e test-upstream-rook

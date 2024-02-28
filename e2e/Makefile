@@ -1,6 +1,5 @@
 include ../versions.mk
 
-DOCKER_SAVE_PATH ?= .
 BINDIR := $(shell pwd)/bin
 TMPDIR := $(shell pwd)/tmp
 CURL := curl -sSLf
@@ -91,7 +90,6 @@ test:
 
 .PHONY: clean
 clean:
-	rm -f controller-container.tar
 	$(MAKE) delete-rook-ceph
 	$(MAKE) delete-minikube
 
@@ -206,10 +204,7 @@ common/setup-components:
 	$(KUBECTL) apply -f https://github.com/cert-manager/cert-manager/releases/download/$(CERT_MANAGER_VERSION)/cert-manager.yaml
 	$(MAKE) -C .. docker-build
 	df -h
-	echo $(DOCKER_SAVE_PATH)/controller-container.tar
-	docker save controller:latest | $(SUDO) ctr -n k8s.io images import -
-	ls -l $(DOCKER_SAVE_PATH)/controller-container.tar
-	ls -hl $(DOCKER_SAVE_PATH)/controller-container.tar
+	minikube image load controller:latest
 	
 	$(MAKE) -C .. install
 	$(MAKE) -C .. deploy
