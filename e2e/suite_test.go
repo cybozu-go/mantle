@@ -101,6 +101,8 @@ var _ = BeforeSuite(func() {
 			fmt.Printf(string(stdout2))
 			stdout2, _, err = kubectl("-n", operatorNamespace, "logs", "-p", "-lapp=rook-ceph-osd-prepare")
 			fmt.Printf(string(stdout2))
+			stdout2, _, err = kubectl("get", "pv")
+			fmt.Printf(string(stdout2))
 			return fmt.Errorf("kubectl get deploy failed. stderr: %s, err: %w", string(stderr), err)
 		}
 
