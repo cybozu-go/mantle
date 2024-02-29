@@ -97,8 +97,8 @@ var _ = BeforeSuite(func() {
 	Eventually(func() error {
 		stdout, stderr, err := kubectl("-n", operatorNamespace, "get", "deploy", "rook-ceph-osd-0", "-o", "json")
 		if err != nil {
-			stdout2, _, err := kubectl("-n", operatorNamespace, "get", "pod")
-			fmt.Printf(string(stdout2))
+			stdout2, _, err := kubectl("-n", operatorNamespace, "get", "pod", "|", "grep", "rook-ceph-operator")
+			fmt.Print(string(stdout2))
 			return fmt.Errorf("kubectl get deploy failed. stderr: %s, err: %w", string(stderr), err)
 		}
 
