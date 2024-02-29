@@ -213,6 +213,7 @@ common/setup-components:
 
 .PHONY: common/test
 common/test: $(GINKGO)
+	losetup
 	$(SUDO) -E env \
 	PATH=${PATH} \
 	E2ETEST=1 \
