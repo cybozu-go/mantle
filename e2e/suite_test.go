@@ -105,7 +105,7 @@ var _ = BeforeSuite(func() {
 			fmt.Printf(string(stdout2))
 			stdout2, _, err = kubectl("get", "pvc", "-oyaml")
 			fmt.Printf(string(stdout2))
-			stdout2, _, err = kubectl("get", "describe", "pvc")
+			stdout2, _, err = kubectl("describe", "pvc")
 			fmt.Printf(string(stdout2))
 			return fmt.Errorf("kubectl get deploy failed. stderr: %s, err: %w", string(stderr), err)
 		}
