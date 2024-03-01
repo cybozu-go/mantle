@@ -8,7 +8,7 @@ GINKGO_FLAGS :=
 MINIKUBE := $(BINDIR)/minikube
 KUBECTL := $(BINDIR)/kubectl-$(KUBERNETES_VERSION)
 MINIKUBE_HOME = $(BINDIR)
-NODE_NAME ?= minikube-worker
+NODE_NAME := minikube-worker
 SUDO := sudo
 DD := dd
 LOSETUP := losetup
@@ -30,9 +30,8 @@ setup-minikube:
 
 	$(SUDO) apt update
 	$(SUDO) apt install -y conntrack socat
-	curl -LO https://storage.googleapis.com/minikube/releases/$(MINIKUBE_VERSION)/minikube_latest_amd64.deb
-	$(SUDO) dpkg -i minikube_latest_amd64.deb
-	rm -f minikube_latest_amd64.deb
+	$(CURL) -o $(MINIKUBE) https://github.com/kubernetes/minikube/releases/download/$(MINIKUBE_VERSION)/minikube-linux-amd64
+	chmod a+x $(MINIKUBE)
 
 	$(CURL) -o cri-dockerd.deb https://github.com/Mirantis/cri-dockerd/releases/download/$(CRI_DOCKERD_VERSION)/cri-dockerd_$(CRI_DOCKERD_VERSION:v%=%).3-0.ubuntu-focal_amd64.deb
 	$(SUDO) dpkg -i cri-dockerd.deb
@@ -61,9 +60,7 @@ clean:
 	$(MAKE) delete-minikube
 
 $(BINDIR):
-	ls -l /home/runner/work/rbd-backup-system/rbd-backup-system/e2e/
 	mkdir -p $@
-	ls -l /home/runner/work/rbd-backup-system/rbd-backup-system/e2e/
 
 $(TMPDIR):
 	mkdir -p $@
@@ -82,7 +79,7 @@ launch-minikube:
 	kubectl get pod >/dev/null 2>&1; \
 	RET=$$? ; \
 	if [ $$RET -eq 0 ] ; then exit; fi ; \
-	$(SUDO) -E minikube start \
+	$(SUDO) -E $(MINIKUBE) start \
 		--kubernetes-version="v$(KUBERNETES_VERSION)" \
 		--driver=none \
 		--memory 6g \
