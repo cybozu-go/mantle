@@ -119,24 +119,16 @@ func (r *RBDPVCBackupReconciler) updateConditions(ctx context.Context, backup *b
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.16.3/pkg/reconcile
 func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger.Info("Reconcile start")
-	defer logger.Info("Reconcile end")
-
 	var backup backupv1.RBDPVCBackup
 	err := r.Get(ctx, req.NamespacedName, &backup)
-	logger.Info("debug - 116\n")
 	if errors.IsNotFound(err) {
 		logger.Info("RBDPVCBackup is not found", "name", backup.Name, "error", err)
-		logger.Info("err1\n")
 		return ctrl.Result{}, nil
 	}
 	if err != nil {
 		logger.Error("failed to get RBDPVCBackup", "name", req.NamespacedName, "error", err)
-		logger.Info("err2\n")
 		return ctrl.Result{}, err
 	}
-
-	logger.Info("debug - 127\n")
 
 	pvcNamespace := backup.Namespace
 	pvcName := backup.Spec.PVC
@@ -165,8 +157,6 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 	}
 
-	logger.Info("debug - 150\n")
-
 	pvName := pvc.Spec.VolumeName
 	var pv corev1.PersistentVolume
 	err = r.Get(ctx, types.NamespacedName{Namespace: req.NamespacedName.Namespace, Name: pvName}, &pv)
@@ -181,8 +171,6 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	imageName := pv.Spec.CSI.VolumeAttributes["imageName"]
 	poolName := pv.Spec.CSI.VolumeAttributes["pool"]
-
-	logger.Info("debug - 164\n")
 
 	if !backup.ObjectMeta.DeletionTimestamp.IsZero() {
 		if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsDeleting {
@@ -220,11 +208,8 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			}
 		}
 
-		logger.Info("err9\n")
 		return ctrl.Result{}, nil
 	}
-
-	logger.Info("debug - 208\n")
 
 	if !controllerutil.ContainsFinalizer(&backup, RBDPVCBackupFinalizerName) {
 		controllerutil.AddFinalizer(&backup, RBDPVCBackupFinalizerName)
@@ -236,8 +221,6 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 		return ctrl.Result{Requeue: true}, nil
 	}
-
-	logger.Info("debug1\n")
 
 	if backup.Status.Conditions == backupv1.RBDPVCBackupConditionsBound || backup.Status.Conditions == backupv1.RBDPVCBackupConditionsDeleting {
 		return ctrl.Result{}, nil
@@ -254,7 +237,6 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	command := []string{"rbd", "snap", "create", poolName + "/" + imageName + "@" + backup.Name}
 	_, err = executeCommand(command, nil)
 	if err != nil {
-		// TODO EEXISTと比較できないか？
 		command = []string{"rbd", "snap", "ls", poolName + "/" + imageName, "--format=json"}
 		out, err := executeCommand(command, nil)
 		if err != nil {

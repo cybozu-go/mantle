@@ -33,6 +33,7 @@ const (
 	pvcName          = "rbd-pvc"
 	poolName         = "replicapool"
 	rbdPVCBackupName = "rbdpvcbackup-test"
+	namespace        = "rook-ceph"
 )
 
 func execAtLocal(cmd string, input []byte, args ...string) ([]byte, []byte, error) {
@@ -57,8 +58,6 @@ func kubectlWithInput(input []byte, args ...string) ([]byte, []byte, error) {
 	return execAtLocal("kubectl", input, args...)
 }
 
-var operatorNamespace = "rook-ceph"
-
 func TestMtest(t *testing.T) {
 	if os.Getenv("E2ETEST") == "" {
 		t.Skip("Run under e2e/")
@@ -75,7 +74,7 @@ func TestMtest(t *testing.T) {
 var _ = BeforeSuite(func() {
 	By("[BeforeSuite] Waiting for rook to get ready")
 	Eventually(func() error {
-		stdout, stderr, err := kubectl("-n", operatorNamespace, "get", "deploy", "rook-ceph-operator", "-o", "json")
+		stdout, stderr, err := kubectl("-n", namespace, "get", "deploy", "rook-ceph-operator", "-o", "json")
 		if err != nil {
 			return fmt.Errorf("kubectl get deploy failed. stderr: %s, err: %w", string(stderr), err)
 		}
@@ -95,20 +94,8 @@ var _ = BeforeSuite(func() {
 
 	By("[BeforeSuite] Waiting for ceph cluster to get ready")
 	Eventually(func() error {
-		stdout, stderr, err := kubectl("-n", operatorNamespace, "get", "deploy", "rook-ceph-osd-0", "-o", "json")
+		stdout, stderr, err := kubectl("-n", namespace, "get", "deploy", "rook-ceph-osd-0", "-o", "json")
 		if err != nil {
-			stdout2, _, err := kubectl("-n", operatorNamespace, "describe", "pod", "-lapp=rook-ceph-osd-prepare")
-			fmt.Printf(string(stdout2))
-			stdout2, _, err = kubectl("-n", operatorNamespace, "logs", "-p", "-lapp=rook-ceph-osd-prepare")
-			fmt.Printf(string(stdout2))
-			stdout2, _, err = kubectl("get", "pv", "-oyaml")
-			fmt.Printf(string(stdout2))
-			stdout2, _, err = kubectl("-n", operatorNamespace, "get", "pvc", "-oyaml")
-			fmt.Printf(string(stdout2))
-			stdout2, _, err = kubectl("-n", operatorNamespace, "describe", "pvc")
-			fmt.Printf(string(stdout2))
-			stdout2, _, err = kubectl("-n", operatorNamespace, "get", "node")
-			fmt.Printf(string(stdout2))
 			return fmt.Errorf("kubectl get deploy failed. stderr: %s, err: %w", string(stderr), err)
 		}
 
@@ -127,8 +114,8 @@ var _ = BeforeSuite(func() {
 
 	By("[BeforeSuite] Creating Rook Pool and SC")
 	Eventually(func() error {
-		manifest := fmt.Sprintf(dummyRookPoolSCTemplate, poolName, operatorNamespace, poolName, operatorNamespace, operatorNamespace, operatorNamespace)
-		_, _, err := kubectlWithInput([]byte(manifest), "apply", "-n", operatorNamespace, "-f", "-")
+		manifest := fmt.Sprintf(dummyRookPoolSCTemplate, poolName, namespace, poolName, namespace, namespace, namespace)
+		_, _, err := kubectlWithInput([]byte(manifest), "apply", "-n", namespace, "-f", "-")
 		if err != nil {
 			return err
 		}
@@ -139,7 +126,7 @@ var _ = BeforeSuite(func() {
 	By("[BeforeSuite] Creating PVC")
 	Eventually(func() error {
 		manifest := fmt.Sprintf(dummyPVCTemplate, pvcName)
-		_, _, err := kubectlWithInput([]byte(manifest), "apply", "-n", operatorNamespace, "-f", "-")
+		_, _, err := kubectlWithInput([]byte(manifest), "apply", "-n", namespace, "-f", "-")
 		if err != nil {
 			return err
 		}
@@ -149,7 +136,7 @@ var _ = BeforeSuite(func() {
 
 	By("[BeforeSuite] Waiting for PVC to get bound")
 	Eventually(func() error {
-		stdout, stderr, err := kubectl("-n", operatorNamespace, "get", "pvc", pvcName, "-o", "json")
+		stdout, stderr, err := kubectl("-n", namespace, "get", "pvc", pvcName, "-o", "json")
 		if err != nil {
 			return fmt.Errorf("kubectl get pvc failed. stderr: %s, err: %w", string(stderr), err)
 		}
@@ -169,7 +156,7 @@ var _ = BeforeSuite(func() {
 
 	By("[BeforeSuite] Waiting for rbd-backup-system-controller-manager to get ready")
 	Eventually(func() error {
-		stdout, stderr, err := kubectl("-n", operatorNamespace, "get", "deploy", "rbd-backup-system-controller-manager", "-o", "json")
+		stdout, stderr, err := kubectl("-n", namespace, "get", "deploy", "rbd-backup-system-controller-manager", "-o", "json")
 		if err != nil {
 			return fmt.Errorf("kubectl get deploy failed. stderr: %s, err: %w", string(stderr), err)
 		}
@@ -193,13 +180,13 @@ var _ = Describe("rbd backup system", func() {
 
 	It("should create rbdpvcbackup resource", func() {
 		By("Creating RBDPVCBackup")
-		manifest := fmt.Sprintf(dummyRBDPVCBackupTemplate, rbdPVCBackupName, rbdPVCBackupName, operatorNamespace, pvcName)
+		manifest := fmt.Sprintf(dummyRBDPVCBackupTemplate, rbdPVCBackupName, rbdPVCBackupName, namespace, pvcName)
 		_, _, err := kubectlWithInput([]byte(manifest), "apply", "-f", "-")
 		Expect(err).NotTo(HaveOccurred())
 
 		By("Waiting for RBD snapshot to be created")
 		Eventually(func() error {
-			stdout, stderr, err := kubectl("-n", operatorNamespace, "get", "pvc", pvcName, "-o", "json")
+			stdout, stderr, err := kubectl("-n", namespace, "get", "pvc", pvcName, "-o", "json")
 			if err != nil {
 				return fmt.Errorf("kubectl get pvc failed. stderr: %s, err: %w", string(stderr), err)
 			}
@@ -221,7 +208,7 @@ var _ = Describe("rbd backup system", func() {
 			}
 			imageName = pv.Spec.CSI.VolumeAttributes["imageName"]
 
-			stdout, stderr, err = kubectl("-n", operatorNamespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "snap", "ls", poolName+"/"+imageName, "--format=json")
+			stdout, stderr, err = kubectl("-n", namespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "snap", "ls", poolName+"/"+imageName, "--format=json")
 			if err != nil {
 				return fmt.Errorf("rbd snap ls failed. stderr: %s, err: %w", string(stderr), err)
 			}
@@ -247,12 +234,12 @@ var _ = Describe("rbd backup system", func() {
 
 	It("should delete rbdbackup resource", func() {
 		By("Deleting RBDPVCBackup")
-		_, _, err := kubectl("-n", operatorNamespace, "delete", "rbdpvcbackups", rbdPVCBackupName)
+		_, _, err := kubectl("-n", namespace, "delete", "rbdpvcbackups", rbdPVCBackupName)
 		Expect(err).NotTo(HaveOccurred())
 
 		By("Waiting for RBD snapshot to be deleted")
 		Eventually(func() error {
-			stdout, stderr, err := kubectl("-n", operatorNamespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "snap", "ls", poolName+"/"+imageName, "--format=json")
+			stdout, stderr, err := kubectl("-n", namespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "snap", "ls", poolName+"/"+imageName, "--format=json")
 			if err != nil {
 				return fmt.Errorf("rbd snap ls failed. stderr: %s, err: %w", string(stderr), err)
 			}
