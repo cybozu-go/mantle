@@ -42,5 +42,5 @@ jobs:
           key: go-${{ hashFiles('go.sum', 'Makefile', 'versions.mk') }}
           restore-keys: |
             go-
-      - run: make -C e2e setup-minikube
+      - run: make -C e2e setup
       - run: make -C e2e test

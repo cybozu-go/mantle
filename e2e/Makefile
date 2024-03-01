@@ -23,29 +23,11 @@ CNI_PLUGIN_INSTALL_DIR := /opt/cni/bin
 
 export MINIKUBE_HOME
 
-.PHONY: setup-minikube
-setup-minikube:
+.PHONY: setup
+setup:
 	$(MAKE) $(GINKGO)
 	$(MAKE) $(KUBECTL)
-
-	$(SUDO) apt update
-	$(SUDO) apt install -y conntrack socat
-	$(CURL) -o $(MINIKUBE) https://github.com/kubernetes/minikube/releases/download/$(MINIKUBE_VERSION)/minikube-linux-amd64
-	chmod a+x $(MINIKUBE)
-
-	$(CURL) -o cri-dockerd.deb https://github.com/Mirantis/cri-dockerd/releases/download/$(CRI_DOCKERD_VERSION)/cri-dockerd_$(CRI_DOCKERD_VERSION:v%=%).3-0.ubuntu-focal_amd64.deb
-	$(SUDO) dpkg -i cri-dockerd.deb
-	rm -f cri-dockerd.deb
-
-	$(CURL) -o crictl.tar.gz https://github.com/kubernetes-sigs/cri-tools/releases/download/$(CRICTL_VERSION)/crictl-$(CRICTL_VERSION)-linux-amd64.tar.gz
-	$(SUDO) tar zxvf crictl.tar.gz -C /usr/local/bin
-	rm -f crictl.tar.gz
-	$(SUDO) sysctl fs.protected_regular=0
-
-	$(CURL) -o cni-plugins.tgz https://github.com/containernetworking/plugins/releases/download/$(CNI_PLUGINS_VERSION)/cni-plugins-linux-amd64-$(CNI_PLUGINS_VERSION).tgz
-	$(SUDO) mkdir -p $(CNI_PLUGIN_INSTALL_DIR)
-	$(SUDO) tar -xf cni-plugins.tgz -C $(CNI_PLUGIN_INSTALL_DIR)
-	rm -f cni-plugins.tgz
+	$(MAKE) $(MINIKUBE)
 
 .PHONY: test
 test:
@@ -72,6 +54,26 @@ $(GINKGO): | $(BINDIR)
 $(KUBECTL): | $(BINDIR)
 	$(CURL) -o $@ https://storage.googleapis.com/kubernetes-release/release/v$(KUBERNETES_VERSION)/bin/linux/amd64/kubectl
 	chmod a+x $@
+
+$(MINIKUBE): | $(BINDIR)
+	$(SUDO) apt update
+	$(SUDO) apt install -y conntrack socat
+	$(CURL) -o $@ https://github.com/kubernetes/minikube/releases/download/$(MINIKUBE_VERSION)/minikube-linux-amd64
+	chmod a+x $@
+
+	$(CURL) -o cri-dockerd.deb https://github.com/Mirantis/cri-dockerd/releases/download/$(CRI_DOCKERD_VERSION)/cri-dockerd_$(CRI_DOCKERD_VERSION:v%=%).3-0.ubuntu-focal_amd64.deb
+	$(SUDO) dpkg -i cri-dockerd.deb
+	rm -f cri-dockerd.deb
+
+	$(CURL) -o crictl.tar.gz https://github.com/kubernetes-sigs/cri-tools/releases/download/$(CRICTL_VERSION)/crictl-$(CRICTL_VERSION)-linux-amd64.tar.gz
+	$(SUDO) tar zxvf crictl.tar.gz -C /usr/local/bin
+	rm -f crictl.tar.gz
+	$(SUDO) sysctl fs.protected_regular=0
+
+	$(CURL) -o cni-plugins.tgz https://github.com/containernetworking/plugins/releases/download/$(CNI_PLUGINS_VERSION)/cni-plugins-linux-amd64-$(CNI_PLUGINS_VERSION).tgz
+	$(SUDO) mkdir -p $(CNI_PLUGIN_INSTALL_DIR)
+	$(SUDO) tar -xf cni-plugins.tgz -C $(CNI_PLUGIN_INSTALL_DIR)
+	rm -f cni-plugins.tgz
 
 .PHONY: launch-minikube
 launch-minikube:
