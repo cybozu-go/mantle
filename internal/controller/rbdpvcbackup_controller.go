@@ -12,7 +12,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -38,10 +37,6 @@ type Snapshot struct {
 
 const (
 	RBDPVCBackupFinalizerName = "rbdpvcbackup.backup.cybozu.com/finalizer"
-)
-
-var (
-	rbdPVCBackupGVK = schema.GroupVersionKind{Group: "backup.cybozu.com", Version: "v1", Kind: "RBDPVCBackup"}
 )
 
 // NewRBDPVCBackupReconciler returns NodeReconciler.
