@@ -10,7 +10,7 @@ Depending on the creation/deletion of the resource named RBDPVCBackup, the RBD s
 
 If you want to try rbd-backup-system on your local machine, see [e2e](e2e/) directory which provides scripts to run rbd-backup-system on [minikube][kind].
 
-To use rbd-backup-system on your real kubernetes cluster, read [documents](docs/README.md).
+To use rbd-backup-system on your real kubernetes cluster, read following sections.
 
 ### Prerequisites
 - go version v1.20.0+

@@ -1,0 +1,1 @@
+The `CephBlockPool` and `StorageClass` in config/samples/backup_v1_rbdpvcbackup.yaml are copies of https://github.com/rook/rook/blob/2ae319eebce7d525be90b5aed6baba1afe1e2e6e/deploy/examples/csi/rbd/storageclass-test.yaml.

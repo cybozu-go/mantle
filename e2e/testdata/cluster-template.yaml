@@ -28,7 +28,7 @@ spec:
         - key: kubernetes.io/hostname
           operator: In
           values:
-          - minikube-worker
+          - NODE_NAME
 ---
 apiVersion: ceph.rook.io/v1
 kind: CephCluster
