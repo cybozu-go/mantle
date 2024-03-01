@@ -1,7 +1,9 @@
 # rbd-backup-system
-// TODO(user): Add simple overview of use/purpose
+
+The system for backup by RBD snapshots and replication between clusters.
 
 ## Description
+
 // TODO(user): An in-depth paragraph about your project and overview of use
 
 ## Getting Started
@@ -74,4 +76,3 @@ make undeploy
 More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
 
 ## License
-

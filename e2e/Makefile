@@ -69,7 +69,7 @@ setup-minikube-upstream-rook:
 	echo eeeee
 	ls -l /home/runner/work/rbd-backup-system/rbd-backup-system/e2e/
 
-	sudo -E minikube start --kubernetes-version="v$(KUBERNETES_VERSION)" --driver=none --memory 6g --cpus=2 --addons ingress --cni=calico
+	sudo -E minikube start --kubernetes-version="v$(KUBERNETES_VERSION)" --driver=none --memory 6g --cpus=2 --addons ingress --cni=calico --extra-config=kubeadm.node-name=minikube-worker --extra-config=kubelet.hostname-override=minikube-worker
 
 	$(SUDO) chown -R $$USER $$HOME/.kube $(MINIKUBE_HOME)/.minikube
 	$(SUDO) chmod -R a+r $$HOME/.kube $(MINIKUBE_HOME)/.minikube
