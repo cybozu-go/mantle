@@ -21,6 +21,14 @@ spec:
   volumeMode: Block
   local:
     path: LOOP_DEV
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - minikube-worker
 ---
 apiVersion: ceph.rook.io/v1
 kind: CephCluster

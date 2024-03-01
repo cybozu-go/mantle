@@ -4,9 +4,13 @@ The system for backup by RBD snapshots and replication between clusters.
 
 ## Description
 
-// TODO(user): An in-depth paragraph about your project and overview of use
+Depending on the creation/deletion of the resource named RBDPVCBackup, the RBD snapshot of the target PV is created/deleted.
 
 ## Getting Started
+
+If you want to try rbd-backup-system on your local machine, see [e2e](e2e/) directory which provides scripts to run rbd-backup-system on [minikube][kind].
+
+To use rbd-backup-system on your real kubernetes cluster, read [documents](docs/README.md).
 
 ### Prerequisites
 - go version v1.20.0+
@@ -76,3 +80,5 @@ make undeploy
 More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
 
 ## License
+
+[minikube]: https://minikube.sigs.k8s.io/
