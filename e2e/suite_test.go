@@ -3,13 +3,15 @@ package e2e
 import (
 	"bytes"
 	_ "embed"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"testing"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/errors"
+
+	backupv1 "github.com/cybozu-go/rbd-backup-system/api/v1"
 	"github.com/cybozu-go/rbd-backup-system/internal/controller"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -86,7 +88,7 @@ var _ = BeforeSuite(func() {
 		}
 
 		if deploy.Status.AvailableReplicas != 1 {
-			return errors.New("rook operator is not available yet")
+			return fmt.Errorf("rook operator is not available yet")
 		}
 
 		return nil
@@ -106,7 +108,7 @@ var _ = BeforeSuite(func() {
 		}
 
 		if deploy.Status.AvailableReplicas != 1 {
-			return errors.New("osd.0 is not available yet")
+			return fmt.Errorf("osd.0 is not available yet")
 		}
 
 		return nil
@@ -148,7 +150,7 @@ var _ = BeforeSuite(func() {
 		}
 
 		if pvc.Status.Phase != "Bound" {
-			return errors.New("PVC is not bound yet")
+			return fmt.Errorf("PVC is not bound yet")
 		}
 
 		return nil
@@ -168,7 +170,7 @@ var _ = BeforeSuite(func() {
 		}
 
 		if deploy.Status.AvailableReplicas != 1 {
-			return errors.New("rbd-backup-system-controller-manager is not available yet")
+			return fmt.Errorf("rbd-backup-system-controller-manager is not available yet")
 		}
 
 		return nil
@@ -232,23 +234,23 @@ var _ = Describe("rbd backup system", func() {
 		}).Should(Succeed())
 	})
 
-	// It("should not delete RBDPVCBackup resource when delete backup target PVC", func() {
-	// 	By("Deleting backup target PVC")
-	// 	_, _, err := kubectl("-n", namespace, "delete", "pvc", pvcName)
-	// 	Expect(err).NotTo(HaveOccurred())
+	It("should not delete RBDPVCBackup resource when delete backup target PVC", func() {
+		By("Deleting backup target PVC")
+		_, _, err := kubectl("-n", namespace, "delete", "pvc", pvcName)
+		Expect(err).NotTo(HaveOccurred())
 
-	// 	By("Checking that the status.conditions of the RBDPVCBackup resource remain \"Bound\"")
-	// 	stdout, _, err := kubectl("-n", namespace, "get", "rbdpvcbackup", rbdPVCBackupName, "-o", "json")
-	// 	Expect(err).NotTo(HaveOccurred())
-	// 	var backup backupv1.RBDPVCBackup
-	// 	err = yaml.Unmarshal(stdout, &backup)
-	// 	Expect(err).NotTo(HaveOccurred())
-	// 	Expect(backup.Status.Conditions).To(Equal(backupv1.RBDPVCBackupConditionsBound))
-	// })
+		By("Checking that the status.conditions of the RBDPVCBackup resource remain \"Bound\"")
+		stdout, _, err := kubectl("-n", namespace, "get", "rbdpvcbackup", rbdPVCBackupName, "-o", "json")
+		Expect(err).NotTo(HaveOccurred())
+		var backup backupv1.RBDPVCBackup
+		err = yaml.Unmarshal(stdout, &backup)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(backup.Status.Conditions).To(Equal(backupv1.RBDPVCBackupConditionsBound))
+	})
 
 	It("should delete RBDPVCBackup resource", func() {
-		By("Deleting RBDPVCBackup")
-		_, _, err := kubectl("-n", namespace, "delete", "rbdpvcbackup", rbdPVCBackupName)
+		By("Delete RBDPVCBackup")
+		_, _, err := kubectl("-n", namespace, "delete", "rbdpvcbackup", rbdPVCBackupName, "--wait=false")
 		Expect(err).NotTo(HaveOccurred())
 
 		By("Waiting for RBD snapshot to be deleted")
@@ -274,6 +276,18 @@ var _ = Describe("rbd backup system", func() {
 			}
 
 			return nil
+		}).Should(Succeed())
+
+		By("Confirming RBDPVCBackup resource deletion")
+		Eventually(func() error {
+			stdout, stderr, err := kubectl("-n", namespace, "get", "rbdpvcbackup", rbdPVCBackupName)
+			if errors.IsNotFound(err) {
+				return nil
+			}
+			if err != nil {
+				return fmt.Errorf("get rbdpvcbackup %s failed. stderr: %s, err: %w", rbdPVCBackupName, string(stderr), err)
+			}
+			return fmt.Errorf("RBDPVCBackup resource %s still exists. stdout: %s", rbdPVCBackupName, stdout)
 		}).Should(Succeed())
 	})
 })
