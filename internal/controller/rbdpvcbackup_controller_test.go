@@ -147,7 +147,7 @@ var _ = Describe("RBDPVCBackup controller", func() {
 			}
 
 			if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsCreating {
-				return fmt.Errorf("status.conditions does not set \"Creating\" yet")
+				return fmt.Errorf("status.conditions does not set \"Creating\" yet (status.conditions: %s)", backup.Status.Conditions)
 			}
 
 			return nil
