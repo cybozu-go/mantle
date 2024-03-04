@@ -146,8 +146,8 @@ var _ = Describe("RBDPVCBackup controller", func() {
 				return fmt.Errorf("finalizer does not set yet")
 			}
 
-			if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsCreating {
-				return fmt.Errorf("status.conditions does not set \"Creating\" yet (status.conditions: %s)", backup.Status.Conditions)
+			if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsCreating && backup.Status.Conditions != backupv1.RBDPVCBackupConditionsBound {
+				return fmt.Errorf("status.conditions does not set \"Creating\" or \"Bound\" yet (status.conditions: %s)", backup.Status.Conditions)
 			}
 
 			return nil
