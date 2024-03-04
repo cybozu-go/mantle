@@ -184,6 +184,9 @@ var _ = Describe("RBDPVCBackup controller", func() {
 				Name:      backup.Name,
 			}
 			err = k8sClient.Get(ctx, namespacedName, &backup)
+			if errors.IsNotFound(err) {
+				return nil
+			}
 			if err != nil {
 				return err
 			}
