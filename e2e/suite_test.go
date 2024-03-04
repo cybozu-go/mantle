@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	backupv1 "github.com/cybozu-go/rbd-backup-system/api/v1"
 	"github.com/cybozu-go/rbd-backup-system/internal/controller"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -178,7 +179,7 @@ var _ = BeforeSuite(func() {
 var _ = Describe("rbd backup system", func() {
 	var imageName string
 
-	It("should create rbdpvcbackup resource", func() {
+	It("should create RBDPVCBackup resource", func() {
 		By("Creating RBDPVCBackup")
 		manifest := fmt.Sprintf(dummyRBDPVCBackupTemplate, rbdPVCBackupName, rbdPVCBackupName, namespace, pvcName)
 		_, _, err := kubectlWithInput([]byte(manifest), "apply", "-f", "-")
@@ -232,7 +233,21 @@ var _ = Describe("rbd backup system", func() {
 		}).Should(Succeed())
 	})
 
-	It("should delete rbdbackup resource", func() {
+	It("should not delete RBDPVCBackup resource when delete backup target PVC", func() {
+		By("Deleting backup target PVC")
+		_, _, err := kubectl("-n", namespace, "delete", "pvc", pvcName)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("Checking that the status.conditions of the RBDPVCBackup resource remain \"Bound\"")
+		stdout, _, err := kubectl("-n", namespace, "get", "rbdpvcbackup", rbdPVCBackupName, "-o", "json")
+		Expect(err).NotTo(HaveOccurred())
+		var backup backupv1.RBDPVCBackup
+		err = yaml.Unmarshal(stdout, &backup)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(backup.Status.Conditions).To(Equal(backupv1.RBDPVCBackupConditionsBound))
+	})
+
+	It("should delete RBDPVCBackup resource", func() {
 		By("Deleting RBDPVCBackup")
 		_, _, err := kubectl("-n", namespace, "delete", "rbdpvcbackups", rbdPVCBackupName)
 		Expect(err).NotTo(HaveOccurred())
