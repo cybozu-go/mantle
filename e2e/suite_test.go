@@ -249,7 +249,10 @@ var _ = Describe("rbd backup system", func() {
 
 	It("should delete RBDPVCBackup resource", func() {
 		By("Deleting RBDPVCBackup")
-		_, _, err := kubectl("-n", namespace, "delete", "rbdpvcbackups", rbdPVCBackupName)
+		_, stderr, err := kubectl("-n", namespace, "delete", "rbdpvcbackup", rbdPVCBackupName)
+		if err != nil {
+			fmt.Print(stderr)
+		}
 		Expect(err).NotTo(HaveOccurred())
 
 		By("Waiting for RBD snapshot to be deleted")
