@@ -19,6 +19,13 @@ import (
 )
 
 func mockExecuteCommand(command []string, input io.Reader) ([]byte, error) {
+	if command[0] == "rbd" && command[1] == "snap" && (command[2] == "create" || command[2] == "rm") {
+		// The actual `rbd snap create` or `rbd snap rm` is momentary,
+		// but to check the transition of the `status.conditions` of the RBDPVCBackups resource,
+		// a DefaultEventuallyPollingInterval (1 second) or longer sleep is set to.
+		time.Sleep(1500 * time.Millisecond)
+	}
+
 	return nil, nil
 }
 
@@ -146,8 +153,8 @@ var _ = Describe("RBDPVCBackup controller", func() {
 				return fmt.Errorf("finalizer does not set yet")
 			}
 
-			if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsCreating && backup.Status.Conditions != backupv1.RBDPVCBackupConditionsBound {
-				return fmt.Errorf("status.conditions does not set \"Creating\" or \"Bound\" yet (status.conditions: %s)", backup.Status.Conditions)
+			if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsCreating {
+				return fmt.Errorf("status.conditions does not set \"Creating\" yet (status.conditions: %s)", backup.Status.Conditions)
 			}
 
 			return nil
@@ -184,15 +191,12 @@ var _ = Describe("RBDPVCBackup controller", func() {
 				Name:      backup.Name,
 			}
 			err = k8sClient.Get(ctx, namespacedName, &backup)
-			if errors.IsNotFound(err) {
-				return nil
-			}
 			if err != nil {
 				return err
 			}
 
 			if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsDeleting {
-				return fmt.Errorf("status.conditions does not set \"Deleting\" yet")
+				return fmt.Errorf("status.conditions does not set \"Deleting\" yet (status.conditions: %s)", backup.Status.Conditions)
 			}
 
 			return nil
