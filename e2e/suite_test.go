@@ -257,7 +257,11 @@ var _ = Describe("rbd backup system", func() {
 		Eventually(func() error {
 			stdout, stderr, err := kubectl("-n", namespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "snap", "ls", poolName+"/"+imageName, "--format=json")
 			if err != nil {
-				return fmt.Errorf("rbd snap ls failed. stderr: %s, err: %w", string(stderr), err)
+				stdout, stderr2, err2 := kubectl("-n", namespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "ls", "--pool="+poolName)
+				if err2 != nil {
+					return fmt.Errorf("rbd ls failed. pool: %s, stderr: %s, err: %w", poolName, stderr2, err2)
+				}
+				return fmt.Errorf("rbd snap ls failed. stderr: %s, err: %w, rbd ls: %s", string(stderr), err, stdout)
 			}
 			var snapshots []controller.Snapshot
 			err = yaml.Unmarshal(stdout, &snapshots)
