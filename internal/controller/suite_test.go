@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -46,6 +47,9 @@ func createNamespace() string {
 
 func TestControllers(t *testing.T) {
 	RegisterFailHandler(Fail)
+
+	SetDefaultEventuallyPollingInterval(time.Second)
+	SetDefaultEventuallyTimeout(3 * time.Minute)
 
 	RunSpecs(t, "Controller Suite")
 }

@@ -142,7 +142,7 @@ common/setup-components:
 	# We can't use `minikube image load` due to a minikube's problem.
 	# ref. https://github.com/kubernetes/minikube/issues/17785
 	docker save controller:latest | $(SUDO) ctr -n k8s.io images import -
-	
+
 	$(MAKE) -C .. install
 	$(MAKE) -C .. deploy
 
