@@ -31,11 +31,13 @@ var (
 )
 
 const (
-	pvcName           = "rbd-pvc"
+	pvcName = "rbd-pvc"
+	// pvcName2          = "rbd-pvc-2"
 	poolName          = "replicapool"
 	rbdPVCBackupName  = "rbdpvcbackup-test"
 	rbdPVCBackupName2 = "rbdpvcbackup-test-2"
-	namespace         = "rook-ceph"
+	// rbdPVCBackupName3 = "rbdpvcbackup-test-3"
+	namespace = "rook-ceph"
 )
 
 func execAtLocal(cmd string, input []byte, args ...string) ([]byte, []byte, error) {
@@ -155,6 +157,39 @@ var _ = BeforeSuite(func() {
 
 		return nil
 	}).Should(Succeed())
+
+	// for _, name := range []string{pvcName, pvcName2} {
+	// 	By(fmt.Sprintf("[BeforeSuite] Creating PVC (%s)", name))
+	// 	Eventually(func() error {
+	// 		manifest := fmt.Sprintf(dummyPVCTemplate, name)
+	// 		_, _, err := kubectlWithInput([]byte(manifest), "apply", "-n", namespace, "-f", "-")
+	// 		if err != nil {
+	// 			return err
+	// 		}
+
+	// 		return nil
+	// 	}).Should(Succeed())
+
+	// 	By(fmt.Sprintf("[BeforeSuite] Waiting for PVC(%s) to get bound", name))
+	// 	Eventually(func() error {
+	// 		stdout, stderr, err := kubectl("-n", namespace, "get", "pvc", name, "-o", "json")
+	// 		if err != nil {
+	// 			return fmt.Errorf("kubectl get pvc failed. stderr: %s, err: %w", string(stderr), err)
+	// 		}
+
+	// 		var pvc corev1.PersistentVolumeClaim
+	// 		err = yaml.Unmarshal(stdout, &pvc)
+	// 		if err != nil {
+	// 			return err
+	// 		}
+
+	// 		if pvc.Status.Phase != "Bound" {
+	// 			return fmt.Errorf("PVC is not bound yet")
+	// 		}
+
+	// 		return nil
+	// 	}).Should(Succeed())
+	// }
 
 	By("[BeforeSuite] Waiting for rbd-backup-system-controller-manager to get ready")
 	Eventually(func() error {
@@ -287,6 +322,60 @@ var _ = Describe("rbd backup system", func() {
 			return nil
 		}).Should(Succeed())
 	})
+
+	// It("should create multiple RBDPVCBackup resources for the different PVC", func() {
+	// 	By("Creating a third RBDPVCBackup for the other PVC")
+	// 	manifest := fmt.Sprintf(dummyRBDPVCBackupTemplate, rbdPVCBackupName3, rbdPVCBackupName3, namespace, pvcName2)
+	// 	_, _, err := kubectlWithInput([]byte(manifest), "apply", "-f", "-")
+	// 	Expect(err).NotTo(HaveOccurred())
+
+	// 	By("Waiting for RBD snapshot to be created")
+	// 	Eventually(func() error {
+	// 		stdout, stderr, err := kubectl("-n", namespace, "get", "pvc", pvcName2, "-o", "json")
+	// 		if err != nil {
+	// 			return fmt.Errorf("kubectl get pvc failed. stderr: %s, err: %w", string(stderr), err)
+	// 		}
+	// 		var pvc corev1.PersistentVolumeClaim
+	// 		err = yaml.Unmarshal(stdout, &pvc)
+	// 		if err != nil {
+	// 			return err
+	// 		}
+	// 		pvName := pvc.Spec.VolumeName
+
+	// 		stdout, stderr, err = kubectl("get", "pv", pvName, "-o", "json")
+	// 		if err != nil {
+	// 			return fmt.Errorf("kubectl get pv failed. stderr: %s, err: %w", string(stderr), err)
+	// 		}
+	// 		var pv corev1.PersistentVolume
+	// 		err = yaml.Unmarshal(stdout, &pv)
+	// 		if err != nil {
+	// 			return err
+	// 		}
+	// 		imageName = pv.Spec.CSI.VolumeAttributes["imageName"]
+
+	// 		stdout, stderr, err = kubectl("-n", namespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "snap", "ls", poolName+"/"+imageName, "--format=json")
+	// 		if err != nil {
+	// 			return fmt.Errorf("rbd snap ls failed. stderr: %s, err: %w", string(stderr), err)
+	// 		}
+	// 		var snapshots []controller.Snapshot
+	// 		err = yaml.Unmarshal(stdout, &snapshots)
+	// 		if err != nil {
+	// 			return err
+	// 		}
+	// 		existSnapshot := false
+	// 		for _, s := range snapshots {
+	// 			if s.Name == rbdPVCBackupName3 {
+	// 				existSnapshot = true
+	// 				break
+	// 			}
+	// 		}
+	// 		if !existSnapshot {
+	// 			return fmt.Errorf("snapshot not exists. snapshotName: %s", rbdPVCBackupName2)
+	// 		}
+
+	// 		return nil
+	// 	}).Should(Succeed())
+	// })
 
 	// It("should not delete RBDPVCBackup resource when delete backup target PVC", func() {
 	// 	By("Deleting backup target PVC")
