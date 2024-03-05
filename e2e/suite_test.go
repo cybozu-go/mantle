@@ -185,7 +185,7 @@ var _ = BeforeSuite(func() {
 })
 
 var _ = Describe("rbd backup system", func() {
-	var imageName string
+	var firstImageName string
 
 	It("should create RBDPVCBackup resource", func() {
 		By("Creating RBDPVCBackup")
@@ -215,9 +215,9 @@ var _ = Describe("rbd backup system", func() {
 			if err != nil {
 				return err
 			}
-			imageName = pv.Spec.CSI.VolumeAttributes["imageName"]
+			firstImageName = pv.Spec.CSI.VolumeAttributes["imageName"]
 
-			stdout, stderr, err = kubectl("-n", namespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "snap", "ls", poolName+"/"+imageName, "--format=json")
+			stdout, stderr, err = kubectl("-n", namespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "snap", "ls", poolName+"/"+firstImageName, "--format=json")
 			if err != nil {
 				return fmt.Errorf("rbd snap ls failed. stderr: %s, err: %w", string(stderr), err)
 			}
@@ -269,9 +269,9 @@ var _ = Describe("rbd backup system", func() {
 			if err != nil {
 				return err
 			}
-			imageName2 := pv.Spec.CSI.VolumeAttributes["imageName"]
+			imageName := pv.Spec.CSI.VolumeAttributes["imageName"]
 
-			stdout, stderr, err = kubectl("-n", namespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "snap", "ls", poolName+"/"+imageName2, "--format=json")
+			stdout, stderr, err = kubectl("-n", namespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "snap", "ls", poolName+"/"+imageName, "--format=json")
 			if err != nil {
 				return fmt.Errorf("rbd snap ls failed. stderr: %s, err: %w", string(stderr), err)
 			}
@@ -323,9 +323,9 @@ var _ = Describe("rbd backup system", func() {
 			if err != nil {
 				return err
 			}
-			imageName3 := pv.Spec.CSI.VolumeAttributes["imageName"]
+			imageName := pv.Spec.CSI.VolumeAttributes["imageName"]
 
-			stdout, stderr, err = kubectl("-n", namespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "snap", "ls", poolName+"/"+imageName3, "--format=json")
+			stdout, stderr, err = kubectl("-n", namespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "snap", "ls", poolName+"/"+imageName, "--format=json")
 			if err != nil {
 				return fmt.Errorf("rbd snap ls failed. stderr: %s, err: %w", string(stderr), err)
 			}
@@ -370,7 +370,7 @@ var _ = Describe("rbd backup system", func() {
 
 		By("Waiting for RBD snapshot to be deleted")
 		Eventually(func() error {
-			stdout, stderr, err := kubectl("-n", namespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "snap", "ls", poolName+"/"+imageName, "--format=json")
+			stdout, stderr, err := kubectl("-n", namespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "snap", "ls", poolName+"/"+firstImageName, "--format=json")
 			if err != nil {
 				return fmt.Errorf("rbd snap ls failed. stderr: %s, err: %w", string(stderr), err)
 			}
@@ -489,7 +489,7 @@ var _ = Describe("rbd backup system", func() {
 			if err != nil {
 				return err
 			}
-			imageName = pv.Spec.CSI.VolumeAttributes["imageName"]
+			imageName := pv.Spec.CSI.VolumeAttributes["imageName"]
 
 			stdout, stderr, err = kubectl("-n", namespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "snap", "ls", poolName+"/"+imageName, "--format=json")
 			if err != nil {
