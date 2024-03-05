@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,7 +28,7 @@ var (
 	//go:embed testdata/rbdpvcbackup-template.yaml
 	dummyRBDPVCBackupTemplate string
 
-	kubectlIsNotFoundRegexp = regexp.MustCompile("^Error from server (NotFound): .+$")
+	kubectlIsNotFoundMessage = "Error from server (NotFound):"
 )
 
 const (
@@ -380,11 +380,11 @@ var _ = Describe("rbd backup system", func() {
 
 	// It("should not delete RBDPVCBackup resource when delete backup target PVC", func() {
 	// 	By("Deleting backup target PVC")
-	// 	_, _, err := kubectl("-n", namespace, "delete", "pvc", pvcName)
+	// 	_, _, err := kubectl("-n", namespace, "delete", "pvc", pvcName2)
 	// 	Expect(err).NotTo(HaveOccurred())
 
 	// 	By("Checking that the status.conditions of the RBDPVCBackup resource remain \"Bound\"")
-	// 	stdout, _, err := kubectl("-n", namespace, "get", "rbdpvcbackup", rbdPVCBackupName, "-o", "json")
+	// 	stdout, _, err := kubectl("-n", namespace, "get", "rbdpvcbackup", rbdPVCBackupName2, "-o", "json")
 	// 	Expect(err).NotTo(HaveOccurred())
 	// 	var backup backupv1.RBDPVCBackup
 	// 	err = yaml.Unmarshal(stdout, &backup)
@@ -401,11 +401,7 @@ var _ = Describe("rbd backup system", func() {
 		Eventually(func() error {
 			stdout, stderr, err := kubectl("-n", namespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "snap", "ls", poolName+"/"+imageName, "--format=json")
 			if err != nil {
-				stdout, stderr2, err2 := kubectl("-n", namespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "ls", "--pool="+poolName)
-				if err2 != nil {
-					return fmt.Errorf("rbd ls failed. pool: %s, stderr: %s, err: %w", poolName, stderr2, err2)
-				}
-				return fmt.Errorf("rbd snap ls failed. stderr: %s, err: %w, rbd ls: %s", string(stderr), err, stdout)
+				return fmt.Errorf("rbd snap ls failed. stderr: %s, err: %w", string(stderr), err)
 			}
 			var snapshots []controller.Snapshot
 			err = yaml.Unmarshal(stdout, &snapshots)
@@ -430,7 +426,7 @@ var _ = Describe("rbd backup system", func() {
 		Eventually(func() error {
 			stdout, stderr, err := kubectl("-n", namespace, "get", "rbdpvcbackup", rbdPVCBackupName)
 			if err != nil {
-				if kubectlIsNotFoundRegexp.MatchString(string(stderr)) {
+				if strings.Contains(string(stderr), kubectlIsNotFoundMessage) {
 					return nil
 				}
 				return fmt.Errorf("get rbdpvcbackup %s failed. stderr: %s, err: %w", rbdPVCBackupName, string(stderr), err)
