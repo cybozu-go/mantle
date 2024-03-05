@@ -268,9 +268,9 @@ var _ = Describe("rbd backup system", func() {
 			if err != nil {
 				return err
 			}
-			imageName = pv.Spec.CSI.VolumeAttributes["imageName"]
+			imageName2 := pv.Spec.CSI.VolumeAttributes["imageName"]
 
-			stdout, stderr, err = kubectl("-n", namespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "snap", "ls", poolName+"/"+imageName, "--format=json")
+			stdout, stderr, err = kubectl("-n", namespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "snap", "ls", poolName+"/"+imageName2, "--format=json")
 			if err != nil {
 				return fmt.Errorf("rbd snap ls failed. stderr: %s, err: %w", string(stderr), err)
 			}
@@ -322,9 +322,9 @@ var _ = Describe("rbd backup system", func() {
 			if err != nil {
 				return err
 			}
-			imageName = pv.Spec.CSI.VolumeAttributes["imageName"]
+			imageName3 := pv.Spec.CSI.VolumeAttributes["imageName"]
 
-			stdout, stderr, err = kubectl("-n", namespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "snap", "ls", poolName+"/"+imageName, "--format=json")
+			stdout, stderr, err = kubectl("-n", namespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "snap", "ls", poolName+"/"+imageName3, "--format=json")
 			if err != nil {
 				return fmt.Errorf("rbd snap ls failed. stderr: %s, err: %w", string(stderr), err)
 			}
@@ -354,7 +354,7 @@ var _ = Describe("rbd backup system", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		By("Checking that the status.conditions of the RBDPVCBackup resource remain \"Bound\"")
-		stdout, _, err := kubectl("-n", namespace, "get", "rbdpvcbackup", rbdPVCBackupName2, "-o", "json")
+		stdout, _, err := kubectl("-n", namespace, "get", "rbdpvcbackup", rbdPVCBackupName3, "-o", "json")
 		Expect(err).NotTo(HaveOccurred())
 		var backup backupv1.RBDPVCBackup
 		err = yaml.Unmarshal(stdout, &backup)
