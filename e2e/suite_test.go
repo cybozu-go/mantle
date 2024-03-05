@@ -6,10 +6,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"testing"
 	"time"
-
-	"k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/cybozu-go/rbd-backup-system/internal/controller"
 	. "github.com/onsi/ginkgo/v2"
@@ -28,6 +27,8 @@ var (
 
 	//go:embed testdata/rbdpvcbackup-template.yaml
 	dummyRBDPVCBackupTemplate string
+
+	kubectlIsNotFoundRegexp = regexp.MustCompile("^Error from server (NotFound): .+$")
 )
 
 const (
@@ -428,10 +429,10 @@ var _ = Describe("rbd backup system", func() {
 		By("Confirming RBDPVCBackup resource deletion")
 		Eventually(func() error {
 			stdout, stderr, err := kubectl("-n", namespace, "get", "rbdpvcbackup", rbdPVCBackupName)
-			if errors.IsNotFound(err) {
-				return nil
-			}
 			if err != nil {
+				if kubectlIsNotFoundRegexp.MatchString(string(stderr)) {
+					return nil
+				}
 				return fmt.Errorf("get rbdpvcbackup %s failed. stderr: %s, err: %w", rbdPVCBackupName, string(stderr), err)
 			}
 			return fmt.Errorf("RBDPVCBackup resource %s still exists. stdout: %s", rbdPVCBackupName, stdout)
