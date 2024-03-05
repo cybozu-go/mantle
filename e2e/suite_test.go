@@ -31,10 +31,11 @@ var (
 )
 
 const (
-	pvcName          = "rbd-pvc"
-	poolName         = "replicapool"
-	rbdPVCBackupName = "rbdpvcbackup-test"
-	namespace        = "rook-ceph"
+	pvcName           = "rbd-pvc"
+	poolName          = "replicapool"
+	rbdPVCBackupName  = "rbdpvcbackup-test"
+	rbdPVCBackupName2 = "rbdpvcbackup-test-2"
+	namespace         = "rook-ceph"
 )
 
 func execAtLocal(cmd string, input []byte, args ...string) ([]byte, []byte, error) {
@@ -227,6 +228,60 @@ var _ = Describe("rbd backup system", func() {
 			}
 			if !existSnapshot {
 				return fmt.Errorf("snapshot not exists. snapshotName: %s", rbdPVCBackupName)
+			}
+
+			return nil
+		}).Should(Succeed())
+	})
+
+	It("should create multiple RBDPVCBackup resources for the same PVC", func() {
+		By("Creating a second RBDPVCBackup for the same PVC")
+		manifest := fmt.Sprintf(dummyRBDPVCBackupTemplate, rbdPVCBackupName2, rbdPVCBackupName2, namespace, pvcName)
+		_, _, err := kubectlWithInput([]byte(manifest), "apply", "-f", "-")
+		Expect(err).NotTo(HaveOccurred())
+
+		By("Waiting for RBD snapshot to be created")
+		Eventually(func() error {
+			stdout, stderr, err := kubectl("-n", namespace, "get", "pvc", pvcName, "-o", "json")
+			if err != nil {
+				return fmt.Errorf("kubectl get pvc failed. stderr: %s, err: %w", string(stderr), err)
+			}
+			var pvc corev1.PersistentVolumeClaim
+			err = yaml.Unmarshal(stdout, &pvc)
+			if err != nil {
+				return err
+			}
+			pvName := pvc.Spec.VolumeName
+
+			stdout, stderr, err = kubectl("get", "pv", pvName, "-o", "json")
+			if err != nil {
+				return fmt.Errorf("kubectl get pv failed. stderr: %s, err: %w", string(stderr), err)
+			}
+			var pv corev1.PersistentVolume
+			err = yaml.Unmarshal(stdout, &pv)
+			if err != nil {
+				return err
+			}
+			imageName = pv.Spec.CSI.VolumeAttributes["imageName"]
+
+			stdout, stderr, err = kubectl("-n", namespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "snap", "ls", poolName+"/"+imageName, "--format=json")
+			if err != nil {
+				return fmt.Errorf("rbd snap ls failed. stderr: %s, err: %w", string(stderr), err)
+			}
+			var snapshots []controller.Snapshot
+			err = yaml.Unmarshal(stdout, &snapshots)
+			if err != nil {
+				return err
+			}
+			existSnapshot := false
+			for _, s := range snapshots {
+				if s.Name == rbdPVCBackupName2 {
+					existSnapshot = true
+					break
+				}
+			}
+			if !existSnapshot {
+				return fmt.Errorf("snapshot not exists. snapshotName: %s", rbdPVCBackupName2)
 			}
 
 			return nil
