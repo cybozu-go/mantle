@@ -218,4 +218,95 @@ var _ = Describe("RBDPVCBackup controller", func() {
 			return fmt.Errorf("\"%s\" does not deleted yet", backup.Name)
 		}).Should(Succeed())
 	})
+
+	It("should remain \"Bound\" in RBDPVCBackup resource even if the PVC is broken", func() {
+		ctx := context.Background()
+		ns := createNamespace()
+
+		err := k8sClient.Create(ctx, &pv)
+		Expect(err).NotTo(HaveOccurred())
+
+		pvc.Namespace = ns
+		err = k8sClient.Create(ctx, &pvc)
+		Expect(err).NotTo(HaveOccurred())
+
+		pvc.Status.Phase = corev1.ClaimBound
+		err = k8sClient.Status().Update(ctx, &pvc)
+		Expect(err).NotTo(HaveOccurred())
+
+		backup.Namespace = ns
+		err = k8sClient.Create(ctx, &backup)
+		Expect(err).NotTo(HaveOccurred())
+
+		Eventually(func() error {
+			namespacedName := types.NamespacedName{
+				Namespace: ns,
+				Name:      backup.Name,
+			}
+			err = k8sClient.Get(ctx, namespacedName, &backup)
+			if err != nil {
+				return err
+			}
+
+			existFinalizer := false
+			for _, f := range backup.Finalizers {
+				if f == RBDPVCBackupFinalizerName {
+					existFinalizer = true
+					break
+				}
+			}
+			if !existFinalizer {
+				return fmt.Errorf("finalizer does not set yet")
+			}
+
+			if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsCreating {
+				return fmt.Errorf("status.conditions does not set \"Creating\" yet (status.conditions: %s)", backup.Status.Conditions)
+			}
+
+			return nil
+		}).Should(Succeed())
+
+		Eventually(func() error {
+			namespacedName := types.NamespacedName{
+				Namespace: ns,
+				Name:      backup.Name,
+			}
+			err = k8sClient.Get(ctx, namespacedName, &backup)
+			if err != nil {
+				return err
+			}
+
+			if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsBound {
+				return fmt.Errorf("status.conditions does not set \"Bound\" yet")
+			}
+
+			timeDiff := time.Since(backup.Status.CreatedAt.Time).Seconds()
+			if timeDiff > 5 {
+				return fmt.Errorf("invalid status.createdAt (time difference from createdAt(%f sec) exceeds 5 seconds.)", timeDiff)
+			}
+
+			return nil
+		}).Should(Succeed())
+
+		pvc.Status.Phase = corev1.ClaimLost // simulate broken PVC
+		err = k8sClient.Status().Update(ctx, &pvc)
+		Expect(err).NotTo(HaveOccurred())
+
+		Eventually(func() error {
+			namespacedName := types.NamespacedName{
+				Namespace: ns,
+				Name:      backup.Name,
+			}
+			err = k8sClient.Get(ctx, namespacedName, &backup)
+			if err != nil {
+				return err
+			}
+
+			if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsBound {
+				return fmt.Errorf("status.conditions changed from \"Bound\"")
+			}
+
+			return nil
+		}).Should(Succeed())
+	})
 })
