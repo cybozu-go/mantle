@@ -21,13 +21,13 @@ import (
 
 var (
 	//go:embed testdata/pvc-template.yaml
-	dummyPVCTemplate string
+	testPVCTemplate string
 
 	//go:embed testdata/rook-pool-sc-template.yaml
-	dummyRookPoolSCTemplate string
+	testRookPoolSCTemplate string
 
 	//go:embed testdata/rbdpvcbackup-template.yaml
-	dummyRBDPVCBackupTemplate string
+	testRBDPVCBackupTemplate string
 
 	kubectlIsNotFoundMessage = "Error from server (NotFound):"
 )
@@ -121,7 +121,7 @@ var _ = BeforeSuite(func() {
 
 	By("[BeforeSuite] Creating Rook Pool and SC")
 	Eventually(func() error {
-		manifest := fmt.Sprintf(dummyRookPoolSCTemplate, poolName, namespace, poolName, namespace, namespace, namespace)
+		manifest := fmt.Sprintf(testRookPoolSCTemplate, poolName, namespace, poolName, namespace, namespace, namespace)
 		_, _, err := kubectlWithInput([]byte(manifest), "apply", "-n", namespace, "-f", "-")
 		if err != nil {
 			return err
@@ -133,7 +133,7 @@ var _ = BeforeSuite(func() {
 	for _, name := range []string{pvcName, pvcName2} {
 		By(fmt.Sprintf("[BeforeSuite] Creating PVC (%s)", name))
 		Eventually(func() error {
-			manifest := fmt.Sprintf(dummyPVCTemplate, name)
+			manifest := fmt.Sprintf(testPVCTemplate, name)
 			_, _, err := kubectlWithInput([]byte(manifest), "apply", "-n", namespace, "-f", "-")
 			if err != nil {
 				return err
@@ -189,7 +189,7 @@ var _ = Describe("rbd backup system", func() {
 
 	It("should create RBDPVCBackup resource", func() {
 		By("Creating RBDPVCBackup")
-		manifest := fmt.Sprintf(dummyRBDPVCBackupTemplate, rbdPVCBackupName, rbdPVCBackupName, namespace, pvcName)
+		manifest := fmt.Sprintf(testRBDPVCBackupTemplate, rbdPVCBackupName, rbdPVCBackupName, namespace, pvcName)
 		_, _, err := kubectlWithInput([]byte(manifest), "apply", "-f", "-")
 		Expect(err).NotTo(HaveOccurred())
 
@@ -243,7 +243,7 @@ var _ = Describe("rbd backup system", func() {
 
 	It("should create multiple RBDPVCBackup resources for the same PVC", func() {
 		By("Creating a second RBDPVCBackup for the same PVC")
-		manifest := fmt.Sprintf(dummyRBDPVCBackupTemplate, rbdPVCBackupName2, rbdPVCBackupName2, namespace, pvcName)
+		manifest := fmt.Sprintf(testRBDPVCBackupTemplate, rbdPVCBackupName2, rbdPVCBackupName2, namespace, pvcName)
 		_, _, err := kubectlWithInput([]byte(manifest), "apply", "-f", "-")
 		Expect(err).NotTo(HaveOccurred())
 
@@ -297,7 +297,7 @@ var _ = Describe("rbd backup system", func() {
 
 	It("should create multiple RBDPVCBackup resources for the different PVC", func() {
 		By("Creating a third RBDPVCBackup for the other PVC")
-		manifest := fmt.Sprintf(dummyRBDPVCBackupTemplate, rbdPVCBackupName3, rbdPVCBackupName3, namespace, pvcName2)
+		manifest := fmt.Sprintf(testRBDPVCBackupTemplate, rbdPVCBackupName3, rbdPVCBackupName3, namespace, pvcName2)
 		_, _, err := kubectlWithInput([]byte(manifest), "apply", "-f", "-")
 		Expect(err).NotTo(HaveOccurred())
 
@@ -420,7 +420,7 @@ var _ = Describe("rbd backup system", func() {
 
 	It("should not succeed RBDPVCBackup creation if specified non-existent PVC name", func() {
 		By("Creating an RBDPVCBackup specified the non-existent PVC name")
-		manifest := fmt.Sprintf(dummyRBDPVCBackupTemplate, rbdPVCBackupName, rbdPVCBackupName, namespace, nonExistentPvcName)
+		manifest := fmt.Sprintf(testRBDPVCBackupTemplate, rbdPVCBackupName, rbdPVCBackupName, namespace, nonExistentPvcName)
 		_, _, err := kubectlWithInput([]byte(manifest), "apply", "-f", "-")
 		Expect(err).NotTo(HaveOccurred())
 

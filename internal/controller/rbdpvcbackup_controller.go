@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os/exec"
 	"syscall"
@@ -16,7 +17,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	backupv1 "github.com/cybozu-go/rbd-backup-system/api/v1"
 )
@@ -135,21 +135,21 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		if err2 != nil {
 			return ctrl.Result{}, err2
 		}
-		return reconcile.Result{}, err
+		return ctrl.Result{}, err
 	}
-	for pvc.Status.Phase != corev1.ClaimBound {
-		logger.Info("waiting for PVC bound.")
-		time.Sleep(1 * time.Second)
-
-		err = r.Get(ctx, types.NamespacedName{Namespace: pvcNamespace, Name: pvcName}, &pvc)
-		if err != nil {
-			logger.Error("failed to get PVC", "namespace", pvcNamespace, "name", pvcName, "error", err)
-			err2 := r.updateConditions(ctx, &backup, backupv1.RBDPVCBackupConditionsFailed)
-			if err2 != nil {
-				return ctrl.Result{}, err2
+	if pvc.Status.Phase != corev1.ClaimBound {
+		if pvc.Status.Phase == corev1.ClaimPending {
+			logger.Info("waiting for PVC bound.")
+			return ctrl.Result{Requeue: true}, nil
+		} else {
+			logger.Error("failed to bound PVC", "status.phase", pvc.Status.Phase)
+			err = r.updateConditions(ctx, &backup, backupv1.RBDPVCBackupConditionsFailed)
+			if err != nil {
+				return ctrl.Result{}, err
 			}
-			return reconcile.Result{}, err
+			return ctrl.Result{}, fmt.Errorf("failed to bound PVC (status.phase: %s)", pvc.Status.Phase)
 		}
+
 	}
 
 	pvName := pvc.Spec.VolumeName
@@ -161,7 +161,7 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		if err2 != nil {
 			return ctrl.Result{}, err2
 		}
-		return reconcile.Result{}, err
+		return ctrl.Result{}, err
 	}
 
 	imageName := pv.Spec.CSI.VolumeAttributes["imageName"]
