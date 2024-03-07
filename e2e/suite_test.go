@@ -354,6 +354,18 @@ var _ = Describe("rbd backup system", func() {
 		_, _, err := kubectl("-n", namespace, "delete", "pvc", pvcName2)
 		Expect(err).NotTo(HaveOccurred())
 
+		By("Checking backup target PVC deletion")
+		Eventually(func() error {
+			stdout, stderr, err := kubectl("-n", namespace, "get", "pvc", pvcName2)
+			if err != nil {
+				if strings.Contains(string(stderr), kubectlIsNotFoundMessage) {
+					return nil
+				}
+				return fmt.Errorf("get pvc %s failed. stderr: %s, err: %w", pvcName2, string(stderr), err)
+			}
+			return fmt.Errorf("PVC %s still exists. stdout: %s", pvcName2, stdout)
+		}).Should(Succeed())
+
 		By("Checking that the status.conditions of the RBDPVCBackup resource remain \"Bound\"")
 		stdout, _, err := kubectl("-n", namespace, "get", "rbdpvcbackup", rbdPVCBackupName3, "-o", "json")
 		Expect(err).NotTo(HaveOccurred())
@@ -393,7 +405,7 @@ var _ = Describe("rbd backup system", func() {
 			return nil
 		}).Should(Succeed())
 
-		By("Confirming RBDPVCBackup resource deletion")
+		By("Checking RBDPVCBackup resource deletion")
 		Eventually(func() error {
 			stdout, stderr, err := kubectl("-n", namespace, "get", "rbdpvcbackup", rbdPVCBackupName)
 			if err != nil {
