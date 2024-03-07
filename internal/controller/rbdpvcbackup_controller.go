@@ -185,10 +185,6 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 					exitCode := waitStatus.ExitStatus()
 					if exitCode != int(syscall.ENOENT) {
 						logger.Error("failed to remove rbd snapshot", "poolName", poolName, "imageName", imageName, "snapshotName", backup.Name, "exitCode", exitCode, "error", err)
-						err2 := r.updateConditions(ctx, &backup, backupv1.RBDPVCBackupConditionsFailed)
-						if err2 != nil {
-							return ctrl.Result{}, err2
-						}
 						return ctrl.Result{Requeue: true}, nil
 					}
 				}
@@ -208,7 +204,6 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	if !controllerutil.ContainsFinalizer(&backup, RBDPVCBackupFinalizerName) {
 		controllerutil.AddFinalizer(&backup, RBDPVCBackupFinalizerName)
-		logger.Info("set finalizer\n")
 		err = r.Update(ctx, &backup)
 		if err != nil {
 			logger.Error("failed to add finalizer", "finalizer", RBDPVCBackupFinalizerName, "error", err)

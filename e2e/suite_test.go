@@ -119,7 +119,7 @@ var _ = BeforeSuite(func() {
 		return nil
 	}).Should(Succeed())
 
-	By("[BeforeSuite] Creating Rook Pool and SC")
+	By("[BeforeSuite] Creating RBD Pool and SC")
 	Eventually(func() error {
 		manifest := fmt.Sprintf(testRookPoolSCTemplate, poolName, namespace, poolName, namespace, namespace, namespace)
 		_, _, err := kubectlWithInput([]byte(manifest), "apply", "-n", namespace, "-f", "-")

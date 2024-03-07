@@ -65,7 +65,7 @@ var _ = Describe("RBDPVCBackup controller", func() {
 		Expect(<-errCh).NotTo(HaveOccurred())
 	})
 
-	It("should set finalizer and status fields on RBDPVCBackup resource creation and deletion", func() {
+	It("should set/unset finalizer and status fields properly on the resource creation/deletion", func() {
 		ctx := context.Background()
 		ns := createNamespace()
 
@@ -218,7 +218,7 @@ var _ = Describe("RBDPVCBackup controller", func() {
 		}).Should(Succeed())
 	})
 
-	It("should remain \"Bound\" in RBDPVCBackup resource even if the PVC is broken", func() {
+	It("should remain \"Bound\" in RBDPVCBackup resource even if the PVC is not bound", func() {
 		ctx := context.Background()
 		ns := createNamespace()
 
