@@ -137,7 +137,7 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 		return reconcile.Result{}, err
 	}
-	for pvc.Status.Phase == "Pending" {
+	for pvc.Status.Phase != corev1.ClaimBound {
 		logger.Info("waiting for PVC bound.")
 		time.Sleep(1 * time.Second)
 
