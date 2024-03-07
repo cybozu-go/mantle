@@ -371,7 +371,7 @@ var _ = Describe("RBDPVCBackup controller", func() {
 		}
 		pv := corev1.PersistentVolume{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: "pv2",
+				Name: "pv3",
 			},
 			Spec: corev1.PersistentVolumeSpec{
 				Capacity: corev1.ResourceList{
