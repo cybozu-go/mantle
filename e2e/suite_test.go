@@ -23,8 +23,8 @@ var (
 	//go:embed testdata/pvc-template.yaml
 	testPVCTemplate string
 
-	//go:embed testdata/rook-pool-sc-template.yaml
-	testRookPoolSCTemplate string
+	//go:embed testdata/rbd-pool-sc-template.yaml
+	testRBDPoolSCTemplate string
 
 	//go:embed testdata/rbdpvcbackup-template.yaml
 	testRBDPVCBackupTemplate string
@@ -120,7 +120,7 @@ var _ = BeforeSuite(func() {
 
 	By("[BeforeSuite] Creating RBD Pool and SC")
 	Eventually(func() error {
-		manifest := fmt.Sprintf(testRookPoolSCTemplate, poolName, namespace, poolName, namespace, namespace, namespace)
+		manifest := fmt.Sprintf(testRBDPoolSCTemplate, poolName, namespace, poolName, namespace, namespace, namespace)
 		_, _, err := kubectlWithInput([]byte(manifest), "apply", "-n", namespace, "-f", "-")
 		if err != nil {
 			return err
