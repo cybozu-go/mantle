@@ -32,8 +32,8 @@ setup:
 .PHONY: test
 test:
 	$(MAKE) launch-minikube
-	$(MAKE) launch-rook-ceph
 	$(MAKE) common/setup-components
+	$(MAKE) launch-rook-ceph
 	$(MAKE) common/test
 
 .PHONY: clean
