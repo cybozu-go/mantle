@@ -33,14 +33,13 @@ var (
 )
 
 const (
-	pvcName            = "rbd-pvc"
-	pvcName2           = "rbd-pvc-2"
-	nonExistentPvcName = "non-existent-pvc"
-	poolName           = "replicapool"
-	rbdPVCBackupName   = "rbdpvcbackup-test"
-	rbdPVCBackupName2  = "rbdpvcbackup-test-2"
-	rbdPVCBackupName3  = "rbdpvcbackup-test-3"
-	namespace          = "rook-ceph"
+	pvcName           = "rbd-pvc"
+	pvcName2          = "rbd-pvc-2"
+	poolName          = "replicapool"
+	rbdPVCBackupName  = "rbdpvcbackup-test"
+	rbdPVCBackupName2 = "rbdpvcbackup-test-2"
+	rbdPVCBackupName3 = "rbdpvcbackup-test-3"
+	namespace         = "rook-ceph"
 )
 
 func execAtLocal(cmd string, input []byte, args ...string) ([]byte, []byte, error) {
@@ -415,30 +414,6 @@ var _ = Describe("rbd backup system", func() {
 				return fmt.Errorf("get rbdpvcbackup %s failed. stderr: %s, err: %w", rbdPVCBackupName, string(stderr), err)
 			}
 			return fmt.Errorf("RBDPVCBackup resource %s still exists. stdout: %s", rbdPVCBackupName, stdout)
-		}).Should(Succeed())
-	})
-
-	It("should not succeed RBDPVCBackup creation if specified non-existent PVC name", func() {
-		By("Creating an RBDPVCBackup specified the non-existent PVC name")
-		manifest := fmt.Sprintf(testRBDPVCBackupTemplate, rbdPVCBackupName, rbdPVCBackupName, namespace, nonExistentPvcName)
-		_, _, err := kubectlWithInput([]byte(manifest), "apply", "-f", "-")
-		Expect(err).NotTo(HaveOccurred())
-
-		By("Waiting for the conditions of the RBDPVCBackup resource to become \"Failed\"")
-		Eventually(func() error {
-			stdout, stderr, err := kubectl("-n", namespace, "get", "rbdpvcbackup", rbdPVCBackupName, "-ojson")
-			if err != nil {
-				return fmt.Errorf("get rbdpvcbackup %s failed. stderr: %s, err: %w", rbdPVCBackupName, string(stderr), err)
-			}
-			var backup backupv1.RBDPVCBackup
-			err = yaml.Unmarshal(stdout, &backup)
-			if err != nil {
-				return err
-			}
-			if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsFailed {
-				return fmt.Errorf("conditions of RBDPVCBackup is not \"Failed\" yet. status.condigions: %s", backup.Status.Conditions)
-			}
-			return nil
 		}).Should(Succeed())
 	})
 })

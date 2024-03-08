@@ -357,7 +357,7 @@ var _ = Describe("RBDPVCBackup controller", func() {
 		}).Should(Succeed())
 	})
 
-	It("should be \"Failed\" conditions in RBDPVCBackup resource if the status.phase of the PVC is in the lost state from the beginning", func() {
+	It("should not be \"Bound\" conditions in RBDPVCBackup resource if the status.phase of the PVC is in the lost state from the beginning", func() {
 		ctx := context.Background()
 		ns := createNamespace()
 
@@ -434,8 +434,42 @@ var _ = Describe("RBDPVCBackup controller", func() {
 				return err
 			}
 
-			if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsFailed {
-				return fmt.Errorf("status.conditions does not set \"Failed\" yet (status.conditions: %s)", backup.Status.Conditions)
+			if backup.Status.Conditions == backupv1.RBDPVCBackupConditionsBound {
+				return fmt.Errorf("status.conditions should not be \"Bound\"")
+			}
+
+			return nil
+		}).Should(Succeed())
+	})
+
+	It("should not be \"Bound\" conditions in RBDPVCBackup resource if specified non-existent PVC name", func() {
+		ctx := context.Background()
+		ns := createNamespace()
+
+		backup := backupv1.RBDPVCBackup{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "backup",
+				Namespace: ns,
+			},
+			Spec: backupv1.RBDPVCBackupSpec{
+				PVC: "non-existent-pvc",
+			},
+		}
+		err := k8sClient.Create(ctx, &backup)
+		Expect(err).NotTo(HaveOccurred())
+
+		Eventually(func() error {
+			namespacedName := types.NamespacedName{
+				Namespace: ns,
+				Name:      backup.Name,
+			}
+			err = k8sClient.Get(ctx, namespacedName, &backup)
+			if err != nil {
+				return err
+			}
+
+			if backup.Status.Conditions == backupv1.RBDPVCBackupConditionsBound {
+				return fmt.Errorf("status.conditions should not be \"Bound\"")
 			}
 
 			return nil

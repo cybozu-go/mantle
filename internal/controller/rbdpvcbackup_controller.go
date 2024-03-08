@@ -131,10 +131,6 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	err = r.Get(ctx, types.NamespacedName{Namespace: pvcNamespace, Name: pvcName}, &pvc)
 	if err != nil {
 		logger.Error("failed to get PVC", "namespace", pvcNamespace, "name", pvcName, "error", err)
-		err2 := r.updateConditions(ctx, &backup, backupv1.RBDPVCBackupConditionsFailed)
-		if err2 != nil {
-			return ctrl.Result{}, err2
-		}
 		return ctrl.Result{}, err
 	}
 	if pvc.Status.Phase != corev1.ClaimBound {
@@ -143,10 +139,6 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			return ctrl.Result{Requeue: true}, nil
 		} else {
 			logger.Error("failed to bound PVC", "status.phase", pvc.Status.Phase)
-			err = r.updateConditions(ctx, &backup, backupv1.RBDPVCBackupConditionsFailed)
-			if err != nil {
-				return ctrl.Result{}, err
-			}
 			return ctrl.Result{}, fmt.Errorf("failed to bound PVC (status.phase: %s)", pvc.Status.Phase)
 		}
 
@@ -157,10 +149,6 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	err = r.Get(ctx, types.NamespacedName{Namespace: req.NamespacedName.Namespace, Name: pvName}, &pv)
 	if err != nil {
 		logger.Error("failed to get PV", "namespace", req.NamespacedName.Namespace, "name", pvName, "error", err)
-		err2 := r.updateConditions(ctx, &backup, backupv1.RBDPVCBackupConditionsFailed)
-		if err2 != nil {
-			return ctrl.Result{}, err2
-		}
 		return ctrl.Result{}, err
 	}
 
@@ -231,6 +219,10 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		out, err := executeCommand(command, nil)
 		if err != nil {
 			logger.Info("failed to run `rbd snap ls`", "poolName", poolName, "imageName", imageName, "error", err)
+			err2 := r.updateConditions(ctx, &backup, backupv1.RBDPVCBackupConditionsFailed)
+			if err2 != nil {
+				return ctrl.Result{}, err2
+			}
 			return ctrl.Result{Requeue: true}, nil
 		}
 		var snapshots []Snapshot
@@ -252,6 +244,10 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 		if !existSnapshot {
 			logger.Info("snapshot not exists", "snapshotName", backup.Name)
+			err2 := r.updateConditions(ctx, &backup, backupv1.RBDPVCBackupConditionsFailed)
+			if err2 != nil {
+				return ctrl.Result{}, err2
+			}
 			return ctrl.Result{Requeue: true}, nil
 		}
 	}
