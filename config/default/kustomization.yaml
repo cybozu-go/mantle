@@ -15,6 +15,7 @@ namePrefix: rbd-backup-system-
 #    someName: someValue
 
 resources:
+- ./namespace.yml
 - ../crd
 - ../rbac
 - ../manager
