@@ -39,7 +39,7 @@ patches:
 # [CERTMANAGER] To enable cert-manager, uncomment all sections with 'CERTMANAGER'.
 # Uncomment 'CERTMANAGER' sections in crd/kustomization.yaml to enable the CA injection in the admission webhooks.
 # 'CERTMANAGER' needs to be enabled to use ca injection
-- path: webhookcainjection_patch.yaml
+# - path: webhookcainjection_patch.yaml
 
 # [CERTMANAGER] To enable cert-manager, uncomment all sections with 'CERTMANAGER' prefix.
 # Uncomment the following replacements to add the cert-manager CA injection annotations
@@ -106,40 +106,40 @@ replacements:
          delimiter: '/'
          index: 1
          create: true
- - source: # Add cert-manager annotation to the webhook Service
-     kind: Service
-     version: v1
-     name: webhook-service
-     fieldPath: .metadata.name # namespace of the service
-   targets:
-     - select:
-         kind: Certificate
-         group: cert-manager.io
-         version: v1
-       fieldPaths:
-         - .spec.dnsNames.0
-         - .spec.dnsNames.1
-       options:
-         delimiter: '.'
-         index: 0
-         create: true
- - source:
-     kind: Service
-     version: v1
-     name: webhook-service
-     fieldPath: .metadata.namespace # namespace of the service
-   targets:
-     - select:
-         kind: Certificate
-         group: cert-manager.io
-         version: v1
-       fieldPaths:
-         - .spec.dnsNames.0
-         - .spec.dnsNames.1
-       options:
-         delimiter: '.'
-         index: 1
-         create: true
+#  - source: # Add cert-manager annotation to the webhook Service
+#      kind: Service
+#      version: v1
+#      name: webhook-service
+#      fieldPath: .metadata.name # namespace of the service
+#    targets:
+#      - select:
+#          kind: Certificate
+#          group: cert-manager.io
+#          version: v1
+#        fieldPaths:
+#          - .spec.dnsNames.0
+#          - .spec.dnsNames.1
+#        options:
+#          delimiter: '.'
+#          index: 0
+#          create: true
+#  - source:
+#      kind: Service
+#      version: v1
+#      name: webhook-service
+#      fieldPath: .metadata.namespace # namespace of the service
+#    targets:
+#      - select:
+#          kind: Certificate
+#          group: cert-manager.io
+#          version: v1
+#        fieldPaths:
+#          - .spec.dnsNames.0
+#          - .spec.dnsNames.1
+#        options:
+#          delimiter: '.'
+#          index: 1
+#          create: true
 
 # the following config is for teaching kustomize how to do var substitution
 vars:
@@ -157,15 +157,15 @@ vars:
     group: cert-manager.io
     version: v1
     name: serving-cert # this name should match the one in certificate.yaml
-- name: SERVICE_NAMESPACE # namespace of the service
-  objref:
-    kind: Service
-    version: v1
-    name: webhook-service
-  fieldref:
-    fieldpath: metadata.namespace
-- name: SERVICE_NAME
-  objref:
-    kind: Service
-    version: v1
-    name: webhook-service
+# - name: SERVICE_NAMESPACE # namespace of the service
+#   objref:
+#     kind: Service
+#     version: v1
+#     name: webhook-service
+#   fieldref:
+#     fieldpath: metadata.namespace
+# - name: SERVICE_NAME
+#   objref:
+#     kind: Service
+#     version: v1
+#     name: webhook-service
