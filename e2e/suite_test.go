@@ -86,7 +86,7 @@ var _ = BeforeSuite(func() {
 	_, _, err := kubectlWithInput([]byte(manifest), "apply", "-f", "-")
 	Expect(err).NotTo(HaveOccurred())
 
-	By("[BeforeSuite] Waiting for rook to get ready")
+	By("[BeforeSuite] Waiting for rook-ceph-operator to get ready")
 	Eventually(func() error {
 		stdout, stderr, err := kubectl("-n", namespace, "get", "deploy", "rook-ceph-operator", "-o", "json")
 		if err != nil {
@@ -100,7 +100,27 @@ var _ = BeforeSuite(func() {
 		}
 
 		if deploy.Status.AvailableReplicas != 1 {
-			return fmt.Errorf("rook operator is not available yet")
+			return fmt.Errorf("rook-ceph-operator is not available yet")
+		}
+
+		return nil
+	}).Should(Succeed())
+
+	By("[BeforeSuite] Waiting for rook-ceph-tools to get ready")
+	Eventually(func() error {
+		stdout, stderr, err := kubectl("-n", namespace, "get", "deploy", "rook-ceph-tools", "-o", "json")
+		if err != nil {
+			return fmt.Errorf("kubectl get deploy failed. stderr: %s, err: %w", string(stderr), err)
+		}
+
+		var deploy appsv1.Deployment
+		err = yaml.Unmarshal(stdout, &deploy)
+		if err != nil {
+			return err
+		}
+
+		if deploy.Status.AvailableReplicas != 1 {
+			return fmt.Errorf("rook-ceph-tools is not available yet")
 		}
 
 		return nil
