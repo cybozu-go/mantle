@@ -20,6 +20,9 @@ import (
 )
 
 var (
+	//go:embed testdata/toolbox-template.yaml
+	testToolboxTemplate string
+
 	//go:embed testdata/pvc-template.yaml
 	testPVCTemplate string
 
@@ -78,6 +81,11 @@ func TestMtest(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
+	By("[BeforeSuite] Deploying toolbox pod")
+	manifest := fmt.Sprintf(testToolboxTemplate, namespace)
+	_, _, err := kubectlWithInput([]byte(manifest), "apply", "-f", "-")
+	Expect(err).NotTo(HaveOccurred())
+
 	By("[BeforeSuite] Waiting for rook to get ready")
 	Eventually(func() error {
 		stdout, stderr, err := kubectl("-n", namespace, "get", "deploy", "rook-ceph-operator", "-o", "json")
