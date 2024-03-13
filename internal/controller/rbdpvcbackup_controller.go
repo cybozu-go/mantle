@@ -152,8 +152,14 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
-	imageName := pv.Spec.CSI.VolumeAttributes["imageName"]
-	poolName := pv.Spec.CSI.VolumeAttributes["pool"]
+	imageName, ok := pv.Spec.CSI.VolumeAttributes["imageName"]
+	if !ok {
+		return ctrl.Result{}, fmt.Errorf("failed to get imageName from PV")
+	}
+	poolName, ok := pv.Spec.CSI.VolumeAttributes["pool"]
+	if !ok {
+		return ctrl.Result{}, fmt.Errorf("failed to get pool from PV")
+	}
 
 	if !backup.ObjectMeta.DeletionTimestamp.IsZero() {
 		if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsDeleting {
