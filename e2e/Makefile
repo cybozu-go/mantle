@@ -121,6 +121,7 @@ launch-rook-ceph: create-loop-dev
 	$(KUBECTL) apply -f testdata/operator.yaml
 	sed -e "s%LOOP_DEV%$(LOOP_DEV)%" -e "s%NODE_NAME%$(NODE_NAME)%" testdata/cluster-template.yaml > testdata/cluster.yaml
 	$(KUBECTL) apply -f testdata/cluster.yaml
+	$(KUBECTL) apply -f testdata/toolbox.yaml
 
 .PHONY: delete-rook-ceph
 delete-rook-ceph:
