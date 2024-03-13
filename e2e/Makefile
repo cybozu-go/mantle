@@ -139,6 +139,20 @@ launch-rook-ceph: create-loop-dev
 		echo "failed to start rook operator" > /dev/stderr; \
 		exit 1; \
 	fi
+	is_ok="false"; \
+	for i in $(shell seq $(TIMEOUT)); do \
+		available_replicas=$$($(KUBECTL) -n $(NS) get deploy rook-ceph-osd-0 -o json | jq -r ".status.availableReplicas"); \
+		if [ $$available_replicas -eq 1 ]; then \
+			is_ok="true"; \
+			break; \
+		fi; \
+		echo "osd.0 is not available yet" > /dev/stderr; \
+		sleep $(POLLING_INTERVAL); \
+	done; \
+	if [ "$$is_ok" = "false" ]; then \
+		echo "failed to start osd.0" > /dev/stderr; \
+		exit 1; \
+	fi
 
 .PHONY: delete-rook-ceph
 delete-rook-ceph:

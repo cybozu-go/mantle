@@ -78,26 +78,6 @@ func TestMtest(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	By("[BeforeSuite] Waiting for ceph cluster to get ready")
-	Eventually(func() error {
-		stdout, stderr, err := kubectl("-n", namespace, "get", "deploy", "rook-ceph-osd-0", "-o", "json")
-		if err != nil {
-			return fmt.Errorf("kubectl get deploy failed. stderr: %s, err: %w", string(stderr), err)
-		}
-
-		var deploy appsv1.Deployment
-		err = yaml.Unmarshal(stdout, &deploy)
-		if err != nil {
-			return err
-		}
-
-		if deploy.Status.AvailableReplicas != 1 {
-			return fmt.Errorf("osd.0 is not available yet")
-		}
-
-		return nil
-	}).Should(Succeed())
-
 	By("[BeforeSuite] Creating RBD Pool and SC")
 	Eventually(func() error {
 		manifest := fmt.Sprintf(testRBDPoolSCTemplate, poolName, namespace, poolName, namespace, namespace, namespace)
