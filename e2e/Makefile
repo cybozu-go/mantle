@@ -8,6 +8,7 @@ GINKGO_FLAGS :=
 MINIKUBE := $(BINDIR)/minikube
 KUBECTL := $(BINDIR)/kubectl-$(KUBERNETES_VERSION)
 MINIKUBE_HOME = $(BINDIR)
+NS := rook-ceph
 NODE_NAME := minikube-worker
 SUDO := sudo
 DD := dd
@@ -20,6 +21,8 @@ LOOP_DEV := $(shell loop_dev=$$($(LOSETUP) | grep $(LOOP_FILE) | cut -d ' ' -f 1
 			echo $$loop_dev; \
 		fi)
 CNI_PLUGIN_INSTALL_DIR := /opt/cni/bin
+POLLING_INTERVAL := 1
+TIMEOUT := 180
 
 export MINIKUBE_HOME
 
@@ -122,6 +125,20 @@ launch-rook-ceph: create-loop-dev
 	sed -e "s%LOOP_DEV%$(LOOP_DEV)%" -e "s%NODE_NAME%$(NODE_NAME)%" testdata/cluster-template.yaml > testdata/cluster.yaml
 	$(KUBECTL) apply -f testdata/cluster.yaml
 	$(KUBECTL) apply -f testdata/toolbox.yaml
+	is_ok="false"; \
+	for i in $(shell seq $(TIMEOUT)); do \
+		available_replicas=$$($(KUBECTL) -n $(NS) get deploy rook-ceph-operator -o json | jq -r ".status.availableReplicas"); \
+		if [ $$available_replicas -eq 1 ]; then \
+			is_ok="true"; \
+			break; \
+		fi; \
+		echo "rook operator is not available yet" > /dev/stderr; \
+		sleep $(POLLING_INTERVAL); \
+	done; \
+	if [ "$$is_ok" = "false" ]; then \
+		echo "failed to start rook operator" > /dev/stderr; \
+		exit 1; \
+	fi
 
 .PHONY: delete-rook-ceph
 delete-rook-ceph:
