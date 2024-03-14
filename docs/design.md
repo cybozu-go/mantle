@@ -6,7 +6,7 @@ We want to back up volumes, either by user operation or by periodic automatic pr
 
 ## Goal
 
-(Currently only has the ability to manually take backups.)
+(Currently only can manually take backups.)
 
 - Users can back up volumes for each PVC.
 
@@ -56,12 +56,23 @@ flowchart LR
 
 To take/delete a backup (RBD snapshot), rbd-backup-system works as follows:
 
-1. Create/Delete `RBDPVCBackup` by user.
+1. Create/Delete `RBDPVCBackup` by the user.
 2. Get the target PVC from `RBDPVCBackup`.
 3. Get the PV from the target PVC.
 4. Get the RBD image and pool from the PV.
-5. Take/Delete a RBD snapshot for the RBD image.
+5. Take/Delete an RBD snapshot for the RBD image.
 
 ### Details
 
-TBD
+The `RBDPVCBackup` resource format is as follows:
+
+```yaml
+apiVersion: backup.cybozu.com/v1
+kind: RBDPVCBackup
+metadata:
+  name: <RBDPVCBackup resource name>
+spec:
+  pvc: <target PVC name>
+```
+
+- `<target PVC name>` is the backup target.
