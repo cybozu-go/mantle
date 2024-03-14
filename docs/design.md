@@ -36,10 +36,10 @@ flowchart LR
         RBSCM -- watch RBDPVCBackup --> RPB
         RPB -- specify PVC --> PVC
         PVC -- point PV --> PV
-        PV -- point RBD image --> RI
       end
 
       subgraph Ceph Layer
+        PV -- point RBD image --> RI
         RS -- snapshot from RBD image --> RI
       end
 
