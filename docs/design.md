@@ -32,11 +32,16 @@ flowchart LR
       RI[RBD Image]
       RS[RBD Snapshot]
 
-      RBSCM -- watch RBDPVCBackup --> RPB
-      RPB -- specify PVC --> PVC
-      PVC -- point PV --> PV
-      PV -- point RBD image --> RI
-      RS -- snapshot from RBD image --> RI
+      subgraph Kubernetes Layer
+        RBSCM -- watch RBDPVCBackup --> RPB
+        RPB -- specify PVC --> PVC
+        PVC -- point PV --> PV
+        PV -- point RBD image --> RI
+      end
+
+      subgraph Ceph Layer
+        RS -- snapshot from RBD image --> RI
+      end
 
       USER -- 1. create/delete RBDPVCBackup --> RPB
       RBSCM -- 2. take/delete snapshot --> RS
