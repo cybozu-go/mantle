@@ -24,39 +24,22 @@ flowchart LR
     style Architecture fill:#FFFFFF
     subgraph Architecture
 
-      classDef storageComponent fill:#FFFF00
-      classDef component fill:#ADD8E6
+      USER([User])
+      RBSCM[rbd-backup-system-controller-manager]
+      RPB[RBDPVCBackup]
+      PVC[PersistentVolumeClaim]
+      PV[PersistentVolume]
+      RI[RBD Image]
+      RS[RBD Snapshot]
 
-      style PVCA fill:#90EE90
-      style storage fill:#FFFFE0
-      style Node fill-opacity:0
+      RBSCM -- watch RBDPVCBackup --> RPB
+      RPB -- specify PVC --> PVC
+      PVC -- point PV --> PV
+      PV -- point RBD image --> RI
+      RS -- snapshot from RBD image --> RI
 
-      CD[CSI Driver]:::storageComponent
-      PVC[PersistentVolumeClaim]:::storageComponent
-      SC[StorageClass]:::storageComponent
-      PVCA[pvc-autoresizer]
-
-      kubelet:::component
-      Prometheus:::component
-      kube-apiserver:::component
-
-      subgraph Node
-        kubelet
-        storage
-      end
-
-      subgraph kube-apiserver
-        SC --- PVC
-      end
-
-      CD -- watch PVC --> PVC
-      CD -- expand volume --> storage[(Storage)]
-      Prometheus -- get metrics --> kubelet
-
-      PVCA -- 1. get target PVCs --> PVC
-      PVCA -- 2. get SCs --> SC
-      PVCA -- 3. get metrics of storage capacity --> Prometheus
-      PVCA -- 4. expand storage capacity --> PVC
+      USER -- 1. create/delete RBDPVCBackup --> RPB
+      RBSCM -- 2. take/delete snapshot --> RS
 
     end
 ```
