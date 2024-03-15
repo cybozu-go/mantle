@@ -146,7 +146,7 @@ var _ = BeforeSuite(func() {
 var _ = Describe("rbd backup system", func() {
 	var firstImageName string
 
-	It("should create RBDPVCBackup resource", func() {
+	testRBDPVCBackupResourceCreation := func(rbdPVCBackupName string, saveImageName bool) {
 		By("Creating RBDPVCBackup")
 		manifest := fmt.Sprintf(testRBDPVCBackupTemplate, rbdPVCBackupName, rbdPVCBackupName, namespace, pvcName)
 		_, _, err := kubectlWithInput([]byte(manifest), "apply", "-f", "-")
@@ -174,9 +174,14 @@ var _ = Describe("rbd backup system", func() {
 			if err != nil {
 				return err
 			}
-			firstImageName = pv.Spec.CSI.VolumeAttributes["imageName"]
+			if saveImageName {
+				firstImageName = pv.Spec.CSI.VolumeAttributes["imageName"]
+			}
+			imageName := pv.Spec.CSI.VolumeAttributes["imageName"]
 
-			stdout, stderr, err = kubectl("-n", namespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "snap", "ls", poolName+"/"+firstImageName, "--format=json")
+			stdout, stderr, err = kubectl(
+				"-n", namespace, "exec", "deploy/rook-ceph-tools", "--",
+				"rbd", "snap", "ls", poolName+"/"+imageName, "--format=json")
 			if err != nil {
 				return fmt.Errorf("rbd snap ls failed. stderr: %s, err: %w", string(stderr), err)
 			}
@@ -198,60 +203,14 @@ var _ = Describe("rbd backup system", func() {
 
 			return nil
 		}).Should(Succeed())
+	}
+
+	It("should create RBDPVCBackup resource", func() {
+		testRBDPVCBackupResourceCreation(rbdPVCBackupName, true)
 	})
 
 	It("should create multiple RBDPVCBackup resources for the same PVC", func() {
-		By("Creating a second RBDPVCBackup for the same PVC")
-		manifest := fmt.Sprintf(testRBDPVCBackupTemplate, rbdPVCBackupName2, rbdPVCBackupName2, namespace, pvcName)
-		_, _, err := kubectlWithInput([]byte(manifest), "apply", "-f", "-")
-		Expect(err).NotTo(HaveOccurred())
-
-		By("Waiting for RBD snapshot to be created")
-		Eventually(func() error {
-			stdout, stderr, err := kubectl("-n", namespace, "get", "pvc", pvcName, "-o", "json")
-			if err != nil {
-				return fmt.Errorf("kubectl get pvc failed. stderr: %s, err: %w", string(stderr), err)
-			}
-			var pvc corev1.PersistentVolumeClaim
-			err = yaml.Unmarshal(stdout, &pvc)
-			if err != nil {
-				return err
-			}
-			pvName := pvc.Spec.VolumeName
-
-			stdout, stderr, err = kubectl("get", "pv", pvName, "-o", "json")
-			if err != nil {
-				return fmt.Errorf("kubectl get pv failed. stderr: %s, err: %w", string(stderr), err)
-			}
-			var pv corev1.PersistentVolume
-			err = yaml.Unmarshal(stdout, &pv)
-			if err != nil {
-				return err
-			}
-			imageName := pv.Spec.CSI.VolumeAttributes["imageName"]
-
-			stdout, stderr, err = kubectl("-n", namespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "snap", "ls", poolName+"/"+imageName, "--format=json")
-			if err != nil {
-				return fmt.Errorf("rbd snap ls failed. stderr: %s, err: %w", string(stderr), err)
-			}
-			var snapshots []controller.Snapshot
-			err = yaml.Unmarshal(stdout, &snapshots)
-			if err != nil {
-				return err
-			}
-			existSnapshot := false
-			for _, s := range snapshots {
-				if s.Name == rbdPVCBackupName2 {
-					existSnapshot = true
-					break
-				}
-			}
-			if !existSnapshot {
-				return fmt.Errorf("snapshot not exists. snapshotName: %s", rbdPVCBackupName2)
-			}
-
-			return nil
-		}).Should(Succeed())
+		testRBDPVCBackupResourceCreation(rbdPVCBackupName2, false)
 	})
 
 	It("should create multiple RBDPVCBackup resources for the different PVC", func() {
@@ -284,7 +243,9 @@ var _ = Describe("rbd backup system", func() {
 			}
 			imageName := pv.Spec.CSI.VolumeAttributes["imageName"]
 
-			stdout, stderr, err = kubectl("-n", namespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "snap", "ls", poolName+"/"+imageName, "--format=json")
+			stdout, stderr, err = kubectl(
+				"-n", namespace, "exec", "deploy/rook-ceph-tools", "--",
+				"rbd", "snap", "ls", poolName+"/"+imageName, "--format=json")
 			if err != nil {
 				return fmt.Errorf("rbd snap ls failed. stderr: %s, err: %w", string(stderr), err)
 			}
@@ -341,7 +302,9 @@ var _ = Describe("rbd backup system", func() {
 
 		By("Waiting for RBD snapshot to be deleted")
 		Eventually(func() error {
-			stdout, stderr, err := kubectl("-n", namespace, "exec", "deploy/rook-ceph-tools", "--", "rbd", "snap", "ls", poolName+"/"+firstImageName, "--format=json")
+			stdout, stderr, err := kubectl(
+				"-n", namespace, "exec", "deploy/rook-ceph-tools", "--",
+				"rbd", "snap", "ls", poolName+"/"+firstImageName, "--format=json")
 			if err != nil {
 				return fmt.Errorf("rbd snap ls failed. stderr: %s, err: %w", string(stderr), err)
 			}

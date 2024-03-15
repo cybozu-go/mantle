@@ -53,7 +53,12 @@ func executeCommandImpl(command []string, input io.Reader) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer stdout.Close()
+	defer func() {
+		err := stdout.Close()
+		if err != nil {
+			logger.Error("failed to stdout.Close", "error", err)
+		}
+	}()
 
 	if input != nil {
 		stdin, err := cmd.StdinPipe()
@@ -61,7 +66,12 @@ func executeCommandImpl(command []string, input io.Reader) ([]byte, error) {
 			return nil, err
 		}
 		go func() {
-			defer stdin.Close()
+			defer func() {
+				err := stdin.Close()
+				if err != nil {
+					logger.Error("failed to stdin.Close", "error", err)
+				}
+			}()
 			if _, err = io.Copy(stdin, input); err != nil {
 				logger.Error("failed to io.Copy", "error", err)
 			}
@@ -94,6 +104,49 @@ func (r *RBDPVCBackupReconciler) updateConditions(ctx context.Context, backup *b
 		return err
 	}
 	return nil
+}
+
+func (r *RBDPVCBackupReconciler) createRBDSnapshot(ctx context.Context, poolName, imageName string, backup *backupv1.RBDPVCBackup) (ctrl.Result, error) {
+	command := []string{"rbd", "snap", "create", poolName + "/" + imageName + "@" + backup.Name}
+	_, err := executeCommand(command, nil)
+	if err != nil {
+		command = []string{"rbd", "snap", "ls", poolName + "/" + imageName, "--format=json"}
+		out, err := executeCommand(command, nil)
+		if err != nil {
+			logger.Info("failed to run `rbd snap ls`", "poolName", poolName, "imageName", imageName, "error", err)
+			err2 := r.updateConditions(ctx, backup, backupv1.RBDPVCBackupConditionsFailed)
+			if err2 != nil {
+				return ctrl.Result{}, err2
+			}
+			return ctrl.Result{Requeue: true}, nil
+		}
+		var snapshots []Snapshot
+		err = json.Unmarshal(out, &snapshots)
+		if err != nil {
+			logger.Error("failed to unmarshal json", "json", out, "error", err)
+			err2 := r.updateConditions(ctx, backup, backupv1.RBDPVCBackupConditionsFailed)
+			if err2 != nil {
+				return ctrl.Result{}, err2
+			}
+			return ctrl.Result{Requeue: true}, err
+		}
+		existSnapshot := false
+		for _, s := range snapshots {
+			if s.Name == backup.Name {
+				existSnapshot = true
+				break
+			}
+		}
+		if !existSnapshot {
+			logger.Info("snapshot not exists", "snapshotName", backup.Name)
+			err2 := r.updateConditions(ctx, backup, backupv1.RBDPVCBackupConditionsFailed)
+			if err2 != nil {
+				return ctrl.Result{}, err2
+			}
+			return ctrl.Result{Requeue: true}, nil
+		}
+	}
+	return ctrl.Result{}, nil
 }
 
 //+kubebuilder:rbac:groups=backup.cybozu.com,resources=rbdpvcbackups,verbs=get;list;watch;create;update;patch;delete
@@ -218,44 +271,9 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	command := []string{"rbd", "snap", "create", poolName + "/" + imageName + "@" + backup.Name}
-	_, err = executeCommand(command, nil)
+	result, err := r.createRBDSnapshot(ctx, poolName, imageName, &backup)
 	if err != nil {
-		command = []string{"rbd", "snap", "ls", poolName + "/" + imageName, "--format=json"}
-		out, err := executeCommand(command, nil)
-		if err != nil {
-			logger.Info("failed to run `rbd snap ls`", "poolName", poolName, "imageName", imageName, "error", err)
-			err2 := r.updateConditions(ctx, &backup, backupv1.RBDPVCBackupConditionsFailed)
-			if err2 != nil {
-				return ctrl.Result{}, err2
-			}
-			return ctrl.Result{Requeue: true}, nil
-		}
-		var snapshots []Snapshot
-		err = json.Unmarshal([]byte(out), &snapshots)
-		if err != nil {
-			logger.Error("failed to unmarshal json", "json", out, "error", err)
-			err2 := r.updateConditions(ctx, &backup, backupv1.RBDPVCBackupConditionsFailed)
-			if err2 != nil {
-				return ctrl.Result{}, err2
-			}
-			return ctrl.Result{Requeue: true}, err
-		}
-		existSnapshot := false
-		for _, s := range snapshots {
-			if s.Name == backup.Name {
-				existSnapshot = true
-				break
-			}
-		}
-		if !existSnapshot {
-			logger.Info("snapshot not exists", "snapshotName", backup.Name)
-			err2 := r.updateConditions(ctx, &backup, backupv1.RBDPVCBackupConditionsFailed)
-			if err2 != nil {
-				return ctrl.Result{}, err2
-			}
-			return ctrl.Result{Requeue: true}, nil
-		}
+		return result, err
 	}
 
 	backup.Status.CreatedAt = metav1.NewTime(time.Now())
