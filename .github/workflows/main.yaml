@@ -24,4 +24,5 @@ jobs:
           key: go-${{ hashFiles('go.sum', 'Makefile', 'versions.mk') }}
           restore-keys: |
             go-
+      - run: make lint
       - run: make test
