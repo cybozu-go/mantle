@@ -17,8 +17,4 @@ resources:
   kind: RBDPVCBackup
   path: github.com/cybozu-go/rbd-backup-system/api/v1
   version: v1
-  webhooks:
-    defaulting: true
-    validation: true
-    webhookVersion: v1
 version: "3"
