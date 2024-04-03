@@ -11,6 +11,7 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -19,13 +20,6 @@ import (
 )
 
 func mockExecuteCommand(command []string, input io.Reader) ([]byte, error) {
-	if command[0] == "rbd" && command[1] == "snap" && (command[2] == "create" || command[2] == "rm") {
-		// The actual `rbd snap create` or `rbd snap rm` is momentary,
-		// but to check the transition of the `status.conditions` of the RBDPVCBackups resource,
-		// a DefaultEventuallyPollingInterval (1 second) or longer sleep is set to.
-		time.Sleep(1500 * time.Millisecond)
-	}
-
 	return nil, nil
 }
 
@@ -65,7 +59,7 @@ var _ = Describe("RBDPVCBackup controller", func() {
 		Expect(<-errCh).NotTo(HaveOccurred())
 	})
 
-	It("should set/unset finalizer and status fields properly on the resource creation/deletion", func() {
+	It("should be ready to use", func() {
 		ctx := context.Background()
 		ns := createNamespace()
 
@@ -153,10 +147,6 @@ var _ = Describe("RBDPVCBackup controller", func() {
 				return fmt.Errorf("finalizer does not set yet")
 			}
 
-			if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsCreating {
-				return fmt.Errorf("status.conditions does not set \"Creating\" yet (status.conditions: %s)", backup.Status.Conditions)
-			}
-
 			return nil
 		}).Should(Succeed())
 
@@ -170,13 +160,8 @@ var _ = Describe("RBDPVCBackup controller", func() {
 				return err
 			}
 
-			if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsBound {
-				return fmt.Errorf("status.conditions does not set \"Bound\" yet")
-			}
-
-			timeDiff := time.Since(backup.Status.CreatedAt.Time).Seconds()
-			if timeDiff > 5 {
-				return fmt.Errorf("invalid status.createdAt (time difference from createdAt(%f sec) exceeds 5 seconds.)", timeDiff)
+			if meta.FindStatusCondition(backup.Status.Conditions, backupv1.ConditionReadyToUse).Status != metav1.ConditionTrue {
+				return fmt.Errorf("not ready to use yet")
 			}
 
 			return nil
@@ -191,34 +176,17 @@ var _ = Describe("RBDPVCBackup controller", func() {
 				Name:      backup.Name,
 			}
 			err = k8sClient.Get(ctx, namespacedName, &backup)
-			if err != nil {
-				return err
-			}
-
-			if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsDeleting {
-				return fmt.Errorf("status.conditions does not set \"Deleting\" yet (status.conditions: %s)", backup.Status.Conditions)
-			}
-
-			return nil
-		}).Should(Succeed())
-
-		Eventually(func() error {
-			namespacedName := types.NamespacedName{
-				Namespace: ns,
-				Name:      backup.Name,
-			}
-			err = k8sClient.Get(ctx, namespacedName, &backup)
 			if errors.IsNotFound(err) {
 				return nil
 			}
 			if err != nil {
 				return err
 			}
-			return fmt.Errorf("\"%s\" does not deleted yet", backup.Name)
+			return fmt.Errorf("\"%s\" is not deleted yet", backup.Name)
 		}).Should(Succeed())
 	})
 
-	It("should remain \"Bound\" in RBDPVCBackup resource even if the PVC is not bound", func() {
+	It("should still be ready to use even if the PVC lost", func() {
 		ctx := context.Background()
 		ns := createNamespace()
 
@@ -306,10 +274,6 @@ var _ = Describe("RBDPVCBackup controller", func() {
 				return fmt.Errorf("finalizer does not set yet")
 			}
 
-			if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsCreating {
-				return fmt.Errorf("status.conditions does not set \"Creating\" yet (status.conditions: %s)", backup.Status.Conditions)
-			}
-
 			return nil
 		}).Should(Succeed())
 
@@ -323,19 +287,14 @@ var _ = Describe("RBDPVCBackup controller", func() {
 				return err
 			}
 
-			if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsBound {
-				return fmt.Errorf("status.conditions does not set \"Bound\" yet")
-			}
-
-			timeDiff := time.Since(backup.Status.CreatedAt.Time).Seconds()
-			if timeDiff > 5 {
-				return fmt.Errorf("invalid status.createdAt (time difference from createdAt(%f sec) exceeds 5 seconds.)", timeDiff)
+			if meta.FindStatusCondition(backup.Status.Conditions, backupv1.ConditionReadyToUse).Status != metav1.ConditionTrue {
+				return fmt.Errorf("not ready to use yet")
 			}
 
 			return nil
 		}).Should(Succeed())
 
-		pvc.Status.Phase = corev1.ClaimLost // simulate broken PVC
+		pvc.Status.Phase = corev1.ClaimLost // simulate lost PVC
 		err = k8sClient.Status().Update(ctx, &pvc)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -349,15 +308,20 @@ var _ = Describe("RBDPVCBackup controller", func() {
 				return err
 			}
 
-			if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsBound {
-				return fmt.Errorf("status.conditions changed from \"Bound\"")
+			condition := meta.FindStatusCondition(backup.Status.Conditions, backupv1.ConditionReadyToUse)
+			if condition == nil {
+				return fmt.Errorf("condition is not set")
+			}
+
+			if condition.Status != metav1.ConditionTrue {
+				return fmt.Errorf("should keep ready to use")
 			}
 
 			return nil
 		}).Should(Succeed())
 	})
 
-	It("should not be \"Bound\" conditions in RBDPVCBackup resource if the status.phase of the PVC is in the lost state from the beginning", func() {
+	It("should not be ready to use if the PVC is the lost state from the beginning", func() {
 		ctx := context.Background()
 		ns := createNamespace()
 
@@ -434,15 +398,19 @@ var _ = Describe("RBDPVCBackup controller", func() {
 				return err
 			}
 
-			if backup.Status.Conditions == backupv1.RBDPVCBackupConditionsBound {
-				return fmt.Errorf("status.conditions should not be \"Bound\"")
+			condition := meta.FindStatusCondition(backup.Status.Conditions, backupv1.ConditionReadyToUse)
+			if condition == nil {
+				return fmt.Errorf("condition is not set")
+			}
+			if !(condition.Status == metav1.ConditionFalse && condition.Reason != backupv1.ReasonNone) {
+				return fmt.Errorf("should not be ready to use")
 			}
 
 			return nil
 		}).Should(Succeed())
 	})
 
-	It("should not be \"Bound\" conditions in RBDPVCBackup resource if specified non-existent PVC name", func() {
+	It("should not be ready to use if specified non-existent PVC name", func() {
 		ctx := context.Background()
 		ns := createNamespace()
 
@@ -468,8 +436,12 @@ var _ = Describe("RBDPVCBackup controller", func() {
 				return err
 			}
 
-			if backup.Status.Conditions == backupv1.RBDPVCBackupConditionsBound {
-				return fmt.Errorf("status.conditions should not be \"Bound\"")
+			condition := meta.FindStatusCondition(backup.Status.Conditions, backupv1.ConditionReadyToUse)
+			if condition == nil {
+				return fmt.Errorf("condition is not set")
+			}
+			if !(condition.Status == metav1.ConditionFalse && condition.Reason != backupv1.ReasonNone) {
+				return fmt.Errorf("should not be ready to use")
 			}
 
 			return nil
