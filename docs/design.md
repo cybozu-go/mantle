@@ -71,7 +71,11 @@ kind: RBDPVCBackup
 metadata:
   name: <RBDPVCBackup resource name>
 spec:
+  # The name of the backup target PVC
   pvc: <target PVC name>
+status:
+  conditions:
+    # The corresponding backup data is ready to use if `status` is "True"
+    - type: "ReadyToUse"
+      status: "True"
 ```
-
-- `<target PVC name>` is the name of the backup target PVC.

@@ -30,15 +30,15 @@ type RBDPVCBackupStatus struct {
 	CreatedAt metav1.Time `json:"createdAt,omitempty"`
 
 	// 'conditions' specifies current backup conditions
-	// +kubebuilder:validation:Enum=Creating;Bound;Failed;Deleting
-	Conditions string `json:"conditions,omitempty"`
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 const (
-	RBDPVCBackupConditionsCreating = "Creating"
-	RBDPVCBackupConditionsBound    = "Bound"
-	RBDPVCBackupConditionsFailed   = "Failed"
-	RBDPVCBackupConditionsDeleting = "Deleting"
+	ConditionReadyToUse = "ReadyToUse"
+
+	// Reasons for ConditionReadyToUse
+	ReasonNone                 = "NoProblem"
+	ReasonFailedToCreateBackup = "FailedToCreateBackup"
 )
 
 //+kubebuilder:object:root=true

@@ -11,6 +11,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -96,11 +97,11 @@ func executeCommandImpl(command []string, input io.Reader) ([]byte, error) {
 
 var executeCommand = executeCommandImpl
 
-func (r *RBDPVCBackupReconciler) updateConditions(ctx context.Context, backup *backupv1.RBDPVCBackup, conditions string) error {
-	backup.Status.Conditions = conditions
+func (r *RBDPVCBackupReconciler) updateStatus(ctx context.Context, backup *backupv1.RBDPVCBackup, condition metav1.Condition) error {
+	meta.SetStatusCondition(&backup.Status.Conditions, condition)
 	err := r.Status().Update(ctx, backup)
 	if err != nil {
-		logger.Error("failed to update status", "conditions", backup.Status.Conditions, "error", err)
+		logger.Error("failed to update status", "status", backup.Status, "error", err)
 		return err
 	}
 	return nil
@@ -114,7 +115,7 @@ func (r *RBDPVCBackupReconciler) createRBDSnapshot(ctx context.Context, poolName
 		out, err := executeCommand(command, nil)
 		if err != nil {
 			logger.Info("failed to run `rbd snap ls`", "poolName", poolName, "imageName", imageName, "error", err)
-			err2 := r.updateConditions(ctx, backup, backupv1.RBDPVCBackupConditionsFailed)
+			err2 := r.updateStatus(ctx, backup, metav1.Condition{Type: backupv1.ConditionReadyToUse, Status: metav1.ConditionFalse, Reason: backupv1.ReasonFailedToCreateBackup})
 			if err2 != nil {
 				return ctrl.Result{}, err2
 			}
@@ -124,7 +125,7 @@ func (r *RBDPVCBackupReconciler) createRBDSnapshot(ctx context.Context, poolName
 		err = json.Unmarshal(out, &snapshots)
 		if err != nil {
 			logger.Error("failed to unmarshal json", "json", out, "error", err)
-			err2 := r.updateConditions(ctx, backup, backupv1.RBDPVCBackupConditionsFailed)
+			err2 := r.updateStatus(ctx, backup, metav1.Condition{Type: backupv1.ConditionReadyToUse, Status: metav1.ConditionFalse, Reason: backupv1.ReasonFailedToCreateBackup})
 			if err2 != nil {
 				return ctrl.Result{}, err2
 			}
@@ -138,8 +139,8 @@ func (r *RBDPVCBackupReconciler) createRBDSnapshot(ctx context.Context, poolName
 			}
 		}
 		if !existSnapshot {
-			logger.Info("snapshot not exists", "snapshotName", backup.Name)
-			err2 := r.updateConditions(ctx, backup, backupv1.RBDPVCBackupConditionsFailed)
+			logger.Info("snapshot does not exists", "snapshotName", backup.Name)
+			err2 := r.updateStatus(ctx, backup, metav1.Condition{Type: backupv1.ConditionReadyToUse, Status: metav1.ConditionFalse, Reason: backupv1.ReasonFailedToCreateBackup})
 			if err2 != nil {
 				return ctrl.Result{}, err2
 			}
@@ -184,6 +185,10 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	err = r.Get(ctx, types.NamespacedName{Namespace: pvcNamespace, Name: pvcName}, &pvc)
 	if err != nil {
 		logger.Error("failed to get PVC", "namespace", pvcNamespace, "name", pvcName, "error", err)
+		err2 := r.updateStatus(ctx, &backup, metav1.Condition{Type: backupv1.ConditionReadyToUse, Status: metav1.ConditionFalse, Reason: backupv1.ReasonFailedToCreateBackup})
+		if err2 != nil {
+			return ctrl.Result{}, err2
+		}
 		if errors.IsNotFound(err) {
 			if !backup.ObjectMeta.DeletionTimestamp.IsZero() {
 				if controllerutil.ContainsFinalizer(&backup, RBDPVCBackupFinalizerName) {
@@ -202,12 +207,17 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	if pvc.Status.Phase != corev1.ClaimBound {
+		err := r.updateStatus(ctx, &backup, metav1.Condition{Type: backupv1.ConditionReadyToUse, Status: metav1.ConditionFalse, Reason: backupv1.ReasonFailedToCreateBackup})
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
 		if pvc.Status.Phase == corev1.ClaimPending {
 			logger.Info("waiting for PVC bound.")
 			return ctrl.Result{Requeue: true}, nil
 		} else {
-			logger.Error("failed to bound PVC", "status.phase", pvc.Status.Phase)
-			return ctrl.Result{}, fmt.Errorf("failed to bound PVC (status.phase: %s)", pvc.Status.Phase)
+			logger.Error("PVC phase is neither bound nor pending", "status.phase", pvc.Status.Phase)
+			return ctrl.Result{}, fmt.Errorf("PVC phase is neither bound nor pending (status.phase: %s)", pvc.Status.Phase)
 		}
 	}
 
@@ -216,6 +226,11 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	err = r.Get(ctx, types.NamespacedName{Namespace: req.NamespacedName.Namespace, Name: pvName}, &pv)
 	if err != nil {
 		logger.Error("failed to get PV", "namespace", req.NamespacedName.Namespace, "name", pvName, "error", err)
+		err2 := r.updateStatus(ctx, &backup, metav1.Condition{Type: backupv1.ConditionReadyToUse, Status: metav1.ConditionFalse, Reason: backupv1.ReasonFailedToCreateBackup})
+		if err2 != nil {
+			return ctrl.Result{}, err2
+		}
+
 		return ctrl.Result{}, err
 	}
 
@@ -229,14 +244,6 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	if !backup.ObjectMeta.DeletionTimestamp.IsZero() {
-		if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsDeleting {
-			err = r.updateConditions(ctx, &backup, backupv1.RBDPVCBackupConditionsDeleting)
-			if err != nil {
-				return ctrl.Result{}, err
-			}
-			return ctrl.Result{Requeue: true}, nil
-		}
-
 		if controllerutil.ContainsFinalizer(&backup, RBDPVCBackupFinalizerName) {
 			command := []string{"rbd", "snap", "rm", poolName + "/" + imageName + "@" + backup.Name}
 			_, err = executeCommand(command, nil)
@@ -270,19 +277,15 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			logger.Error("failed to add finalizer", "finalizer", RBDPVCBackupFinalizerName, "error", err)
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{Requeue: true}, nil
-	}
-
-	if backup.Status.Conditions == backupv1.RBDPVCBackupConditionsBound || backup.Status.Conditions == backupv1.RBDPVCBackupConditionsDeleting {
-		return ctrl.Result{}, nil
-	}
-
-	if backup.Status.Conditions != backupv1.RBDPVCBackupConditionsCreating {
-		err := r.updateConditions(ctx, &backup, backupv1.RBDPVCBackupConditionsCreating)
+		err := r.updateStatus(ctx, &backup, metav1.Condition{Type: backupv1.ConditionReadyToUse, Status: metav1.ConditionFalse, Reason: backupv1.ReasonNone})
 		if err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{Requeue: true}, nil
+	}
+
+	if meta.FindStatusCondition(backup.Status.Conditions, backupv1.ConditionReadyToUse).Status == metav1.ConditionTrue {
+		return ctrl.Result{}, nil
 	}
 
 	result, err := r.createRBDSnapshot(ctx, poolName, imageName, &backup)
@@ -291,10 +294,8 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	backup.Status.CreatedAt = metav1.NewTime(time.Now())
-	backup.Status.Conditions = backupv1.RBDPVCBackupConditionsBound
-	err = r.Status().Update(ctx, &backup)
+	err = r.updateStatus(ctx, &backup, metav1.Condition{Type: backupv1.ConditionReadyToUse, Status: metav1.ConditionTrue, Reason: backupv1.ReasonNone})
 	if err != nil {
-		logger.Error("failed to update status", "createdAt", backup.Status.CreatedAt, "conditions", backup.Status.Conditions, "error", err)
 		return ctrl.Result{}, err
 	}
 
