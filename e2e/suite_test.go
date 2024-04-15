@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	backupv1 "github.com/cybozu-go/rbd-backup-system/api/v1"
-	"github.com/cybozu-go/rbd-backup-system/internal/controller"
+	backupv1 "github.com/cybozu-go/mantle/api/v1"
+	"github.com/cybozu-go/mantle/internal/controller"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
@@ -29,8 +29,8 @@ var (
 	//go:embed testdata/rbd-pool-sc-template.yaml
 	testRBDPoolSCTemplate string
 
-	//go:embed testdata/rbdpvcbackup-template.yaml
-	testRBDPVCBackupTemplate string
+	//go:embed testdata/mantlebackup-template.yaml
+	testMantleBackupTemplate string
 
 	kubectlIsNotFoundMessage = "Error from server (NotFound):"
 )
@@ -39,9 +39,9 @@ const (
 	pvcName           = "rbd-pvc"
 	pvcName2          = "rbd-pvc-2"
 	poolName          = "replicapool"
-	rbdPVCBackupName  = "rbdpvcbackup-test"
-	rbdPVCBackupName2 = "rbdpvcbackup-test-2"
-	rbdPVCBackupName3 = "rbdpvcbackup-test-3"
+	mantleBackupName  = "mantlebackup-test"
+	mantleBackupName2 = "mantlebackup-test-2"
+	mantleBackupName3 = "mantlebackup-test-3"
 	namespace         = "rook-ceph"
 )
 
@@ -125,9 +125,9 @@ var _ = BeforeSuite(func() {
 		}).Should(Succeed())
 	}
 
-	By("[BeforeSuite] Waiting for rbd-backup-system-controller-manager to get ready")
+	By("[BeforeSuite] Waiting for mantle-controller-manager to get ready")
 	Eventually(func() error {
-		stdout, stderr, err := kubectl("-n", namespace, "get", "deploy", "rbd-backup-system-controller-manager", "-o", "json")
+		stdout, stderr, err := kubectl("-n", namespace, "get", "deploy", "mantle-controller-manager", "-o", "json")
 		if err != nil {
 			return fmt.Errorf("kubectl get deploy failed. stderr: %s, err: %w", string(stderr), err)
 		}
@@ -139,7 +139,7 @@ var _ = BeforeSuite(func() {
 		}
 
 		if deploy.Status.AvailableReplicas != 1 {
-			return fmt.Errorf("rbd-backup-system-controller-manager is not available yet")
+			return fmt.Errorf("mantle-controller-manager is not available yet")
 		}
 
 		return nil
@@ -147,9 +147,9 @@ var _ = BeforeSuite(func() {
 })
 
 var _ = AfterSuite(func() {
-	By("[AfterSuite] Deleting RBDPVCBackups")
-	for _, rbdPVCBackup := range []string{rbdPVCBackupName, rbdPVCBackupName2, rbdPVCBackupName3} {
-		_, _, _ = kubectl("delete", "-n", namespace, "rbdpvcbackup", rbdPVCBackup)
+	By("[AfterSuite] Deleting MantleBackups")
+	for _, mantleBackup := range []string{mantleBackupName, mantleBackupName2, mantleBackupName3} {
+		_, _, _ = kubectl("delete", "-n", namespace, "mantlebackup", mantleBackup)
 	}
 
 	By("[AfterSuite] Deleting PVCs")
@@ -165,9 +165,9 @@ var _ = AfterSuite(func() {
 var _ = Describe("rbd backup system", func() {
 	var firstImageName string
 
-	testRBDPVCBackupResourceCreation := func(rbdPVCBackupName string, saveImageName bool) {
-		By("Creating RBDPVCBackup")
-		manifest := fmt.Sprintf(testRBDPVCBackupTemplate, rbdPVCBackupName, rbdPVCBackupName, namespace, pvcName)
+	testMantleBackupResourceCreation := func(mantleBackupName string, saveImageName bool) {
+		By("Creating MantleBackup")
+		manifest := fmt.Sprintf(testMantleBackupTemplate, mantleBackupName, mantleBackupName, namespace, pvcName)
 		_, _, err := kubectlWithInput([]byte(manifest), "apply", "-f", "-")
 		Expect(err).NotTo(HaveOccurred())
 
@@ -211,30 +211,30 @@ var _ = Describe("rbd backup system", func() {
 			}
 			existSnapshot := false
 			for _, s := range snapshots {
-				if s.Name == rbdPVCBackupName {
+				if s.Name == mantleBackupName {
 					existSnapshot = true
 					break
 				}
 			}
 			if !existSnapshot {
-				return fmt.Errorf("snapshot not exists. snapshotName: %s", rbdPVCBackupName)
+				return fmt.Errorf("snapshot not exists. snapshotName: %s", mantleBackupName)
 			}
 
 			return nil
 		}).Should(Succeed())
 	}
 
-	It("should create RBDPVCBackup resource", func() {
-		testRBDPVCBackupResourceCreation(rbdPVCBackupName, true)
+	It("should create MantleBackup resource", func() {
+		testMantleBackupResourceCreation(mantleBackupName, true)
 	})
 
-	It("should create multiple RBDPVCBackup resources for the same PVC", func() {
-		testRBDPVCBackupResourceCreation(rbdPVCBackupName2, false)
+	It("should create multiple MantleBackup resources for the same PVC", func() {
+		testMantleBackupResourceCreation(mantleBackupName2, false)
 	})
 
-	It("should create RBDPVCBackups resources for different PVCs", func() {
-		By("Creating a third RBDPVCBackup for the other PVC")
-		manifest := fmt.Sprintf(testRBDPVCBackupTemplate, rbdPVCBackupName3, rbdPVCBackupName3, namespace, pvcName2)
+	It("should create MantleBackups resources for different PVCs", func() {
+		By("Creating a third MantleBackup for the other PVC")
+		manifest := fmt.Sprintf(testMantleBackupTemplate, mantleBackupName3, mantleBackupName3, namespace, pvcName2)
 		_, _, err := kubectlWithInput([]byte(manifest), "apply", "-f", "-")
 		Expect(err).NotTo(HaveOccurred())
 
@@ -275,20 +275,20 @@ var _ = Describe("rbd backup system", func() {
 			}
 			existSnapshot := false
 			for _, s := range snapshots {
-				if s.Name == rbdPVCBackupName3 {
+				if s.Name == mantleBackupName3 {
 					existSnapshot = true
 					break
 				}
 			}
 			if !existSnapshot {
-				return fmt.Errorf("snapshot not exists. snapshotName: %s", rbdPVCBackupName3)
+				return fmt.Errorf("snapshot not exists. snapshotName: %s", mantleBackupName3)
 			}
 
 			return nil
 		}).Should(Succeed())
 	})
 
-	It("should not delete RBDPVCBackup resource when delete backup target PVC", func() {
+	It("should not delete MantleBackup resource when delete backup target PVC", func() {
 		By("Deleting backup target PVC")
 		_, _, err := kubectl("-n", namespace, "delete", "pvc", pvcName2)
 		Expect(err).NotTo(HaveOccurred())
@@ -305,19 +305,19 @@ var _ = Describe("rbd backup system", func() {
 			return fmt.Errorf("PVC %s still exists. stdout: %s", pvcName2, stdout)
 		}).Should(Succeed())
 
-		By("Checking that the status.conditions of the RBDPVCBackup resource remain \"Bound\"")
-		stdout, _, err := kubectl("-n", namespace, "get", "rbdpvcbackup", rbdPVCBackupName3, "-o", "json")
+		By("Checking that the status.conditions of the MantleBackup resource remain \"Bound\"")
+		stdout, _, err := kubectl("-n", namespace, "get", "mantlebackup", mantleBackupName3, "-o", "json")
 		Expect(err).NotTo(HaveOccurred())
-		var backup backupv1.RBDPVCBackup
+		var backup backupv1.MantleBackup
 		err = yaml.Unmarshal(stdout, &backup)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(meta.FindStatusCondition(backup.Status.Conditions, backupv1.ConditionReadyToUse).Status).
 			To(Equal(metav1.ConditionTrue))
 	})
 
-	It("should delete RBDPVCBackup resource", func() {
-		By("Delete RBDPVCBackup")
-		_, _, err := kubectl("-n", namespace, "delete", "rbdpvcbackup", rbdPVCBackupName, "--wait=false")
+	It("should delete MantleBackup resource", func() {
+		By("Delete MantleBackup")
+		_, _, err := kubectl("-n", namespace, "delete", "mantlebackup", mantleBackupName, "--wait=false")
 		Expect(err).NotTo(HaveOccurred())
 
 		By("Waiting for RBD snapshot to be deleted")
@@ -335,46 +335,46 @@ var _ = Describe("rbd backup system", func() {
 			}
 			existSnapshot := false
 			for _, s := range snapshots {
-				if s.Name == rbdPVCBackupName {
+				if s.Name == mantleBackupName {
 					existSnapshot = true
 					break
 				}
 			}
 			if existSnapshot {
-				return fmt.Errorf("snapshot exists. snapshotName: %s", rbdPVCBackupName)
+				return fmt.Errorf("snapshot exists. snapshotName: %s", mantleBackupName)
 			}
 
 			return nil
 		}).Should(Succeed())
 
-		By("Checking RBDPVCBackup resource deletion")
+		By("Checking MantleBackup resource deletion")
 		Eventually(func() error {
-			stdout, stderr, err := kubectl("-n", namespace, "get", "rbdpvcbackup", rbdPVCBackupName)
+			stdout, stderr, err := kubectl("-n", namespace, "get", "mantlebackup", mantleBackupName)
 			if err != nil {
 				if strings.Contains(string(stderr), kubectlIsNotFoundMessage) {
 					return nil
 				}
-				return fmt.Errorf("get rbdpvcbackup %s failed. stderr: %s, err: %w", rbdPVCBackupName, string(stderr), err)
+				return fmt.Errorf("get mantlebackup %s failed. stderr: %s, err: %w", mantleBackupName, string(stderr), err)
 			}
-			return fmt.Errorf("RBDPVCBackup resource %s still exists. stdout: %s", rbdPVCBackupName, stdout)
+			return fmt.Errorf("MantleBackup resource %s still exists. stdout: %s", mantleBackupName, stdout)
 		}).Should(Succeed())
 	})
 
-	It("should delete RBDPVCBackup resource when backup target PVC is missing", func() {
-		By("Deleting RBDPVCBackup resource")
-		_, _, err := kubectl("-n", namespace, "delete", "rbdpvcbackup", rbdPVCBackupName3)
+	It("should delete MantleBackup resource when backup target PVC is missing", func() {
+		By("Deleting MantleBackup resource")
+		_, _, err := kubectl("-n", namespace, "delete", "mantlebackup", mantleBackupName3)
 		Expect(err).NotTo(HaveOccurred())
 
-		By("Checking RBDPVCBackup resource deletion")
+		By("Checking MantleBackup resource deletion")
 		Eventually(func() error {
-			stdout, stderr, err := kubectl("-n", namespace, "get", "rbdpvcbackup", rbdPVCBackupName3)
+			stdout, stderr, err := kubectl("-n", namespace, "get", "mantlebackup", mantleBackupName3)
 			if err != nil {
 				if strings.Contains(string(stderr), kubectlIsNotFoundMessage) {
 					return nil
 				}
-				return fmt.Errorf("get rbdpvcbackup %s failed. stderr: %s, err: %w", rbdPVCBackupName3, string(stderr), err)
+				return fmt.Errorf("get mantlebackup %s failed. stderr: %s, err: %w", mantleBackupName3, string(stderr), err)
 			}
-			return fmt.Errorf("RBDPVCBackup resource %s still exists. stdout: %s", rbdPVCBackupName3, stdout)
+			return fmt.Errorf("MantleBackup resource %s still exists. stdout: %s", mantleBackupName3, stdout)
 		}).Should(Succeed())
 	})
 })

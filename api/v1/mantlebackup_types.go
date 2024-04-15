@@ -7,8 +7,8 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-// RBDPVCBackupSpec defines the desired state of RBDPVCBackup
-type RBDPVCBackupSpec struct {
+// MantleBackupSpec defines the desired state of MantleBackup
+type MantleBackupSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
@@ -21,8 +21,8 @@ type RBDPVCBackupSpec struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
-// RBDPVCBackupStatus defines the observed state of RBDPVCBackup
-type RBDPVCBackupStatus struct {
+// MantleBackupStatus defines the observed state of MantleBackup
+type MantleBackupStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
@@ -44,24 +44,24 @@ const (
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 
-// RBDPVCBackup is the Schema for the rbdpvcbackups API
-type RBDPVCBackup struct {
+// MantleBackup is the Schema for the mantlebackups API
+type MantleBackup struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   RBDPVCBackupSpec   `json:"spec,omitempty"`
-	Status RBDPVCBackupStatus `json:"status,omitempty"`
+	Spec   MantleBackupSpec   `json:"spec,omitempty"`
+	Status MantleBackupStatus `json:"status,omitempty"`
 }
 
 //+kubebuilder:object:root=true
 
-// RBDPVCBackupList contains a list of RBDPVCBackup
-type RBDPVCBackupList struct {
+// MantleBackupList contains a list of MantleBackup
+type MantleBackupList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []RBDPVCBackup `json:"items"`
+	Items           []MantleBackup `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&RBDPVCBackup{}, &RBDPVCBackupList{})
+	SchemeBuilder.Register(&MantleBackup{}, &MantleBackupList{})
 }

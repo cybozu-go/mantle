@@ -21,32 +21,6 @@ rules:
   - list
   - watch
 - apiGroups:
-  - backup.cybozu.com
-  resources:
-  - rbdpvcbackups
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - backup.cybozu.com
-  resources:
-  - rbdpvcbackups/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - backup.cybozu.com
-  resources:
-  - rbdpvcbackups/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
   - ""
   resources:
   - configmaps
@@ -62,3 +36,29 @@ rules:
   - get
   - list
   - watch
+- apiGroups:
+  - mantle.cybozu.io
+  resources:
+  - mantlebackups
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - mantle.cybozu.io
+  resources:
+  - mantlebackups/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - mantle.cybozu.io
+  resources:
+  - mantlebackups/status
+  verbs:
+  - get
+  - patch
+  - update

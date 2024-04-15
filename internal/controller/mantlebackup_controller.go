@@ -19,11 +19,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	backupv1 "github.com/cybozu-go/rbd-backup-system/api/v1"
+	backupv1 "github.com/cybozu-go/mantle/api/v1"
 )
 
-// RBDPVCBackupReconciler reconciles a RBDPVCBackup object
-type RBDPVCBackupReconciler struct {
+// MantleBackupReconciler reconciles a MantleBackup object
+type MantleBackupReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 }
@@ -37,12 +37,12 @@ type Snapshot struct {
 }
 
 const (
-	RBDPVCBackupFinalizerName = "rbdpvcbackup.backup.cybozu.com/finalizer"
+	MantleBackupFinalizerName = "mantlebackup.mantle.cybozu.io/finalizer"
 )
 
-// NewRBDPVCBackupReconciler returns NodeReconciler.
-func NewRBDPVCBackupReconciler(client client.Client, scheme *runtime.Scheme) *RBDPVCBackupReconciler {
-	return &RBDPVCBackupReconciler{
+// NewMantleBackupReconciler returns NodeReconciler.
+func NewMantleBackupReconciler(client client.Client, scheme *runtime.Scheme) *MantleBackupReconciler {
+	return &MantleBackupReconciler{
 		Client: client,
 		Scheme: scheme,
 	}
@@ -97,7 +97,7 @@ func executeCommandImpl(command []string, input io.Reader) ([]byte, error) {
 
 var executeCommand = executeCommandImpl
 
-func (r *RBDPVCBackupReconciler) updateStatus(ctx context.Context, backup *backupv1.RBDPVCBackup, condition metav1.Condition) error {
+func (r *MantleBackupReconciler) updateStatus(ctx context.Context, backup *backupv1.MantleBackup, condition metav1.Condition) error {
 	meta.SetStatusCondition(&backup.Status.Conditions, condition)
 	err := r.Status().Update(ctx, backup)
 	if err != nil {
@@ -107,7 +107,7 @@ func (r *RBDPVCBackupReconciler) updateStatus(ctx context.Context, backup *backu
 	return nil
 }
 
-func (r *RBDPVCBackupReconciler) createRBDSnapshot(ctx context.Context, poolName, imageName string, backup *backupv1.RBDPVCBackup) (ctrl.Result, error) {
+func (r *MantleBackupReconciler) createRBDSnapshot(ctx context.Context, poolName, imageName string, backup *backupv1.MantleBackup) (ctrl.Result, error) {
 	command := []string{"rbd", "snap", "create", poolName + "/" + imageName + "@" + backup.Name}
 	_, err := executeCommand(command, nil)
 	if err != nil {
@@ -150,9 +150,9 @@ func (r *RBDPVCBackupReconciler) createRBDSnapshot(ctx context.Context, poolName
 	return ctrl.Result{}, nil
 }
 
-//+kubebuilder:rbac:groups=backup.cybozu.com,resources=rbdpvcbackups,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=backup.cybozu.com,resources=rbdpvcbackups/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=backup.cybozu.com,resources=rbdpvcbackups/finalizers,verbs=update
+//+kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlebackups,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlebackups/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlebackups/finalizers,verbs=update
 //+kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch
 //+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
 //+kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch
@@ -161,21 +161,21 @@ func (r *RBDPVCBackupReconciler) createRBDSnapshot(ctx context.Context, poolName
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 // TODO(user): Modify the Reconcile function to compare the state specified by
-// the RBDPVCBackup object against the actual cluster state, and then
+// the MantleBackup object against the actual cluster state, and then
 // perform operations to make the cluster state reflect the state specified by
 // the user.
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.16.3/pkg/reconcile
-func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	var backup backupv1.RBDPVCBackup
+func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	var backup backupv1.MantleBackup
 	err := r.Get(ctx, req.NamespacedName, &backup)
 	if errors.IsNotFound(err) {
-		logger.Info("RBDPVCBackup is not found", "name", backup.Name, "error", err)
+		logger.Info("MantleBackup is not found", "name", backup.Name, "error", err)
 		return ctrl.Result{}, nil
 	}
 	if err != nil {
-		logger.Error("failed to get RBDPVCBackup", "name", req.NamespacedName, "error", err)
+		logger.Error("failed to get MantleBackup", "name", req.NamespacedName, "error", err)
 		return ctrl.Result{}, err
 	}
 
@@ -191,11 +191,11 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 		if errors.IsNotFound(err) {
 			if !backup.ObjectMeta.DeletionTimestamp.IsZero() {
-				if controllerutil.ContainsFinalizer(&backup, RBDPVCBackupFinalizerName) {
-					controllerutil.RemoveFinalizer(&backup, RBDPVCBackupFinalizerName)
+				if controllerutil.ContainsFinalizer(&backup, MantleBackupFinalizerName) {
+					controllerutil.RemoveFinalizer(&backup, MantleBackupFinalizerName)
 					err = r.Update(ctx, &backup)
 					if err != nil {
-						logger.Error("failed to remove finalizer", "finalizer", RBDPVCBackupFinalizerName, "error", err)
+						logger.Error("failed to remove finalizer", "finalizer", MantleBackupFinalizerName, "error", err)
 						return ctrl.Result{}, err
 					}
 				}
@@ -244,7 +244,7 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	if !backup.ObjectMeta.DeletionTimestamp.IsZero() {
-		if controllerutil.ContainsFinalizer(&backup, RBDPVCBackupFinalizerName) {
+		if controllerutil.ContainsFinalizer(&backup, MantleBackupFinalizerName) {
 			command := []string{"rbd", "snap", "rm", poolName + "/" + imageName + "@" + backup.Name}
 			_, err = executeCommand(command, nil)
 			if err != nil {
@@ -259,10 +259,10 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				logger.Info("rbd snapshot has already been removed", "poolName", poolName, "imageName", imageName, "snapshotName", backup.Name, "error", err)
 			}
 
-			controllerutil.RemoveFinalizer(&backup, RBDPVCBackupFinalizerName)
+			controllerutil.RemoveFinalizer(&backup, MantleBackupFinalizerName)
 			err = r.Update(ctx, &backup)
 			if err != nil {
-				logger.Error("failed to remove finalizer", "finalizer", RBDPVCBackupFinalizerName, "error", err)
+				logger.Error("failed to remove finalizer", "finalizer", MantleBackupFinalizerName, "error", err)
 				return ctrl.Result{}, err
 			}
 		}
@@ -270,11 +270,11 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
-	if !controllerutil.ContainsFinalizer(&backup, RBDPVCBackupFinalizerName) {
-		controllerutil.AddFinalizer(&backup, RBDPVCBackupFinalizerName)
+	if !controllerutil.ContainsFinalizer(&backup, MantleBackupFinalizerName) {
+		controllerutil.AddFinalizer(&backup, MantleBackupFinalizerName)
 		err = r.Update(ctx, &backup)
 		if err != nil {
-			logger.Error("failed to add finalizer", "finalizer", RBDPVCBackupFinalizerName, "error", err)
+			logger.Error("failed to add finalizer", "finalizer", MantleBackupFinalizerName, "error", err)
 			return ctrl.Result{}, err
 		}
 		err := r.updateStatus(ctx, &backup, metav1.Condition{Type: backupv1.ConditionReadyToUse, Status: metav1.ConditionFalse, Reason: backupv1.ReasonNone})
@@ -303,8 +303,8 @@ func (r *RBDPVCBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *RBDPVCBackupReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *MantleBackupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&backupv1.RBDPVCBackup{}).
+		For(&backupv1.MantleBackup{}).
 		Complete(r)
 }

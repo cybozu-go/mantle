@@ -1,4 +1,4 @@
 ## Append samples of your project ##
 resources:
-- backup_v1_rbdpvcbackup.yaml
+- backup_v1_mantlebackup.yaml
 #+kubebuilder:scaffold:manifestskustomizesamples
