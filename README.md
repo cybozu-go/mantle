@@ -8,7 +8,7 @@ Users can manage backups by `MantleBackup` resources.
 
 ## Getting Started
 
-If you want to try mantle on your local machine, see [e2e](e2e/) directory which provides scripts to run rbd-backup-system on [minikube][kind].
+If you want to try mantle on your local machine, see [e2e](e2e/) directory which provides scripts to run mantle on [minikube].
 
 To use mantle on your real kubernetes cluster, read following sections.
 

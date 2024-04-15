@@ -12,7 +12,7 @@ resources:
     crdVersion: v1
     namespaced: true
   controller: true
-  domain: cybozu.com
+  domain: cybozu.io
   group: backup
   kind: MantleBackup
   path: github.com/cybozu-go/mantle/api/v1
