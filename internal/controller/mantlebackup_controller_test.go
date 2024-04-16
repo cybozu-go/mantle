@@ -6,7 +6,7 @@ import (
 	"io"
 	"time"
 
-	backupv1 "github.com/cybozu-go/rbd-backup-system/api/v1"
+	backupv1 "github.com/cybozu-go/mantle/api/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -23,12 +23,12 @@ func mockExecuteCommand(command []string, input io.Reader) ([]byte, error) {
 	return nil, nil
 }
 
-var _ = Describe("RBDPVCBackup controller", func() {
+var _ = Describe("MantleBackup controller", func() {
 	ctx := context.Background()
 	var stopFunc func()
 	errCh := make(chan error)
 
-	var reconciler *RBDPVCBackupReconciler
+	var reconciler *MantleBackupReconciler
 	scheme := runtime.NewScheme()
 
 	BeforeEach(func() {
@@ -40,7 +40,7 @@ var _ = Describe("RBDPVCBackup controller", func() {
 		})
 		Expect(err).ToNot(HaveOccurred())
 
-		reconciler = NewRBDPVCBackupReconciler(k8sClient, mgr.GetScheme())
+		reconciler = NewMantleBackupReconciler(k8sClient, mgr.GetScheme())
 		err = reconciler.SetupWithManager(mgr)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -114,12 +114,12 @@ var _ = Describe("RBDPVCBackup controller", func() {
 		err = k8sClient.Status().Update(ctx, &pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		backup := backupv1.RBDPVCBackup{
+		backup := backupv1.MantleBackup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "backup",
 				Namespace: ns,
 			},
-			Spec: backupv1.RBDPVCBackupSpec{
+			Spec: backupv1.MantleBackupSpec{
 				PVC: pvc.Name,
 			},
 		}
@@ -138,7 +138,7 @@ var _ = Describe("RBDPVCBackup controller", func() {
 
 			existFinalizer := false
 			for _, f := range backup.Finalizers {
-				if f == RBDPVCBackupFinalizerName {
+				if f == MantleBackupFinalizerName {
 					existFinalizer = true
 					break
 				}
@@ -241,12 +241,12 @@ var _ = Describe("RBDPVCBackup controller", func() {
 		err = k8sClient.Status().Update(ctx, &pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		backup := backupv1.RBDPVCBackup{
+		backup := backupv1.MantleBackup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "backup",
 				Namespace: ns,
 			},
-			Spec: backupv1.RBDPVCBackupSpec{
+			Spec: backupv1.MantleBackupSpec{
 				PVC: pvc.Name,
 			},
 		}
@@ -265,7 +265,7 @@ var _ = Describe("RBDPVCBackup controller", func() {
 
 			existFinalizer := false
 			for _, f := range backup.Finalizers {
-				if f == RBDPVCBackupFinalizerName {
+				if f == MantleBackupFinalizerName {
 					existFinalizer = true
 					break
 				}
@@ -376,12 +376,12 @@ var _ = Describe("RBDPVCBackup controller", func() {
 		err = k8sClient.Status().Update(ctx, &pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		backup := backupv1.RBDPVCBackup{
+		backup := backupv1.MantleBackup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "backup",
 				Namespace: ns,
 			},
-			Spec: backupv1.RBDPVCBackupSpec{
+			Spec: backupv1.MantleBackupSpec{
 				PVC: pvc.Name,
 			},
 		}
@@ -414,12 +414,12 @@ var _ = Describe("RBDPVCBackup controller", func() {
 		ctx := context.Background()
 		ns := createNamespace()
 
-		backup := backupv1.RBDPVCBackup{
+		backup := backupv1.MantleBackup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "backup",
 				Namespace: ns,
 			},
-			Spec: backupv1.RBDPVCBackupSpec{
+			Spec: backupv1.MantleBackupSpec{
 				PVC: "non-existent-pvc",
 			},
 		}
@@ -448,7 +448,7 @@ var _ = Describe("RBDPVCBackup controller", func() {
 		}).Should(Succeed())
 	})
 
-	It("should fail the resource creation the second time if the same RBDPVCBackup is created twice", func() {
+	It("should fail the resource creation the second time if the same MantleBackup is created twice", func() {
 		ctx := context.Background()
 		ns := createNamespace()
 
@@ -503,12 +503,12 @@ var _ = Describe("RBDPVCBackup controller", func() {
 		err = k8sClient.Status().Update(ctx, &pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		backup := backupv1.RBDPVCBackup{
+		backup := backupv1.MantleBackup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "backup",
 				Namespace: ns,
 			},
-			Spec: backupv1.RBDPVCBackupSpec{
+			Spec: backupv1.MantleBackupSpec{
 				PVC: pvc.Name,
 			},
 		}

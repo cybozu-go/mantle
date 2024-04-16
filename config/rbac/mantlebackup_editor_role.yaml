@@ -1,20 +1,20 @@
-# permissions for end users to edit rbdpvcbackups.
+# permissions for end users to edit mantlebackups.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   labels:
     app.kubernetes.io/name: clusterrole
-    app.kubernetes.io/instance: rbdpvcbackup-editor-role
+    app.kubernetes.io/instance: mantlebackup-editor-role
     app.kubernetes.io/component: rbac
-    app.kubernetes.io/created-by: rbd-backup-system
-    app.kubernetes.io/part-of: rbd-backup-system
+    app.kubernetes.io/created-by: mantle
+    app.kubernetes.io/part-of: mantle
     app.kubernetes.io/managed-by: kustomize
-  name: rbdpvcbackup-editor-role
+  name: mantlebackup-editor-role
 rules:
 - apiGroups:
-  - backup.cybozu.com
+  - mantle.cybozu.io
   resources:
-  - rbdpvcbackups
+  - mantlebackups
   verbs:
   - create
   - delete
@@ -24,8 +24,8 @@ rules:
   - update
   - watch
 - apiGroups:
-  - backup.cybozu.com
+  - mantle.cybozu.io
   resources:
-  - rbdpvcbackups/status
+  - mantlebackups/status
   verbs:
   - get

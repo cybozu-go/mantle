@@ -1,29 +1,32 @@
-# rbd-backup-system
+# mantle
 
 The system for backup RBD PVC managed by Rook/Ceph. It can also copy the backup data to another Rook/Ceph cluster in another data center.
 
 ## Description
 
-Users can manage backups by `RBDPVCBackup` resources.
+Users can manage backups by `MantleBackup` resources.
 
 ## Getting Started
 
-If you want to try rbd-backup-system on your local machine, see [e2e](e2e/) directory which provides scripts to run rbd-backup-system on [minikube][kind].
+If you want to try mantle on your local machine, see [e2e](e2e/) directory which provides scripts to run mantle on [minikube].
 
-To use rbd-backup-system on your real kubernetes cluster, read following sections.
+To use mantle on your real kubernetes cluster, read following sections.
 
 ### Prerequisites
-- go version v1.21.0+
-- docker version 20.10+
-- kubectl version v1.27.10+
-- Access to a Kubernetes v1.27.10+ cluster
-- Rook v1.13.1+
+- Deploy
+  - Kubernetes cluster: v1.27.10+
+  - Rook: v1.13.1+
+- build
+  - go: v1.21.0+
+  - docker: 20.10+
+  - kubectl:  v1.27.10+
+  - kubebuilder: 3.14.0+ 
 
 ### To Deploy on the cluster
 **Build and push your image to the location specified by `IMG`:**
 
 ```sh
-make docker-build docker-push IMG=<some-registry>/rbd-backup-system:tag
+make docker-build docker-push IMG=<some-registry>/mantle:tag
 ```
 
 **NOTE:** This image ought to be published in the personal registry you specified. 
@@ -39,7 +42,7 @@ make install
 **Deploy the Manager to the cluster with the image specified by `IMG`:**
 
 ```sh
-make deploy IMG=<some-registry>/rbd-backup-system:tag
+make deploy IMG=<some-registry>/mantle:tag
 ```
 
 > **NOTE**: If you encounter RBAC errors, you may need to grant yourself cluster-admin 

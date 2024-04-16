@@ -2,19 +2,19 @@
 # This file is used to track the info used to scaffold your project
 # and allow the plugins properly work.
 # More info: https://book.kubebuilder.io/reference/project-config.html
-domain: cybozu.com
+domain: cybozu.io
 layout:
 - go.kubebuilder.io/v4
-projectName: rbd-backup-system
-repo: github.com/cybozu-go/rbd-backup-system
+projectName: mantle
+repo: github.com/cybozu-go/mantle
 resources:
 - api:
     crdVersion: v1
     namespaced: true
   controller: true
-  domain: cybozu.com
+  domain: cybozu.io
   group: backup
-  kind: RBDPVCBackup
-  path: github.com/cybozu-go/rbd-backup-system/api/v1
+  kind: MantleBackup
+  path: github.com/cybozu-go/mantle/api/v1
   version: v1
 version: "3"

@@ -8,8 +8,8 @@ metadata:
     app.kubernetes.io/name: deployment
     app.kubernetes.io/instance: controller-manager
     app.kubernetes.io/component: manager
-    app.kubernetes.io/created-by: rbd-backup-system
-    app.kubernetes.io/part-of: rbd-backup-system
+    app.kubernetes.io/created-by: mantle
+    app.kubernetes.io/part-of: mantle
     app.kubernetes.io/managed-by: kustomize
 spec:
   selector:

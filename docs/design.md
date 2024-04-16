@@ -24,8 +24,8 @@ flowchart LR
     subgraph Architecture
 
       USER([User])
-      RBSC[rbd-backup-system-controller]
-      RPB[RBDPVCBackup]
+      RBSC[mantle-controller]
+      RPB[MantleBackup]
       PVC[PersistentVolumeClaim]
       PV[PersistentVolume]
       RI[RBD Image]
@@ -49,27 +49,27 @@ flowchart LR
     end
 ```
 
-rbd-backup-system-controller-manager exists for each Rook/Ceph cluster.
+mantle-controller-manager exists for each Rook/Ceph cluster.
 
 ### Backup flow
 
-To create/delete a backup, rbd-backup-system works as follows:
+To create/delete a backup, mantle works as follows:
 
-1. Users create/delete `RBDPVCBackup`.
-2. rbd-backupsystem-controller (the controller) gets the target PVC from `RBDPVCBackup`.
+1. Users create/delete `MantleBackup`.
+2. rbd-backupsystem-controller (the controller) gets the target PVC from `MantleBackup`.
 3. The controller gets the PV from the target PVC.
 4. The controller gets the RBD image name and pool name from the PV.
 5. The controller creates/deletes an RBD snapshot corresponding to the backup in the target RBD image.
 
 ### Definitions
 
-The definition `RBDPVCBackup` is as follows:
+The definition `MantleBackup` is as follows:
 
 ```yaml
-apiVersion: backup.cybozu.com/v1
-kind: RBDPVCBackup
+apiVersion: mantle.cybozu.io/v1
+kind: MantleBackup
 metadata:
-  name: <RBDPVCBackup resource name>
+  name: <MantleBackup resource name>
 spec:
   # The name of the backup target PVC
   pvc: <target PVC name>

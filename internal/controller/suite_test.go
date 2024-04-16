@@ -20,7 +20,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	backupv1 "github.com/cybozu-go/rbd-backup-system/api/v1"
+	backupv1 "github.com/cybozu-go/mantle/api/v1"
 	//+kubebuilder:scaffold:imports
 )
 

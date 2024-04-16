@@ -1,4 +1,4 @@
-module github.com/cybozu-go/rbd-backup-system
+module github.com/cybozu-go/mantle
 
 go 1.21
 
