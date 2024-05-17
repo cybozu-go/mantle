@@ -1,0 +1,23 @@
+replicaCount: 1
+
+image:
+  repository: controller
+  pullPolicy: IfNotPresent
+  tag: latest
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: "mantle-controller"
+
+podAnnotations: {}
+podLabels: {}
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

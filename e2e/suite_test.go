@@ -125,9 +125,9 @@ var _ = BeforeSuite(func() {
 		}).Should(Succeed())
 	}
 
-	By("[BeforeSuite] Waiting for mantle-controller-manager to get ready")
+	By("[BeforeSuite] Waiting for mantle-controller to get ready")
 	Eventually(func() error {
-		stdout, stderr, err := kubectl("-n", namespace, "get", "deploy", "mantle-controller-manager", "-o", "json")
+		stdout, stderr, err := kubectl("-n", namespace, "get", "deploy", "mantle-controller", "-o", "json")
 		if err != nil {
 			return fmt.Errorf("kubectl get deploy failed. stderr: %s, err: %w", string(stderr), err)
 		}
@@ -139,7 +139,7 @@ var _ = BeforeSuite(func() {
 		}
 
 		if deploy.Status.AvailableReplicas != 1 {
-			return fmt.Errorf("mantle-controller-manager is not available yet")
+			return fmt.Errorf("mantle-controller is not available yet")
 		}
 
 		return nil

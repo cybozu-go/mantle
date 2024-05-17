@@ -49,7 +49,7 @@ flowchart LR
     end
 ```
 
-mantle-controller-manager exists for each Rook/Ceph cluster.
+mantle-controller exists for each Rook/Ceph cluster.
 
 ### Backup flow
 

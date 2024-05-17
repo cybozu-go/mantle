@@ -7,6 +7,7 @@ CURL := curl -sSLf
 GINKGO := $(BINDIR)/ginkgo-$(GINKGO_VERSION)
 GINKGO_FLAGS :=
 MINIKUBE := $(BINDIR)/minikube
+HELM := $(BINDIR)/helm
 KUBECTL := $(BINDIR)/kubectl-$(KUBERNETES_VERSION)
 MINIKUBE_HOME = $(BINDIR)
 NS := rook-ceph
@@ -32,6 +33,7 @@ setup:
 	$(MAKE) $(GINKGO)
 	$(MAKE) $(KUBECTL)
 	$(MAKE) $(MINIKUBE)
+	$(MAKE) $(HELM)
 
 .PHONY: test
 test:
@@ -79,6 +81,10 @@ $(MINIKUBE): | $(BINDIR)
 	$(SUDO) mkdir -p $(CNI_PLUGIN_INSTALL_DIR)
 	$(SUDO) tar -xf cni-plugins.tgz -C $(CNI_PLUGIN_INSTALL_DIR)
 	rm -f cni-plugins.tgz
+
+$(HELM): | $(BINDIR)
+	$(CURL) https://get.helm.sh/helm-v$(HELM_VERSION)-linux-amd64.tar.gz \
+		| tar xvz -C $(BINDIR) --strip-components 1 linux-amd64/helm
 
 .PHONY: launch-minikube
 launch-minikube:
@@ -175,13 +181,13 @@ setup-components:
 	# ref. https://github.com/kubernetes/minikube/issues/17785
 	docker save controller:latest | $(SUDO) ctr -n k8s.io images import -
 
-	$(MAKE) -C .. install
-	$(MAKE) -C .. deploy
+	$(HELM) upgrade --install mantle-cluster-wide ../charts/mantle-cluster-wide/
+	$(HELM) upgrade --install --namespace=$(NS) mantle ../charts/mantle/
 
 .PHONY: delete-components
 delete-components:
-	$(MAKE) -C .. undeploy || :
-	$(MAKE) -C .. uninstall || :
+	$(HELM) uninstall --namespace=$(NS) mantle || true
+	$(HELM) uninstall mantle-cluster-wide || true
 
 .PHONY: do_test
 do_test: $(GINKGO)

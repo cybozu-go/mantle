@@ -20,7 +20,7 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   volumeMode: Block
   local:
-    path: /dev/loop0
+    path: /dev/loop6
   nodeAffinity:
     required:
       nodeSelectorTerms:
