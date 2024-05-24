@@ -11,22 +11,25 @@ HELM := $(BINDIR)/helm
 KUBECTL := $(BINDIR)/kubectl-$(KUBERNETES_VERSION)
 MINIKUBE_HOME = $(BINDIR)
 NS := rook-ceph
+NS2 := rook-ceph2
 NODE_NAME := minikube-worker
 SUDO := sudo
 DD := dd
 LOSETUP := losetup
 LOOP_FILE := $(TMPDIR)/loop.img
-LOOP_DEV := $(shell loop_dev=$$($(LOSETUP) | grep $(LOOP_FILE) | cut -d ' ' -f 1); \
-		if [ -z "$$loop_dev" ]; then \
-			$(LOSETUP) -f; \
-		else \
-			echo $$loop_dev; \
-		fi)
+LOOP_FILE2 := $(TMPDIR)/loop2.img
 CNI_PLUGIN_INSTALL_DIR := /opt/cni/bin
 POLLING_INTERVAL := 1
 TIMEOUT_SECS := 180
 
 export MINIKUBE_HOME
+
+define loop-dev
+$(shell $(LOSETUP) | grep $(LOOP_FILE) | cut -d ' ' -f 1)
+endef
+define loop-dev2
+$(shell $(LOSETUP) | grep $(LOOP_FILE2) | cut -d ' ' -f 1)
+endef
 
 .PHONY: setup
 setup:
@@ -113,65 +116,77 @@ delete-minikube:
 
 .PHONY: create-loop-dev
 create-loop-dev: | $(TMPDIR)
-	$(LOSETUP) | grep -q $(LOOP_FILE); \
-	RET=$$? ; \
-	if [ $$RET -ne 0 ]; then \
-		$(DD) if=/dev/zero of=$(LOOP_FILE) bs=1G seek=32 count=0; \
-		$(SUDO) $(LOSETUP) $(LOOP_DEV) $(LOOP_FILE); \
-	fi
+	$(shell \
+		if [ -z "$(loop-dev)" ]; then \
+			$(DD) if=/dev/zero of=$(LOOP_FILE) bs=1G seek=32 count=0; \
+			$(SUDO) $(LOSETUP) $$($(SUDO) $(LOSETUP) -f) $(LOOP_FILE); \
+		fi; \
+		if [ -z "$(loop-dev2)" ]; then \
+			$(DD) if=/dev/zero of=$(LOOP_FILE2) bs=1G seek=32 count=0; \
+			$(SUDO) $(LOSETUP) $$($(SUDO) $(LOSETUP) -f) $(LOOP_FILE2); \
+		fi\
+	)
+# suppress "make[1]: Nothing to be done for 'create-loop-dev'."
+	:
 
 .PHONY: delete-loop-dev
 delete-loop-dev: | $(TMPDIR)
-	$(SUDO) $(LOSETUP) -d $(LOOP_DEV)
+	$(SUDO) $(LOSETUP) -d $(loop-dev) || :
 	$(SUDO) rm -f $(LOOP_FILE)
+	$(SUDO) $(LOSETUP) -d $(loop-dev2) || :
+	$(SUDO) rm -f $(LOOP_FILE2)
+
+.PHONY: wait-deploy-ready
+wait-deploy-ready: NS=
+wait-deploy-ready: DEPLOY=
+wait-deploy-ready:
+	is_ok="false"; \
+	for ((i=0;i<$(TIMEOUT_SECS);i+=$(POLLING_INTERVAL))); do \
+		available_replicas=$$($(KUBECTL) -n $(NS) get deploy $(DEPLOY) -o json | jq -r ".status.availableReplicas"); \
+		if [ "$$available_replicas" = 1 ]; then \
+			is_ok="true"; \
+			break; \
+		fi; \
+		echo "waiting for deploy $(DEPLOY) to be available" > /dev/stderr; \
+		sleep $(POLLING_INTERVAL); \
+	done; \
+	if [ "$$is_ok" = "false" ]; then \
+		echo "failed to start deploy $(DEPLOY)" > /dev/stderr; \
+		exit 1; \
+	fi
 
 .PHONY: launch-rook-ceph
 launch-rook-ceph: create-loop-dev
-	$(KUBECTL) apply -f testdata/common.yaml
-	$(KUBECTL) apply -f testdata/crds.yaml
-	$(KUBECTL) apply -f testdata/operator.yaml
-	sed -e "s%LOOP_DEV%$(LOOP_DEV)%" -e "s%NODE_NAME%$(NODE_NAME)%" testdata/cluster-template.yaml > testdata/cluster.yaml
-	$(KUBECTL) apply -f testdata/cluster.yaml
-	$(KUBECTL) apply -f testdata/toolbox.yaml
-	is_ok="false"; \
-	for ((i=0;i<$(TIMEOUT_SECS);i+=$(POLLING_INTERVAL))); do \
-		available_replicas=$$($(KUBECTL) -n $(NS) get deploy rook-ceph-operator -o json | jq -r ".status.availableReplicas"); \
-		if [ "$$available_replicas" = 1 ]; then \
-			is_ok="true"; \
-			break; \
-		fi; \
-		echo "waiting for rook operator to be available" > /dev/stderr; \
-		sleep $(POLLING_INTERVAL); \
-	done; \
-	if [ "$$is_ok" = "false" ]; then \
-		echo "failed to start rook operator" > /dev/stderr; \
-		exit 1; \
-	fi
-	is_ok="false"; \
-	for ((i=0;i<$(TIMEOUT_SECS);i+=$(POLLING_INTERVAL))); do \
-		available_replicas=$$($(KUBECTL) -n $(NS) get deploy rook-ceph-osd-0 -o json | jq -r ".status.availableReplicas"); \
-		if [ "$$available_replicas" = 1 ]; then \
-			is_ok="true"; \
-			break; \
-		fi; \
-		echo "waiting for osd.0 to be available" > /dev/stderr; \
-		sleep $(POLLING_INTERVAL); \
-	done; \
-	if [ "$$is_ok" = "false" ]; then \
-		echo "failed to start osd.0" > /dev/stderr; \
-		exit 1; \
-	fi
+	$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
+		--create-namespace --namespace $(NS) -f testdata/values.yaml --wait \
+		rook-ceph rook-ceph
+	sed \
+		-e "s%{LOOP_DEV}%$(loop-dev)%" \
+		-e "s%{LOOP_DEV2}%$(loop-dev2)%" \
+		-e "s%{NODE_NAME}%$(NODE_NAME)%" \
+		testdata/persistentvolumes-template.yaml \
+		> testdata/persistentvolumes.yaml
+	$(KUBECTL) apply -f testdata/persistentvolumes.yaml
+	$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
+		--namespace $(NS) -f testdata/values-cluster.yaml --wait rook-ceph-cluster rook-ceph-cluster
+	$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
+		--create-namespace --namespace $(NS2) -f testdata/values-cluster.yaml \
+		--set cephClusterSpec.dataDirHostPath=/var/lib/rook2 \
+		--wait rook-ceph-cluster2 rook-ceph-cluster
+	$(MAKE) wait-deploy-ready NS=$(NS) DEPLOY=rook-ceph-operator
+	$(MAKE) wait-deploy-ready NS=$(NS) DEPLOY=rook-ceph-osd-0
+	$(MAKE) wait-deploy-ready NS=$(NS2) DEPLOY=rook-ceph-osd-0
 
 .PHONY: delete-rook-ceph
 delete-rook-ceph:
-	$(KUBECTL) delete -f testdata/toolbox.yaml || :
-	$(KUBECTL) delete -f testdata/cluster.yaml || :
+	$(HELM) uninstall --namespace $(NS2) rook-ceph-cluster2 --wait || :
+	$(HELM) uninstall --namespace $(NS) rook-ceph-cluster --wait || :
 	$(SUDO) rm -rf /var/lib/rook
+	$(SUDO) rm -rf /var/lib/rook2
 	ls /dev/mapper/ceph-* | xargs -I% -- $(SUDO) dmsetup remove %
 	$(SUDO) rm -rf /dev/mapper/ceph-*
-	$(KUBECTL) delete -f testdata/operator.yaml || :
-	$(KUBECTL) delete -f testdata/crds.yaml || :
-	$(KUBECTL) delete -f testdata/common.yaml || :
+	$(HELM) uninstall --namespace $(NS) rook-ceph --wait || :
+	$(KUBECTL) delete -f testdata/persistentvolumes.yaml || :
 	$(MAKE) delete-loop-dev
 
 .PHONY: setup-components
@@ -181,13 +196,13 @@ setup-components:
 	# ref. https://github.com/kubernetes/minikube/issues/17785
 	docker save controller:latest | $(SUDO) ctr -n k8s.io images import -
 
-	$(HELM) upgrade --install mantle-cluster-wide ../charts/mantle-cluster-wide/
-	$(HELM) upgrade --install --namespace=$(NS) mantle ../charts/mantle/
+	$(HELM) upgrade --install mantle-cluster-wide ../charts/mantle-cluster-wide/ --wait
+	$(HELM) upgrade --install --namespace=$(NS) mantle ../charts/mantle/ --wait
 
 .PHONY: delete-components
 delete-components:
-	$(HELM) uninstall --namespace=$(NS) mantle || true
-	$(HELM) uninstall mantle-cluster-wide || true
+	$(HELM) uninstall --namespace=$(NS) mantle --wait || true
+	$(HELM) uninstall mantle-cluster-wide --wait || true
 
 .PHONY: do_test
 do_test: $(GINKGO)
