@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"os"
 
@@ -73,10 +74,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.MantleBackupReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+	managedCephClusterID := os.Getenv("POD_NAMESPACE")
+	if managedCephClusterID == "" {
+		setupLog.Error(errors.New("POD_NAMESPACE is empty"), "POD_NAMESPACE is empty")
+		os.Exit(1)
+	}
+
+	reconciler := controller.NewMantleBackupReconciler(
+		mgr.GetClient(),
+		mgr.GetScheme(),
+		managedCephClusterID,
+	)
+
+	if err = reconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MantleBackup")
 		os.Exit(1)
 	}

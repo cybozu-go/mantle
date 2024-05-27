@@ -3,6 +3,7 @@ package e2e
 import (
 	"bytes"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -43,6 +44,9 @@ const (
 	mantleBackupName2 = "mantlebackup-test-2"
 	mantleBackupName3 = "mantlebackup-test-3"
 	namespace         = "rook-ceph"
+	namespace2        = "rook-ceph2"
+	storageClassName  = "rook-ceph-block"
+	storageClassName2 = "rook-ceph-block2"
 )
 
 func execAtLocal(cmd string, input []byte, args ...string) ([]byte, []byte, error) {
@@ -67,6 +71,20 @@ func kubectlWithInput(input []byte, args ...string) ([]byte, []byte, error) {
 	return execAtLocal("kubectl", input, args...)
 }
 
+func getImageNameFromPVName(pvName string) (string, error) {
+	stdout, stderr, err := kubectl("get", "pv", pvName, "-o", "json")
+	if err != nil {
+		return "", fmt.Errorf("kubectl get pv failed. stderr: %s, err: %w", string(stderr), err)
+	}
+	var pv corev1.PersistentVolume
+	err = json.Unmarshal(stdout, &pv)
+	if err != nil {
+		return "", err
+	}
+	imageName := pv.Spec.CSI.VolumeAttributes["imageName"]
+	return imageName, nil
+}
+
 func TestMtest(t *testing.T) {
 	if os.Getenv("E2ETEST") == "" {
 		t.Skip("Run under e2e/")
@@ -83,8 +101,15 @@ func TestMtest(t *testing.T) {
 var _ = BeforeSuite(func() {
 	By("[BeforeSuite] Creating common resources")
 	Eventually(func() error {
-		manifest := fmt.Sprintf(testRBDPoolSCTemplate, poolName, namespace, poolName, namespace, namespace, namespace)
+		manifest := fmt.Sprintf(testRBDPoolSCTemplate, poolName, namespace,
+			storageClassName, poolName, namespace, namespace, namespace)
 		_, _, err := kubectlWithInput([]byte(manifest), "apply", "-n", namespace, "-f", "-")
+		if err != nil {
+			return err
+		}
+		manifest = fmt.Sprintf(testRBDPoolSCTemplate, poolName, namespace2,
+			storageClassName2, poolName, namespace2, namespace2, namespace2)
+		_, _, err = kubectlWithInput([]byte(manifest), "apply", "-n", namespace2, "-f", "-")
 		if err != nil {
 			return err
 		}
@@ -105,6 +130,7 @@ var _ = BeforeSuite(func() {
 		}).Should(Succeed())
 
 		By(fmt.Sprintf("[BeforeSuite] Waiting for PVC(%s) to get bound", name))
+		pvName := ""
 		Eventually(func() error {
 			stdout, stderr, err := kubectl("-n", namespace, "get", "pvc", name, "-o", "json")
 			if err != nil {
@@ -119,6 +145,27 @@ var _ = BeforeSuite(func() {
 
 			if pvc.Status.Phase != "Bound" {
 				return fmt.Errorf("PVC is not bound yet")
+			}
+			pvName = pvc.Spec.VolumeName
+
+			return nil
+		}).Should(Succeed())
+
+		By(fmt.Sprintf("[BeforeSuite] Create a new RBD image in %s ns with the same name as that of the PVC(%s) in %s ns",
+			namespace2, name, namespace))
+		Eventually(func() error {
+			// Get the image name
+			imageName, err := getImageNameFromPVName(pvName)
+			if err != nil {
+				return err
+			}
+
+			// Create a new RBD image in namespace2 with the same name as imageName.
+			_, stderr, err := kubectl(
+				"-n", namespace2, "exec", "deploy/rook-ceph-tools", "--",
+				"rbd", "create", "--size", "100", poolName+"/"+imageName)
+			if err != nil {
+				return fmt.Errorf("rbd create failed. stderr: %s, err: %w", string(stderr), err)
 			}
 
 			return nil
@@ -157,9 +204,24 @@ var _ = AfterSuite(func() {
 		_, _, _ = kubectl("delete", "-n", namespace, "pvc", pvc)
 	}
 
+	By("[AfterSuite] Deleting RBD images in " + namespace2)
+	stdout, _, err := kubectl("exec", "-n", namespace2, "deploy/rook-ceph-tools", "--",
+		"rbd", "ls", poolName, "--format=json")
+	if err == nil {
+		imageNames := []string{}
+		if err := json.Unmarshal(stdout, &imageNames); err == nil {
+			for _, imageName := range imageNames {
+				_, _, _ = kubectl("exec", "-n", namespace2, "deploy/rook-ceph-tools", "--",
+					"rbd", "rm", poolName+"/"+imageName)
+			}
+		}
+	}
+
 	By("[AfterSuite] Deleting common resources")
-	_, _, _ = kubectl("delete", "sc", "rook-ceph-block", "--wait=false")
-	_, _, _ = kubectl("delete", "-n", namespace, "cephblockpool", "replicapool", "--wait=false")
+	_, _, _ = kubectl("delete", "sc", storageClassName, "--wait=false")
+	_, _, _ = kubectl("delete", "sc", storageClassName2, "--wait=false")
+	_, _, _ = kubectl("delete", "-n", namespace, "cephblockpool", poolName, "--wait=false")
+	_, _, _ = kubectl("delete", "-n", namespace2, "cephblockpool", poolName, "--wait=false")
 })
 
 var _ = Describe("rbd backup system", func() {
@@ -172,6 +234,7 @@ var _ = Describe("rbd backup system", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		By("Waiting for RBD snapshot to be created")
+		imageName := ""
 		Eventually(func() error {
 			stdout, stderr, err := kubectl("-n", namespace, "get", "pvc", pvcName, "-o", "json")
 			if err != nil {
@@ -184,19 +247,13 @@ var _ = Describe("rbd backup system", func() {
 			}
 			pvName := pvc.Spec.VolumeName
 
-			stdout, stderr, err = kubectl("get", "pv", pvName, "-o", "json")
-			if err != nil {
-				return fmt.Errorf("kubectl get pv failed. stderr: %s, err: %w", string(stderr), err)
-			}
-			var pv corev1.PersistentVolume
-			err = yaml.Unmarshal(stdout, &pv)
+			imageName, err = getImageNameFromPVName(pvName)
 			if err != nil {
 				return err
 			}
 			if saveImageName {
-				firstImageName = pv.Spec.CSI.VolumeAttributes["imageName"]
+				firstImageName = imageName
 			}
-			imageName := pv.Spec.CSI.VolumeAttributes["imageName"]
 
 			stdout, stderr, err = kubectl(
 				"-n", namespace, "exec", "deploy/rook-ceph-tools", "--",
@@ -220,6 +277,34 @@ var _ = Describe("rbd backup system", func() {
 				return fmt.Errorf("snapshot not exists. snapshotName: %s", mantleBackupName)
 			}
 
+			return nil
+		}).Should(Succeed())
+
+		By("Checking that the mantle-controller deployed for a certain Rook/Ceph cluster (i.e., " +
+			namespace2 + ") doesn't create a snapshot for a MantleBackup for a different Rook/Ceph cluster (i.e., " +
+			namespace + ")")
+		Consistently(func() error {
+			stdout, stderr, err := kubectl(
+				"-n", namespace2, "exec", "deploy/rook-ceph-tools", "--",
+				"rbd", "snap", "ls", poolName+"/"+imageName, "--format=json")
+			if err != nil {
+				return fmt.Errorf("rbd snap ls failed. stderr: %s, err: %w", string(stderr), err)
+			}
+			var snapshots []controller.Snapshot
+			err = yaml.Unmarshal(stdout, &snapshots)
+			if err != nil {
+				return err
+			}
+			existSnapshot := false
+			for _, s := range snapshots {
+				if s.Name == mantleBackupName {
+					existSnapshot = true
+					break
+				}
+			}
+			if existSnapshot {
+				return fmt.Errorf("a wrong snapshot exists. snapshotName: %s", mantleBackupName)
+			}
 			return nil
 		}).Should(Succeed())
 	}
@@ -251,16 +336,10 @@ var _ = Describe("rbd backup system", func() {
 			}
 			pvName := pvc.Spec.VolumeName
 
-			stdout, stderr, err = kubectl("get", "pv", pvName, "-o", "json")
-			if err != nil {
-				return fmt.Errorf("kubectl get pv failed. stderr: %s, err: %w", string(stderr), err)
-			}
-			var pv corev1.PersistentVolume
-			err = yaml.Unmarshal(stdout, &pv)
+			imageName, err := getImageNameFromPVName(pvName)
 			if err != nil {
 				return err
 			}
-			imageName := pv.Spec.CSI.VolumeAttributes["imageName"]
 
 			stdout, stderr, err = kubectl(
 				"-n", namespace, "exec", "deploy/rook-ceph-tools", "--",

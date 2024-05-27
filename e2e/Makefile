@@ -198,9 +198,11 @@ setup-components:
 
 	$(HELM) upgrade --install mantle-cluster-wide ../charts/mantle-cluster-wide/ --wait
 	$(HELM) upgrade --install --namespace=$(NS) mantle ../charts/mantle/ --wait
+	$(HELM) upgrade --install --namespace=$(NS2) mantle2 ../charts/mantle/ --wait
 
 .PHONY: delete-components
 delete-components:
+	$(HELM) uninstall --namespace=$(NS2) mantle2 --wait || true
 	$(HELM) uninstall --namespace=$(NS) mantle --wait || true
 	$(HELM) uninstall mantle-cluster-wide --wait || true
 
