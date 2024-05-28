@@ -8,6 +8,8 @@ CHART_TESTING_VERSION := 3.10.1
 CNI_PLUGINS_VERSION := v1.4.0
 # https://github.com/GoogleContainerTools/container-structure-test/releases
 CONTAINER_STRUCTURE_TEST_VERSION := 1.16.0
+# https://github.com/kubernetes-sigs/controller-tools/releases
+CONTROLLER_TOOLS_VERSION := v0.14.0
 # https://github.com/Mirantis/cri-dockerd/releases
 CRI_DOCKERD_VERSION := v0.3.9
 # https://github.com/kubernetes-sigs/cri-tools/releases
@@ -21,22 +23,24 @@ HELM_VERSION := 3.14.0
 # https://github.com/kubernetes-sigs/kind/releases
 KIND_VERSION := v0.20.0
 # It is set by CI using the environment variable, use conditional assignment.
-KUBERNETES_VERSION ?= 1.27.10
+KUBERNETES_VERSION := 1.27.10
+# https://github.com/kubernetes-sigs/kustomize/releases
+KUSTOMIZE_VERSION := v5.2.1
 # https://github.com/kubernetes/minikube/releases
 MINIKUBE_VERSION := v1.32.0
 # https://github.com/protocolbuffers/protobuf/releases
-PROTOC_VERSION :=  25.2
-
-ENVTEST_KUBERNETES_VERSION := $(shell echo $(KUBERNETES_VERSION) | cut -d "." -f 1-2)
+PROTOC_VERSION := 25.2
 
 # Tools versions which are defined in go.mod
 SELF_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
-CONTROLLER_RUNTIME_VERSION := $(shell awk '/sigs\.k8s\.io\/controller-runtime/ {print substr($$2, 2)}' $(SELF_DIR)/go.mod)
-CONTROLLER_TOOLS_VERSION := $(shell awk '/sigs\.k8s\.io\/controller-tools/ {print substr($$2, 2)}' $(SELF_DIR)/go.mod)
-GINKGO_VERSION := $(shell awk '/github.com\/onsi\/ginkgo\/v2/ {print $$2}' $(SELF_DIR)/go.mod)
-PROTOC_GEN_DOC_VERSION := $(shell awk '/github.com\/pseudomuto\/protoc-gen-doc/ {print substr($$2, 2)}' $(SELF_DIR)/go.mod)
-PROTOC_GEN_GO_GRPC_VERSION := $(shell awk '/google.golang.org\/grpc\/cmd\/protoc-gen-go-grpc/ {print substr($$2, 2)}' $(SELF_DIR)/go.mod)
-PROTOC_GEN_GO_VERSION := $(shell awk '/google.golang.org\/protobuf/ {print substr($$2, 2)}' $(SELF_DIR)/go.mod)
+CONTROLLER_RUNTIME_VERSION := $(shell awk '$$1 == "sigs.k8s.io/controller-runtime" {print substr($$2, 2)}' $(SELF_DIR)/go.mod)
+GINKGO_VERSION := $(shell awk '$$1 == "github.com/onsi/ginkgo/v2" {print $$2}' $(SELF_DIR)/go.mod)
+PROTOC_GEN_DOC_VERSION := $(shell awk '$$1 == "github.com/pseudomuto/protoc-gen-doc" {print substr($$2, 2)}' $(SELF_DIR)/go.mod)
+PROTOC_GEN_GO_GRPC_VERSION := $(shell awk '$$1 == "google.golang.org/grpc/cmd/protoc-gen-go-grpc" {print substr($$2, 2)}' $(SELF_DIR)/go.mod)
+PROTOC_GEN_GO_VERSION := $(shell awk '$$1 == "google.golang.org/protobuf" {print substr($$2, 2)}' $(SELF_DIR)/go.mod)
+
+ENVTEST_BRANCH := release-$(shell echo $(CONTROLLER_RUNTIME_VERSION) | cut -d "." -f 1-2)
+ENVTEST_KUBERNETES_VERSION := $(shell echo $(KUBERNETES_VERSION) | cut -d "." -f 1-2)
 
 # CSI sidecar versions
 EXTERNAL_PROVISIONER_VERSION := 4.0.0
