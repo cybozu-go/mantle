@@ -311,7 +311,7 @@ var _ = Describe("rbd backup system", func() {
 		var backup backupv1.MantleBackup
 		err = yaml.Unmarshal(stdout, &backup)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(meta.FindStatusCondition(backup.Status.Conditions, backupv1.ConditionReadyToUse).Status).
+		Expect(meta.FindStatusCondition(backup.Status.Conditions, backupv1.BackupConditionReadyToUse).Status).
 			To(Equal(metav1.ConditionTrue))
 	})
 
