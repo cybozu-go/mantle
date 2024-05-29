@@ -160,7 +160,7 @@ var _ = Describe("MantleBackup controller", func() {
 				return err
 			}
 
-			if meta.FindStatusCondition(backup.Status.Conditions, backupv1.ConditionReadyToUse).Status != metav1.ConditionTrue {
+			if meta.FindStatusCondition(backup.Status.Conditions, backupv1.BackupConditionReadyToUse).Status != metav1.ConditionTrue {
 				return fmt.Errorf("not ready to use yet")
 			}
 
@@ -287,7 +287,7 @@ var _ = Describe("MantleBackup controller", func() {
 				return err
 			}
 
-			if meta.FindStatusCondition(backup.Status.Conditions, backupv1.ConditionReadyToUse).Status != metav1.ConditionTrue {
+			if meta.FindStatusCondition(backup.Status.Conditions, backupv1.BackupConditionReadyToUse).Status != metav1.ConditionTrue {
 				return fmt.Errorf("not ready to use yet")
 			}
 
@@ -308,7 +308,7 @@ var _ = Describe("MantleBackup controller", func() {
 				return err
 			}
 
-			condition := meta.FindStatusCondition(backup.Status.Conditions, backupv1.ConditionReadyToUse)
+			condition := meta.FindStatusCondition(backup.Status.Conditions, backupv1.BackupConditionReadyToUse)
 			if condition == nil {
 				return fmt.Errorf("condition is not set")
 			}
@@ -398,11 +398,11 @@ var _ = Describe("MantleBackup controller", func() {
 				return err
 			}
 
-			condition := meta.FindStatusCondition(backup.Status.Conditions, backupv1.ConditionReadyToUse)
+			condition := meta.FindStatusCondition(backup.Status.Conditions, backupv1.BackupConditionReadyToUse)
 			if condition == nil {
 				return fmt.Errorf("condition is not set")
 			}
-			if !(condition.Status == metav1.ConditionFalse && condition.Reason != backupv1.ReasonNone) {
+			if !(condition.Status == metav1.ConditionFalse && condition.Reason != backupv1.BackupReasonNone) {
 				return fmt.Errorf("should not be ready to use")
 			}
 
@@ -436,11 +436,11 @@ var _ = Describe("MantleBackup controller", func() {
 				return err
 			}
 
-			condition := meta.FindStatusCondition(backup.Status.Conditions, backupv1.ConditionReadyToUse)
+			condition := meta.FindStatusCondition(backup.Status.Conditions, backupv1.BackupConditionReadyToUse)
 			if condition == nil {
 				return fmt.Errorf("condition is not set")
 			}
-			if !(condition.Status == metav1.ConditionFalse && condition.Reason != backupv1.ReasonNone) {
+			if !(condition.Status == metav1.ConditionFalse && condition.Reason != backupv1.BackupReasonNone) {
 				return fmt.Errorf("should not be ready to use")
 			}
 

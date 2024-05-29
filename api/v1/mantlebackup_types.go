@@ -34,11 +34,11 @@ type MantleBackupStatus struct {
 }
 
 const (
-	ConditionReadyToUse = "ReadyToUse"
+	BackupConditionReadyToUse = "ReadyToUse"
 
 	// Reasons for ConditionReadyToUse
-	ReasonNone                 = "NoProblem"
-	ReasonFailedToCreateBackup = "FailedToCreateBackup"
+	BackupReasonNone                 = "NoProblem"
+	BackupReasonFailedToCreateBackup = "FailedToCreateBackup"
 )
 
 //+kubebuilder:object:root=true
