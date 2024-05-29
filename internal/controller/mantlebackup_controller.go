@@ -284,7 +284,7 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	if meta.FindStatusCondition(backup.Status.Conditions, backupv1.BackupConditionReadyToUse).Status == metav1.ConditionTrue {
+	if cond := meta.FindStatusCondition(backup.Status.Conditions, backupv1.BackupConditionReadyToUse); cond != nil && cond.Status == metav1.ConditionTrue {
 		return ctrl.Result{}, nil
 	}
 
