@@ -123,6 +123,12 @@ spec:
                 description: '''createdAt'' specifies the creation date and time'
                 format: date-time
                 type: string
+              pvManifest:
+                description: '''pvManifest'' saving backup target PV manifest'
+                type: string
+              pvcManifest:
+                description: '''pvcManifest'' saving backup target PVC manifests'
+                type: string
             type: object
         type: object
     served: true
