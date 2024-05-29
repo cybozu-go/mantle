@@ -1,4 +1,5 @@
 ## Append samples of your project ##
 resources:
 - backup_v1_mantlebackup.yaml
+- backup_v1_mantlerestore.yaml
 #+kubebuilder:scaffold:manifestskustomizesamples

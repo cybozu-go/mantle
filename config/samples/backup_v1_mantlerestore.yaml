@@ -1,0 +1,9 @@
+apiVersion: backup.cybozu.io/v1
+kind: MantleRestore
+metadata:
+  labels:
+    app.kubernetes.io/name: mantle
+    app.kubernetes.io/managed-by: kustomize
+  name: mantlerestore-sample
+spec:
+  # TODO(user): Add fields here
