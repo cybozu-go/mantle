@@ -189,6 +189,10 @@ func (r *MantleBackupReconciler) createRBDSnapshot(ctx context.Context, poolName
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.16.3/pkg/reconcile
+//
+// Reconcile is the main component of mantle-controller, so let's admit that Reconcile can be complex by `nolint:gocyclo`
+//
+//nolint:gocyclo
 func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var backup backupv1.MantleBackup
 	err := r.Get(ctx, req.NamespacedName, &backup)
