@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"syscall"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -25,7 +27,8 @@ import (
 // MantleBackupReconciler reconciles a MantleBackup object
 type MantleBackupReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme               *runtime.Scheme
+	managedCephClusterID string
 }
 
 type Snapshot struct {
@@ -41,10 +44,11 @@ const (
 )
 
 // NewMantleBackupReconciler returns NodeReconciler.
-func NewMantleBackupReconciler(client client.Client, scheme *runtime.Scheme) *MantleBackupReconciler {
+func NewMantleBackupReconciler(client client.Client, scheme *runtime.Scheme, managedCephClusterID string) *MantleBackupReconciler {
 	return &MantleBackupReconciler{
-		Client: client,
-		Scheme: scheme,
+		Client:               client,
+		Scheme:               scheme,
+		managedCephClusterID: managedCephClusterID,
 	}
 }
 
@@ -107,6 +111,23 @@ func (r *MantleBackupReconciler) updateStatus(ctx context.Context, backup *backu
 	return nil
 }
 
+func (r *MantleBackupReconciler) removeRBDSnapshot(poolName, imageName, snapshotName string) error {
+	command := []string{"rbd", "snap", "rm", poolName + "/" + imageName + "@" + snapshotName}
+	_, err := executeCommand(command, nil)
+	if err != nil {
+		if exitError, ok := err.(*exec.ExitError); ok {
+			waitStatus := exitError.Sys().(syscall.WaitStatus)
+			exitCode := waitStatus.ExitStatus()
+			if exitCode != int(syscall.ENOENT) {
+				logger.Error("failed to remove rbd snapshot", "poolName", poolName, "imageName", imageName, "snapshotName", snapshotName, "exitCode", exitCode, "error", err)
+				return fmt.Errorf("failed to remove rbd snapshot")
+			}
+		}
+		logger.Info("rbd snapshot has already been removed", "poolName", poolName, "imageName", imageName, "snapshotName", snapshotName, "error", err)
+	}
+	return nil
+}
+
 func (r *MantleBackupReconciler) createRBDSnapshot(ctx context.Context, poolName, imageName string, backup *backupv1.MantleBackup) (ctrl.Result, error) {
 	command := []string{"rbd", "snap", "create", poolName + "/" + imageName + "@" + backup.Name}
 	_, err := executeCommand(command, nil)
@@ -157,6 +178,7 @@ func (r *MantleBackupReconciler) createRBDSnapshot(ctx context.Context, poolName
 //+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
 //+kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch
 //+kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get;list;watch
+//+kubebuilder:rbac:groups=storage.k8s.io,resources=storageclasses,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -167,6 +189,10 @@ func (r *MantleBackupReconciler) createRBDSnapshot(ctx context.Context, poolName
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.16.3/pkg/reconcile
+//
+// Reconcile is the main component of mantle-controller, so let's admit that Reconcile can be complex by `nolint:gocyclo`
+//
+//nolint:gocyclo
 func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var backup backupv1.MantleBackup
 	err := r.Get(ctx, req.NamespacedName, &backup)
@@ -204,6 +230,39 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			}
 		}
 		return ctrl.Result{}, err
+	}
+
+	storageClassName := pvc.Spec.StorageClassName
+	if storageClassName == nil {
+		logger.Info("not managed storage class", "pvc.Spec.StorageClassName", storageClassName)
+		return ctrl.Result{}, nil
+	}
+	var storageClass storagev1.StorageClass
+	err = r.Get(ctx, types.NamespacedName{Namespace: req.NamespacedName.Name, Name: *storageClassName}, &storageClass)
+	if err != nil {
+		logger.Error("failed to get SC", "namespace", req.NamespacedName.Namespace, "name", storageClassName, "error", err)
+		err2 := r.updateStatus(ctx, &backup, metav1.Condition{Type: backupv1.BackupConditionReadyToUse, Status: metav1.ConditionFalse, Reason: backupv1.BackupReasonFailedToCreateBackup})
+		if err2 != nil {
+			return ctrl.Result{}, err2
+		}
+		return ctrl.Result{}, err
+	}
+
+	// Check if the MantleBackup resource being reconciled is managed by the CephCluster we are in charge of.
+	if !strings.HasSuffix(storageClass.Provisioner, ".rbd.csi.ceph.com") {
+		logger.Info("SC is not managed by RBD", "namespace", req.NamespacedName.Namespace,
+			"storageClassName", *storageClassName, "provisioner", storageClass.Provisioner)
+		return ctrl.Result{}, nil
+	}
+	clusterID, ok := storageClass.Parameters["clusterID"]
+	if !ok {
+		logger.Info("clusterID not found", "namespace", req.NamespacedName.Namespace, "storageClassName", *storageClassName)
+		return ctrl.Result{}, nil
+	}
+	if clusterID != r.managedCephClusterID {
+		logger.Info("clusterID not matched", "namespace", req.NamespacedName.Namespace,
+			"storageClassName", *storageClassName, "clusterID", clusterID, "managedCephClusterID", r.managedCephClusterID)
+		return ctrl.Result{}, nil
 	}
 
 	if pvc.Status.Phase != corev1.ClaimBound {
@@ -245,18 +304,9 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	if !backup.ObjectMeta.DeletionTimestamp.IsZero() {
 		if controllerutil.ContainsFinalizer(&backup, MantleBackupFinalizerName) {
-			command := []string{"rbd", "snap", "rm", poolName + "/" + imageName + "@" + backup.Name}
-			_, err = executeCommand(command, nil)
+			err := r.removeRBDSnapshot(poolName, imageName, backup.Name)
 			if err != nil {
-				if exitError, ok := err.(*exec.ExitError); ok {
-					waitStatus := exitError.Sys().(syscall.WaitStatus)
-					exitCode := waitStatus.ExitStatus()
-					if exitCode != int(syscall.ENOENT) {
-						logger.Error("failed to remove rbd snapshot", "poolName", poolName, "imageName", imageName, "snapshotName", backup.Name, "exitCode", exitCode, "error", err)
-						return ctrl.Result{Requeue: true}, nil
-					}
-				}
-				logger.Info("rbd snapshot has already been removed", "poolName", poolName, "imageName", imageName, "snapshotName", backup.Name, "error", err)
+				return ctrl.Result{}, err
 			}
 
 			controllerutil.RemoveFinalizer(&backup, MantleBackupFinalizerName)
@@ -284,7 +334,7 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	if meta.FindStatusCondition(backup.Status.Conditions, backupv1.BackupConditionReadyToUse).Status == metav1.ConditionTrue {
+	if cond := meta.FindStatusCondition(backup.Status.Conditions, backupv1.BackupConditionReadyToUse); cond != nil && cond.Status == metav1.ConditionTrue {
 		return ctrl.Result{}, nil
 	}
 

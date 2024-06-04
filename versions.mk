@@ -30,6 +30,8 @@ KUSTOMIZE_VERSION := v5.2.1
 MINIKUBE_VERSION := v1.32.0
 # https://github.com/protocolbuffers/protobuf/releases
 PROTOC_VERSION := 25.2
+# https://github.com/rook/rook/releases
+ROOK_CHART_VERSION := v1.13.8
 
 # Tools versions which are defined in go.mod
 SELF_DIR := $(dir $(lastword $(MAKEFILE_LIST)))

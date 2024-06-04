@@ -1,25 +1,70 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: rook-ceph-tools
-  namespace: rook-ceph # namespace:cluster
+  name: {{ include "mantle.fullname" . }}-controller
+  namespace: {{ .Release.Namespace }}
   labels:
-    app: rook-ceph-tools
+    {{- include "mantle.labels" . | nindent 4 }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      app: rook-ceph-tools
+      {{- include "mantle.selectorLabels" . | nindent 6 }}
   template:
     metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       labels:
-        app: rook-ceph-tools
+        {{- include "mantle.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
-      dnsPolicy: ClusterFirstWithHostNet
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "mantle.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
       containers:
-        - name: rook-ceph-tools
-          image: quay.io/ceph/ceph:v18.2.1
+        - name: {{ .Chart.Name }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - "ALL"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - mountPath: /etc/ceph
+              name: ceph-config
           command:
+            - /manager
+          args:
+            - --leader-elect
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+        - command:
             - /bin/bash
             - -c
             - |
@@ -85,28 +130,29 @@ spec:
 
               # continuously update the mon endpoints if they fail over
               watch_endpoints
+          env:
+          - name: ROOK_CEPH_USERNAME
+            valueFrom:
+              secretKeyRef:
+                key: ceph-username
+                name: rook-ceph-mon
+          image: quay.io/cybozu/ceph:18.2.1.1
           imagePullPolicy: IfNotPresent
-          tty: true
+          name: toolbox
           securityContext:
+            runAsGroup: 2016
             runAsNonRoot: true
             runAsUser: 2016
-            runAsGroup: 2016
-            capabilities:
-              drop: ["ALL"]
-          env:
-            - name: ROOK_CEPH_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: rook-ceph-mon
-                  key: ceph-username
+          tty: true
           volumeMounts:
-            - mountPath: /etc/ceph
-              name: ceph-config
-            - name: mon-endpoint-volume
-              mountPath: /etc/rook
-            - name: ceph-admin-secret
-              mountPath: /var/lib/rook-ceph-mon
-              readOnly: true
+          - mountPath: /etc/ceph
+            name: ceph-config
+          - mountPath: /etc/rook
+            name: mon-endpoint-volume
+          - name: ceph-admin-secret
+            mountPath: /var/lib/rook-ceph-mon
+            readOnly: true
+      dnsPolicy: ClusterFirstWithHostNet
       volumes:
         - name: ceph-admin-secret
           secret:
@@ -115,16 +161,28 @@ spec:
             items:
               - key: ceph-secret
                 path: secret.keyring
-        - name: mon-endpoint-volume
-          configMap:
-            name: rook-ceph-mon-endpoints
+        - configMap:
             items:
-              - key: data
-                path: mon-endpoints
-        - name: ceph-config
-          emptyDir: {}
+            - key: data
+              path: mon-endpoints
+            name: rook-ceph-mon-endpoints
+          name: mon-endpoint-volume
+        - emptyDir: {}
+          name: ceph-config
+      terminationGracePeriodSeconds: 10
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
       tolerations:
-        - key: "node.kubernetes.io/unreachable"
-          operator: "Exists"
-          effect: "NoExecute"
+        - effect: NoExecute
+          key: node.kubernetes.io/unreachable
+          operator: Exists
           tolerationSeconds: 5
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -12,6 +12,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -54,6 +55,10 @@ func TestControllers(t *testing.T) {
 	RunSpecs(t, "Controller Suite")
 }
 
+var dummyStorageClassName = "dummy-sc"
+var dummyStorageClassClusterID = "rook-ceph"
+var dummyStorageClassProvisioner = "rook-ceph.rbd.csi.ceph.com"
+
 var _ = BeforeSuite(func() {
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
 
@@ -86,6 +91,18 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
 
+	sc := storagev1.StorageClass{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: dummyStorageClassName,
+		},
+		Provisioner: dummyStorageClassProvisioner,
+		Parameters: map[string]string{
+			"clusterID": dummyStorageClassClusterID,
+		},
+	}
+	ctx := context.Background()
+	err = k8sClient.Create(ctx, &sc)
+	Expect(err).NotTo(HaveOccurred())
 })
 
 var _ = AfterSuite(func() {
