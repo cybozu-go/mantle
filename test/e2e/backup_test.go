@@ -6,327 +6,257 @@ import (
 	"strings"
 
 	backupv1 "github.com/cybozu-go/mantle/api/v1"
-	"github.com/cybozu-go/mantle/internal/controller"
+	"github.com/cybozu-go/mantle/test/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 )
 
 const (
-	pvcName           = "rbd-pvc"
-	pvcName2          = "rbd-pvc-2"
-	poolName          = "replicapool"
-	mantleBackupName  = "mantlebackup-test"
-	mantleBackupName2 = "mantlebackup-test-2"
-	mantleBackupName3 = "mantlebackup-test-3"
-	namespace         = "rook-ceph"
-	namespace2        = "rook-ceph2"
-	storageClassName  = "rook-ceph-block"
-	storageClassName2 = "rook-ceph-block2"
+	kubectlIsNotFoundMessage = "Error from server (NotFound):"
 )
 
-func testBackup() {
-	BeforeEach(func() {
-		By("Creating common resources")
-		Eventually(func() error {
-			if err := applyRBDPoolAndSC(namespace, poolName, storageClassName); err != nil {
-				return err
-			}
-			if err := applyRBDPoolAndSC(namespace2, poolName, storageClassName2); err != nil {
-				return err
-			}
-			return nil
-		}).Should(Succeed())
+type backupTest struct {
+	poolName          string
+	storageClassName1 string
+	storageClassName2 string
+	tenantNamespace1  string
+	tenantNamespace2  string
 
-		for _, name := range []string{pvcName, pvcName2} {
+	pvcName1          string
+	pvcName2          string
+	mantleBackupName1 string
+	mantleBackupName2 string
+	mantleBackupName3 string
+}
+
+func backupTestSuite() {
+	test := &backupTest{
+		poolName:          util.GetUniqueName("pool-"),
+		storageClassName1: util.GetUniqueName("sc-"),
+		storageClassName2: util.GetUniqueName("sc-"),
+		tenantNamespace1:  util.GetUniqueName("ns-"),
+		tenantNamespace2:  util.GetUniqueName("ns-"),
+
+		pvcName1:          "rbd-pvc1",
+		pvcName2:          "rbd-pvc2",
+		mantleBackupName1: "mantlebackup-test1",
+		mantleBackupName2: "mantlebackup-test2",
+		mantleBackupName3: "mantlebackup-test3",
+	}
+
+	Describe("setup environment", test.setupEnv)
+	Describe("test case 1", test.testCase1)
+	Describe("teardown environment", test.teardownEnv)
+}
+
+func (test *backupTest) setupEnv() {
+	It("creating common resources", func() {
+		for _, ns := range []string{test.tenantNamespace1, test.tenantNamespace2} {
+			err := createNamespace(ns)
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		err := applyRBDPoolAndSCTemplate(cephCluster1Namespace, test.poolName, test.storageClassName1)
+		Expect(err).NotTo(HaveOccurred())
+
+		err = applyRBDPoolAndSCTemplate(cephCluster2Namespace, test.poolName, test.storageClassName2)
+		Expect(err).NotTo(HaveOccurred())
+
+		for _, name := range []string{test.pvcName1, test.pvcName2} {
 			By(fmt.Sprintf("Creating PVC, PV and RBD image (%s)", name))
+			err = applyPVCTemplate(test.tenantNamespace1, name, test.storageClassName1)
+			Expect(err).NotTo(HaveOccurred())
+
+			pvName, err := getPVFromPVC(test.tenantNamespace1, name)
+			Expect(err).NotTo(HaveOccurred())
+
+			imageName, err := getImageNameFromPVName(pvName)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Create a new RBD image in cephNamespace2 with the same name as imageName.
 			Eventually(func() error {
-				pvName, err := applyPVCAndGetPVName(namespace, name)
-				if err != nil {
-					return err
-				}
-
-				imageName, err := getImageNameFromPVName(pvName)
-				if err != nil {
-					return err
-				}
-
-				// Create a new RBD image in namespace2 with the same name as imageName.
-				return createRBDImage(namespace2, poolName, imageName, 100)
+				return createRBDImage(cephCluster2Namespace, test.poolName, imageName, 100)
 			}).Should(Succeed())
 		}
-
-		By("Waiting for mantle-controller to get ready")
-		Eventually(func() error {
-			return checkDeploymentReady(namespace, "mantle-controller")
-		}).Should(Succeed())
 	})
 
-	AfterEach(func() {
-		By("Deleting MantleBackups")
-		for _, mantleBackup := range []string{mantleBackupName, mantleBackupName2, mantleBackupName3} {
-			_, _, _ = kubectl("delete", "-n", namespace, "mantlebackup", mantleBackup)
+	It("waiting for mantle-controller to get ready", func() {
+		Eventually(func() error {
+			return checkDeploymentReady(cephCluster1Namespace, "mantle-controller")
+		}).Should(Succeed())
+	})
+}
+
+func (test *backupTest) teardownEnv() {
+	It("deleting MantleBackups", func() {
+		for _, mantleBackup := range []string{test.mantleBackupName1, test.mantleBackupName2, test.mantleBackupName3} {
+			_, _, _ = kubectl("delete", "-n", test.tenantNamespace1, "mantlebackup", mantleBackup)
+		}
+	})
+
+	It("deleting PVCs", func() {
+		for _, pvc := range []string{test.pvcName1, test.pvcName2} {
+			_, _, _ = kubectl("delete", "-n", test.tenantNamespace1, "pvc", pvc)
 		}
 
-		By("Deleting PVCs")
-		for _, pvc := range []string{pvcName, pvcName2} {
-			_, _, _ = kubectl("delete", "-n", namespace, "pvc", pvc)
-		}
-
-		By("Deleting RBD images in " + namespace2)
-		stdout, _, err := kubectl("exec", "-n", namespace2, "deploy/rook-ceph-tools", "--",
-			"rbd", "ls", poolName, "--format=json")
+		By("Deleting RBD images in " + cephCluster2Namespace)
+		stdout, _, err := kubectl("exec", "-n", cephCluster2Namespace, "deploy/rook-ceph-tools", "--",
+			"rbd", "ls", test.poolName, "--format=json")
 		if err == nil {
 			imageNames := []string{}
 			if err := json.Unmarshal(stdout, &imageNames); err == nil {
 				for _, imageName := range imageNames {
-					_, _, _ = kubectl("exec", "-n", namespace2, "deploy/rook-ceph-tools", "--",
-						"rbd", "rm", poolName+"/"+imageName)
+					_, _, _ = kubectl("exec", "-n", cephCluster2Namespace, "deploy/rook-ceph-tools", "--",
+						"rbd", "rm", test.poolName+"/"+imageName)
 				}
 			}
 		}
-
-		By("Deleting common resources")
-		_, _, _ = kubectl("delete", "sc", storageClassName, "--wait=false")
-		_, _, _ = kubectl("delete", "sc", storageClassName2, "--wait=false")
-		_, _, _ = kubectl("delete", "-n", namespace, "cephblockpool", poolName, "--wait=false")
-		_, _, _ = kubectl("delete", "-n", namespace2, "cephblockpool", poolName, "--wait=false")
 	})
 
-	Describe("rbd backup system", func() {
-		var firstImageName string
+	It("deleting common resources", func() {
+		_, _, _ = kubectl("delete", "sc", test.storageClassName1, "--wait=false")
+		_, _, _ = kubectl("delete", "sc", test.storageClassName2, "--wait=false")
+		_, _, _ = kubectl("delete", "-n", cephCluster1Namespace, "cephblockpool", test.poolName, "--wait=false")
+		_, _, _ = kubectl("delete", "-n", cephCluster2Namespace, "cephblockpool", test.poolName, "--wait=false")
+	})
+}
 
-		testMantleBackupResourceCreation := func(mantleBackupName string, saveImageName bool) {
-			By("Creating MantleBackup")
-			manifest := fmt.Sprintf(testMantleBackupTemplate, mantleBackupName, mantleBackupName, namespace, pvcName)
-			_, _, err := kubectlWithInput([]byte(manifest), "apply", "-f", "-")
-			Expect(err).NotTo(HaveOccurred())
+func (test *backupTest) testCase1() {
+	var firstImageName string
 
-			By("Waiting for RBD snapshot to be created")
-			imageName := ""
-			Eventually(func() error {
-				stdout, stderr, err := kubectl("-n", namespace, "get", "pvc", pvcName, "-o", "json")
-				if err != nil {
-					return fmt.Errorf("kubectl get pvc failed. stderr: %s, err: %w", string(stderr), err)
-				}
-				var pvc corev1.PersistentVolumeClaim
-				err = yaml.Unmarshal(stdout, &pvc)
-				if err != nil {
-					return err
-				}
-				pvName := pvc.Spec.VolumeName
+	createMantleBackupAndGetImage := func(mantleBackupName string) string {
+		By("Creating MantleBackup")
+		err := applyMantleBackupTemplate(test.tenantNamespace1, test.pvcName1, mantleBackupName)
+		Expect(err).NotTo(HaveOccurred())
 
-				imageName, err = getImageNameFromPVName(pvName)
-				if err != nil {
-					return err
-				}
-				if saveImageName {
-					firstImageName = imageName
-				}
+		pvName, err := getPVFromPVC(test.tenantNamespace1, test.pvcName1)
+		Expect(err).NotTo(HaveOccurred())
 
-				stdout, stderr, err = kubectl(
-					"-n", namespace, "exec", "deploy/rook-ceph-tools", "--",
-					"rbd", "snap", "ls", poolName+"/"+imageName, "--format=json")
-				if err != nil {
-					return fmt.Errorf("rbd snap ls failed. stderr: %s, err: %w", string(stderr), err)
-				}
-				var snapshots []controller.Snapshot
-				err = yaml.Unmarshal(stdout, &snapshots)
-				if err != nil {
-					return err
-				}
-				existSnapshot := false
-				for _, s := range snapshots {
-					if s.Name == mantleBackupName {
-						existSnapshot = true
-						break
-					}
-				}
-				if !existSnapshot {
-					return fmt.Errorf("snapshot not exists. snapshotName: %s", mantleBackupName)
-				}
+		By("Waiting for RBD snapshot to be created")
+		imageName := ""
+		Eventually(func() error {
+			imageName, err = getImageNameFromPVName(pvName)
+			if err != nil {
+				return err
+			}
 
-				return nil
-			}).Should(Succeed())
+			return checkSnapshotExist(cephCluster1Namespace, test.poolName, imageName, mantleBackupName)
+		}).Should(Succeed())
 
-			By("Checking that the mantle-controller deployed for a certain Rook/Ceph cluster (i.e., " +
-				namespace2 + ") doesn't create a snapshot for a MantleBackup for a different Rook/Ceph cluster (i.e., " +
-				namespace + ")")
-			Consistently(func() error {
-				stdout, stderr, err := kubectl(
-					"-n", namespace2, "exec", "deploy/rook-ceph-tools", "--",
-					"rbd", "snap", "ls", poolName+"/"+imageName, "--format=json")
-				if err != nil {
-					return fmt.Errorf("rbd snap ls failed. stderr: %s, err: %w", string(stderr), err)
-				}
-				var snapshots []controller.Snapshot
-				err = yaml.Unmarshal(stdout, &snapshots)
-				if err != nil {
-					return err
-				}
-				existSnapshot := false
-				for _, s := range snapshots {
-					if s.Name == mantleBackupName {
-						existSnapshot = true
-						break
-					}
-				}
-				if existSnapshot {
-					return fmt.Errorf("a wrong snapshot exists. snapshotName: %s", mantleBackupName)
-				}
-				return nil
-			}).Should(Succeed())
-		}
+		By("Checking that the mantle-controller deployed for a certain Rook/Ceph cluster (i.e., " +
+			cephCluster1Namespace + ") doesn't create a snapshot for a MantleBackup for a different Rook/Ceph cluster (i.e., " +
+			cephCluster2Namespace + ")")
+		Consistently(func() error {
+			err := checkSnapshotExist(cephCluster2Namespace, test.poolName, imageName, mantleBackupName)
+			if err == nil {
+				return fmt.Errorf("a wrong snapshot exists. snapshotName: %s", mantleBackupName)
+			}
+			return nil
+		}).Should(Succeed())
 
-		It("should create MantleBackup resource", func() {
-			testMantleBackupResourceCreation(mantleBackupName, true)
-		})
+		return imageName
+	}
 
-		It("should create multiple MantleBackup resources for the same PVC", func() {
-			testMantleBackupResourceCreation(mantleBackupName2, false)
-		})
+	It("should create MantleBackup resource", func() {
+		firstImageName = createMantleBackupAndGetImage(test.mantleBackupName1)
+	})
 
-		It("should create MantleBackups resources for different PVCs", func() {
-			By("Creating a third MantleBackup for the other PVC")
-			manifest := fmt.Sprintf(testMantleBackupTemplate, mantleBackupName3, mantleBackupName3, namespace, pvcName2)
-			_, _, err := kubectlWithInput([]byte(manifest), "apply", "-f", "-")
-			Expect(err).NotTo(HaveOccurred())
+	It("should create multiple MantleBackup resources for the same PVC", func() {
+		createMantleBackupAndGetImage(test.mantleBackupName2)
+	})
 
-			By("Waiting for RBD snapshot to be created")
-			Eventually(func() error {
-				stdout, stderr, err := kubectl("-n", namespace, "get", "pvc", pvcName2, "-o", "json")
-				if err != nil {
-					return fmt.Errorf("kubectl get pvc failed. stderr: %s, err: %w", string(stderr), err)
+	It("should create MantleBackups resources for different PVCs", func() {
+		By("Creating a third MantleBackup for the other PVC")
+		err := applyMantleBackupTemplate(test.tenantNamespace1, test.pvcName2, test.mantleBackupName3)
+		Expect(err).NotTo(HaveOccurred())
+
+		pvName, err := getPVFromPVC(test.tenantNamespace1, test.pvcName2)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("Waiting for RBD snapshot to be created")
+		Eventually(func() error {
+			imageName, err := getImageNameFromPVName(pvName)
+			if err != nil {
+				return err
+			}
+
+			return checkSnapshotExist(cephCluster1Namespace, test.poolName, imageName, test.mantleBackupName3)
+		}).Should(Succeed())
+	})
+
+	It("should not delete MantleBackup resource when delete backup target PVC", func() {
+		By("Deleting backup target PVC")
+		_, _, err := kubectl("-n", test.tenantNamespace1, "delete", "pvc", test.pvcName2)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("Checking backup target PVC deletion")
+		Eventually(func() error {
+			stdout, stderr, err := kubectl("-n", test.tenantNamespace1, "get", "pvc", test.pvcName2)
+			if err != nil {
+				if strings.Contains(string(stderr), kubectlIsNotFoundMessage) {
+					return nil
 				}
-				var pvc corev1.PersistentVolumeClaim
-				err = yaml.Unmarshal(stdout, &pvc)
-				if err != nil {
-					return err
-				}
-				pvName := pvc.Spec.VolumeName
+				return fmt.Errorf("get pvc %s failed. stderr: %s, err: %w", test.pvcName2, string(stderr), err)
+			}
+			return fmt.Errorf("PVC %s still exists. stdout: %s", test.pvcName2, stdout)
+		}).Should(Succeed())
 
-				imageName, err := getImageNameFromPVName(pvName)
-				if err != nil {
-					return err
-				}
+		By("Checking that the status.conditions of the MantleBackup resource remain \"Bound\"")
+		stdout, _, err := kubectl("-n", test.tenantNamespace1, "get", "mantlebackup", test.mantleBackupName3, "-o", "json")
+		Expect(err).NotTo(HaveOccurred())
+		var backup backupv1.MantleBackup
+		err = yaml.Unmarshal(stdout, &backup)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(meta.FindStatusCondition(backup.Status.Conditions, backupv1.BackupConditionReadyToUse).Status).
+			To(Equal(metav1.ConditionTrue))
+	})
 
-				stdout, stderr, err = kubectl(
-					"-n", namespace, "exec", "deploy/rook-ceph-tools", "--",
-					"rbd", "snap", "ls", poolName+"/"+imageName, "--format=json")
-				if err != nil {
-					return fmt.Errorf("rbd snap ls failed. stderr: %s, err: %w", string(stderr), err)
-				}
-				var snapshots []controller.Snapshot
-				err = yaml.Unmarshal(stdout, &snapshots)
-				if err != nil {
-					return err
-				}
-				existSnapshot := false
-				for _, s := range snapshots {
-					if s.Name == mantleBackupName3 {
-						existSnapshot = true
-						break
-					}
-				}
-				if !existSnapshot {
-					return fmt.Errorf("snapshot not exists. snapshotName: %s", mantleBackupName3)
-				}
+	It("should delete MantleBackup resource", func() {
+		By("Delete MantleBackup")
+		_, _, err := kubectl("-n", test.tenantNamespace1, "delete", "mantlebackup", test.mantleBackupName1, "--wait=false")
+		Expect(err).NotTo(HaveOccurred())
 
-				return nil
-			}).Should(Succeed())
-		})
+		By("Waiting for RBD snapshot to be deleted")
+		Eventually(func() error {
+			err := checkSnapshotExist(cephCluster1Namespace, test.poolName, firstImageName, test.mantleBackupName1)
+			if err == nil {
+				return fmt.Errorf("snapshot exists. snapshotName: %s", test.mantleBackupName1)
+			}
 
-		It("should not delete MantleBackup resource when delete backup target PVC", func() {
-			By("Deleting backup target PVC")
-			_, _, err := kubectl("-n", namespace, "delete", "pvc", pvcName2)
-			Expect(err).NotTo(HaveOccurred())
+			return nil
+		}).Should(Succeed())
 
-			By("Checking backup target PVC deletion")
-			Eventually(func() error {
-				stdout, stderr, err := kubectl("-n", namespace, "get", "pvc", pvcName2)
-				if err != nil {
-					if strings.Contains(string(stderr), kubectlIsNotFoundMessage) {
-						return nil
-					}
-					return fmt.Errorf("get pvc %s failed. stderr: %s, err: %w", pvcName2, string(stderr), err)
+		By("Checking MantleBackup resource deletion")
+		Eventually(func() error {
+			stdout, stderr, err := kubectl("-n", test.tenantNamespace1, "get", "mantlebackup", test.mantleBackupName1)
+			if err != nil {
+				if strings.Contains(string(stderr), kubectlIsNotFoundMessage) {
+					return nil
 				}
-				return fmt.Errorf("PVC %s still exists. stdout: %s", pvcName2, stdout)
-			}).Should(Succeed())
+				return fmt.Errorf("get mantlebackup %s failed. stderr: %s, err: %w", test.mantleBackupName1, string(stderr), err)
+			}
+			return fmt.Errorf("MantleBackup resource %s still exists. stdout: %s", test.mantleBackupName1, stdout)
+		}).Should(Succeed())
+	})
 
-			By("Checking that the status.conditions of the MantleBackup resource remain \"Bound\"")
-			stdout, _, err := kubectl("-n", namespace, "get", "mantlebackup", mantleBackupName3, "-o", "json")
-			Expect(err).NotTo(HaveOccurred())
-			var backup backupv1.MantleBackup
-			err = yaml.Unmarshal(stdout, &backup)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(meta.FindStatusCondition(backup.Status.Conditions, backupv1.BackupConditionReadyToUse).Status).
-				To(Equal(metav1.ConditionTrue))
-		})
+	It("should delete MantleBackup resource when backup target PVC is missing", func() {
+		By("Deleting MantleBackup resource")
+		_, _, err := kubectl("-n", test.tenantNamespace1, "delete", "mantlebackup", test.mantleBackupName3)
+		Expect(err).NotTo(HaveOccurred())
 
-		It("should delete MantleBackup resource", func() {
-			By("Delete MantleBackup")
-			_, _, err := kubectl("-n", namespace, "delete", "mantlebackup", mantleBackupName, "--wait=false")
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Waiting for RBD snapshot to be deleted")
-			Eventually(func() error {
-				stdout, stderr, err := kubectl(
-					"-n", namespace, "exec", "deploy/rook-ceph-tools", "--",
-					"rbd", "snap", "ls", poolName+"/"+firstImageName, "--format=json")
-				if err != nil {
-					return fmt.Errorf("rbd snap ls failed. stderr: %s, err: %w", string(stderr), err)
+		By("Checking MantleBackup resource deletion")
+		Eventually(func() error {
+			stdout, stderr, err := kubectl("-n", test.tenantNamespace1, "get", "mantlebackup", test.mantleBackupName3)
+			if err != nil {
+				if strings.Contains(string(stderr), kubectlIsNotFoundMessage) {
+					return nil
 				}
-				var snapshots []controller.Snapshot
-				err = yaml.Unmarshal(stdout, &snapshots)
-				if err != nil {
-					return err
-				}
-				existSnapshot := false
-				for _, s := range snapshots {
-					if s.Name == mantleBackupName {
-						existSnapshot = true
-						break
-					}
-				}
-				if existSnapshot {
-					return fmt.Errorf("snapshot exists. snapshotName: %s", mantleBackupName)
-				}
-
-				return nil
-			}).Should(Succeed())
-
-			By("Checking MantleBackup resource deletion")
-			Eventually(func() error {
-				stdout, stderr, err := kubectl("-n", namespace, "get", "mantlebackup", mantleBackupName)
-				if err != nil {
-					if strings.Contains(string(stderr), kubectlIsNotFoundMessage) {
-						return nil
-					}
-					return fmt.Errorf("get mantlebackup %s failed. stderr: %s, err: %w", mantleBackupName, string(stderr), err)
-				}
-				return fmt.Errorf("MantleBackup resource %s still exists. stdout: %s", mantleBackupName, stdout)
-			}).Should(Succeed())
-		})
-
-		It("should delete MantleBackup resource when backup target PVC is missing", func() {
-			By("Deleting MantleBackup resource")
-			_, _, err := kubectl("-n", namespace, "delete", "mantlebackup", mantleBackupName3)
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Checking MantleBackup resource deletion")
-			Eventually(func() error {
-				stdout, stderr, err := kubectl("-n", namespace, "get", "mantlebackup", mantleBackupName3)
-				if err != nil {
-					if strings.Contains(string(stderr), kubectlIsNotFoundMessage) {
-						return nil
-					}
-					return fmt.Errorf("get mantlebackup %s failed. stderr: %s, err: %w", mantleBackupName3, string(stderr), err)
-				}
-				return fmt.Errorf("MantleBackup resource %s still exists. stdout: %s", mantleBackupName3, stdout)
-			}).Should(Succeed())
-		})
+				return fmt.Errorf("get mantlebackup %s failed. stderr: %s, err: %w", test.mantleBackupName3, string(stderr), err)
+			}
+			return fmt.Errorf("MantleBackup resource %s still exists. stdout: %s", test.mantleBackupName3, stdout)
+		}).Should(Succeed())
 	})
 }

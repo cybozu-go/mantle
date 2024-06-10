@@ -10,8 +10,8 @@ MINIKUBE := $(BINDIR)/minikube
 HELM := $(BINDIR)/helm
 KUBECTL := $(BINDIR)/kubectl-$(KUBERNETES_VERSION)
 MINIKUBE_HOME = $(BINDIR)
-NS := rook-ceph
-NS2 := rook-ceph2
+CEPH_CLUSTER1_NAMESPACE := rook-ceph
+CEPH_CLUSTER2_NAMESPACE := rook-ceph2
 NODE_NAME := minikube-worker
 SUDO := sudo
 DD := dd
@@ -110,9 +110,10 @@ launch-minikube:
 
 .PHONY: delete-minikube
 delete-minikube:
+	$(SUDO) -E $(MINIKUBE) stop || true
 	$(SUDO) -E $(MINIKUBE) delete || true
 	# Is it really OK to remove these files?
-	rm -rf /tmp/juju-*
+	$(SUDO) rm -rf /tmp/juju-*
 
 .PHONY: create-loop-dev
 create-loop-dev: | $(TMPDIR)
@@ -142,7 +143,7 @@ wait-deploy-ready: DEPLOY=
 wait-deploy-ready:
 	is_ok="false"; \
 	for ((i=0;i<$(TIMEOUT_SECS);i+=$(POLLING_INTERVAL))); do \
-		available_replicas=$$($(KUBECTL) -n $(NS) get deploy $(DEPLOY) -o json | jq -r ".status.availableReplicas"); \
+		available_replicas=$$($(KUBECTL) -n $(CEPH_CLUSTER1_NAMESPACE) get deploy $(DEPLOY) -o json | jq -r ".status.availableReplicas"); \
 		if [ "$$available_replicas" = 1 ]; then \
 			is_ok="true"; \
 			break; \
@@ -158,7 +159,7 @@ wait-deploy-ready:
 .PHONY: launch-rook-ceph
 launch-rook-ceph: create-loop-dev
 	$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
-		--create-namespace --namespace $(NS) -f testdata/values.yaml --wait \
+		--create-namespace --namespace $(CEPH_CLUSTER1_NAMESPACE) -f testdata/values.yaml --wait \
 		rook-ceph rook-ceph
 	sed \
 		-e "s%{LOOP_DEV}%$(loop-dev)%" \
@@ -168,24 +169,24 @@ launch-rook-ceph: create-loop-dev
 		> testdata/persistentvolumes.yaml
 	$(KUBECTL) apply -f testdata/persistentvolumes.yaml
 	$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
-		--namespace $(NS) -f testdata/values-cluster.yaml --wait rook-ceph-cluster rook-ceph-cluster
+		--namespace $(CEPH_CLUSTER1_NAMESPACE) -f testdata/values-cluster.yaml --wait rook-ceph-cluster rook-ceph-cluster
 	$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
-		--create-namespace --namespace $(NS2) -f testdata/values-cluster.yaml \
+		--create-namespace --namespace $(CEPH_CLUSTER2_NAMESPACE) -f testdata/values-cluster.yaml \
 		--set cephClusterSpec.dataDirHostPath=/var/lib/rook2 \
 		--wait rook-ceph-cluster2 rook-ceph-cluster
-	$(MAKE) wait-deploy-ready NS=$(NS) DEPLOY=rook-ceph-operator
-	$(MAKE) wait-deploy-ready NS=$(NS) DEPLOY=rook-ceph-osd-0
-	$(MAKE) wait-deploy-ready NS=$(NS2) DEPLOY=rook-ceph-osd-0
+	$(MAKE) wait-deploy-ready NS=$(CEPH_CLUSTER1_NAMESPACE) DEPLOY=rook-ceph-operator
+	$(MAKE) wait-deploy-ready NS=$(CEPH_CLUSTER1_NAMESPACE) DEPLOY=rook-ceph-osd-0
+	$(MAKE) wait-deploy-ready NS=$(CEPH_CLUSTER2_NAMESPACE) DEPLOY=rook-ceph-osd-0
 
 .PHONY: delete-rook-ceph
 delete-rook-ceph:
-	$(HELM) uninstall --namespace $(NS2) rook-ceph-cluster2 --wait || :
-	$(HELM) uninstall --namespace $(NS) rook-ceph-cluster --wait || :
+	$(HELM) uninstall --namespace $(CEPH_CLUSTER2_NAMESPACE) rook-ceph-cluster2 --wait || :
+	$(HELM) uninstall --namespace $(CEPH_CLUSTER1_NAMESPACE) rook-ceph-cluster --wait || :
 	$(SUDO) rm -rf /var/lib/rook
 	$(SUDO) rm -rf /var/lib/rook2
 	ls /dev/mapper/ceph-* | xargs -I% -- $(SUDO) dmsetup remove %
 	$(SUDO) rm -rf /dev/mapper/ceph-*
-	$(HELM) uninstall --namespace $(NS) rook-ceph --wait || :
+	$(HELM) uninstall --namespace $(CEPH_CLUSTER1_NAMESPACE) rook-ceph --wait || :
 	$(KUBECTL) delete -f testdata/persistentvolumes.yaml || :
 	$(MAKE) delete-loop-dev
 
@@ -197,13 +198,13 @@ setup-components:
 	docker save controller:latest | $(SUDO) ctr -n k8s.io images import -
 
 	$(HELM) upgrade --install mantle-cluster-wide ../../charts/mantle-cluster-wide/ --wait
-	$(HELM) upgrade --install --namespace=$(NS) mantle ../../charts/mantle/ --wait
-	$(HELM) upgrade --install --namespace=$(NS2) mantle2 ../../charts/mantle/ --wait
+	$(HELM) upgrade --install --namespace=$(CEPH_CLUSTER1_NAMESPACE) mantle ../../charts/mantle/ --wait
+	$(HELM) upgrade --install --namespace=$(CEPH_CLUSTER2_NAMESPACE) mantle2 ../../charts/mantle/ --wait
 
 .PHONY: delete-components
 delete-components:
-	$(HELM) uninstall --namespace=$(NS2) mantle2 --wait || true
-	$(HELM) uninstall --namespace=$(NS) mantle --wait || true
+	$(HELM) uninstall --namespace=$(CEPH_CLUSTER2_NAMESPACE) mantle2 --wait || true
+	$(HELM) uninstall --namespace=$(CEPH_CLUSTER1_NAMESPACE) mantle --wait || true
 	$(HELM) uninstall mantle-cluster-wide --wait || true
 
 .PHONY: do_test

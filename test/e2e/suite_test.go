@@ -10,8 +10,9 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var (
-	kubectlIsNotFoundMessage = "Error from server (NotFound):"
+const (
+	cephCluster1Namespace = "rook-ceph"
+	cephCluster2Namespace = "rook-ceph2"
 )
 
 func TestMtest(t *testing.T) {
@@ -28,5 +29,5 @@ func TestMtest(t *testing.T) {
 }
 
 var _ = Describe("Mantle", func() {
-	Context("backup", testBackup)
+	Context("backup", backupTestSuite)
 })
