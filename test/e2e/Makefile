@@ -1,4 +1,4 @@
-include ../versions.mk
+include ../../versions.mk
 
 SHELL := /bin/bash
 BINDIR := $(shell pwd)/bin
@@ -191,14 +191,14 @@ delete-rook-ceph:
 
 .PHONY: setup-components
 setup-components:
-	$(MAKE) -C .. docker-build
+	$(MAKE) -C ../.. docker-build
 	# We can't use `minikube image load` due to a minikube's problem.
 	# ref. https://github.com/kubernetes/minikube/issues/17785
 	docker save controller:latest | $(SUDO) ctr -n k8s.io images import -
 
-	$(HELM) upgrade --install mantle-cluster-wide ../charts/mantle-cluster-wide/ --wait
-	$(HELM) upgrade --install --namespace=$(NS) mantle ../charts/mantle/ --wait
-	$(HELM) upgrade --install --namespace=$(NS2) mantle2 ../charts/mantle/ --wait
+	$(HELM) upgrade --install mantle-cluster-wide ../../charts/mantle-cluster-wide/ --wait
+	$(HELM) upgrade --install --namespace=$(NS) mantle ../../charts/mantle/ --wait
+	$(HELM) upgrade --install --namespace=$(NS2) mantle2 ../../charts/mantle/ --wait
 
 .PHONY: delete-components
 delete-components:
