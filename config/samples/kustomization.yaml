@@ -2,4 +2,5 @@
 resources:
 - mantle_v1_mantlebackup.yaml
 - mantle_v1_mantlerestore.yaml
+- mantle_v1_mantlebackupconfig.yaml
 #+kubebuilder:scaffold:manifestskustomizesamples
