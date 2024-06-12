@@ -1,0 +1,31 @@
+# permissions for end users to edit mantlebackupconfigs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/instance: mantlebackupconfig-editor-role
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: mantle
+    app.kubernetes.io/part-of: mantle
+    app.kubernetes.io/managed-by: kustomize
+  name: mantlebackupconfig-editor-role
+rules:
+- apiGroups:
+  - mantle.cybozu.io
+  resources:
+  - mantlebackupconfigs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - mantle.cybozu.io
+  resources:
+  - mantlebackupconfigs/status
+  verbs:
+  - get

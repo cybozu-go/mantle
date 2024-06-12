@@ -26,4 +26,13 @@ resources:
   kind: MantleRestore
   path: github.com/cybozu-go/mantle/api/v1
   version: v1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: cybozu.io
+  group: mantle
+  kind: MantleBackupConfig
+  path: github.com/cybozu-go/mantle/api/v1
+  version: v1
 version: "3"
