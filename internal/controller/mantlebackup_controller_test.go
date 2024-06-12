@@ -6,7 +6,7 @@ import (
 	"io"
 	"time"
 
-	backupv1 "github.com/cybozu-go/mantle/api/v1"
+	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -35,7 +35,7 @@ var _ = Describe("MantleBackup controller", func() {
 	storageClassName := dummyStorageClassName
 
 	BeforeEach(func() {
-		err := backupv1.AddToScheme(scheme)
+		err := mantlev1.AddToScheme(scheme)
 		Expect(err).NotTo(HaveOccurred())
 
 		mgr, err := ctrl.NewManager(cfg, ctrl.Options{
@@ -118,12 +118,12 @@ var _ = Describe("MantleBackup controller", func() {
 		err = k8sClient.Status().Update(ctx, &pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		backup := backupv1.MantleBackup{
+		backup := mantlev1.MantleBackup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "backup",
 				Namespace: ns,
 			},
-			Spec: backupv1.MantleBackupSpec{
+			Spec: mantlev1.MantleBackupSpec{
 				PVC: pvc.Name,
 			},
 		}
@@ -164,7 +164,7 @@ var _ = Describe("MantleBackup controller", func() {
 				return err
 			}
 
-			if meta.FindStatusCondition(backup.Status.Conditions, backupv1.BackupConditionReadyToUse).Status != metav1.ConditionTrue {
+			if meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse).Status != metav1.ConditionTrue {
 				return fmt.Errorf("not ready to use yet")
 			}
 
@@ -246,12 +246,12 @@ var _ = Describe("MantleBackup controller", func() {
 		err = k8sClient.Status().Update(ctx, &pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		backup := backupv1.MantleBackup{
+		backup := mantlev1.MantleBackup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "backup",
 				Namespace: ns,
 			},
-			Spec: backupv1.MantleBackupSpec{
+			Spec: mantlev1.MantleBackupSpec{
 				PVC: pvc.Name,
 			},
 		}
@@ -292,7 +292,7 @@ var _ = Describe("MantleBackup controller", func() {
 				return err
 			}
 
-			if meta.FindStatusCondition(backup.Status.Conditions, backupv1.BackupConditionReadyToUse).Status != metav1.ConditionTrue {
+			if meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse).Status != metav1.ConditionTrue {
 				return fmt.Errorf("not ready to use yet")
 			}
 
@@ -313,7 +313,7 @@ var _ = Describe("MantleBackup controller", func() {
 				return err
 			}
 
-			condition := meta.FindStatusCondition(backup.Status.Conditions, backupv1.BackupConditionReadyToUse)
+			condition := meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse)
 			if condition == nil {
 				return fmt.Errorf("condition is not set")
 			}
@@ -382,12 +382,12 @@ var _ = Describe("MantleBackup controller", func() {
 		err = k8sClient.Status().Update(ctx, &pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		backup := backupv1.MantleBackup{
+		backup := mantlev1.MantleBackup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "backup",
 				Namespace: ns,
 			},
-			Spec: backupv1.MantleBackupSpec{
+			Spec: mantlev1.MantleBackupSpec{
 				PVC: pvc.Name,
 			},
 		}
@@ -404,11 +404,11 @@ var _ = Describe("MantleBackup controller", func() {
 				return err
 			}
 
-			condition := meta.FindStatusCondition(backup.Status.Conditions, backupv1.BackupConditionReadyToUse)
+			condition := meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse)
 			if condition == nil {
 				return fmt.Errorf("condition is not set")
 			}
-			if !(condition.Status == metav1.ConditionFalse && condition.Reason != backupv1.BackupReasonNone) {
+			if !(condition.Status == metav1.ConditionFalse && condition.Reason != mantlev1.BackupReasonNone) {
 				return fmt.Errorf("should not be ready to use")
 			}
 
@@ -420,12 +420,12 @@ var _ = Describe("MantleBackup controller", func() {
 		ctx := context.Background()
 		ns := createNamespace()
 
-		backup := backupv1.MantleBackup{
+		backup := mantlev1.MantleBackup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "backup",
 				Namespace: ns,
 			},
-			Spec: backupv1.MantleBackupSpec{
+			Spec: mantlev1.MantleBackupSpec{
 				PVC: "non-existent-pvc",
 			},
 		}
@@ -442,11 +442,11 @@ var _ = Describe("MantleBackup controller", func() {
 				return err
 			}
 
-			condition := meta.FindStatusCondition(backup.Status.Conditions, backupv1.BackupConditionReadyToUse)
+			condition := meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse)
 			if condition == nil {
 				return fmt.Errorf("condition is not set")
 			}
-			if !(condition.Status == metav1.ConditionFalse && condition.Reason != backupv1.BackupReasonNone) {
+			if !(condition.Status == metav1.ConditionFalse && condition.Reason != mantlev1.BackupReasonNone) {
 				return fmt.Errorf("should not be ready to use")
 			}
 
@@ -510,12 +510,12 @@ var _ = Describe("MantleBackup controller", func() {
 		err = k8sClient.Status().Update(ctx, &pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		backup := backupv1.MantleBackup{
+		backup := mantlev1.MantleBackup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "backup",
 				Namespace: ns,
 			},
-			Spec: backupv1.MantleBackupSpec{
+			Spec: mantlev1.MantleBackupSpec{
 				PVC: pvc.Name,
 			},
 		}
