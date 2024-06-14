@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"time"
@@ -170,6 +171,21 @@ var _ = Describe("MantleBackup controller", func() {
 
 			return nil
 		}).Should(Succeed())
+
+		pvcJS := backup.Status.PVCManifest
+		Expect(pvcJS).NotTo(BeEmpty())
+		pvcStored := corev1.PersistentVolumeClaim{}
+		err = json.Unmarshal([]byte(pvcJS), &pvcStored)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(pvcStored.Name).To(Equal(pvc.Name))
+		Expect(pvcStored.Namespace).To(Equal(pvc.Namespace))
+
+		pvJS := backup.Status.PVManifest
+		Expect(pvJS).NotTo(BeEmpty())
+		pvStored := corev1.PersistentVolume{}
+		err = json.Unmarshal([]byte(pvJS), &pvStored)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(pvStored.Name).To(Equal(pv.Name))
 
 		err = k8sClient.Delete(ctx, &backup)
 		Expect(err).NotTo(HaveOccurred())

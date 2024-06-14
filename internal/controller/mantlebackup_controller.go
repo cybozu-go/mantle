@@ -343,6 +343,20 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return result, err
 	}
 
+	pvcJs, err := json.Marshal(pvc)
+	if err != nil {
+		logger.Error("failed to marshal PVC", "error", err)
+		return ctrl.Result{}, err
+	}
+	backup.Status.PVCManifest = string(pvcJs)
+
+	pvJs, err := json.Marshal(pv)
+	if err != nil {
+		logger.Error("failed to marshal PV", "error", err)
+		return ctrl.Result{}, err
+	}
+	backup.Status.PVManifest = string(pvJs)
+
 	backup.Status.CreatedAt = metav1.NewTime(time.Now())
 	err = r.updateStatus(ctx, &backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionTrue, Reason: mantlev1.BackupReasonNone})
 	if err != nil {
