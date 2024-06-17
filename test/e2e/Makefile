@@ -21,6 +21,7 @@ CNI_PLUGIN_INSTALL_DIR := /opt/cni/bin
 POLLING_INTERVAL := 1
 TIMEOUT_SECS := 180
 PROFILE ?= minikube
+MEMORY ?= 6g
 
 export MINIKUBE_HOME
 
@@ -85,7 +86,7 @@ launch-minikube:
 	$(MINIKUBE) start \
 		--kubernetes-version="v$(KUBERNETES_VERSION)" \
 		--driver=kvm2 \
-		--memory 6g \
+		--memory $(MEMORY) \
 		--cpus=2 \
 		--cni=calico \
 		--network test-nw \

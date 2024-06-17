@@ -58,8 +58,8 @@ jobs:
              make -C test/e2e setup
              ln -s $(pwd)/test/e2e/bin/kubectl-1.28.3 test/e2e/bin/kubectl
       - run: |-
-             make -C test/e2e launch-minikube PROFILE=profile1
-             make -C test/e2e launch-minikube PROFILE=profile2
+             make -C test/e2e launch-minikube PROFILE=profile1 MEMORY=4g
+             make -C test/e2e launch-minikube PROFILE=profile2 MEMORY=4g
       - run: |-
             make -C test/e2e image-build PROFILE=profile1
             make -C test/e2e image-build PROFILE=profile2
