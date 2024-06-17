@@ -1,4 +1,4 @@
-name: "e2e"
+name: "inter-cluster connection"
 on:
   pull_request:
     paths-ignore:
@@ -54,5 +54,30 @@ jobs:
              sudo rmmod kvm
              sudo modprobe -a kvm
              sudo modprobe -a kvm_amd
-      - run: make -C test/e2e setup
-      - run: make -C test/e2e test
+      - run: |-
+             make -C test/e2e setup
+             ln -s $(pwd)/test/e2e/bin/kubectl-1.28.3 test/e2e/bin/kubectl
+      - run: |-
+             make -C test/e2e launch-minikube PROFILE=profile1
+             make -C test/e2e launch-minikube PROFILE=profile2
+      - name: "deploy components"
+        id: deploy-components
+        run: |-
+             ./test/e2e/bin/kubectl --context profile2 create ns test
+             ./test/e2e/bin/kubectl --context profile2 apply -f test/e2e/nginx.yaml
+             ./test/e2e/bin/kubectl --context profile2 apply -f test/e2e/svcnp.yaml
+             ./test/e2e/bin/minikube -p profile2 service list
+             SERVICE=$(./test/e2e/bin/minikube -p profile2 service list | grep my-nginx-np | cut -d "|" -f 5 | tr -d "[[:space:]]" | sed 's/\//\\\//g')
+             echo "service name: ${SERVICE}"
+             echo "service-name=${SERVICE}" >> "$GITHUB_OUTPUT"
+             ./test/e2e/bin/kubectl wait deploy -n test --timeout=2m --for=condition=available my-nginx
+      - name: "Run and wait curl job"
+        run: |-
+            sed -i "s/placeholder/${{ steps.deploy-components.outputs.service-name }}/" test/e2e/job.yaml
+            ./test/e2e/bin/kubectl --context profile1 apply -f test/e2e/job.yaml
+            ./test/e2e/bin/kubectl --context profile1 wait job --for=condition=complete --timeout=2m curl
+            PODS=$(./test/e2e/bin/kubectl --context profile1 get pod | grep curl | awk '{print $1}')
+            for POD in ${PODS}; do
+              echo "POD: ${POD}"
+              ./test/e2e/bin/kubectl --context profile1 logs ${POD}
+            done

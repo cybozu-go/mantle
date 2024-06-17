@@ -23,11 +23,11 @@ HELM_VERSION := 3.14.0
 # https://github.com/kubernetes-sigs/kind/releases
 KIND_VERSION := v0.20.0
 # It is set by CI using the environment variable, use conditional assignment.
-KUBERNETES_VERSION := 1.27.10
+KUBERNETES_VERSION := 1.28.3
 # https://github.com/kubernetes-sigs/kustomize/releases
 KUSTOMIZE_VERSION := v5.2.1
 # https://github.com/kubernetes/minikube/releases
-MINIKUBE_VERSION := v1.32.0
+MINIKUBE_VERSION := v1.33.1
 # https://github.com/protocolbuffers/protobuf/releases
 PROTOC_VERSION := 25.2
 # https://github.com/rook/rook/releases

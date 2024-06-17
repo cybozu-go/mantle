@@ -1,4 +1,4 @@
-name: "e2e"
+name: "two k8s cluster"
 on:
   pull_request:
     paths-ignore:
@@ -54,5 +54,22 @@ jobs:
              sudo rmmod kvm
              sudo modprobe -a kvm
              sudo modprobe -a kvm_amd
-      - run: make -C test/e2e setup
-      - run: make -C test/e2e test
+      - run: |-
+             make -C test/e2e setup
+             ln -s $(pwd)/test/e2e/bin/kubectl-1.28.3 test/e2e/bin/kubectl
+      - run: |-
+             make -C test/e2e launch-minikube PROFILE=profile1
+             make -C test/e2e launch-minikube PROFILE=profile2
+      - run: |-
+            make -C test/e2e image-build PROFILE=profile1
+            make -C test/e2e image-build PROFILE=profile2
+      - name: "Deploy primary Rook/Ceph cluster"
+        run: |-
+            ./test/e2e/bin/kubectl config use-context profile1
+            make -C test/e2e launch-single-rook-ceph PROFILE=profile1
+            make -C test/e2e setup-single-components PROFILE=profile1
+      - name: "Deploy secondary Rook/Ceph cluster"
+        run: |-
+            ./test/e2e/bin/kubectl config use-context profile2
+            make -C test/e2e launch-single-rook-ceph PROFILE=profile2
+            make -C test/e2e setup-single-components PROFILE=profile2
