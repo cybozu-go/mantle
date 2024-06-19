@@ -91,20 +91,23 @@ func subMain() error {
 		return err
 	}
 
-	reconciler := controller.NewMantleBackupReconciler(
+	backupReconciler := controller.NewMantleBackupReconciler(
 		mgr.GetClient(),
 		mgr.GetScheme(),
 		managedCephClusterID,
 	)
 
-	if err = reconciler.SetupWithManager(mgr); err != nil {
+	if err = backupReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MantleBackup")
 		return err
 	}
-	if err = (&controller.MantleRestoreReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+
+	restoreReconciler := controller.NewMantleRestoreReconciler(
+		mgr.GetClient(),
+		mgr.GetScheme(),
+		managedCephClusterID,
+	)
+	if err = restoreReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MantleRestore")
 		os.Exit(1)
 	}
