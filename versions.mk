@@ -28,6 +28,8 @@ KUBERNETES_VERSION := 1.27.10
 KUSTOMIZE_VERSION := v5.2.1
 # https://github.com/kubernetes/minikube/releases
 MINIKUBE_VERSION := v1.32.0
+# https://github.com/uber-go/mock/releases
+MOCKGEN_VERSION := v0.4.0
 # https://github.com/protocolbuffers/protobuf/releases
 PROTOC_VERSION := 25.2
 # https://github.com/rook/rook/releases
