@@ -75,14 +75,22 @@ var _ = Describe("CephCmd.RBDInfo", func() {
 			"block_name_prefix": "rbd_data.60dd8f9270ba",
 			"format": 2,
 			"features": [
-			"layering"
+				"layering"
 			],
 			"op_features": [],
 			"flags": [],
 			"create_timestamp": "Tue May 28 06:54:51 2024",
 			"access_timestamp": "Tue May 28 06:54:51 2024",
 			"modify_timestamp": "Tue May 28 06:54:51 2024",
-			"parent": "pool/csi-vol-39ca122a-88e1-44b6-aa2b-cae64fb383db@test-snap"
+			"parent": {
+				"pool": "pool",
+				"pool_namespace": "",
+				"image": "csi-vol-39ca122a-88e1-44b6-aa2b-cae64fb383db",
+				"id": "60dd8f9270bc",
+				"snapshot": "test-snap",
+				"trash": false,
+				"overlap": 5368709120
+			}
 		}`), nil)
 
 		cmd := mockedCephCmd(m)
