@@ -173,27 +173,15 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPV() {
 		Expect(pv1.Spec.Capacity).To(Equal(test.srcPV.Spec.Capacity))
 		Expect(pv1.Spec.ClaimRef).To(BeNil())
 		Expect(pv1.Spec.PersistentVolumeSource.CSI.Driver).To(Equal(test.srcPV.Spec.PersistentVolumeSource.CSI.Driver))
-		Expect(pv1.Spec.PersistentVolumeSource.CSI.VolumeAttributes["staticVolume"]).To(Equal("true"))
+		Expect(pv1.Spec.PersistentVolumeSource.CSI.VolumeAttributes).To(HaveLen(4))
+		Expect(pv1.Spec.PersistentVolumeSource.CSI.VolumeAttributes["clusterID"]).To(Equal(test.srcPV.Spec.PersistentVolumeSource.CSI.VolumeAttributes["clusterID"]))
 		Expect(pv1.Spec.PersistentVolumeSource.CSI.VolumeAttributes["imageFeatures"]).To(Equal(test.srcPV.Spec.PersistentVolumeSource.CSI.VolumeAttributes["imageFeatures"] + ",deep-flatten"))
-		for _, key := range []string{
-			"clusterID", "csi.storage.k8s.io/pv/name",
-			"csi.storage.k8s.io/pvc/name",
-			"csi.storage.k8s.io/pvc/namespace",
-			"imageFormat",
-			// TODO check
-			"imageName",
-			"journalPool",
-			"pool",
-			// TODO check
-			"storage.kubernetes.io/csiProvisionerIdentity",
-		} {
-			Expect(pv1.Spec.PersistentVolumeSource.CSI.VolumeAttributes[key]).To(Equal(test.srcPV.Spec.PersistentVolumeSource.CSI.VolumeAttributes[key]))
-		}
+		Expect(pv1.Spec.PersistentVolumeSource.CSI.VolumeAttributes["pool"]).To(Equal(test.srcPV.Spec.PersistentVolumeSource.CSI.VolumeAttributes["pool"]))
+		Expect(pv1.Spec.PersistentVolumeSource.CSI.VolumeAttributes["staticVolume"]).To(Equal("true"))
 		Expect(pv1.Spec.PersistentVolumeSource.CSI.VolumeHandle).To(Equal(fmt.Sprintf("mantle-%s-%s", restore.Namespace, restore.Name)))
 		Expect(pv1.Spec.StorageClassName).To(Equal(test.srcPV.Spec.StorageClassName))
 		Expect(pv1.Spec.VolumeMode).To(Equal(test.srcPV.Spec.VolumeMode))
-		// TODO check
-		Expect(pv1.Spec.PersistentVolumeReclaimPolicy).To(Equal(test.srcPV.Spec.PersistentVolumeReclaimPolicy))
+		Expect(pv1.Spec.PersistentVolumeReclaimPolicy).To(Equal(corev1.PersistentVolumeReclaimRetain))
 	})
 
 	It("should skip creating a PV if it already exists", func() {
