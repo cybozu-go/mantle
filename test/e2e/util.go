@@ -9,8 +9,16 @@ import (
 	"os/exec"
 	"time"
 
+	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/controller"
+	testutil "github.com/cybozu-go/mantle/test/util"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+const (
+	testDataFilename = "test-data.bin"
 )
 
 var (
@@ -20,6 +28,10 @@ var (
 	testRBDPoolSCTemplate string
 	//go:embed testdata/mantlebackup-template.yaml
 	testMantleBackupTemplate string
+	//go:embed testdata/mantlerestore-template.yaml
+	testMantleRestoreTemplate string
+	//go:embed testdata/pod-volume-mount-template.yaml
+	testPodVolumeMountTemplate string
 
 	kubectlPath = os.Getenv("KUBECTL")
 )
@@ -36,6 +48,13 @@ func execAtLocal(cmd string, input []byte, args ...string) ([]byte, []byte, erro
 
 	err := command.Run()
 	return stdout.Bytes(), stderr.Bytes(), err
+}
+
+func execAtPod(ns, pod, cmd string, input []byte, args ...string) ([]byte, []byte, error) {
+	if len(kubectlPath) == 0 {
+		panic("KUBECTL environment variable is not set")
+	}
+	return execAtLocal(kubectlPath, input, append([]string{"exec", "-n", ns, pod, "--", cmd}, args...)...)
 }
 
 func kubectl(args ...string) ([]byte, []byte, error) {
@@ -57,6 +76,24 @@ func applyMantleBackupTemplate(namespace, pvcName, backupName string) error {
 	_, _, err := kubectlWithInput([]byte(manifest), "apply", "-f", "-")
 	if err != nil {
 		return fmt.Errorf("kubectl apply mantlebackup failed. err: %w", err)
+	}
+	return nil
+}
+
+func applyMantleRestoreTemplate(namespace, restoreName, backupName string) error {
+	manifest := fmt.Sprintf(testMantleRestoreTemplate, restoreName, namespace, backupName)
+	_, _, err := kubectlWithInput([]byte(manifest), "apply", "-f", "-")
+	if err != nil {
+		return fmt.Errorf("kubectl apply mantlerestore failed. err: %w", err)
+	}
+	return nil
+}
+
+func applyPodVolumeMountTemplate(namespace, podName, pvcName string) error {
+	manifest := fmt.Sprintf(testPodVolumeMountTemplate, podName, namespace, pvcName)
+	_, _, err := kubectlWithInput([]byte(manifest), "apply", "-n", namespace, "-f", "-")
+	if err != nil {
+		return fmt.Errorf("kubectl apply pod failed. err: %w", err)
 	}
 	return nil
 }
@@ -163,4 +200,102 @@ func getPVFromPVC(namespace, pvcName string) (string, error) {
 	}
 
 	return "", fmt.Errorf("timeout to get pv from pvc. namespace: %s, pvcName: %s", namespace, pvcName)
+}
+
+type rbdInfoParent struct {
+	Pool     string `json:"pool"`
+	Image    string `json:"image"`
+	Snapshot string `json:"snapshot"`
+}
+
+type rbdInfo struct {
+	CreateTimestamp string         `json:"create_timestamp"`
+	ModifyTimestamp string         `json:"modify_timestamp"`
+	Parent          *rbdInfoParent `json:"parent"`
+}
+
+func getRBDInfo(clusterNS, pool, image string) (*rbdInfo, error) {
+	stdout, stderr, err := kubectl(
+		"-n", clusterNS, "exec", "deploy/rook-ceph-tools", "--",
+		"rbd", "info", "--format", "json", fmt.Sprintf("%s/%s", pool, image))
+	if err != nil {
+		return nil, fmt.Errorf("rbd info failed. stderr: %s, err: %w", string(stderr), err)
+	}
+
+	var info rbdInfo
+	err = json.Unmarshal(stdout, &info)
+	if err != nil {
+		return nil, fmt.Errorf("yaml unmarshal failed. err: %w", err)
+	}
+
+	return &info, nil
+}
+
+func isMantleRestoreReady(namespace, name string) bool {
+	stdout, stderr, err := kubectl("get", "mantlerestore", "-n", namespace, name, "-o", "json")
+	if err != nil {
+		fmt.Println(string(stderr))
+		panic(err)
+	}
+
+	var restore mantlev1.MantleRestore
+	if err := json.Unmarshal(stdout, &restore); err != nil {
+		panic(err)
+	}
+
+	if restore.Status.Conditions == nil {
+		return false
+	}
+	readyToUseCondition := meta.FindStatusCondition(restore.Status.Conditions, mantlev1.RestoreConditionReadyToUse)
+	return readyToUseCondition.Status == metav1.ConditionTrue
+}
+
+func writeTestData(namespace, pvc string, data []byte) error {
+	podName := testutil.GetUniqueName("pod-")
+
+	if err := applyPodVolumeMountTemplate(namespace, podName, pvc); err != nil {
+		return err
+	}
+
+	_, _, err := kubectl("wait", "--for=condition=Ready", "pod", podName, "-n", namespace, "--timeout=1m")
+	if err != nil {
+		return fmt.Errorf("kubectl wait pod failed. err: %w", err)
+	}
+
+	_, _, err = execAtPod(namespace, podName, "sh", nil, "-c", fmt.Sprintf("echo -n %q > /mnt/%s", data, testDataFilename))
+	if err != nil {
+		return fmt.Errorf("write file failed. err: %w", err)
+	}
+
+	_, _, err = kubectl("delete", "pod", podName, "-n", namespace)
+	if err != nil {
+		return fmt.Errorf("kubectl delete pod failed. err: %w", err)
+	}
+
+	return nil
+}
+
+func readTestData(namespace, pvc string) ([]byte, error) {
+	podName := testutil.GetUniqueName("pod-")
+
+	if err := applyPodVolumeMountTemplate(namespace, podName, pvc); err != nil {
+		return nil, err
+	}
+
+	_, _, err := kubectl("wait", "--for=condition=Ready", "pod", podName, "-n", namespace, "--timeout=1m")
+	if err != nil {
+		return nil, fmt.Errorf("kubectl wait pod failed. err: %w", err)
+	}
+
+	stdout, stderr, err := execAtPod(namespace, podName, "sh", nil, "-c", fmt.Sprintf("cat /mnt/%s", testDataFilename))
+	if err != nil {
+		return nil, fmt.Errorf("read file failed. stderr: %s, err: %w", string(stderr), err)
+	}
+
+	_, _, err = kubectl("delete", "pod", podName, "-n", namespace)
+	if err != nil {
+		return nil, fmt.Errorf("kubectl delete pod failed. err: %w", err)
+	}
+
+	return stdout, nil
 }

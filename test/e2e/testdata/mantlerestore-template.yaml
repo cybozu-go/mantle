@@ -1,0 +1,7 @@
+apiVersion: mantle.cybozu.io/v1
+kind: MantleRestore
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  backup: %s
