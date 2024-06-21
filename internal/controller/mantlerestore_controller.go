@@ -33,10 +33,10 @@ const (
 	PVCAnnotationRestoredBy    = "mantle.cybozu.io/restored-by"
 )
 
-// +kubebuilder:rbac:groups=backup.cybozu.io,resources=mantlerbackup,verbs=get;list;watch
-// +kubebuilder:rbac:groups=backup.cybozu.io,resources=mantlerestores,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=backup.cybozu.io,resources=mantlerestores/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=backup.cybozu.io,resources=mantlerestores/finalizers,verbs=update
+// +kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlerbackup,verbs=get;list;watch
+// +kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlerestores,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlerestores/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlerestores/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get;list;watch;create;update;patch;delete
 
@@ -99,6 +99,14 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, logger *slog.Logg
 		return ctrl.Result{}, nil
 	}
 
+	// store the cluster ID in the status
+	restore.Status.ClusterID = clusterID
+	err = r.Status().Update(ctx, restore)
+	if err != nil {
+		logger.Error("failed to update status.clusterID", "status", restore.Status, "error", err)
+		return ctrl.Result{}, err
+	}
+
 	// set the finalizer to this MantleRestore
 	controllerutil.AddFinalizer(restore, MantleRestoreFinalizerName)
 	err = r.Update(ctx, restore)
@@ -128,7 +136,7 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, logger *slog.Logg
 	}
 	err = r.Status().Update(ctx, restore)
 	if err != nil {
-		logger.Error("failed to update status", "status", restore.Status, "error", err)
+		logger.Error("failed to update status.pool", "status", restore.Status, "error", err)
 		return ctrl.Result{}, err
 	}
 
@@ -310,6 +318,11 @@ func (r *MantleRestoreReconciler) createRestoringPVC(ctx context.Context, restor
 }
 
 func (r *MantleRestoreReconciler) cleanup(ctx context.Context, logger *slog.Logger, restore *mantlev1.MantleRestore) (ctrl.Result, error) {
+	// check if the cluster ID matches
+	if restore.Status.ClusterID != r.managedCephClusterID {
+		return ctrl.Result{}, nil
+	}
+
 	logger.Info("deleting", "name", restore.Name, "namespace", restore.Namespace)
 
 	// delete the PVC

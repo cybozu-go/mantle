@@ -25,6 +25,9 @@ type MantleRestoreStatus struct {
 	// 'conditions' specifies current restore conditions
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
+	// 'clusterID' specifies the Ceph cluster ID the source PV/PVC belongs to
+	ClusterID string `json:"clusterID,omitempty"`
+
 	// 'pool' specifies pool name the volumes are restored to
 	Pool string `json:"pool,omitempty"`
 }
