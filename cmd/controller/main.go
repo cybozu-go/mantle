@@ -35,6 +35,7 @@ var (
 	enableLeaderElection bool
 	probeAddr            string
 	zapOpts              zap.Options
+	expireOffset         string
 
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
@@ -47,6 +48,8 @@ func init() {
 	flags.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
+	flags.StringVar(&expireOffset, "expire-offset", "",
+		"An offset for expire field. Use this option for testing purposes only.")
 
 	goflags := flag.NewFlagSet("goflags", flag.ExitOnError)
 	zapOpts.Development = true
@@ -111,12 +114,14 @@ func subMain() error {
 		setupLog.Error(err, "unable to create controller", "controller", "MantleRestore")
 		return err
 	}
-	if err = (&controller.MantleBackupConfigReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+	if err = controller.NewMantleBackupConfigReconciler(
+		mgr.GetClient(),
+		mgr.GetScheme(),
+		managedCephClusterID,
+		expireOffset,
+	).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MantleBackupConfig")
-		os.Exit(1)
+		return err
 	}
 	//+kubebuilder:scaffold:builder
 

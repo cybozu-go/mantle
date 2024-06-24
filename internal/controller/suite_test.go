@@ -21,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
+	"github.com/cybozu-go/mantle/test/util"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -30,6 +31,12 @@ import (
 var cfg *rest.Config
 var k8sClient client.Client
 var testEnv *envtest.Environment
+
+var (
+	dummyStorageClassName        = "dummy-sc"
+	dummyStorageClassClusterID   = "rook-ceph"
+	dummyStorageClassProvisioner = "rook-ceph.rbd.csi.ceph.com"
+)
 
 var namespaceCounter = 0 // EnvTest cannot delete namespace. So, we have to use another new namespace.
 func createNamespace() string {
@@ -85,6 +92,10 @@ var _ = BeforeSuite(func() {
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
+
+	err = util.CreateStorageClass(context.Background(), k8sClient, dummyStorageClassName,
+		dummyStorageClassProvisioner, dummyStorageClassClusterID)
+	Expect(err).NotTo(HaveOccurred())
 })
 
 var _ = AfterSuite(func() {

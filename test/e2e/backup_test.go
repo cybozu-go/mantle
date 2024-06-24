@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -25,11 +26,12 @@ type backupTest struct {
 	tenantNamespace1  string
 	tenantNamespace2  string
 
-	pvcName1          string
-	pvcName2          string
-	mantleBackupName1 string
-	mantleBackupName2 string
-	mantleBackupName3 string
+	pvcName1               string
+	pvcName2               string
+	mantleBackupName1      string
+	mantleBackupName2      string
+	mantleBackupName3      string
+	mantleBackupConfigName string
 }
 
 func backupTestSuite() {
@@ -40,15 +42,17 @@ func backupTestSuite() {
 		tenantNamespace1:  util.GetUniqueName("ns-"),
 		tenantNamespace2:  util.GetUniqueName("ns-"),
 
-		pvcName1:          "rbd-pvc1",
-		pvcName2:          "rbd-pvc2",
-		mantleBackupName1: "mantlebackup-test1",
-		mantleBackupName2: "mantlebackup-test2",
-		mantleBackupName3: "mantlebackup-test3",
+		pvcName1:               "rbd-pvc1",
+		pvcName2:               "rbd-pvc2",
+		mantleBackupName1:      "mantlebackup-test1",
+		mantleBackupName2:      "mantlebackup-test2",
+		mantleBackupName3:      "mantlebackup-test3",
+		mantleBackupConfigName: "mantlebackupconfig-test",
 	}
 
 	Describe("setup environment", test.setupEnv)
 	Describe("test case 1", test.testCase1)
+	Describe("test case 2", test.testCase2)
 	Describe("teardown environment", test.teardownEnv)
 }
 
@@ -91,6 +95,19 @@ func (test *backupTest) setupEnv() {
 }
 
 func (test *backupTest) teardownEnv() {
+	It("Delete the MantleBackupConfig and the MantleBackups associated with it.", func() {
+		mbc, err := getMBC(test.tenantNamespace1, test.mantleBackupConfigName)
+		Expect(err).NotTo(HaveOccurred())
+		_, _, err = kubectl("delete", "-n", test.tenantNamespace1, "mantlebackupconfig", test.mantleBackupConfigName)
+		Expect(err).NotTo(HaveOccurred())
+		mbs, err := listMantleBackupsByMBCUID(test.tenantNamespace1, string(mbc.UID))
+		Expect(err).NotTo(HaveOccurred())
+		for _, mb := range mbs {
+			_, _, err = kubectl("delete", "-n", test.tenantNamespace1, "mantlebackup", mb.Name)
+			Expect(err).NotTo(HaveOccurred())
+		}
+	})
+
 	It("deleting MantleBackups", func() {
 		for _, mantleBackup := range []string{test.mantleBackupName1, test.mantleBackupName2, test.mantleBackupName3} {
 			_, _, _ = kubectl("delete", "-n", test.tenantNamespace1, "mantlebackup", mantleBackup)
@@ -257,6 +274,82 @@ func (test *backupTest) testCase1() {
 				return fmt.Errorf("get mantlebackup %s failed. stderr: %s, err: %w", test.mantleBackupName3, string(stderr), err)
 			}
 			return fmt.Errorf("MantleBackup resource %s still exists. stdout: %s", test.mantleBackupName3, stdout)
+		}).Should(Succeed())
+	})
+}
+
+func (test *backupTest) testCase2() {
+	It("should create and rotate MantleBackups from MantleBackupConfig", func() {
+		By("Creating MantleBackupConfig")
+		err := applyMantleBackupConfigTemplate(test.tenantNamespace1, test.pvcName1, test.mantleBackupConfigName)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("Waiting for a CronJob to be created")
+		mbc, err := getMBC(test.tenantNamespace1, test.mantleBackupConfigName)
+		Expect(err).NotTo(HaveOccurred())
+		cronJobName := "mbc-" + string(mbc.UID)
+		Eventually(func() error {
+			_, err := getCronJob(cephCluster1Namespace, cronJobName)
+			return err
+		}).Should(Succeed())
+
+		By("Creating a Job from the CronJob")
+		err = createJobFromCronJob(cephCluster1Namespace, cronJobName, util.GetUniqueName("job-"))
+		Expect(err).NotTo(HaveOccurred())
+
+		By("Waiting for a MantleBackup to be created")
+		var mb mantlev1.MantleBackup
+		Eventually(func() error {
+			mbs, err := listMantleBackupsByMBCUID(test.tenantNamespace1, string(mbc.UID))
+			if err != nil {
+				return err
+			}
+			if len(mbs) == 1 {
+				mb = mbs[0]
+				return nil
+			}
+			return errors.New("MantleBackup not found")
+		}).Should(Succeed())
+
+		By("Creating another Job from the CronJob")
+		err = createJobFromCronJob(cephCluster1Namespace, cronJobName, util.GetUniqueName("job-"))
+		Expect(err).NotTo(HaveOccurred())
+
+		By("Waiting for MantleBackups to be rotated")
+		Eventually(func() error {
+			mbs, err := listMantleBackupsByMBCUID(test.tenantNamespace1, string(mbc.UID))
+			if err != nil {
+				return err
+			}
+			if len(mbs) == 1 && mbs[0].Name != mb.Name {
+				return nil
+			}
+			return errors.New("MantleBackup not rotated")
+		}).Should(Succeed())
+	})
+
+	It("should re-create a CronJob associated with a MantleBackup when it's deleted by someone", func() {
+		By("Creating MantleBackupConfig")
+		err := applyMantleBackupConfigTemplate(test.tenantNamespace1, test.pvcName1, test.mantleBackupConfigName)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("Waiting for a CronJob to be created")
+		mbc, err := getMBC(test.tenantNamespace1, test.mantleBackupConfigName)
+		Expect(err).NotTo(HaveOccurred())
+		cronJobName := "mbc-" + string(mbc.UID)
+		Eventually(func() error {
+			_, err := getCronJob(cephCluster1Namespace, cronJobName)
+			return err
+		}).Should(Succeed())
+
+		By("Deleting the CronJob")
+		_, _, err = kubectl("delete", "cronjob", "-n", cephCluster1Namespace, cronJobName)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("Waiting for a CronJob to be created")
+		Eventually(func() error {
+			_, err := getCronJob(cephCluster1Namespace, cronJobName)
+			return err
 		}).Should(Succeed())
 	})
 }
