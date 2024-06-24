@@ -12,8 +12,23 @@ type MantleBackupConfigSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// Foo is an example field of MantleBackupConfig. Edit mantlebackupconfig_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	//+kubebuilder:validation:XValidation:message="spec.pvc is immutable",rule="self == oldSelf"
+	PVC string `json:"pvc"`
+
+	//+kubebuilder:validation:Pattern:=^\s*([0-5]?[0-9])\s+(0?[0-9]|1[0-9]|2[0-3])\s+\*\s+\*\s+\*\s*$
+	Schedule string `json:"schedule"`
+
+	// NOTE: we CANNOT use metav1.Duration for Expire due to an unresolved k8s bug.
+	// See https://github.com/kubernetes/apiextensions-apiserver/issues/56 for the details.
+
+	//+kubebuilder:validation:Format:="duration"
+	//+kubebuilder:validation:XValidation:message="expire must be >= 1d",rule="self >= duration('24h')"
+	//+kubebuilder:validation:XValidation:message="expire must be <= 15d",rule="self <= duration('360h')"
+	//+kubebuilder:validation:XValidation:message="spec.expire is immutable",rule="self == oldSelf"
+	Expire string `json:"expire"`
+
+	//+kubebuilder:default:=false
+	Suspend bool `json:"suspend,omitempty"`
 }
 
 // MantleBackupConfigStatus defines the observed state of MantleBackupConfig
@@ -24,6 +39,7 @@ type MantleBackupConfigStatus struct {
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+//+kubebuilder:resource:shortName=mbc
 
 // MantleBackupConfig is the Schema for the mantlebackupconfigs API
 type MantleBackupConfig struct {

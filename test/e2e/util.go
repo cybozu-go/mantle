@@ -13,6 +13,7 @@ import (
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/controller"
 	testutil "github.com/cybozu-go/mantle/test/util"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,6 +34,8 @@ var (
 	testMantleRestoreTemplate string
 	//go:embed testdata/pod-volume-mount-template.yaml
 	testPodVolumeMountTemplate string
+	//go:embed testdata/mantlebackupconfig-template.yaml
+	testMantleBackupConfigTemplate string
 
 	kubectlPath = os.Getenv("KUBECTL")
 )
@@ -70,6 +73,54 @@ func kubectlWithInput(input []byte, args ...string) ([]byte, []byte, error) {
 		panic("KUBECTL environment variable is not set")
 	}
 	return execAtLocal(kubectlPath, input, args...)
+}
+
+func listMantleBackupsByMBCUID(namespace, uid string) ([]mantlev1.MantleBackup, error) {
+	stdout, _, err := kubectl("get", "mantlebackup", "-n", namespace, "-l", "mantle.cybozu.io/mbc-uid="+uid, "-o", "json")
+	if err != nil {
+		return nil, err
+	}
+	var mbs mantlev1.MantleBackupList
+	if err := json.Unmarshal(stdout, &mbs); err != nil {
+		return nil, err
+	}
+	return mbs.Items, nil
+}
+
+func getObject[T any](kind, namespace, name string) (*T, error) {
+	stdout, _, err := kubectl("get", kind, "-n", namespace, name, "-o", "json")
+	if err != nil {
+		return nil, err
+	}
+
+	var obj T
+	if err := json.Unmarshal(stdout, &obj); err != nil {
+		return nil, err
+	}
+
+	return &obj, nil
+}
+
+//nolint:unparam
+func getCronJob(namespace, name string) (*batchv1.CronJob, error) {
+	return getObject[batchv1.CronJob]("cronjob", namespace, name)
+}
+
+func getMB(namespace, name string) (*mantlev1.MantleBackup, error) {
+	return getObject[mantlev1.MantleBackup]("mantlebackup", namespace, name)
+}
+
+func getMBC(namespace, name string) (*mantlev1.MantleBackupConfig, error) {
+	return getObject[mantlev1.MantleBackupConfig]("mantlebackupconfig", namespace, name)
+}
+
+func applyMantleBackupConfigTemplate(namespace, pvcName, mbcName string) error {
+	manifest := fmt.Sprintf(testMantleBackupConfigTemplate, mbcName, namespace, pvcName)
+	_, _, err := kubectlWithInput([]byte(manifest), "apply", "-f", "-")
+	if err != nil {
+		return fmt.Errorf("kubectl apply mantlebackupconfig failed. err: %w", err)
+	}
+	return nil
 }
 
 func applyMantleBackupTemplate(namespace, pvcName, backupName string) error {

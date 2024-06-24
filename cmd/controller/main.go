@@ -35,6 +35,8 @@ var (
 	enableLeaderElection bool
 	probeAddr            string
 	zapOpts              zap.Options
+	expireOffset         string
+	overwriteMBCSchedule string
 
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
@@ -47,6 +49,12 @@ func init() {
 	flags.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
+	flags.StringVar(&expireOffset, "expire-offset", "",
+		"An offset for MantleBackupConfig's .spec.expire field. A MantleBackup will expire after "+
+			"it has been active for (.spec.expire - expire-offset) time. This option is intended for testing purposes only.")
+	flags.StringVar(&overwriteMBCSchedule, "overwrite-mbc-schedule", "",
+		"By setting this option, every CronJob created by this controller for every MantleBackupConfig "+
+			"will use its value as .spec.schedule. This option is intended for testing purposes only.")
 
 	goflags := flag.NewFlagSet("goflags", flag.ExitOnError)
 	zapOpts.Development = true
@@ -111,12 +119,15 @@ func subMain() error {
 		setupLog.Error(err, "unable to create controller", "controller", "MantleRestore")
 		return err
 	}
-	if err = (&controller.MantleBackupConfigReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+	if err = controller.NewMantleBackupConfigReconciler(
+		mgr.GetClient(),
+		mgr.GetScheme(),
+		managedCephClusterID,
+		expireOffset,
+		overwriteMBCSchedule,
+	).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MantleBackupConfig")
-		os.Exit(1)
+		return err
 	}
 	//+kubebuilder:scaffold:builder
 
