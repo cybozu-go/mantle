@@ -17,7 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	backupv1 "github.com/cybozu-go/mantle/api/v1"
+	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/controller"
 	//+kubebuilder:scaffold:imports
 )
@@ -30,7 +30,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
-	utilruntime.Must(backupv1.AddToScheme(scheme))
+	utilruntime.Must(mantlev1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 

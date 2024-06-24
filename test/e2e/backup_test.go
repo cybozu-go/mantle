@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	backupv1 "github.com/cybozu-go/mantle/api/v1"
+	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/test/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -207,10 +207,10 @@ func (test *backupTest) testCase1() {
 		By("Checking that the status.conditions of the MantleBackup resource remain \"Bound\"")
 		stdout, _, err := kubectl("-n", test.tenantNamespace1, "get", "mantlebackup", test.mantleBackupName3, "-o", "json")
 		Expect(err).NotTo(HaveOccurred())
-		var backup backupv1.MantleBackup
+		var backup mantlev1.MantleBackup
 		err = yaml.Unmarshal(stdout, &backup)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(meta.FindStatusCondition(backup.Status.Conditions, backupv1.BackupConditionReadyToUse).Status).
+		Expect(meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse).Status).
 			To(Equal(metav1.ConditionTrue))
 	})
 

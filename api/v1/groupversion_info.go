@@ -1,4 +1,4 @@
-// Package v1 contains API Schema definitions for the backup v1 API group
+// Package v1 contains API Schema definitions for the mantle v1 API group
 // +kubebuilder:object:generate=true
 // +groupName=mantle.cybozu.io
 package v1
