@@ -25,4 +25,4 @@ Dockerfile.cross
 *.swo
 *~
 
-e2e/testdata/persistentvolumes.yaml
+test/e2e/testdata/persistentvolumes.yaml
