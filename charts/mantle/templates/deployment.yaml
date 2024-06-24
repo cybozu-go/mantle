@@ -58,6 +58,7 @@ spec:
           command:
             - /manager
           args:
+            - controller
             - --leader-elect
           env:
             - name: POD_NAMESPACE
