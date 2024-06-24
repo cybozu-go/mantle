@@ -48,6 +48,7 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 	cp -a config/crd/bases/mantle.cybozu.io_mantlebackups.yaml charts/mantle-cluster-wide/templates/
 	cp -a config/crd/bases/mantle.cybozu.io_mantlerestores.yaml charts/mantle-cluster-wide/templates/
+	cp -a config/crd/bases/mantle.cybozu.io_mantlebackupconfigs.yaml charts/mantle-cluster-wide/templates/
 	cat config/rbac/role.yaml | yq '.metadata.name = "mantle-controller"' > charts/mantle-cluster-wide/templates/clusterrole.yaml
 
 .PHONY: generate
