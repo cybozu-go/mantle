@@ -1,2 +1,4 @@
 allowLoopDevices: true
 resources: null
+csi:
+  enableCephfsDriver: false
