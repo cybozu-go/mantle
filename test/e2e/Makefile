@@ -42,8 +42,6 @@ test:
 
 .PHONY: clean
 clean:
-	$(MAKE) delete-components
-	$(MAKE) delete-rook-ceph
 	$(MAKE) delete-minikube
 
 $(BINDIR):
@@ -108,11 +106,6 @@ create-loop-dev:
 	$(MINIKUBE) ssh -- $(SUDO) $(LOSETUP) $(LOOP_DEV2) $(LOOP_FILE2) || :
 	$(MINIKUBE) ssh -- lsblk
 
-.PHONY: delete-loop-dev
-delete-loop-dev:
-	$(MINIKUBE) ssh -- $(SUDO) $(LOSETUP) -D || :
-	$(MINIKUBE) ssh -- $(SUDO) rm -f $(LOOP_DEV) $(LOOP_DEV2)
-
 .PHONY: wait-deploy-ready
 wait-deploy-ready: NS=
 wait-deploy-ready: DEPLOY=
@@ -154,18 +147,6 @@ launch-rook-ceph: create-loop-dev
 	$(MAKE) wait-deploy-ready NS=$(CEPH_CLUSTER1_NAMESPACE) DEPLOY=rook-ceph-osd-0
 	$(MAKE) wait-deploy-ready NS=$(CEPH_CLUSTER2_NAMESPACE) DEPLOY=rook-ceph-osd-0
 
-.PHONY: delete-rook-ceph
-delete-rook-ceph:
-	$(HELM) uninstall --namespace $(CEPH_CLUSTER2_NAMESPACE) rook-ceph-cluster2 --wait || :
-	$(HELM) uninstall --namespace $(CEPH_CLUSTER1_NAMESPACE) rook-ceph-cluster --wait || :
-	$(SUDO) rm -rf /var/lib/rook
-	$(SUDO) rm -rf /var/lib/rook2
-	ls /dev/mapper/ceph-* | xargs -I% -- $(SUDO) dmsetup remove %
-	$(SUDO) rm -rf /dev/mapper/ceph-*
-	$(HELM) uninstall --namespace $(CEPH_CLUSTER1_NAMESPACE) rook-ceph --wait || :
-	$(KUBECTL) delete -f testdata/persistentvolumes.yaml || :
-	$(MAKE) delete-loop-dev
-
 .PHONY: image-build
 image-build:
 	eval $$($(MINIKUBE) docker-env); \
@@ -177,12 +158,6 @@ setup-components:
 	$(HELM) upgrade --install mantle-cluster-wide ../../charts/mantle-cluster-wide/ --wait
 	$(HELM) upgrade --install --namespace=$(CEPH_CLUSTER1_NAMESPACE) mantle ../../charts/mantle/ --wait
 	$(HELM) upgrade --install --namespace=$(CEPH_CLUSTER2_NAMESPACE) mantle2 ../../charts/mantle/ --wait
-
-.PHONY: delete-components
-delete-components:
-	$(HELM) uninstall --namespace=$(CEPH_CLUSTER2_NAMESPACE) mantle2 --wait || true
-	$(HELM) uninstall --namespace=$(CEPH_CLUSTER1_NAMESPACE) mantle --wait || true
-	$(HELM) uninstall mantle-cluster-wide --wait || true
 
 .PHONY: do_test
 do_test: $(GINKGO)
