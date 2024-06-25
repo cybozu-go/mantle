@@ -2,7 +2,6 @@ include ../../versions.mk
 
 SHELL := /bin/bash
 BINDIR := $(shell pwd)/bin
-TMPDIR := $(shell pwd)/tmp
 CURL := curl -sSLf
 GINKGO := $(BINDIR)/ginkgo-$(GINKGO_VERSION)
 GINKGO_FLAGS :=
@@ -16,20 +15,15 @@ NODE_NAME := minikube-worker
 SUDO := sudo
 DD := dd
 LOSETUP := losetup
-LOOP_FILE := $(TMPDIR)/loop.img
-LOOP_FILE2 := $(TMPDIR)/loop2.img
+LOOP_FILE := loop.img
+LOOP_FILE2 := loop2.img
 CNI_PLUGIN_INSTALL_DIR := /opt/cni/bin
 POLLING_INTERVAL := 1
 TIMEOUT_SECS := 180
+LOOP_DEV := /dev/loop0
+LOOP_DEV2 := /dev/loop1
 
 export MINIKUBE_HOME
-
-define loop-dev
-$(shell $(LOSETUP) | grep $(LOOP_FILE) | cut -d ' ' -f 1)
-endef
-define loop-dev2
-$(shell $(LOSETUP) | grep $(LOOP_FILE2) | cut -d ' ' -f 1)
-endef
 
 .PHONY: setup
 setup:
@@ -41,6 +35,7 @@ setup:
 .PHONY: test
 test:
 	$(MAKE) launch-minikube
+	$(MAKE) image-build
 	$(MAKE) launch-rook-ceph
 	$(MAKE) setup-components
 	$(MAKE) do_test
@@ -52,9 +47,6 @@ clean:
 	$(MAKE) delete-minikube
 
 $(BINDIR):
-	mkdir -p $@
-
-$(TMPDIR):
 	mkdir -p $@
 
 $(GINKGO): | $(BINDIR)
@@ -95,47 +87,31 @@ launch-minikube:
 	kubectl get pod >/dev/null 2>&1; \
 	RET=$$? ; \
 	if [ $$RET -eq 0 ] ; then exit; fi ; \
-	$(SUDO) -E $(MINIKUBE) start \
+	$(MINIKUBE) start \
 		--kubernetes-version="v$(KUBERNETES_VERSION)" \
-		--driver=none \
+		--driver=kvm2 \
 		--memory 6g \
 		--cpus=2 \
-		--addons ingress \
-		--cni=calico \
 		--extra-config=kubeadm.node-name=$(NODE_NAME) \
 		--extra-config=kubelet.hostname-override=$(NODE_NAME)
-	$(SUDO) chown -R $$USER $$HOME/.kube $(MINIKUBE_HOME)/.minikube
-	$(SUDO) chmod -R a+r $$HOME/.kube $(MINIKUBE_HOME)/.minikube
-	$(SUDO) find $(MINIKUBE_HOME)/.minikube -name id_rsa -exec chmod 600 {} ';'
 
 .PHONY: delete-minikube
 delete-minikube:
-	$(SUDO) -E $(MINIKUBE) stop || true
-	$(SUDO) -E $(MINIKUBE) delete || true
-	# Is it really OK to remove these files?
-	$(SUDO) rm -rf /tmp/juju-*
+	$(MINIKUBE) stop || true
+	$(MINIKUBE) delete || true
 
 .PHONY: create-loop-dev
-create-loop-dev: | $(TMPDIR)
-	$(shell \
-		if [ -z "$(loop-dev)" ]; then \
-			$(DD) if=/dev/zero of=$(LOOP_FILE) bs=1G seek=32 count=0; \
-			$(SUDO) $(LOSETUP) $$($(SUDO) $(LOSETUP) -f) $(LOOP_FILE); \
-		fi; \
-		if [ -z "$(loop-dev2)" ]; then \
-			$(DD) if=/dev/zero of=$(LOOP_FILE2) bs=1G seek=32 count=0; \
-			$(SUDO) $(LOSETUP) $$($(SUDO) $(LOSETUP) -f) $(LOOP_FILE2); \
-		fi\
-	)
-# suppress "make[1]: Nothing to be done for 'create-loop-dev'."
-	:
+create-loop-dev:
+	$(MINIKUBE) ssh -- $(DD) if=/dev/zero of=$(LOOP_FILE) bs=1G seek=32 count=0
+	$(MINIKUBE) ssh -- $(SUDO) $(LOSETUP) $(LOOP_DEV) $(LOOP_FILE) || :
+	$(MINIKUBE) ssh $(DD) if=/dev/zero of=$(LOOP_FILE2) bs=1G seek=32 count=0
+	$(MINIKUBE) ssh -- $(SUDO) $(LOSETUP) $(LOOP_DEV2) $(LOOP_FILE2) || :
+	$(MINIKUBE) ssh -- lsblk
 
 .PHONY: delete-loop-dev
-delete-loop-dev: | $(TMPDIR)
-	$(SUDO) $(LOSETUP) -d $(loop-dev) || :
-	$(SUDO) rm -f $(LOOP_FILE)
-	$(SUDO) $(LOSETUP) -d $(loop-dev2) || :
-	$(SUDO) rm -f $(LOOP_FILE2)
+delete-loop-dev:
+	$(MINIKUBE) ssh -- $(SUDO) $(LOSETUP) -D || :
+	$(MINIKUBE) ssh -- $(SUDO) rm -f $(LOOP_DEV) $(LOOP_DEV2)
 
 .PHONY: wait-deploy-ready
 wait-deploy-ready: NS=
@@ -162,8 +138,8 @@ launch-rook-ceph: create-loop-dev
 		--create-namespace --namespace $(CEPH_CLUSTER1_NAMESPACE) -f testdata/values.yaml --wait \
 		rook-ceph rook-ceph
 	sed \
-		-e "s%{LOOP_DEV}%$(loop-dev)%" \
-		-e "s%{LOOP_DEV2}%$(loop-dev2)%" \
+		-e "s%{LOOP_DEV}%$(LOOP_DEV)%" \
+		-e "s%{LOOP_DEV2}%$(LOOP_DEV2)%" \
 		-e "s%{NODE_NAME}%$(NODE_NAME)%" \
 		testdata/persistentvolumes-template.yaml \
 		> testdata/persistentvolumes.yaml
@@ -190,13 +166,14 @@ delete-rook-ceph:
 	$(KUBECTL) delete -f testdata/persistentvolumes.yaml || :
 	$(MAKE) delete-loop-dev
 
+.PHONY: image-build
+image-build:
+	eval $$($(MINIKUBE) docker-env); \
+	$(MAKE) -C ../.. docker-build
+	$(MINIKUBE) ssh -- docker images
+
 .PHONY: setup-components
 setup-components:
-	$(MAKE) -C ../.. docker-build
-	# We can't use `minikube image load` due to a minikube's problem.
-	# ref. https://github.com/kubernetes/minikube/issues/17785
-	docker save controller:latest | $(SUDO) ctr -n k8s.io images import -
-
 	$(HELM) upgrade --install mantle-cluster-wide ../../charts/mantle-cluster-wide/ --wait
 	$(HELM) upgrade --install --namespace=$(CEPH_CLUSTER1_NAMESPACE) mantle ../../charts/mantle/ --wait
 	$(HELM) upgrade --install --namespace=$(CEPH_CLUSTER2_NAMESPACE) mantle2 ../../charts/mantle/ --wait
@@ -209,7 +186,7 @@ delete-components:
 
 .PHONY: do_test
 do_test: $(GINKGO)
-	$(SUDO) -E env \
+	env \
 	PATH=${PATH} \
 	E2ETEST=1 \
 	KUBECTL=$(KUBECTL) \
