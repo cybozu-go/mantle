@@ -31,8 +31,6 @@ jobs:
       - run: sudo apt-get purge -y $(dpkg-query -W | grep dotnet | awk '{print $1}')
       - run: sudo apt-get autoremove -y >/dev/null 2>&1
       - run: sudo apt-get autoclean -y >/dev/null 2>&1
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
       - name: cache go dependencies
         uses: actions/cache@v4
         with:
