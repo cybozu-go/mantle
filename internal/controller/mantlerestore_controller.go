@@ -73,6 +73,13 @@ func (r *MantleRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 func (r *MantleRestoreReconciler) restore(ctx context.Context, logger *slog.Logger, restore *mantlev1.MantleRestore) (ctrl.Result, error) {
 	logger.Info("restoring", "name", restore.Name, "namespace", restore.Namespace, "backup", restore.Spec.Backup)
+
+	// skip if already ReadyToUse
+	condition := meta.FindStatusCondition(restore.Status.Conditions, mantlev1.RestoreConditionReadyToUse)
+	if condition != nil && condition.Status == metav1.ConditionTrue {
+		return ctrl.Result{}, nil
+	}
+
 	// get the MantleBackup resource bound to this MantleRestore
 	var backup mantlev1.MantleBackup
 	err := r.Get(ctx, client.ObjectKey{Name: restore.Spec.Backup, Namespace: restore.Namespace}, &backup)
@@ -116,7 +123,7 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, logger *slog.Logg
 	}
 
 	// check if the backup is ReadyToUse
-	condition := meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse)
+	condition = meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse)
 	if condition == nil || condition.Status != metav1.ConditionTrue {
 		logger.Info("backup is not ready to use", "backup", backup.Name, "namespace", backup.Namespace)
 		return ctrl.Result{Requeue: true}, nil
