@@ -15,7 +15,7 @@ metadata:
   name: %s
 provisioner: rook-ceph.rbd.csi.ceph.com
 parameters:
-  clusterID: rook-ceph
+  clusterID: %s
   pool: %s
   imageFormat: "2"
   imageFeatures: layering
