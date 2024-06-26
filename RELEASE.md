@@ -100,11 +100,11 @@ If you want to release both charts, please follow the instructions for each of t
    ```sh
    # For charts/mantle
    git commit -a -s -m "Bump mantle chart version to ${CHARTVERSION}"
-   git switch -c bump-mantle-chart-${CHARTVERSION}
+   git push --set-upstream origin bump-mantle-chart-${CHARTVERSION}
 
    # For charts/mantle-cluster-wide
    git commit -a -s -m "Bump mantle-cluster-wide chart version to ${CHARTVERSION}"
-   bump-mantle-cluster-wide-chart-${CHARTVERSION}
+   git push --set-upstream origin bump-mantle-cluster-wide-chart-${CHARTVERSION}
    ```
 
 5. Create a new pull request and merge it.
