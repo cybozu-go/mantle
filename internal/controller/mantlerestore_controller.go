@@ -169,6 +169,7 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, logger *slog.Logg
 	meta.SetStatusCondition(&restore.Status.Conditions, metav1.Condition{
 		Type:   mantlev1.RestoreConditionReadyToUse,
 		Status: metav1.ConditionTrue,
+		Reason: mantlev1.RestoreReasonNone,
 	})
 	err = r.Status().Update(ctx, restore)
 	if err != nil {

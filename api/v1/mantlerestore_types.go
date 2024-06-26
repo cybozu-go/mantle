@@ -34,6 +34,9 @@ type MantleRestoreStatus struct {
 
 const (
 	RestoreConditionReadyToUse = "ReadyToUse"
+
+	// Reasons for ConditionReadyToUse
+	RestoreReasonNone = "NoProblem"
 )
 
 // +kubebuilder:object:root=true
