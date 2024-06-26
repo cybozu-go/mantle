@@ -47,6 +47,7 @@ help: ## Display this help.
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 	cp -a config/crd/bases/mantle.cybozu.io_mantlebackups.yaml charts/mantle-cluster-wide/templates/
+	cp -a config/crd/bases/mantle.cybozu.io_mantlerestores.yaml charts/mantle-cluster-wide/templates/
 	cat config/rbac/role.yaml | yq '.metadata.name = "mantle-controller"' > charts/mantle-cluster-wide/templates/clusterrole.yaml
 
 .PHONY: generate
@@ -61,8 +62,12 @@ fmt: ## Run go fmt against code.
 vet: ## Run go vet against code.
 	go vet ./...
 
+.PHONY: mock
+mock: mockgen
+	$(MOCKGEN) -source=internal/ceph/command.go -destination=internal/ceph/command_mock.go -package=ceph
+
 .PHONY: test
-test: manifests generate fmt vet envtest ## Run tests.
+test: manifests generate fmt vet envtest mock ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_KUBERNETES_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./... -coverprofile cover.out
 
 GOLANGCI_LINT = $(shell pwd)/bin/golangci-lint
@@ -155,6 +160,7 @@ KUBECTL ?= $(LOCALBIN)/kubectl
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
+MOCKGEN ?= $(LOCALBIN)/mockgen
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary. If wrong version is installed, it will be removed before downloading.
@@ -181,3 +187,8 @@ kubectl: $(KUBECTL) # Download kubectl if necessary.
 $(KUBECTL): $(LOCALBIN)
 	curl https://storage.googleapis.com/kubernetes-release/release/v$(KUBERNETES_VERSION)/bin/linux/amd64/kubectl -o $(KUBECTL)
 	chmod 755 $(KUBECTL)
+
+.PHONY: mockgen
+mockgen: $(MOCKGEN) ## Download mockgen locally if necessary.
+$(MOCKGEN): $(LOCALBIN)
+	GOBIN=$(LOCALBIN) go install go.uber.org/mock/mockgen@$(MOCKGEN_VERSION)

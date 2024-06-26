@@ -6,12 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"strings"
 	"syscall"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -195,6 +193,8 @@ func (r *MantleBackupReconciler) createRBDSnapshot(ctx context.Context, poolName
 //nolint:gocyclo
 func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var backup mantlev1.MantleBackup
+	logger := logger.With("MantleBackup", req.NamespacedName)
+
 	err := r.Get(ctx, req.NamespacedName, &backup)
 	if errors.IsNotFound(err) {
 		logger.Info("MantleBackup is not found", "name", backup.Name, "error", err)
@@ -232,36 +232,18 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
-	storageClassName := pvc.Spec.StorageClassName
-	if storageClassName == nil {
-		logger.Info("not managed storage class", "pvc.Spec.StorageClassName", storageClassName)
-		return ctrl.Result{}, nil
-	}
-	var storageClass storagev1.StorageClass
-	err = r.Get(ctx, types.NamespacedName{Namespace: req.NamespacedName.Name, Name: *storageClassName}, &storageClass)
+	clusterID, err := getCephClusterIDFromPVC(ctx, logger, r.Client, &pvc)
 	if err != nil {
-		logger.Error("failed to get SC", "namespace", req.NamespacedName.Namespace, "name", storageClassName, "error", err)
+		logger.Error("failed to get clusterID from PVC", "namespace", req.Namespace, "name", pvcName, "error", err)
 		err2 := r.updateStatus(ctx, &backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionFalse, Reason: mantlev1.BackupReasonFailedToCreateBackup})
 		if err2 != nil {
 			return ctrl.Result{}, err2
 		}
+
 		return ctrl.Result{}, err
 	}
-
-	// Check if the MantleBackup resource being reconciled is managed by the CephCluster we are in charge of.
-	if !strings.HasSuffix(storageClass.Provisioner, ".rbd.csi.ceph.com") {
-		logger.Info("SC is not managed by RBD", "namespace", req.NamespacedName.Namespace,
-			"storageClassName", *storageClassName, "provisioner", storageClass.Provisioner)
-		return ctrl.Result{}, nil
-	}
-	clusterID, ok := storageClass.Parameters["clusterID"]
-	if !ok {
-		logger.Info("clusterID not found", "namespace", req.NamespacedName.Namespace, "storageClassName", *storageClassName)
-		return ctrl.Result{}, nil
-	}
 	if clusterID != r.managedCephClusterID {
-		logger.Info("clusterID not matched", "namespace", req.NamespacedName.Namespace,
-			"storageClassName", *storageClassName, "clusterID", clusterID, "managedCephClusterID", r.managedCephClusterID)
+		logger.Info("clusterID not matched", "namespace", req.Namespace, "backup", backup.Name, "pvc", pvcName, "clusterID", clusterID, "managedCephClusterID", r.managedCephClusterID)
 		return ctrl.Result{}, nil
 	}
 
@@ -342,6 +324,20 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if err != nil {
 		return result, err
 	}
+
+	pvcJs, err := json.Marshal(pvc)
+	if err != nil {
+		logger.Error("failed to marshal PVC", "error", err)
+		return ctrl.Result{}, err
+	}
+	backup.Status.PVCManifest = string(pvcJs)
+
+	pvJs, err := json.Marshal(pv)
+	if err != nil {
+		logger.Error("failed to marshal PV", "error", err)
+		return ctrl.Result{}, err
+	}
+	backup.Status.PVManifest = string(pvJs)
 
 	backup.Status.CreatedAt = metav1.NewTime(time.Now())
 	err = r.updateStatus(ctx, &backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionTrue, Reason: mantlev1.BackupReasonNone})

@@ -4,20 +4,20 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.14.0
-  name: mantlebackups.mantle.cybozu.io
+  name: mantlerestores.mantle.cybozu.io
 spec:
   group: mantle.cybozu.io
   names:
-    kind: MantleBackup
-    listKind: MantleBackupList
-    plural: mantlebackups
-    singular: mantlebackup
+    kind: MantleRestore
+    listKind: MantleRestoreList
+    plural: mantlerestores
+    singular: mantlerestore
   scope: Namespaced
   versions:
   - name: v1
     schema:
       openAPIV3Schema:
-        description: MantleBackup is the Schema for the mantlebackups API
+        description: MantleRestore is the Schema for the mantlerestores API
         properties:
           apiVersion:
             description: |-
@@ -37,20 +37,22 @@ spec:
           metadata:
             type: object
           spec:
-            description: MantleBackupSpec defines the desired state of MantleBackup
+            description: MantleRestoreSpec defines the desired state of MantleRestore
             properties:
-              namespace:
-                description: '''namespace'' specifies backup target Namespace'
-                type: string
-              pvc:
-                description: '''pvc'' specifies backup target PVC'
+              backup:
+                description: '''backup'' specifies restore target backup resource
+                  name'
                 type: string
             type: object
           status:
-            description: MantleBackupStatus defines the observed state of MantleBackup
+            description: MantleRestoreStatus defines the observed state of MantleRestore
             properties:
+              clusterID:
+                description: '''clusterID'' specifies the Ceph cluster ID the source
+                  PV/PVC belongs to'
+                type: string
               conditions:
-                description: '''conditions'' specifies current backup conditions'
+                description: '''conditions'' specifies current restore conditions'
                 items:
                   description: "Condition contains details for one aspect of the current
                     state of this API Resource.\n---\nThis struct is intended for
@@ -119,15 +121,9 @@ spec:
                   - type
                   type: object
                 type: array
-              createdAt:
-                description: '''createdAt'' specifies the creation date and time'
-                format: date-time
-                type: string
-              pvManifest:
-                description: '''pvManifest'' saving backup target PV manifest'
-                type: string
-              pvcManifest:
-                description: '''pvcManifest'' saving backup target PVC manifests'
+              pool:
+                description: '''pool'' specifies pool name the volumes are restored
+                  to'
                 type: string
             type: object
         type: object

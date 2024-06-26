@@ -9,16 +9,24 @@ rules:
   resources:
   - persistentvolumeclaims
   verbs:
+  - create
+  - delete
   - get
   - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - ""
   resources:
   - persistentvolumes
   verbs:
+  - create
+  - delete
   - get
   - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - ""
@@ -58,6 +66,40 @@ rules:
   - mantle.cybozu.io
   resources:
   - mantlebackups/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - mantle.cybozu.io
+  resources:
+  - mantlerbackup
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - mantle.cybozu.io
+  resources:
+  - mantlerestores
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - mantle.cybozu.io
+  resources:
+  - mantlerestores/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - mantle.cybozu.io
+  resources:
+  - mantlerestores/status
   verbs:
   - get
   - patch

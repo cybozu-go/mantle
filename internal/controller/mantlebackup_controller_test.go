@@ -2,21 +2,26 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"time"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
+	"github.com/cybozu-go/mantle/test/util"
+
 	. "github.com/onsi/ginkgo/v2"
+
 	. "github.com/onsi/gomega"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	ctrl "sigs.k8s.io/controller-runtime"
+	"k8s.io/client-go/kubernetes/scheme"
 )
 
 func mockExecuteCommand(command []string, input io.Reader) ([]byte, error) {
@@ -24,46 +29,39 @@ func mockExecuteCommand(command []string, input io.Reader) ([]byte, error) {
 }
 
 var _ = Describe("MantleBackup controller", func() {
-	ctx := context.Background()
-	var stopFunc func()
-	errCh := make(chan error)
+	var dummyStorageClassName = "dummy-sc"
+	var dummyStorageClassClusterID = "rook-ceph"
+	var dummyStorageClassProvisioner = "rook-ceph.rbd.csi.ceph.com"
 
+	ctx := context.Background()
+	var mgrUtil util.ManagerUtil
 	var reconciler *MantleBackupReconciler
-	scheme := runtime.NewScheme()
 
 	storageClassClusterID := dummyStorageClassClusterID
 	storageClassName := dummyStorageClassName
 
 	BeforeEach(func() {
-		err := mantlev1.AddToScheme(scheme)
-		Expect(err).NotTo(HaveOccurred())
+		mgrUtil = util.NewManagerUtil(ctx, cfg, scheme.Scheme)
 
-		mgr, err := ctrl.NewManager(cfg, ctrl.Options{
-			Scheme: scheme,
-		})
-		Expect(err).ToNot(HaveOccurred())
-
-		reconciler = NewMantleBackupReconciler(k8sClient, mgr.GetScheme(), storageClassClusterID)
-		err = reconciler.SetupWithManager(mgr)
+		reconciler = NewMantleBackupReconciler(k8sClient, mgrUtil.GetScheme(), storageClassClusterID)
+		err := reconciler.SetupWithManager(mgrUtil.GetManager())
 		Expect(err).NotTo(HaveOccurred())
 
 		executeCommand = mockExecuteCommand
 
-		ctx, cancel := context.WithCancel(ctx)
-		stopFunc = cancel
-		go func() {
-			errCh <- mgr.Start(ctx)
-		}()
+		mgrUtil.Start()
 		time.Sleep(100 * time.Millisecond)
 	})
 
 	AfterEach(func() {
-		stopFunc()
-		Expect(<-errCh).NotTo(HaveOccurred())
+		err := mgrUtil.Stop()
+		Expect(err).NotTo(HaveOccurred())
 	})
 
 	It("should be ready to use", func() {
-		ctx := context.Background()
+		err := util.CreateStorageClass(ctx, k8sClient, dummyStorageClassName, dummyStorageClassProvisioner, dummyStorageClassClusterID)
+		Expect(err).NotTo(HaveOccurred())
+
 		ns := createNamespace()
 
 		csiPVSource := corev1.CSIPersistentVolumeSource{
@@ -90,7 +88,7 @@ var _ = Describe("MantleBackup controller", func() {
 				},
 			},
 		}
-		err := k8sClient.Create(ctx, &pv)
+		err = k8sClient.Create(ctx, &pv)
 		Expect(err).NotTo(HaveOccurred())
 
 		pvc := corev1.PersistentVolumeClaim{
@@ -170,6 +168,21 @@ var _ = Describe("MantleBackup controller", func() {
 
 			return nil
 		}).Should(Succeed())
+
+		pvcJS := backup.Status.PVCManifest
+		Expect(pvcJS).NotTo(BeEmpty())
+		pvcStored := corev1.PersistentVolumeClaim{}
+		err = json.Unmarshal([]byte(pvcJS), &pvcStored)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(pvcStored.Name).To(Equal(pvc.Name))
+		Expect(pvcStored.Namespace).To(Equal(pvc.Namespace))
+
+		pvJS := backup.Status.PVManifest
+		Expect(pvJS).NotTo(BeEmpty())
+		pvStored := corev1.PersistentVolume{}
+		err = json.Unmarshal([]byte(pvJS), &pvStored)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(pvStored.Name).To(Equal(pv.Name))
 
 		err = k8sClient.Delete(ctx, &backup)
 		Expect(err).NotTo(HaveOccurred())

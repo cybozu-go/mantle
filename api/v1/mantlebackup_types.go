@@ -31,6 +31,11 @@ type MantleBackupStatus struct {
 
 	// 'conditions' specifies current backup conditions
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// 'pvcManifest' saving backup target PVC manifests
+	PVCManifest string `json:"pvcManifest,omitempty"`
+	// 'pvManifest' saving backup target PV manifest
+	PVManifest string `json:"pvManifest,omitempty"`
 }
 
 const (
