@@ -109,7 +109,7 @@ func subMain() error {
 	)
 	if err = restoreReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MantleRestore")
-		os.Exit(1)
+		return err
 	}
 	//+kubebuilder:scaffold:builder
 
