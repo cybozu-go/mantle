@@ -3,7 +3,7 @@
 # It should be run by config/default
 resources:
 - bases/mantle.cybozu.io_mantlebackups.yaml
-- bases/backup.cybozu.io_mantlerestores.yaml
+- bases/mantle.cybozu.io_mantlerestores.yaml
 #+kubebuilder:scaffold:crdkustomizeresource
 
 patches:

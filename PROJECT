@@ -22,7 +22,7 @@ resources:
     namespaced: true
   controller: true
   domain: cybozu.io
-  group: backup
+  group: mantle
   kind: MantleRestore
   path: github.com/cybozu-go/mantle/api/v1
   version: v1
