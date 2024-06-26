@@ -29,6 +29,20 @@ func TestMtest(t *testing.T) {
 }
 
 var _ = Describe("Mantle", func() {
+	Context("wait environment", waitEnvironment)
 	Context("backup", backupTestSuite)
 	Context("restore", restoreTestSuite)
+	Context("multi Rook/Ceph env", multiRookCephTestSuite)
 })
+
+func waitEnvironment() {
+	It("wait for mantle-controller to be ready", func() {
+		Eventually(func() error {
+			return checkDeploymentReady(cephCluster1Namespace, "mantle-controller")
+		}).Should(Succeed())
+
+		Eventually(func() error {
+			return checkDeploymentReady(cephCluster2Namespace, "mantle2-controller")
+		}).Should(Succeed())
+	})
+}

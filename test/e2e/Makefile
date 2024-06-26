@@ -122,7 +122,8 @@ launch-rook-ceph: create-loop-dev
 		> testdata/persistentvolumes.yaml
 	$(KUBECTL) apply -f testdata/persistentvolumes.yaml
 	$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
-		--namespace $(CEPH_CLUSTER1_NAMESPACE) -f testdata/values-cluster.yaml --wait rook-ceph-cluster rook-ceph-cluster
+		--namespace $(CEPH_CLUSTER1_NAMESPACE) -f testdata/values-cluster.yaml \
+		--wait rook-ceph-cluster rook-ceph-cluster
 	$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
 		--create-namespace --namespace $(CEPH_CLUSTER2_NAMESPACE) -f testdata/values-cluster.yaml \
 		--set cephClusterSpec.dataDirHostPath=/var/lib/rook2 \
