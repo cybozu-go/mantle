@@ -50,7 +50,8 @@ func init() {
 	flags.StringVar(&mbcName, "name", "", "MantleBackupConfig resource's name")
 	flags.StringVar(&mbcNamespace, "namespace", "", "MantleBackupConfig resource's namespace")
 	flags.StringVar(&expireOffset, "expire-offset", "0s",
-		"An offset for expire field. Use this option for testing purposes only.")
+		"An offset for MantleBackupConfig's .spec.expire field. A MantleBackup will expire after "+
+			"it has been active for (.spec.expire - expire-offset) time. This option is intended for testing purposes only.")
 
 	goflags := flag.NewFlagSet("goflags", flag.ExitOnError)
 	zapOpts.Development = true
@@ -65,7 +66,7 @@ func init() {
 
 func getMBName(mbc *mantlev1.MantleBackupConfig, jobID string) string {
 	name := mbc.GetName()
-	if len(name) >= 43 {
+	if len(name) > 43 {
 		name = name[:43]
 	}
 
@@ -82,7 +83,7 @@ func fetchJobID() (string, error) {
 		return "", fmt.Errorf("JOB_NAME not found")
 	}
 	if len(jobName) < 8 {
-		return "", fmt.Errorf("the length of JOB_NAME is smaller than 8")
+		return "", fmt.Errorf("the length of JOB_NAME must be >= 8")
 	}
 	return jobName[len(jobName)-8:], nil
 }
@@ -106,23 +107,23 @@ func subMain(ctx context.Context) error {
 		return fmt.Errorf("can't get mbc: %s: %s: %w", mbcName, mbcNamespace, err)
 	}
 
-	if err := backup(ctx, cli, &mbc); err != nil {
+	if err := createMantleBackup(ctx, cli, &mbc); err != nil {
 		return fmt.Errorf("backup failed: %s: %s: %w", mbcName, mbcNamespace, err)
 	}
 
-	if err := rotate(ctx, cli, &mbc, parsedExpireOffset); err != nil {
+	if err := rotateMantleBackup(ctx, cli, &mbc, parsedExpireOffset); err != nil {
 		return fmt.Errorf("rotation failed: %s: %s: %w", mbcName, mbcNamespace, err)
 	}
 
 	return nil
 }
 
-// backup creates a new MantleBackup (mb) resource. If mb already exists, it
+// createMantleBackup creates a new MantleBackup (mb) resource. If mb already exists, it
 // checks its label and decides if we can keep on reconciling.
-func backup(ctx context.Context, cli client.Client, mbc *mantlev1.MantleBackupConfig) error {
+func createMantleBackup(ctx context.Context, cli client.Client, mbc *mantlev1.MantleBackupConfig) error {
 	jobID, err := fetchJobID()
 	if err != nil {
-		return fmt.Errorf("can't fetch job id: %w", err)
+		return fmt.Errorf("couldn't fetch job id: %w", err)
 	}
 
 	mbName := getMBName(mbc, jobID)
@@ -157,25 +158,25 @@ func backup(ctx context.Context, cli client.Client, mbc *mantlev1.MantleBackupCo
 		return fmt.Errorf("label %s not found: %s: %s", MantleBackupConfigUID, mb.Name, mb.Namespace)
 	}
 	if uid != string(mbc.GetUID()) {
-		return fmt.Errorf("uid is invalid: expected %s: got %s: %s: %s",
+		return fmt.Errorf("this MantleBackup was created by other MantleBackupConfig: expectedUID %s: actualUID %s: %s: %s",
 			string(mbc.GetUID()), uid, mb.Name, mb.Namespace)
 	}
 
 	// At this point we know that mb was created by the previous run of the current job and we're retrying it.
 	// Thus, it is safe to ignore this "already exists" error.
-	logger.Info("avoid creating a new MantleBackup because it already exists",
+	logger.Info("MantleBackup already exists",
 		"mbName", mbName, "mbNamespace", mbNamespace,
 		"mbcName", mbcName, "mbcNamespace", mbcNamespace)
 	return nil
 }
 
-func rotate(
+func rotateMantleBackup(
 	ctx context.Context,
 	cli client.Client,
 	mbc *mantlev1.MantleBackupConfig,
 	expireOffset time.Duration,
 ) error {
-	// List all MantleBackup objects associated with mbc.
+	// List all MantleBackup objects associated with the mbc.
 	var mbList mantlev1.MantleBackupList
 	if err := cli.List(ctx, &mbList, &client.ListOptions{
 		LabelSelector: labels.SelectorFromSet(map[string]string{MantleBackupConfigUID: string(mbc.GetUID())}),
