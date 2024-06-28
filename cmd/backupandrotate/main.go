@@ -93,18 +93,18 @@ func subMain(ctx context.Context) error {
 
 	parsedExpireOffset, err := strfmt.ParseDuration(expireOffset)
 	if err != nil {
-		return fmt.Errorf("can't parse the expire offset: %w", err)
+		return fmt.Errorf("couldn't parse the expire offset: %w", err)
 	}
 
 	cli, err := client.New(config.GetConfigOrDie(), client.Options{Scheme: scheme})
 	if err != nil {
-		return fmt.Errorf("can't create a new client: %w", err)
+		return fmt.Errorf("couldn't create a new client: %w", err)
 	}
 
 	// Get the target mbc.
 	var mbc mantlev1.MantleBackupConfig
 	if err := cli.Get(ctx, types.NamespacedName{Name: mbcName, Namespace: mbcNamespace}, &mbc); err != nil {
-		return fmt.Errorf("can't get mbc: %s: %s: %w", mbcName, mbcNamespace, err)
+		return fmt.Errorf("couldn't get mbc: %s: %s: %w", mbcName, mbcNamespace, err)
 	}
 
 	if err := createMantleBackup(ctx, cli, &mbc); err != nil {
@@ -146,12 +146,12 @@ func createMantleBackup(ctx context.Context, cli client.Client, mbc *mantlev1.Ma
 		return nil
 	}
 	if !errors.IsAlreadyExists(err) {
-		return fmt.Errorf("can't create a MantleBackup: %s: %s: %w", mbName, mbNamespace, err)
+		return fmt.Errorf("couldn't create a MantleBackup: %s: %s: %w", mbName, mbNamespace, err)
 	}
 
 	var mb mantlev1.MantleBackup
 	if err := cli.Get(ctx, types.NamespacedName{Name: mbName, Namespace: mbNamespace}, &mb); err != nil {
-		return fmt.Errorf("can't get MantleBackup: %s: %s: %w", mbName, mbNamespace, err)
+		return fmt.Errorf("couldn't get MantleBackup: %s: %s: %w", mbName, mbNamespace, err)
 	}
 	uid, ok := mb.GetLabels()[MantleBackupConfigUID]
 	if !ok {
@@ -181,13 +181,13 @@ func rotateMantleBackup(
 	if err := cli.List(ctx, &mbList, &client.ListOptions{
 		LabelSelector: labels.SelectorFromSet(map[string]string{MantleBackupConfigUID: string(mbc.GetUID())}),
 	}); err != nil {
-		return fmt.Errorf("can't list MantleBackups: %s: %w", string(mbc.UID), err)
+		return fmt.Errorf("couldn't list MantleBackups: %s: %w", string(mbc.UID), err)
 	}
 
 	// Delete the MantleBackup objects that are already expired and don't have the retainIfExpired label.
 	expire, err := strfmt.ParseDuration(mbc.Spec.Expire)
 	if err != nil {
-		return fmt.Errorf("can't parse spec.expire: %s: %w", mbc.Spec.Expire, err)
+		return fmt.Errorf("couldn't parse spec.expire: %s: %w", mbc.Spec.Expire, err)
 	}
 	if expire >= expireOffset {
 		expire -= expireOffset
@@ -221,7 +221,7 @@ func rotateMantleBackup(
 				"elapsed", elapsed, "expire", expire,
 			)
 		} else {
-			return fmt.Errorf("can't delete MantleBackup: %s: %s: %s: %s: %w",
+			return fmt.Errorf("couldn't delete MantleBackup: %s: %s: %s: %s: %w",
 				mb.Name, mb.Namespace, mb.UID, mb.ResourceVersion, err)
 		}
 	}

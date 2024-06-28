@@ -6,6 +6,7 @@ import (
 	"time"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
+	"github.com/cybozu-go/mantle/test/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	batchv1 "k8s.io/api/batch/v1"
@@ -116,7 +117,7 @@ func createMBC(ctx context.Context, mbcName, mbcNamespace, pvcName, schedule, ex
 	return nil
 }
 
-// cf. https://zenn.dev/nobishii/articles/type_param_intro_2#%E5%85%AC%E5%BC%8F%E3%83%89%E3%82%AD%E3%83%A5%E3%83%A1%E3%83%B3%E3%83%88%E3%81%AB%E8%A6%8B%E3%82%8B%E5%88%B6%E7%B4%84%E5%9E%8B%E6%8E%A8%E8%AB%96%E3%81%AE%E6%B4%BB%E7%94%A8%E4%BE%8B
+// cf. https://go.googlesource.com/proposal/+/refs/heads/master/design/43651-type-parameters.md#pointer-method-example
 type ObjectConstraint[T any] interface {
 	client.Object
 	*T
@@ -147,13 +148,6 @@ func checkDeletedEventually[T any, OC ObjectConstraint[T]](ctx context.Context, 
 	}).Should(Succeed())
 }
 
-var freshNameIndex = 0
-
-func getFreshName(prefix string) string {
-	freshNameIndex++
-	return fmt.Sprintf("%s-%d", prefix, freshNameIndex)
-}
-
 var _ = Describe("MantleBackupConfig controller", func() {
 	ctx := context.Background()
 	var stopFunc func()
@@ -176,7 +170,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		})
 		Expect(err).ToNot(HaveOccurred())
 
-		reconciler = NewMantleBackupConfigReconciler(k8sClient, mgr.GetScheme(), storageClassClusterID, "0s")
+		reconciler = NewMantleBackupConfigReconciler(k8sClient, mgr.GetScheme(), storageClassClusterID, "0s", "")
 		err = reconciler.SetupWithManager(mgr)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -198,15 +192,15 @@ var _ = Describe("MantleBackupConfig controller", func() {
 	DescribeTable("MantleBackupConfigs with correct fields",
 		func(schedule, expire string) {
 			ns := createNamespace()
-			pvName := getFreshName("pv")
-			pvcName := getFreshName("pvc")
+			pvName := util.GetUniqueName("pv-")
+			pvcName := util.GetUniqueName("pvc-")
 
 			err := createBoundPVC(ctx, ns, pvName, pvcName, storageClassName)
 			Expect(err).NotTo(HaveOccurred())
 
 			mbc := mantlev1.MantleBackupConfig{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      getFreshName("mbc"),
+					Name:      util.GetUniqueName("mbc-"),
 					Namespace: ns,
 				},
 				Spec: mantlev1.MantleBackupConfigSpec{
@@ -220,18 +214,18 @@ var _ = Describe("MantleBackupConfig controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 		},
 		Entry("various expires 1", "0 0 * * *", "24h"),
-		Entry("various expires 1", "0 0 * * *", "1d"),
-		Entry("various expires 1", "0 0 * * *", "15d"),
-		Entry("various expires 1", "0 0 * * *", "1w"),
-		Entry("various expires 1", "0 0 * * *", "2w"),
-		Entry("various expires 1", "0 0 * * *", "1w2d3h4m5s"),
+		Entry("various expires 2", "0 0 * * *", "1d"),
+		Entry("various expires 3", "0 0 * * *", "15d"),
+		Entry("various expires 4", "0 0 * * *", "1w"),
+		Entry("various expires 5", "0 0 * * *", "2w"),
+		Entry("various expires 6", "0 0 * * *", "1w2d3h4m5s"),
 		Entry("unusual spacing", "  0   0 *   * *     ", "2w"),
 	)
 
 	It("should accept MantleBackupConfigs with all possible schedules", func() {
 		ns := createNamespace()
-		pvName := getFreshName("pv")
-		pvcName := getFreshName("pvc")
+		pvName := util.GetUniqueName("pv-")
+		pvcName := util.GetUniqueName("pvc-")
 
 		err := createBoundPVC(ctx, ns, pvName, pvcName, storageClassName)
 		Expect(err).NotTo(HaveOccurred())
@@ -254,7 +248,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		for _, schedule := range schedules {
 			mbc := mantlev1.MantleBackupConfig{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      getFreshName("mbc"),
+					Name:      util.GetUniqueName("mbc-"),
 					Namespace: ns,
 				},
 				Spec: mantlev1.MantleBackupConfigSpec{
@@ -271,8 +265,8 @@ var _ = Describe("MantleBackupConfig controller", func() {
 
 	DescribeTable("MantleBackupConfigs with incorrect fields",
 		func(schedule, expire string) {
-			pvName := getFreshName("pv")
-			pvcName := getFreshName("pvc")
+			pvName := util.GetUniqueName("pv-")
+			pvcName := util.GetUniqueName("pvc-")
 			ns := createNamespace()
 
 			err := createBoundPVC(ctx, ns, pvName, pvcName, storageClassName)
@@ -280,7 +274,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 
 			mbc := mantlev1.MantleBackupConfig{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      getFreshName("mbc"),
+					Name:      util.GetUniqueName("mbc-"),
 					Namespace: ns,
 				},
 				Spec: mantlev1.MantleBackupConfigSpec{
@@ -308,8 +302,8 @@ var _ = Describe("MantleBackupConfig controller", func() {
 	It("should accept MantleBackupConfigs with modified mutable fields", func() {
 		ns := createNamespace()
 
-		pvName := getFreshName("pv")
-		pvcName := getFreshName("pvc")
+		pvName := util.GetUniqueName("pv-")
+		pvcName := util.GetUniqueName("pvc-")
 
 		oldSchedule := "0 0 * * *"
 		newSchedule := "0 10 * * *"
@@ -321,7 +315,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 
 		mbc := mantlev1.MantleBackupConfig{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      getFreshName("mbc"),
+				Name:      util.GetUniqueName("mbc-"),
 				Namespace: ns,
 			},
 			Spec: mantlev1.MantleBackupConfigSpec{
@@ -344,10 +338,10 @@ var _ = Describe("MantleBackupConfig controller", func() {
 	It("should reject MantleBackupConfigs with modified immutable fields", func() {
 		ns := createNamespace()
 
-		pvName1 := getFreshName("pv")
-		pvName2 := getFreshName("pv")
-		oldPVC := getFreshName("pvc")
-		newPVC := getFreshName("pvc")
+		pvName1 := util.GetUniqueName("pv-")
+		pvName2 := util.GetUniqueName("pv-")
+		oldPVC := util.GetUniqueName("pvc-")
+		newPVC := util.GetUniqueName("pvc-")
 		oldExpire := "2w"
 		newExpire := "1w"
 
@@ -358,7 +352,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 
 		mbc := mantlev1.MantleBackupConfig{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      getFreshName("mbc"),
+				Name:      util.GetUniqueName("mbc-"),
 				Namespace: ns,
 			},
 			Spec: mantlev1.MantleBackupConfigSpec{
@@ -388,9 +382,9 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		mbcNamespace := ns
 		controllerNs := createNamespace()
 		setMockedGetRunningPod(controllerNs)
-		pvName := getFreshName("pv")
-		pvcName := getFreshName("pvc")
-		mbcName := getFreshName("mbc")
+		pvName := util.GetUniqueName("pv-")
+		pvcName := util.GetUniqueName("pvc-")
+		mbcName := util.GetUniqueName("mbc-")
 		schedule := "0 0 * * *"
 		suspend := false
 
@@ -426,9 +420,9 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		mbcNamespace := ns
 		controllerNs := createNamespace()
 		setMockedGetRunningPod(controllerNs)
-		pvName := getFreshName("pv")
-		pvcName := getFreshName("pvc")
-		mbcName := getFreshName("mbc")
+		pvName := util.GetUniqueName("pv-")
+		pvcName := util.GetUniqueName("pvc-")
+		mbcName := util.GetUniqueName("mbc-")
 
 		err := createBoundPVC(ctx, ns, pvName, pvcName, storageClassName)
 		Expect(err).NotTo(HaveOccurred())

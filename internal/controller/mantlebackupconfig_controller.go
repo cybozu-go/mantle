@@ -33,10 +33,11 @@ type MantleBackupConfigReconciler struct {
 	Scheme               *runtime.Scheme
 	managedCephClusterID string
 	expireOffset         string
+	overwriteMBCSchedule string
 }
 
-func NewMantleBackupConfigReconciler(cli client.Client, scheme *runtime.Scheme, managedCephClusterID string, expireOffset string) *MantleBackupConfigReconciler {
-	return &MantleBackupConfigReconciler{cli, scheme, managedCephClusterID, expireOffset}
+func NewMantleBackupConfigReconciler(cli client.Client, scheme *runtime.Scheme, managedCephClusterID string, expireOffset string, overwriteMBCSchedule string) *MantleBackupConfigReconciler {
+	return &MantleBackupConfigReconciler{cli, scheme, managedCephClusterID, expireOffset, overwriteMBCSchedule}
 }
 
 //+kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlebackupconfigs,verbs=get;list;watch;create;update;patch;delete
@@ -190,6 +191,10 @@ func (r *MantleBackupConfigReconciler) createOrUpdateCronJob(ctx context.Context
 
 	op, err := ctrl.CreateOrUpdate(ctx, r.Client, cronJob, func() error {
 		cronJob.Spec.Schedule = mbc.Spec.Schedule
+		if r.overwriteMBCSchedule != "" {
+			cronJob.Spec.Schedule = r.overwriteMBCSchedule
+		}
+
 		cronJob.Spec.Suspend = &mbc.Spec.Suspend
 		cronJob.Spec.ConcurrencyPolicy = batchv1.ForbidConcurrent
 		var startingDeadlineSeconds int64 = 3600

@@ -108,11 +108,6 @@ func getMBC(namespace, name string) (*mantlev1.MantleBackupConfig, error) {
 	return getObject[mantlev1.MantleBackupConfig]("mantlebackupconfig", namespace, name)
 }
 
-func createJobFromCronJob(namespace, cronJobName, jobName string) error {
-	_, _, err := kubectl("create", "job", jobName, "--from", "cronjob/"+cronJobName, "-n", namespace)
-	return err
-}
-
 func applyMantleBackupConfigTemplate(namespace, pvcName, mbcName string) error {
 	manifest := fmt.Sprintf(testMantleBackupConfigTemplate, mbcName, namespace, pvcName)
 	_, _, err := kubectlWithInput([]byte(manifest), "apply", "-f", "-")
