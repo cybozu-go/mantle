@@ -169,6 +169,7 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, logger *slog.Logg
 	meta.SetStatusCondition(&restore.Status.Conditions, metav1.Condition{
 		Type:   mantlev1.RestoreConditionReadyToUse,
 		Status: metav1.ConditionTrue,
+		Reason: mantlev1.RestoreReasonNone,
 	})
 	err = r.Status().Update(ctx, restore)
 	if err != nil {
@@ -194,29 +195,24 @@ func (r *MantleRestoreReconciler) cloneImageFromBackup(logger *slog.Logger, rest
 		return fmt.Errorf("failed to unmarshal PV manifest: %v", err)
 	}
 
-	pool := pv.Spec.CSI.VolumeAttributes["pool"]
-	if pool == "" {
-		return fmt.Errorf("pool not found in PV manifest")
-	}
-
 	bkImage := pv.Spec.CSI.VolumeAttributes["imageName"]
 	if bkImage == "" {
 		return fmt.Errorf("imageName not found in PV manifest")
 	}
 
-	images, err := r.ceph.RBDLs(pool)
+	images, err := r.ceph.RBDLs(restore.Status.Pool)
 	if err != nil {
 		return fmt.Errorf("failed to list RBD images: %v", err)
 	}
 
 	// check if the image already exists
 	if slices.Contains(images, r.restoringRBDImageName(restore)) {
-		info, err := r.ceph.RBDInfo(pool, r.restoringRBDImageName(restore))
+		info, err := r.ceph.RBDInfo(restore.Status.Pool, r.restoringRBDImageName(restore))
 		if err != nil {
 			return fmt.Errorf("failed to get RBD info: %v", err)
 		}
 
-		if info.ParentPool == pool && info.ParentImage == bkImage && info.ParentSnap == backup.Name {
+		if info.ParentPool == restore.Status.Pool && info.ParentImage == bkImage && info.ParentSnap == backup.Name {
 			logger.Info("image already exists", "image", r.restoringRBDImageName(restore))
 			return nil
 		} else {
@@ -232,7 +228,7 @@ func (r *MantleRestoreReconciler) cloneImageFromBackup(logger *slog.Logger, rest
 	}
 
 	// create a clone image from the backup
-	return r.ceph.RBDClone(pool, bkImage, backup.Name, r.restoringRBDImageName(restore), features)
+	return r.ceph.RBDClone(restore.Status.Pool, bkImage, backup.Name, r.restoringRBDImageName(restore), features)
 }
 
 func (r *MantleRestoreReconciler) createRestoringPV(ctx context.Context, restore *mantlev1.MantleRestore, backup *mantlev1.MantleBackup) error {

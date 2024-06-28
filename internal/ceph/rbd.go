@@ -3,11 +3,16 @@ package ceph
 import (
 	"encoding/json"
 	"fmt"
-	"regexp"
 )
 
+type rbdInfoParentJS struct {
+	Pool     string `json:"pool"`
+	Image    string `json:"image"`
+	Snapshot string `json:"snapshot"`
+}
+
 type rbdInfoJS struct {
-	Parent string `json:"parent"`
+	Parent *rbdInfoParentJS `json:"parent,omitempty"`
 }
 
 // RBDClone clones an RBD image from a snapshot with specified features.
@@ -39,15 +44,13 @@ func (c *cephCmdImpl) RBDInfo(pool, image string) (*RBDInfo, error) {
 		return nil, fmt.Errorf("failed to unmarshal RBD info: %v", err)
 	}
 
-	re := regexp.MustCompile(`^(.*)/(.*)@(.*)$`)
-	match := re.FindStringSubmatch(infoJS.Parent)
-	if match == nil {
-		return nil, fmt.Errorf("failed to parse RBD info parent field: %v", err)
+	if infoJS.Parent == nil {
+		return nil, fmt.Errorf("RBD info parent field is empty")
 	}
 	info := &RBDInfo{
-		ParentPool:  match[1],
-		ParentImage: match[2],
-		ParentSnap:  match[3],
+		ParentPool:  infoJS.Parent.Pool,
+		ParentImage: infoJS.Parent.Image,
+		ParentSnap:  infoJS.Parent.Snapshot,
 	}
 
 	return info, nil

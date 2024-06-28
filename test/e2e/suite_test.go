@@ -30,4 +30,5 @@ func TestMtest(t *testing.T) {
 
 var _ = Describe("Mantle", func() {
 	Context("backup", backupTestSuite)
+	Context("restore", restoreTestSuite)
 })

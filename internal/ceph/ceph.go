@@ -22,3 +22,9 @@ func NewCephCmd() CephCmd {
 		command: newCommand(),
 	}
 }
+
+func NewCephCmdWithTools(namespace string) CephCmd {
+	return &cephCmdImpl{
+		command: newCommandTools(namespace),
+	}
+}
