@@ -29,10 +29,6 @@ func mockExecuteCommand(command []string, input io.Reader) ([]byte, error) {
 }
 
 var _ = Describe("MantleBackup controller", func() {
-	var dummyStorageClassName = "dummy-sc"
-	var dummyStorageClassClusterID = "rook-ceph"
-	var dummyStorageClassProvisioner = "rook-ceph.rbd.csi.ceph.com"
-
 	ctx := context.Background()
 	var mgrUtil util.ManagerUtil
 	var reconciler *MantleBackupReconciler
@@ -59,9 +55,6 @@ var _ = Describe("MantleBackup controller", func() {
 	})
 
 	It("should be ready to use", func() {
-		err := util.CreateStorageClass(ctx, k8sClient, dummyStorageClassName, dummyStorageClassProvisioner, dummyStorageClassClusterID)
-		Expect(err).NotTo(HaveOccurred())
-
 		ns := createNamespace()
 
 		csiPVSource := corev1.CSIPersistentVolumeSource{
@@ -88,7 +81,7 @@ var _ = Describe("MantleBackup controller", func() {
 				},
 			},
 		}
-		err = k8sClient.Create(ctx, &pv)
+		err := k8sClient.Create(ctx, &pv)
 		Expect(err).NotTo(HaveOccurred())
 
 		pvc := corev1.PersistentVolumeClaim{
