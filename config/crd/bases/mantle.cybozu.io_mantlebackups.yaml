@@ -11,6 +11,8 @@ spec:
     kind: MantleBackup
     listKind: MantleBackupList
     plural: mantlebackups
+    shortNames:
+    - mb
     singular: mantlebackup
   scope: Namespaced
   versions:
