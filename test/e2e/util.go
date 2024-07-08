@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
@@ -108,8 +109,9 @@ func applyPVCTemplate(namespace, name, storageClassName string) error {
 }
 
 func applyRBDPoolAndSCTemplate(namespace, poolName, storageClassName string) error {
-	manifest := fmt.Sprintf(testRBDPoolSCTemplate, poolName, namespace,
-		storageClassName, poolName, namespace, namespace, namespace)
+	manifest := fmt.Sprintf(
+		testRBDPoolSCTemplate, poolName, namespace,
+		storageClassName, namespace, poolName, namespace, namespace, namespace)
 	_, _, err := kubectlWithInput([]byte(manifest), "apply", "-n", namespace, "-f", "-")
 	if err != nil {
 		return err
@@ -162,6 +164,123 @@ func createRBDImage(namespace, poolName, imageName string, siz uint) error {
 	if err != nil {
 		return fmt.Errorf("rbd create failed. stderr: %s, err: %w", string(stderr), err)
 	}
+	return nil
+}
+
+func createRBDCloneImage(namespace, poolName, snapName, cloneName string) error {
+	_, stderr, err := kubectl(
+		"-n", namespace, "exec", "deploy/rook-ceph-tools", "--",
+		"rbd", "clone",
+		"--rbd-default-clone-format", "2",
+		"--image-feature", "layering,deep-flatten",
+		poolName+"/"+snapName, poolName+"/"+cloneName)
+	if err != nil {
+		return fmt.Errorf("rbd clone failed. stderr: %s, err: %w", string(stderr), err)
+	}
+	return nil
+}
+
+func removeRBDImage(namespace, poolName, imageName string) error {
+	_, stderr, err := kubectl(
+		"-n", namespace, "exec", "deploy/rook-ceph-tools", "--",
+		"rbd", "rm", poolName+"/"+imageName)
+	if err != nil {
+		return fmt.Errorf("rbd rm failed. stderr: %s, err: %w", string(stderr), err)
+	}
+	return nil
+}
+
+func createRBDSnap(namespace, poolName, imageName, snapName string) error {
+	_, stderr, err := kubectl(
+		"-n", namespace, "exec", "deploy/rook-ceph-tools", "--",
+		"rbd", "snap", "create", poolName+"/"+imageName+"@"+snapName)
+	if err != nil {
+		return fmt.Errorf("rbd snap create failed. stderr: %s, err: %w", string(stderr), err)
+	}
+	return nil
+}
+
+func removeRBDSnap(namespace, poolName, imageName, snapName string) error {
+	_, stderr, err := kubectl(
+		"-n", namespace, "exec", "deploy/rook-ceph-tools", "--",
+		"rbd", "snap", "rm", poolName+"/"+imageName+"@"+snapName)
+	if err != nil {
+		return fmt.Errorf("rbd snap rm failed. stderr: %s, err: %w", string(stderr), err)
+	}
+	return nil
+}
+
+func removeAllRBDImageAndSnap(namespace, pool string) error {
+	targets, err := getImageAndSnapNames(namespace, pool)
+	if err != nil {
+		return err
+	}
+
+	// remove RBD clone images of targets, RBD snapshots of targets, and target images in order
+	clones := []string{}
+	snaps := []string{}
+	images := []string{}
+	for _, target := range targets {
+		if strings.Contains(target, "@") {
+			snaps = append(snaps, target)
+		} else {
+			info, err := getRBDInfo(namespace, pool, target)
+			if err != nil {
+				return err
+			}
+			if info.Parent != nil {
+				clones = append(clones, target)
+			} else {
+				images = append(images, target)
+			}
+		}
+	}
+
+	// remove RBD clones
+	for _, clone := range clones {
+		err = removeRBDImage(namespace, pool, clone)
+		if err != nil {
+			return err
+		}
+	}
+
+	// remove RBD snapshots
+	for _, snap := range snaps {
+		imageAndSnap := strings.Split(snap, "@")
+		err = removeRBDSnap(namespace, pool, imageAndSnap[0], imageAndSnap[1])
+		if err != nil {
+			return err
+		}
+	}
+
+	// remove RBD images
+	for _, image := range images {
+		err = removeRBDImage(namespace, pool, image)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func deleteNamespacedResource(namespace, kind string) error {
+	stdout, stderr, err := kubectl("get", kind, "-n", namespace, "-o", "jsonpath={.items[*].metadata.name}")
+	if err != nil {
+		return fmt.Errorf("kubectl get failed. stderr: %s, err: %w", string(stderr), err)
+	}
+
+	names := strings.Split(string(stdout), " ")
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		_, stderr, err = kubectl("delete", kind, "-n", namespace, name)
+		if err != nil {
+			return fmt.Errorf("kubectl delete failed. ns: %s, kind: %s, name: %s, stderr: %s, err: %w",
+				namespace, kind, name, string(stderr), err)
+		}
+	}
+
 	return nil
 }
 
@@ -298,4 +417,40 @@ func readTestData(namespace, pvc string) ([]byte, error) {
 	}
 
 	return stdout, nil
+}
+
+func getImageAndSnapNames(namespace, pool string) ([]string, error) {
+	stdout, stderr, err := kubectl(
+		"-n", namespace, "exec", "deploy/rook-ceph-tools", "--",
+		"rbd", "ls", "-p", pool, "--format", "json")
+	if err != nil {
+		return nil, fmt.Errorf("rbd ls failed. stderr: %s, err: %w", string(stderr), err)
+	}
+
+	var images []string
+	err = json.Unmarshal(stdout, &images)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal output of rbd ls: %w", err)
+	}
+
+	var snaps []string
+	for _, image := range images {
+		stdout, stderr, err := kubectl(
+			"-n", namespace, "exec", "deploy/rook-ceph-tools", "--",
+			"rbd", "snap", "ls", pool+"/"+image, "--format=json")
+		if err != nil {
+			return nil, fmt.Errorf("rbd snap ls failed. stderr: %s, err: %w", string(stderr), err)
+		}
+		var snapshots []controller.Snapshot
+		err = json.Unmarshal(stdout, &snapshots)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unmarshal output of rbd snap ls: %w", err)
+		}
+
+		for _, s := range snapshots {
+			snaps = append(snaps, fmt.Sprintf("%s@%s", image, s.Name))
+		}
+	}
+
+	return append(images, snaps...), nil
 }

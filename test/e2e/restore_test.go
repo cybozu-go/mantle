@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
@@ -53,6 +52,10 @@ func restoreTestSuite() {
 }
 
 func (test *restoreTest) setupEnv() {
+	It("describing the test environment", func() {
+		fmt.Fprintf(GinkgoWriter, "%+v\n", *test)
+	})
+
 	It("creating common resources", func() {
 		// namespace
 		err := createNamespace(test.tenantNamespace)
@@ -72,6 +75,22 @@ func (test *restoreTest) setupEnv() {
 
 func (test *restoreTest) tearDownEnv() {
 	test.cleanup()
+
+	It("delete namespace: "+test.tenantNamespace, func() {
+		_, stderr, err := kubectl("delete", "namespace", test.tenantNamespace)
+		Expect(err).NotTo(HaveOccurred(), string(stderr))
+	})
+
+	It("clean up the SCs and RBD pools", func() {
+		_, stderr, err := kubectl("delete", "sc", test.storageClassName)
+		Expect(err).NotTo(HaveOccurred(), string(stderr))
+
+		err = removeAllRBDImageAndSnap(cephCluster1Namespace, test.poolName)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, _, err = kubectl("delete", "-n", cephCluster1Namespace, "cephblockpool", test.poolName, "--wait=false")
+		Expect(err).NotTo(HaveOccurred())
+	})
 }
 
 func (test *restoreTest) testRestore() {
@@ -574,20 +593,10 @@ func (test *restoreTest) testRemoveImage() {
 }
 
 func (test *restoreTest) cleanup() {
-	test.deleteNamespacedResource(test.tenantNamespace, "mantlerestore")
-	test.deleteNamespacedResource(test.tenantNamespace, "mantlebackup")
-	test.deleteNamespacedResource(test.tenantNamespace, "pvc")
-}
-
-func (test *restoreTest) deleteNamespacedResource(namespace, kind string) {
-	stdout, stderr, err := kubectl("get", kind, "-n", namespace, "-o", "jsonpath={.items[*].metadata.name}")
-	Expect(err).NotTo(HaveOccurred(), string(stderr))
-	names := strings.Split(string(stdout), " ")
-	for _, name := range names {
-		if name == "" {
-			continue
-		}
-		_, stderr, err = kubectl("delete", kind, "-n", namespace, name)
-		Expect(err).NotTo(HaveOccurred(), string(stderr))
-	}
+	err := deleteNamespacedResource(test.tenantNamespace, "mantlerestore")
+	Expect(err).NotTo(HaveOccurred())
+	err = deleteNamespacedResource(test.tenantNamespace, "mantlebackup")
+	Expect(err).NotTo(HaveOccurred())
+	err = deleteNamespacedResource(test.tenantNamespace, "pvc")
+	Expect(err).NotTo(HaveOccurred())
 }
