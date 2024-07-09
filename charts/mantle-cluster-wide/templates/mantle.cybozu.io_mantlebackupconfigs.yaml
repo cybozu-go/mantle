@@ -1,0 +1,78 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.14.0
+  name: mantlebackupconfigs.mantle.cybozu.io
+spec:
+  group: mantle.cybozu.io
+  names:
+    kind: MantleBackupConfig
+    listKind: MantleBackupConfigList
+    plural: mantlebackupconfigs
+    shortNames:
+    - mbc
+    singular: mantlebackupconfig
+  scope: Namespaced
+  versions:
+  - name: v1
+    schema:
+      openAPIV3Schema:
+        description: MantleBackupConfig is the Schema for the mantlebackupconfigs
+          API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: MantleBackupConfigSpec defines the desired state of MantleBackupConfig
+            properties:
+              expire:
+                format: duration
+                type: string
+                x-kubernetes-validations:
+                - message: expire must be >= 1d
+                  rule: self >= duration('24h')
+                - message: expire must be <= 15d
+                  rule: self <= duration('360h')
+                - message: spec.expire is immutable
+                  rule: self == oldSelf
+              pvc:
+                type: string
+                x-kubernetes-validations:
+                - message: spec.pvc is immutable
+                  rule: self == oldSelf
+              schedule:
+                pattern: ^\s*([0-5]?[0-9])\s+(0?[0-9]|1[0-9]|2[0-3])\s+\*\s+\*\s+\*\s*$
+                type: string
+              suspend:
+                default: false
+                type: boolean
+            required:
+            - expire
+            - pvc
+            - schedule
+            type: object
+          status:
+            description: MantleBackupConfigStatus defines the observed state of MantleBackupConfig
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

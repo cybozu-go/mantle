@@ -1,0 +1,12 @@
+apiVersion: mantle.cybozu.io/v1
+kind: MantleBackupConfig
+metadata:
+  labels:
+    app.kubernetes.io/name: mantlebackupconfig
+    app.kubernetes.io/instance: mantlebackupconfig-sample
+    app.kubernetes.io/part-of: mantle
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: mantle
+  name: mantlebackupconfig-sample
+spec:
+  # TODO(user): Add fields here

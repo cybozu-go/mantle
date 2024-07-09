@@ -29,9 +29,29 @@ rules:
       - update
       - watch
   - apiGroups:
+      - batch
+    resources:
+      - cronjobs
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
       - ""
     resources:
       - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - pods
     verbs:
       - get
       - list
@@ -44,6 +64,32 @@ rules:
       - get
       - list
       - watch
+  - apiGroups:
+      - mantle.cybozu.io
+    resources:
+      - mantlebackupconfigs
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - mantle.cybozu.io
+    resources:
+      - mantlebackupconfigs/finalizers
+    verbs:
+      - update
+  - apiGroups:
+      - mantle.cybozu.io
+    resources:
+      - mantlebackupconfigs/status
+    verbs:
+      - get
+      - patch
+      - update
   - apiGroups:
       - mantle.cybozu.io
     resources:

@@ -21,3 +21,5 @@ resources: {}
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+controller: {}

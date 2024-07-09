@@ -141,8 +141,10 @@ image-build:
 .PHONY: setup-components
 setup-components:
 	$(HELM) upgrade --install mantle-cluster-wide ../../charts/mantle-cluster-wide/ --wait
-	$(HELM) upgrade --install --namespace=$(CEPH_CLUSTER1_NAMESPACE) mantle ../../charts/mantle/ --wait
+	$(HELM) upgrade --install --namespace=$(CEPH_CLUSTER1_NAMESPACE) mantle ../../charts/mantle/ --wait -f testdata/values-mantle.yaml
 	$(HELM) upgrade --install --namespace=$(CEPH_CLUSTER2_NAMESPACE) mantle2 ../../charts/mantle/ --wait
+	$(KUBECTL) rollout restart -n $(CEPH_CLUSTER1_NAMESPACE) deploy/mantle-controller
+	$(KUBECTL) rollout restart -n $(CEPH_CLUSTER2_NAMESPACE) deploy/mantle2-controller
 
 .PHONY: do_test
 do_test: $(GINKGO)
