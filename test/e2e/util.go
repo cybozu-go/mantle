@@ -13,6 +13,7 @@ import (
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/controller"
 	testutil "github.com/cybozu-go/mantle/test/util"
+	"gopkg.in/yaml.v2"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -399,6 +400,20 @@ func getRBDInfo(clusterNS, pool, image string) (*rbdInfo, error) {
 	}
 
 	return &info, nil
+}
+
+func isMantleBackupReady(namespace, name string) (bool, error) {
+	stdout, _, err := kubectl("-n", namespace, "get", "mantlebackup", name, "-o", "json")
+	if err != nil {
+		return false, err
+	}
+	var backup mantlev1.MantleBackup
+	err = yaml.Unmarshal(stdout, &backup)
+	if err != nil {
+		return false, err
+	}
+	cond := meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse).Status
+	return cond == metav1.ConditionTrue, nil
 }
 
 func isMantleRestoreReady(namespace, name string) bool {

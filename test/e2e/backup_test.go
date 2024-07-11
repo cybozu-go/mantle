@@ -9,9 +9,6 @@ import (
 	"github.com/cybozu-go/mantle/test/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/yaml"
 )
 
 const (
@@ -154,6 +151,18 @@ func (test *backupTest) testCase1() {
 
 			return checkSnapshotExist(cephCluster1Namespace, test.poolName, imageName, test.mantleBackupName3)
 		}).Should(Succeed())
+
+		By("Checking that the status.conditions of the MantleBackup resource becomes \"ReadyToUse\"")
+		Eventually(func() error {
+			ready, err := isMantleBackupReady(test.tenantNamespace, test.mantleBackupName3)
+			if err != nil {
+				return err
+			}
+			if !ready {
+				return fmt.Errorf("not ready")
+			}
+			return nil
+		}).Should(Succeed())
 	})
 
 	It("should not delete MantleBackup resource when delete backup target PVC", func() {
@@ -173,14 +182,10 @@ func (test *backupTest) testCase1() {
 			return fmt.Errorf("PVC %s still exists. stdout: %s", test.pvcName2, stdout)
 		}).Should(Succeed())
 
-		By("Checking that the status.conditions of the MantleBackup resource remain \"Bound\"")
-		stdout, _, err := kubectl("-n", test.tenantNamespace, "get", "mantlebackup", test.mantleBackupName3, "-o", "json")
+		By("Checking that the status.conditions of the MantleBackup resource remain \"ReadyToUse\"")
+		ready, err := isMantleBackupReady(test.tenantNamespace, test.mantleBackupName3)
 		Expect(err).NotTo(HaveOccurred())
-		var backup mantlev1.MantleBackup
-		err = yaml.Unmarshal(stdout, &backup)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse).Status).
-			To(Equal(metav1.ConditionTrue))
+		Expect(ready).To(Equal(true))
 	})
 
 	It("should delete MantleBackup resource", func() {
