@@ -150,18 +150,18 @@ spec:
 Precondition: Process will not start until conditions are met.
 - The target MantleBackup must exist and be ready to use.
 
-1. Users crate a `MantleRestore` resource.
+1. Users create a `MantleRestore` resource.
 2. The controller gets the target MantleBackup from the `MantleRestore` resource.
 3. The controller stores the pool name for the `status.pool` field and cluster ID for the `status.clusterID` field. This value is used to remove the restored PV/PVC when the MantleRestore resource is deleted.
-4. The controller gets backup target RBD snap image name from the MantleBackup.
-5. The controller creates a new RBD clone from the RBD snap image.
-6. The controller creates a new PV/PVC using the new RBD clone.
+4. The controller gets backup target RBD snapshot name from the MantleBackup.
+5. The controller creates a new RBD clone image from the RBD snapshot.
+6. The controller creates a new PV/PVC using the above-mentioned RBD clone image.
 
 ### Cleanup restore flow
 
 1. Users delete the `MantleRestore` resource.
-2. The controller tries to delete the PV/PVC created by the `MantleRestore` resource and wait until the PV/PVC is deleted. If the PV/PVC is used by some pod.
-3. The controller removes the RBD clone created by the `MantleRestore` resource. The controller should not remove RBD clone volume specified by the PV.
+2. The controller tries to delete the PV/PVC created by the `MantleRestore` resource and wait until the Pod consuming the PV/PVC are stopped and deleted.
+3. The controller removes the RBD clone image created by the `MantleRestore` resource. However, the controller should not remove the RBD clone image if the previous step is not completed and a PV/PVC exists.
 
 #### The manifest to get restore PV/PVC from a backup
 
