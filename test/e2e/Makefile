@@ -22,6 +22,8 @@ POLLING_INTERVAL := 1
 TIMEOUT_SECS := 180
 LOOP_DEV := /dev/loop0
 LOOP_DEV2 := /dev/loop1
+MINIKUBE_PROFILE_PRIMARY=profile1
+MINIKUBE_PROFILE_SECONDARY=profile2
 
 export MINIKUBE_HOME
 
@@ -34,15 +36,25 @@ setup:
 
 .PHONY: test
 test:
-	$(MAKE) launch-minikube
-	$(MAKE) image-build
-	$(MAKE) launch-rook-ceph
-	$(MAKE) setup-components
+	$(MAKE) launch-cluster MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_PRIMARY)
+	$(MINIKUBE) profile $(MINIKUBE_PROFILE_PRIMARY)
 	$(MAKE) do_test
+
+.PHONY: test-multiple-k8s-clusters
+test-multiple-k8s-clusters:
+	$(MAKE) launch-cluster MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_PRIMARY)
+	$(MAKE) launch-cluster MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_SECONDARY)
+	$(MINIKUBE) profile $(MINIKUBE_PROFILE_PRIMARY)
+	env \
+		MINIKUBE=$(MINIKUBE) \
+		MINIKUBE_HOME=$(MINIKUBE_HOME) \
+		MINIKUBE_PROFILE_PRIMARY=$(MINIKUBE_PROFILE_PRIMARY) \
+		MINIKUBE_PROFILE_SECONDARY=$(MINIKUBE_PROFILE_SECONDARY) \
+		./test-multiple-k8s-clusters.sh
 
 .PHONY: clean
 clean:
-	$(MAKE) delete-minikube
+	$(MINIKUBE) delete --all || true
 
 $(BINDIR):
 	mkdir -p $@
@@ -63,24 +75,25 @@ $(HELM): | $(BINDIR)
 	$(CURL) https://get.helm.sh/helm-v$(HELM_VERSION)-linux-amd64.tar.gz \
 		| tar xvz -C $(BINDIR) --strip-components 1 linux-amd64/helm
 
-.PHONY: launch-minikube
-launch-minikube:
+.PHONY: launch-cluster
+launch-cluster: MINIKUBE_PROFILE=
+launch-cluster:
 	# TODO: Is there any better way to verify whether k8s cluster is available or not?
-	kubectl get pod >/dev/null 2>&1; \
-	RET=$$? ; \
-	if [ $$RET -eq 0 ] ; then exit; fi ; \
-	$(MINIKUBE) start \
-		--kubernetes-version="v$(KUBERNETES_VERSION)" \
-		--driver=kvm2 \
-		--memory 6g \
-		--cpus=2 \
-		--extra-config=kubeadm.node-name=$(NODE_NAME) \
-		--extra-config=kubelet.hostname-override=$(NODE_NAME)
-
-.PHONY: delete-minikube
-delete-minikube:
-	$(MINIKUBE) stop || true
-	$(MINIKUBE) delete || true
+	if $(MINIKUBE) profile $(MINIKUBE_PROFILE) |& grep "not found" > /dev/null; then \
+		$(MINIKUBE) start \
+			--kubernetes-version="v$(KUBERNETES_VERSION)" \
+			--driver=kvm2 \
+			--memory 6g \
+			--cpus=2 \
+			--extra-config=kubeadm.node-name=$(NODE_NAME) \
+			--extra-config=kubelet.hostname-override=$(NODE_NAME) \
+			--network mantle-test \
+			-p $(MINIKUBE_PROFILE) ; \
+	fi
+	$(MINIKUBE) profile $(MINIKUBE_PROFILE)
+	$(MAKE) image-build
+	$(MAKE) launch-rook-ceph
+	$(MAKE) setup-components
 
 .PHONY: create-loop-dev
 create-loop-dev:

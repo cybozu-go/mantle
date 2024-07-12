@@ -1,4 +1,4 @@
-name: "e2e"
+name: "e2e-multiple-k8s-clusters"
 on:
   pull_request:
     paths-ignore:
@@ -11,9 +11,16 @@ on:
     branches:
       - "main"
 
+# Cancel any ongoing workflows on the same branch to avoid unnecessary fees.
+# cf. https://docs.github.com/en/actions/using-jobs/using-concurrency#example-using-concurrency-and-the-default-behavior
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
-    runs-on: "ubuntu-22.04"
+    #runs-on: "ubuntu-22.04"
+    runs-on: mantle_large_runner_16core
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -32,4 +39,4 @@ jobs:
           restore-keys: |
             go-
       - run: make -C test/e2e setup
-      - run: make -C test/e2e test
+      - run: make -C test/e2e test-multiple-k8s-clusters
