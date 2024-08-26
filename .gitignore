@@ -26,3 +26,4 @@ Dockerfile.cross
 *~
 
 test/e2e/testdata/persistentvolumes.yaml
+include/

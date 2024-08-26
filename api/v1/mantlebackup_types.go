@@ -39,7 +39,8 @@ type MantleBackupStatus struct {
 }
 
 const (
-	BackupConditionReadyToUse = "ReadyToUse"
+	BackupConditionReadyToUse     = "ReadyToUse"
+	BackupConditionSyncedToRemote = "SyncedToRemote"
 
 	// Reasons for ConditionReadyToUse
 	BackupReasonNone                 = "NoProblem"

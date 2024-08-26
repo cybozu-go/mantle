@@ -20,6 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
+	"github.com/cybozu-go/mantle/pkg/controller/proto"
 )
 
 // MantleBackupReconciler reconciles a MantleBackup object
@@ -27,6 +28,8 @@ type MantleBackupReconciler struct {
 	client.Client
 	Scheme               *runtime.Scheme
 	managedCephClusterID string
+	role                 string
+	primarySettings      *PrimarySettings // This should be non-nil if and only if role equals 'primary'.
 }
 
 type Snapshot struct {
@@ -42,11 +45,13 @@ const (
 )
 
 // NewMantleBackupReconciler returns NodeReconciler.
-func NewMantleBackupReconciler(client client.Client, scheme *runtime.Scheme, managedCephClusterID string) *MantleBackupReconciler {
+func NewMantleBackupReconciler(client client.Client, scheme *runtime.Scheme, managedCephClusterID, role string, primarySettings *PrimarySettings) *MantleBackupReconciler {
 	return &MantleBackupReconciler{
 		Client:               client,
 		Scheme:               scheme,
 		managedCephClusterID: managedCephClusterID,
+		role:                 role,
+		primarySettings:      primarySettings,
 	}
 }
 
@@ -194,6 +199,10 @@ func (r *MantleBackupReconciler) createRBDSnapshot(ctx context.Context, poolName
 func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var backup mantlev1.MantleBackup
 	logger := logger.With("MantleBackup", req.NamespacedName)
+
+	if r.role == RoleSecondary {
+		return ctrl.Result{}, nil
+	}
 
 	err := r.Get(ctx, req.NamespacedName, &backup)
 	if errors.IsNotFound(err) {
@@ -343,6 +352,38 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	err = r.updateStatus(ctx, &backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionTrue, Reason: mantlev1.BackupReasonNone})
 	if err != nil {
 		return ctrl.Result{}, err
+	}
+
+	if r.primarySettings != nil {
+		client := r.primarySettings.Client
+		_, err := client.CreateOrUpdatePVC(
+			ctx,
+			&proto.CreateOrUpdatePVCRequest{
+				Pvc: "", // FIXME: this field should be correctly populated.
+			},
+		)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
+		_, err = client.CreateOrUpdateMantleBackup(
+			ctx,
+			&proto.CreateOrUpdateMantleBackupRequest{
+				MantleBackup: "", // FIXME: this field should be correctly populated.
+			},
+		)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
+		err = r.updateStatus(ctx, &backup, metav1.Condition{
+			Type:   mantlev1.BackupConditionSyncedToRemote,
+			Status: metav1.ConditionTrue,
+			Reason: mantlev1.BackupReasonNone,
+		})
+		if err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	return ctrl.Result{}, nil

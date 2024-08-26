@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package proto;
+
+option go_package = "github.com/cybozu-go/mantle/pkg/controller/proto";
+
+// CreateOrUpdatePVCRequest is a request message for CreateOrUpdatePVC RPC.
+message CreateOrUpdatePVCRequest {
+    string pvc = 1;
+}
+
+// CreateOrUpdatePVCResponse is a response message for CreateOrUpdatePVC RPC.
+message CreateOrUpdatePVCResponse {
+    string uid = 1;
+}
+
+// CreateOrUpdateMantleBackupRequest is a request message for CreateOrUpdateMantleBackup RPC.
+message CreateOrUpdateMantleBackupRequest {
+    string mantleBackup = 1;
+}
+
+// CreateOrUpdateMantleBackupResponse is a response message for CreateOrUpdateMantleBackup RPC.
+message CreateOrUpdateMantleBackupResponse {
+    // nothing.
+}
+
+service MantleService {
+    rpc CreateOrUpdatePVC(CreateOrUpdatePVCRequest) returns (CreateOrUpdatePVCResponse);
+    rpc CreateOrUpdateMantleBackup(CreateOrUpdateMantleBackupRequest) returns (CreateOrUpdateMantleBackupResponse);
+}

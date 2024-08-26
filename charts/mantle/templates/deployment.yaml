@@ -60,6 +60,10 @@ spec:
           args:
             - controller
             - --leader-elect
+            - --role={{ .Values.controller.role }}
+            {{- with .Values.controller.mantleServiceEndpoint }}
+            - --mantle-service-endpoint={{ . }}
+            {{- end }}
             {{- with .Values.controller.expireOffset }}
             - --expire-offset={{ . }}
             {{- end }}
@@ -75,6 +79,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+          ports:
+            {{- toYaml .Values.controller.ports | nindent 12 }}
         - command:
             - /bin/bash
             - -c
