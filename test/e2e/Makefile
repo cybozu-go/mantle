@@ -165,4 +165,4 @@ do_test: $(GINKGO)
 	PATH=${PATH} \
 	E2ETEST=1 \
 	KUBECTL=$(KUBECTL) \
-	$(GINKGO) --fail-fast -v $(GINKGO_FLAGS) .
+	$(GINKGO) --fail-fast -v $(GINKGO_FLAGS) singlek8s
