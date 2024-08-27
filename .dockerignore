@@ -1,3 +1,16 @@
-# More info: https://docs.docker.com/engine/reference/builder/#dockerignore-file
-# Ignore build and test binaries.
-bin/
+.git
+.github
+bin
+charts
+config
+docs
+include
+test
+.cr.yaml
+.gitignore
+.golangci.yaml
+LICENSE
+PROJECT
+README.md
+RELEASE.md
+TODO
