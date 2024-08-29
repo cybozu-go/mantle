@@ -36,21 +36,49 @@ setup:
 
 .PHONY: test
 test:
-	$(MAKE) launch-cluster MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_PRIMARY)
-	$(MINIKUBE) profile $(MINIKUBE_PROFILE_PRIMARY)
+	$(MAKE) launch-minikube MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_PRIMARY)
+	$(MAKE) install-rook-ceph-operator
+	$(MAKE) install-rook-ceph-cluster1
+	$(MAKE) install-rook-ceph-cluster2
+	$(MAKE) install-mantle-cluster-wide
+	$(MAKE) install-mantle \
+		NAMESPACE=$(CEPH_CLUSTER1_NAMESPACE) \
+		HELM_RELEASE=mantle \
+		VALUES_YAML=testdata/values-mantle1.yaml
+	$(MAKE) install-mantle \
+		NAMESPACE=$(CEPH_CLUSTER2_NAMESPACE) \
+		HELM_RELEASE=mantle2 \
+		VALUES_YAML=testdata/values-mantle2.yaml
 	$(MAKE) do_test
 
 .PHONY: test-multiple-k8s-clusters
 test-multiple-k8s-clusters:
-	$(MAKE) launch-cluster MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_PRIMARY)
-	$(MAKE) launch-cluster MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_SECONDARY)
+# set up a k8s cluster for secondary mantle
+	$(MAKE) launch-minikube MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_SECONDARY)
+	$(MAKE) install-rook-ceph-operator
+	$(MAKE) install-rook-ceph-cluster1
+	$(MAKE) install-mantle-cluster-wide
+	$(MAKE) install-mantle \
+		NAMESPACE=$(CEPH_CLUSTER1_NAMESPACE) \
+		HELM_RELEASE=mantle \
+		VALUES_YAML=testdata/values-mantle-secondary.yaml
+	$(KUBECTL) apply -f testdata/secondary-mantle-service.yaml
+# set up a k8s cluster for primary mantle
+	$(MAKE) launch-minikube MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_PRIMARY)
+	$(MAKE) install-rook-ceph-operator
+	$(MAKE) install-rook-ceph-cluster1
+	$(MAKE) install-mantle-cluster-wide
+	sed \
+		-e "s%{ENDPOINT}%$$($(MINIKUBE) service list -p $(MINIKUBE_PROFILE_SECONDARY) -o json | jq -r '.[].URLs | select(. | length > 0)[]' | head -1 | sed -r 's/^http:\/\///')%" \
+		testdata/values-mantle-primary-template.yaml \
+		> testdata/values-mantle-primary.yaml
+	$(MAKE) install-mantle \
+		NAMESPACE=$(CEPH_CLUSTER1_NAMESPACE) \
+		HELM_RELEASE=mantle \
+		VALUES_YAML=testdata/values-mantle-primary.yaml
+# start testing
 	$(MINIKUBE) profile $(MINIKUBE_PROFILE_PRIMARY)
-	env \
-		MINIKUBE=$(MINIKUBE) \
-		MINIKUBE_HOME=$(MINIKUBE_HOME) \
-		MINIKUBE_PROFILE_PRIMARY=$(MINIKUBE_PROFILE_PRIMARY) \
-		MINIKUBE_PROFILE_SECONDARY=$(MINIKUBE_PROFILE_SECONDARY) \
-		./test-multiple-k8s-clusters.sh
+	$(MAKE) do-test-multik8s
 
 .PHONY: clean
 clean:
@@ -75,9 +103,9 @@ $(HELM): | $(BINDIR)
 	$(CURL) https://get.helm.sh/helm-v$(HELM_VERSION)-linux-amd64.tar.gz \
 		| tar xvz -C $(BINDIR) --strip-components 1 linux-amd64/helm
 
-.PHONY: launch-cluster
-launch-cluster: MINIKUBE_PROFILE=
-launch-cluster:
+.PHONY: launch-minikube
+launch-minikube: MINIKUBE_PROFILE=
+launch-minikube:
 	# TODO: Is there any better way to verify whether k8s cluster is available or not?
 	if $(MINIKUBE) profile $(MINIKUBE_PROFILE) |& grep "not found" > /dev/null; then \
 		$(MINIKUBE) start \
@@ -92,8 +120,14 @@ launch-cluster:
 	fi
 	$(MINIKUBE) profile $(MINIKUBE_PROFILE)
 	$(MAKE) image-build
-	$(MAKE) launch-rook-ceph
-	$(MAKE) setup-components
+	$(MAKE) create-loop-dev
+	sed \
+		-e "s%{LOOP_DEV}%$(LOOP_DEV)%" \
+		-e "s%{LOOP_DEV2}%$(LOOP_DEV2)%" \
+		-e "s%{NODE_NAME}%$(NODE_NAME)%" \
+		testdata/persistentvolumes-template.yaml \
+		> testdata/persistentvolumes.yaml
+	$(KUBECTL) apply -f testdata/persistentvolumes.yaml
 
 .PHONY: create-loop-dev
 create-loop-dev:
@@ -122,27 +156,26 @@ wait-deploy-ready:
 		exit 1; \
 	fi
 
-.PHONY: launch-rook-ceph
-launch-rook-ceph: create-loop-dev
+.PHONY: install-rook-ceph-operator
+install-rook-ceph-operator:
 	$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
 		--create-namespace --namespace $(CEPH_CLUSTER1_NAMESPACE) -f testdata/values.yaml --wait \
 		rook-ceph rook-ceph
-	sed \
-		-e "s%{LOOP_DEV}%$(LOOP_DEV)%" \
-		-e "s%{LOOP_DEV2}%$(LOOP_DEV2)%" \
-		-e "s%{NODE_NAME}%$(NODE_NAME)%" \
-		testdata/persistentvolumes-template.yaml \
-		> testdata/persistentvolumes.yaml
-	$(KUBECTL) apply -f testdata/persistentvolumes.yaml
+	$(MAKE) wait-deploy-ready NS=$(CEPH_CLUSTER1_NAMESPACE) DEPLOY=rook-ceph-operator
+
+.PHONY: install-rook-ceph-cluster1
+install-rook-ceph-cluster1:
 	$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
 		--namespace $(CEPH_CLUSTER1_NAMESPACE) -f testdata/values-cluster.yaml \
 		--wait rook-ceph-cluster rook-ceph-cluster
+	$(MAKE) wait-deploy-ready NS=$(CEPH_CLUSTER1_NAMESPACE) DEPLOY=rook-ceph-osd-0
+
+.PHONY: install-rook-ceph-cluster2
+install-rook-ceph-cluster2:
 	$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
 		--create-namespace --namespace $(CEPH_CLUSTER2_NAMESPACE) -f testdata/values-cluster.yaml \
 		--set cephClusterSpec.dataDirHostPath=/var/lib/rook2 \
 		--wait rook-ceph-cluster2 rook-ceph-cluster
-	$(MAKE) wait-deploy-ready NS=$(CEPH_CLUSTER1_NAMESPACE) DEPLOY=rook-ceph-operator
-	$(MAKE) wait-deploy-ready NS=$(CEPH_CLUSTER1_NAMESPACE) DEPLOY=rook-ceph-osd-0
 	$(MAKE) wait-deploy-ready NS=$(CEPH_CLUSTER2_NAMESPACE) DEPLOY=rook-ceph-osd-0
 
 .PHONY: image-build
@@ -151,13 +184,17 @@ image-build:
 	$(MAKE) -C ../.. docker-build
 	$(MINIKUBE) ssh -- docker images
 
-.PHONY: setup-components
-setup-components:
+.PHONY: install-mantle-cluster-wide
+install-mantle-cluster-wide:
 	$(HELM) upgrade --install mantle-cluster-wide ../../charts/mantle-cluster-wide/ --wait
-	$(HELM) upgrade --install --namespace=$(CEPH_CLUSTER1_NAMESPACE) mantle ../../charts/mantle/ --wait -f testdata/values-mantle.yaml
-	$(HELM) upgrade --install --namespace=$(CEPH_CLUSTER2_NAMESPACE) mantle2 ../../charts/mantle/ --wait
-	$(KUBECTL) rollout restart -n $(CEPH_CLUSTER1_NAMESPACE) deploy/mantle-controller
-	$(KUBECTL) rollout restart -n $(CEPH_CLUSTER2_NAMESPACE) deploy/mantle2-controller
+
+.PHONY: install-mantle
+install-mantle: NAMESPACE=
+install-mantle: HELM_RELEASE=
+install-mantle: VALUES_YAML=
+install-mantle:
+	$(HELM) upgrade --install --namespace=$(NAMESPACE) $(HELM_RELEASE) ../../charts/mantle/ --wait -f $(VALUES_YAML)
+	$(KUBECTL) rollout restart -n $(NAMESPACE) deploy/$(HELM_RELEASE)-controller
 
 .PHONY: do_test
 do_test: $(GINKGO)
@@ -166,3 +203,12 @@ do_test: $(GINKGO)
 	E2ETEST=1 \
 	KUBECTL=$(KUBECTL) \
 	$(GINKGO) --fail-fast -v $(GINKGO_FLAGS) singlek8s
+
+.PHONY: do-test-multik8s
+do-test-multik8s: $(GINKGO)
+	env \
+	PATH=${PATH} \
+	E2ETEST=1 \
+	KUBECTL_PRIMARY="$(MINIKUBE) -p $(MINIKUBE_PROFILE_PRIMARY) kubectl -- " \
+	KUBECTL_SECONDARY="$(MINIKUBE) -p $(MINIKUBE_PROFILE_SECONDARY) kubectl -- " \
+	$(GINKGO) --fail-fast -v $(GINKGO_FLAGS) multik8s
