@@ -361,7 +361,12 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	backup.Status.SnapID = snapshot.Id
 
-	backup.Status.CreatedAt = metav1.NewTime(time.Now())
+	createdAt, err := time.Parse("Mon Jan  2 15:04:05 2006", snapshot.Timestamp)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	backup.Status.CreatedAt = metav1.NewTime(createdAt)
+
 	err = r.updateStatus(ctx, &backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionTrue, Reason: mantlev1.BackupReasonNone})
 	if err != nil {
 		return ctrl.Result{}, err

@@ -70,7 +70,7 @@ func (test *mantleRestoreControllerUnitTest) setupEnv() {
 		By("prepare MantleBackup reconciler")
 		executeCommand = func(command []string, _ io.Reader) ([]byte, error) {
 			if command[0] == "rbd" && command[1] == "snap" && command[2] == "ls" {
-				return []byte(fmt.Sprintf("[{\"id\":1000,\"name\":\"%s\"}]", test.backupName)), nil
+				return []byte(fmt.Sprintf("[{\"id\":1000,\"name\":\"%s\",\"timestamp\":\"Mon Sep  2 00:42:00 2024\"}]", test.backupName)), nil
 			}
 			return nil, nil
 		}

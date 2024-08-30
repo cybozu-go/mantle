@@ -41,7 +41,8 @@ var _ = Describe("MantleBackup controller", func() {
 
 		executeCommand = func(command []string, _ io.Reader) ([]byte, error) {
 			if command[0] == "rbd" && command[1] == "snap" && command[2] == "ls" {
-				return []byte(fmt.Sprintf("[{\"id\":1000,\"name\":\"backup\"}]")), nil
+				return []byte(fmt.Sprintf("[{\"id\":1000,\"name\":\"backup\"," +
+					"\"timestamp\":\"Mon Sep  2 00:42:00 2024\"}]")), nil
 			}
 			return nil, nil
 		}
