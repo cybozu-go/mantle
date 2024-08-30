@@ -131,42 +131,49 @@ func (r *MantleBackupReconciler) removeRBDSnapshot(poolName, imageName, snapshot
 	return nil
 }
 
+func listRBDSnapshots(poolName, imageName string) ([]Snapshot, error) {
+	command := []string{"rbd", "snap", "ls", poolName + "/" + imageName, "--format=json"}
+	out, err := executeCommand(command, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute `rbd snap ls`: %s: %s: %w", poolName, imageName, err)
+	}
+
+	var snapshots []Snapshot
+	err = json.Unmarshal(out, &snapshots)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal the output of `rbd snap ls`: %s: %s: %w", poolName, imageName, err)
+	}
+
+	return snapshots, nil
+}
+
+func findRBDSnapshot(poolName, imageName, snapshotName string) (*Snapshot, error) {
+	snapshots, err := listRBDSnapshots(poolName, imageName)
+	if err != nil {
+		return nil, err
+	}
+	for _, s := range snapshots {
+		if s.Name == snapshotName {
+			return &s, nil
+		}
+	}
+	return nil, fmt.Errorf("snapshot not found: %s: %s: %s", poolName, imageName, snapshotName)
+}
+
 func (r *MantleBackupReconciler) createRBDSnapshot(ctx context.Context, poolName, imageName string, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
 	command := []string{"rbd", "snap", "create", poolName + "/" + imageName + "@" + backup.Name}
 	_, err := executeCommand(command, nil)
 	if err != nil {
-		command = []string{"rbd", "snap", "ls", poolName + "/" + imageName, "--format=json"}
-		out, err := executeCommand(command, nil)
+		_, err := findRBDSnapshot(poolName, imageName, backup.Name)
 		if err != nil {
-			logger.Info("failed to run `rbd snap ls`", "poolName", poolName, "imageName", imageName, "error", err)
-			err2 := r.updateStatus(ctx, backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionFalse, Reason: mantlev1.BackupReasonFailedToCreateBackup})
-			if err2 != nil {
-				return ctrl.Result{}, err2
-			}
-			return ctrl.Result{Requeue: true}, nil
-		}
-		var snapshots []Snapshot
-		err = json.Unmarshal(out, &snapshots)
-		if err != nil {
-			logger.Error("failed to unmarshal json", "json", out, "error", err)
-			err2 := r.updateStatus(ctx, backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionFalse, Reason: mantlev1.BackupReasonFailedToCreateBackup})
-			if err2 != nil {
-				return ctrl.Result{}, err2
-			}
-			return ctrl.Result{Requeue: true}, err
-		}
-		existSnapshot := false
-		for _, s := range snapshots {
-			if s.Name == backup.Name {
-				existSnapshot = true
-				break
-			}
-		}
-		if !existSnapshot {
-			logger.Info("snapshot does not exists", "snapshotName", backup.Name)
-			err2 := r.updateStatus(ctx, backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionFalse, Reason: mantlev1.BackupReasonFailedToCreateBackup})
-			if err2 != nil {
-				return ctrl.Result{}, err2
+			logger.Error("failed to find rbd snapshot", "error", err)
+			err := r.updateStatus(ctx, backup, metav1.Condition{
+				Type:   mantlev1.BackupConditionReadyToUse,
+				Status: metav1.ConditionFalse,
+				Reason: mantlev1.BackupReasonFailedToCreateBackup,
+			})
+			if err != nil {
+				return ctrl.Result{}, err
 			}
 			return ctrl.Result{Requeue: true}, nil
 		}
