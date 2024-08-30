@@ -22,4 +22,6 @@ nodeSelector: {}
 tolerations: []
 affinity: {}
 
-controller: {}
+controller:
+  role: standalone
+  ports: []

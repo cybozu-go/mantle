@@ -1,0 +1,5 @@
+controller:
+  role: secondary
+  mantleServiceEndpoint: ":58080"
+  ports:
+    - containerPort: 58080

@@ -25,6 +25,7 @@ type MantleRestoreReconciler struct {
 	Scheme               *runtime.Scheme
 	managedCephClusterID string
 	ceph                 ceph.CephCmd
+	role                 string
 }
 
 const (
@@ -40,24 +41,28 @@ const (
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get;list;watch;create;update;patch;delete
 
-func NewMantleRestoreReconciler(cli client.Client, scheme *runtime.Scheme, managedCephClusterID string) *MantleRestoreReconciler {
+func NewMantleRestoreReconciler(cli client.Client, scheme *runtime.Scheme, managedCephClusterID, role string) *MantleRestoreReconciler {
 	return &MantleRestoreReconciler{
 		Client:               cli,
 		Scheme:               scheme,
 		managedCephClusterID: managedCephClusterID,
 		ceph:                 ceph.NewCephCmd(),
+		role:                 role,
 	}
 }
 
 func (r *MantleRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := logger.With("MantleRestore", req.NamespacedName)
 
+	if r.role == RoleSecondary {
+		return ctrl.Result{}, nil
+	}
+
 	var restore mantlev1.MantleRestore
 	err := r.Get(ctx, req.NamespacedName, &restore)
 	if errors.IsNotFound(err) {
 		logger.Info("MantleRestore resource not found", "name", req.Name, "error", err)
-		return ctrl.
-			Result{}, nil
+		return ctrl.Result{}, nil
 	}
 	if err != nil {
 		logger.Error("failed to get MantleRestore", "name", req.NamespacedName, "error", err)
