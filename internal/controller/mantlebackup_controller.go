@@ -355,6 +355,12 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	backup.Status.PVManifest = string(pvJs)
 
+	snapshot, err := findRBDSnapshot(poolName, imageName, backup.Name)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	backup.Status.SnapID = snapshot.Id
+
 	backup.Status.CreatedAt = metav1.NewTime(time.Now())
 	err = r.updateStatus(ctx, &backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionTrue, Reason: mantlev1.BackupReasonNone})
 	if err != nil {
