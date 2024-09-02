@@ -24,10 +24,6 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 )
 
-func mockExecuteCommand(command []string, input io.Reader) ([]byte, error) {
-	return nil, nil
-}
-
 var _ = Describe("MantleBackup controller", func() {
 	ctx := context.Background()
 	var mgrUtil util.ManagerUtil
@@ -43,7 +39,13 @@ var _ = Describe("MantleBackup controller", func() {
 		err := reconciler.SetupWithManager(mgrUtil.GetManager())
 		Expect(err).NotTo(HaveOccurred())
 
-		executeCommand = mockExecuteCommand
+		executeCommand = func(command []string, _ io.Reader) ([]byte, error) {
+			if command[0] == "rbd" && command[1] == "snap" && command[2] == "ls" {
+				return []byte(fmt.Sprintf("[{\"id\":1000,\"name\":\"backup\"," +
+					"\"timestamp\":\"Mon Sep  2 00:42:00 2024\"}]")), nil
+			}
+			return nil, nil
+		}
 
 		mgrUtil.Start()
 		time.Sleep(100 * time.Millisecond)
@@ -176,6 +178,9 @@ var _ = Describe("MantleBackup controller", func() {
 		err = json.Unmarshal([]byte(pvJS), &pvStored)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(pvStored.Name).To(Equal(pv.Name))
+
+		snapID := backup.Status.SnapID
+		Expect(snapID).To(Equal(1000))
 
 		err = k8sClient.Delete(ctx, &backup)
 		Expect(err).NotTo(HaveOccurred())

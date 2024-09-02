@@ -36,6 +36,9 @@ type MantleBackupStatus struct {
 	PVCManifest string `json:"pvcManifest,omitempty"`
 	// 'pvManifest' saving backup target PV manifest
 	PVManifest string `json:"pvManifest,omitempty"`
+
+	// 'snapID' indicates SNAPID of `rbd snap ls`
+	SnapID int `json:"snapID,omitempty"`
 }
 
 const (

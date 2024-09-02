@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"io"
 	"time"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
@@ -174,7 +175,9 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		err = reconciler.SetupWithManager(mgr)
 		Expect(err).NotTo(HaveOccurred())
 
-		executeCommand = mockExecuteCommand
+		executeCommand = func(_ []string, _ io.Reader) ([]byte, error) {
+			return nil, nil
+		}
 
 		ctx, cancel := context.WithCancel(ctx)
 		stopFunc = cancel

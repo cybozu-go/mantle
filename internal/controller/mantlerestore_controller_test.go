@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"io"
 	"time"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
@@ -67,7 +68,12 @@ func (test *mantleRestoreControllerUnitTest) setupEnv() {
 
 	It("prepare reconcilers", func() {
 		By("prepare MantleBackup reconciler")
-		executeCommand = mockExecuteCommand
+		executeCommand = func(command []string, _ io.Reader) ([]byte, error) {
+			if command[0] == "rbd" && command[1] == "snap" && command[2] == "ls" {
+				return []byte(fmt.Sprintf("[{\"id\":1000,\"name\":\"%s\",\"timestamp\":\"Mon Sep  2 00:42:00 2024\"}]", test.backupName)), nil
+			}
+			return nil, nil
+		}
 		test.mgrUtil = testutil.NewManagerUtil(ctx, cfg, scheme.Scheme)
 		backupReconciler := NewMantleBackupReconciler(k8sClient, test.mgrUtil.GetScheme(), test.cephClusterID, RoleStandalone, nil)
 		err := backupReconciler.SetupWithManager(test.mgrUtil.GetManager())

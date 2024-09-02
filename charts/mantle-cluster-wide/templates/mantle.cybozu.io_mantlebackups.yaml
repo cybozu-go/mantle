@@ -131,6 +131,9 @@ spec:
               pvcManifest:
                 description: '''pvcManifest'' saving backup target PVC manifests'
                 type: string
+              snapID:
+                description: '''snapID'' indicates SNAPID of `rbd snap ls`'
+                type: integer
             type: object
         type: object
     served: true
