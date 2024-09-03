@@ -372,7 +372,7 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
-	if r.primarySettings != nil {
+	if r.role == RolePrimary {
 		client := r.primarySettings.Client
 		_, err := client.CreateOrUpdatePVC(
 			ctx,
