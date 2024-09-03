@@ -34,10 +34,18 @@ type MantleBackupConfigReconciler struct {
 	managedCephClusterID string
 	expireOffset         string
 	overwriteMBCSchedule string
+	role                 string
 }
 
-func NewMantleBackupConfigReconciler(cli client.Client, scheme *runtime.Scheme, managedCephClusterID string, expireOffset string, overwriteMBCSchedule string) *MantleBackupConfigReconciler {
-	return &MantleBackupConfigReconciler{cli, scheme, managedCephClusterID, expireOffset, overwriteMBCSchedule}
+func NewMantleBackupConfigReconciler(
+	cli client.Client,
+	scheme *runtime.Scheme,
+	managedCephClusterID string,
+	expireOffset string,
+	overwriteMBCSchedule string,
+	role string,
+) *MantleBackupConfigReconciler {
+	return &MantleBackupConfigReconciler{cli, scheme, managedCephClusterID, expireOffset, overwriteMBCSchedule, role}
 }
 
 //+kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlebackupconfigs,verbs=get;list;watch;create;update;patch;delete
@@ -56,6 +64,10 @@ func NewMantleBackupConfigReconciler(cli client.Client, scheme *runtime.Scheme, 
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.16.3/pkg/reconcile
 func (r *MantleBackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	if r.role == RoleSecondary {
+		return ctrl.Result{}, nil
+	}
+
 	// Get the CronJob info to be created or updated
 	cronJobInfo, err := getCronJobInfo(ctx, r.Client)
 	if err != nil {

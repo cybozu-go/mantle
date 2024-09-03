@@ -171,7 +171,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		})
 		Expect(err).ToNot(HaveOccurred())
 
-		reconciler = NewMantleBackupConfigReconciler(k8sClient, mgr.GetScheme(), storageClassClusterID, "0s", "")
+		reconciler = NewMantleBackupConfigReconciler(k8sClient, mgr.GetScheme(), storageClassClusterID, "0s", "", RoleStandalone)
 		err = reconciler.SetupWithManager(mgr)
 		Expect(err).NotTo(HaveOccurred())
 
