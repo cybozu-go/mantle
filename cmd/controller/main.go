@@ -136,12 +136,14 @@ func setupReconcilers(mgr manager.Manager, primarySettings *controller.PrimarySe
 		setupLog.Error(err, "unable to create controller", "controller", "MantleRestore")
 		return err
 	}
+
 	if err := controller.NewMantleBackupConfigReconciler(
 		mgr.GetClient(),
 		mgr.GetScheme(),
 		managedCephClusterID,
 		expireOffset,
 		overwriteMBCSchedule,
+		role,
 	).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MantleBackupConfig")
 		return err
