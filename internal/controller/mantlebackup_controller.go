@@ -390,33 +390,7 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	if r.role == RolePrimary {
-		client := r.primarySettings.Client
-		_, err := client.CreateOrUpdatePVC(
-			ctx,
-			&proto.CreateOrUpdatePVCRequest{
-				Pvc: "", // FIXME: this field should be correctly populated.
-			},
-		)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-
-		_, err = client.CreateOrUpdateMantleBackup(
-			ctx,
-			&proto.CreateOrUpdateMantleBackupRequest{
-				MantleBackup: "", // FIXME: this field should be correctly populated.
-			},
-		)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-
-		err = r.updateStatus(ctx, &backup, metav1.Condition{
-			Type:   mantlev1.BackupConditionSyncedToRemote,
-			Status: metav1.ConditionTrue,
-			Reason: mantlev1.BackupReasonNone,
-		})
-		if err != nil {
+		if err := r.replicate(ctx, &backup); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
@@ -429,4 +403,41 @@ func (r *MantleBackupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&mantlev1.MantleBackup{}).
 		Complete(r)
+}
+
+func (r *MantleBackupReconciler) replicate(
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
+) error {
+	client := r.primarySettings.Client
+	_, err := client.CreateOrUpdatePVC(
+		ctx,
+		&proto.CreateOrUpdatePVCRequest{
+			Pvc: "", // FIXME: this field should be correctly populated.
+		},
+	)
+	if err != nil {
+		return err
+	}
+
+	_, err = client.CreateOrUpdateMantleBackup(
+		ctx,
+		&proto.CreateOrUpdateMantleBackupRequest{
+			MantleBackup: "", // FIXME: this field should be correctly populated.
+		},
+	)
+	if err != nil {
+		return err
+	}
+
+	err = r.updateStatus(ctx, backup, metav1.Condition{
+		Type:   mantlev1.BackupConditionSyncedToRemote,
+		Status: metav1.ConditionTrue,
+		Reason: mantlev1.BackupReasonNone,
+	})
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
