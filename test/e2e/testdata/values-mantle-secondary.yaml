@@ -3,3 +3,8 @@ controller:
   mantleServiceEndpoint: ":58080"
   ports:
     - containerPort: 58080
+
+secondaryService:
+  type: NodePort
+  port: 58080
+  targetPort: 58080

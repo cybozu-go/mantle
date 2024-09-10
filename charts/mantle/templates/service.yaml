@@ -1,0 +1,16 @@
+{{- if eq .Values.controller.role "secondary" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mantle.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: {{ .Values.secondaryService.type }}
+  ports:
+  - port: {{ .Values.secondaryService.port }}
+    targetPort: {{ .Values.secondaryService.targetPort }}
+    protocol: TCP
+    name: grpc
+  selector:
+    {{- include "mantle.selectorLabels" . | nindent 4 }}
+{{ end }}
