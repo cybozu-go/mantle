@@ -23,6 +23,10 @@ import (
 	"github.com/cybozu-go/mantle/pkg/controller/proto"
 )
 
+const (
+	labelLocalBackupTargetPVCUID = "local-backup-target-pvc-uid"
+)
+
 // MantleBackupReconciler reconciles a MantleBackup object
 type MantleBackupReconciler struct {
 	client.Client
@@ -332,6 +336,17 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{Requeue: true}, nil
+	}
+
+	// Attach local-backup-target-pvc-uid label
+	if _, err := ctrl.CreateOrUpdate(ctx, r.Client, &backup, func() error {
+		if backup.Labels == nil {
+			backup.Labels = map[string]string{}
+		}
+		backup.Labels[labelLocalBackupTargetPVCUID] = string(pvc.GetUID())
+		return nil
+	}); err != nil {
+		return ctrl.Result{}, nil
 	}
 
 	result, err := r.createRBDSnapshot(ctx, poolName, imageName, &backup)
