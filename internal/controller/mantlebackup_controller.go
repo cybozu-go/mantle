@@ -332,10 +332,6 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	if cond := meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse); cond != nil && cond.Status == metav1.ConditionTrue {
-		return ctrl.Result{}, nil
-	}
-
 	result, err := r.createRBDSnapshot(ctx, poolName, imageName, &backup)
 	if err != nil {
 		return result, err
