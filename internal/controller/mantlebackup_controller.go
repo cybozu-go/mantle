@@ -359,7 +359,7 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	backup.Status.SnapID = snapshot.Id
+	backup.Status.SnapID = &snapshot.Id
 
 	createdAt, err := time.Parse("Mon Jan  2 15:04:05 2006", snapshot.Timestamp)
 	if err != nil {

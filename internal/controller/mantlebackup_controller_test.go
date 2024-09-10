@@ -180,7 +180,7 @@ var _ = Describe("MantleBackup controller", func() {
 		Expect(pvStored.Name).To(Equal(pv.Name))
 
 		snapID := backup.Status.SnapID
-		Expect(snapID).To(Equal(1000))
+		Expect(*snapID).To(Equal(1000))
 
 		err = k8sClient.Delete(ctx, &backup)
 		Expect(err).NotTo(HaveOccurred())
