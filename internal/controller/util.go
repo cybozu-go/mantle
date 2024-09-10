@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strings"
 
+	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -35,4 +36,17 @@ func getCephClusterIDFromPVC(ctx context.Context, logger *slog.Logger, k8sClient
 	}
 
 	return clusterID, nil
+}
+
+func updateMantleBackupStatus(ctx context.Context, client client.Client, backup *mantlev1.MantleBackup, mutator func() error) error {
+	if err := client.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup); err != nil {
+		return err
+	}
+	if err := mutator(); err != nil {
+		return err
+	}
+	if err := client.Status().Update(ctx, backup); err != nil {
+		return err
+	}
+	return nil
 }

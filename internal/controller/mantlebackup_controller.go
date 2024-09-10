@@ -105,8 +105,10 @@ func executeCommandImpl(command []string, input io.Reader) ([]byte, error) {
 var executeCommand = executeCommandImpl
 
 func (r *MantleBackupReconciler) updateStatus(ctx context.Context, backup *mantlev1.MantleBackup, condition metav1.Condition) error {
-	meta.SetStatusCondition(&backup.Status.Conditions, condition)
-	err := r.Status().Update(ctx, backup)
+	err := updateMantleBackupStatus(ctx, r.Client, backup, func() error {
+		meta.SetStatusCondition(&backup.Status.Conditions, condition)
+		return nil
+	})
 	if err != nil {
 		logger.Error("failed to update status", "status", backup.Status, "error", err)
 		return err
@@ -337,34 +339,38 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return result, err
 	}
 
-	pvcJs, err := json.Marshal(pvc)
-	if err != nil {
-		logger.Error("failed to marshal PVC", "error", err)
-		return ctrl.Result{}, err
-	}
-	backup.Status.PVCManifest = string(pvcJs)
+	if err := updateMantleBackupStatus(ctx, r.Client, &backup, func() error {
+		pvcJs, err := json.Marshal(pvc)
+		if err != nil {
+			logger.Error("failed to marshal PVC", "error", err)
+			return err
+		}
+		backup.Status.PVCManifest = string(pvcJs)
 
-	pvJs, err := json.Marshal(pv)
-	if err != nil {
-		logger.Error("failed to marshal PV", "error", err)
-		return ctrl.Result{}, err
-	}
-	backup.Status.PVManifest = string(pvJs)
+		pvJs, err := json.Marshal(pv)
+		if err != nil {
+			logger.Error("failed to marshal PV", "error", err)
+			return err
+		}
+		backup.Status.PVManifest = string(pvJs)
 
-	snapshot, err := findRBDSnapshot(poolName, imageName, backup.Name)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	backup.Status.SnapID = &snapshot.Id
+		snapshot, err := findRBDSnapshot(poolName, imageName, backup.Name)
+		if err != nil {
+			return err
+		}
+		backup.Status.SnapID = &snapshot.Id
 
-	createdAt, err := time.Parse("Mon Jan  2 15:04:05 2006", snapshot.Timestamp)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	backup.Status.CreatedAt = metav1.NewTime(createdAt)
+		createdAt, err := time.Parse("Mon Jan  2 15:04:05 2006", snapshot.Timestamp)
+		if err != nil {
+			return err
+		}
+		backup.Status.CreatedAt = metav1.NewTime(createdAt)
 
-	err = r.updateStatus(ctx, &backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionTrue, Reason: mantlev1.BackupReasonNone})
-	if err != nil {
+		meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
+			Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionTrue, Reason: mantlev1.BackupReasonNone})
+		return nil
+	}); err != nil {
+		logger.Error("failed to update MantleBackup status", "status", backup.Status, "error", err)
 		return ctrl.Result{}, err
 	}
 
