@@ -175,7 +175,7 @@ func (s *SecondaryServer) CreateOrUpdateMantleBackup(
 	}
 
 	// Update the status here because ctrl.CreateOrUpdate doesn't change the status.
-	if err := updateMantleBackupStatus(ctx, s.client, &backup, func() error {
+	if err := updateStatus(ctx, s.client, &backup, func() error {
 		backup.Status = backupReceived.Status
 		return nil
 	}); err != nil {

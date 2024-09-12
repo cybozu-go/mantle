@@ -113,7 +113,7 @@ func executeCommandImpl(command []string, input io.Reader) ([]byte, error) {
 var executeCommand = executeCommandImpl
 
 func (r *MantleBackupReconciler) updateStatusCondition(ctx context.Context, backup *mantlev1.MantleBackup, condition metav1.Condition) error {
-	err := updateMantleBackupStatus(ctx, r.Client, backup, func() error {
+	err := updateStatus(ctx, r.Client, backup, func() error {
 		meta.SetStatusCondition(&backup.Status.Conditions, condition)
 		return nil
 	})
@@ -372,7 +372,7 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return result, err
 	}
 
-	if err := updateMantleBackupStatus(ctx, r.Client, &backup, func() error {
+	if err := updateStatus(ctx, r.Client, &backup, func() error {
 		pvcJs, err := json.Marshal(pvc)
 		if err != nil {
 			logger.Error("failed to marshal PVC", "error", err)
