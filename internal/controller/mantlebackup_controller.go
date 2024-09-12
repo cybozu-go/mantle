@@ -367,43 +367,14 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
-	if err := r.createRBDSnapshot(ctx, poolName, imageName, &backup); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	if err := updateStatus(ctx, r.Client, &backup, func() error {
-		pvcJs, err := json.Marshal(pvc)
-		if err != nil {
-			logger.Error("failed to marshal PVC", "error", err)
-			return err
+	// If the given MantleBackup is not ready to use, create a new RBD snapshot and update its status.
+	if cond := meta.FindStatusCondition(
+		backup.Status.Conditions,
+		mantlev1.BackupConditionReadyToUse,
+	); cond == nil || cond.Status != metav1.ConditionTrue {
+		if err := r.createRBDSnapshotAndUpdateStatus(ctx, poolName, imageName, &backup, &pvc, &pv); err != nil {
+			return ctrl.Result{}, err
 		}
-		backup.Status.PVCManifest = string(pvcJs)
-
-		pvJs, err := json.Marshal(pv)
-		if err != nil {
-			logger.Error("failed to marshal PV", "error", err)
-			return err
-		}
-		backup.Status.PVManifest = string(pvJs)
-
-		snapshot, err := findRBDSnapshot(poolName, imageName, backup.Name)
-		if err != nil {
-			return err
-		}
-		backup.Status.SnapID = &snapshot.Id
-
-		createdAt, err := time.Parse("Mon Jan  2 15:04:05 2006", snapshot.Timestamp)
-		if err != nil {
-			return err
-		}
-		backup.Status.CreatedAt = metav1.NewTime(createdAt)
-
-		meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
-			Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionTrue, Reason: mantlev1.BackupReasonNone})
-		return nil
-	}); err != nil {
-		logger.Error("failed to update MantleBackup status", "status", backup.Status, "error", err)
-		return ctrl.Result{}, err
 	}
 
 	if r.role == RolePrimary {
@@ -508,6 +479,55 @@ func (r *MantleBackupReconciler) replicate(
 		Status: metav1.ConditionTrue,
 		Reason: mantlev1.BackupReasonNone,
 	}); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (r *MantleBackupReconciler) createRBDSnapshotAndUpdateStatus(
+	ctx context.Context,
+	poolName, imageName string,
+	backup *mantlev1.MantleBackup,
+	pvc *corev1.PersistentVolumeClaim,
+	pv *corev1.PersistentVolume,
+) error {
+	if err := r.createRBDSnapshot(ctx, poolName, imageName, backup); err != nil {
+		return err
+	}
+
+	if err := updateStatus(ctx, r.Client, backup, func() error {
+		pvcJs, err := json.Marshal(*pvc)
+		if err != nil {
+			logger.Error("failed to marshal PVC", "error", err)
+			return err
+		}
+		backup.Status.PVCManifest = string(pvcJs)
+
+		pvJs, err := json.Marshal(*pv)
+		if err != nil {
+			logger.Error("failed to marshal PV", "error", err)
+			return err
+		}
+		backup.Status.PVManifest = string(pvJs)
+
+		snapshot, err := findRBDSnapshot(poolName, imageName, backup.Name)
+		if err != nil {
+			return err
+		}
+		backup.Status.SnapID = &snapshot.Id
+
+		createdAt, err := time.Parse("Mon Jan  2 15:04:05 2006", snapshot.Timestamp)
+		if err != nil {
+			return err
+		}
+		backup.Status.CreatedAt = metav1.NewTime(createdAt)
+
+		meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
+			Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionTrue, Reason: mantlev1.BackupReasonNone})
+		return nil
+	}); err != nil {
+		logger.Error("failed to update MantleBackup status", "status", backup.Status, "error", err)
 		return err
 	}
 
