@@ -112,7 +112,7 @@ func executeCommandImpl(command []string, input io.Reader) ([]byte, error) {
 
 var executeCommand = executeCommandImpl
 
-func (r *MantleBackupReconciler) updateStatus(ctx context.Context, backup *mantlev1.MantleBackup, condition metav1.Condition) error {
+func (r *MantleBackupReconciler) updateStatusCondition(ctx context.Context, backup *mantlev1.MantleBackup, condition metav1.Condition) error {
 	err := updateMantleBackupStatus(ctx, r.Client, backup, func() error {
 		meta.SetStatusCondition(&backup.Status.Conditions, condition)
 		return nil
@@ -177,7 +177,7 @@ func (r *MantleBackupReconciler) createRBDSnapshot(ctx context.Context, poolName
 		_, err := findRBDSnapshot(poolName, imageName, backup.Name)
 		if err != nil {
 			logger.Error("failed to find rbd snapshot", "error", err)
-			err := r.updateStatus(ctx, backup, metav1.Condition{
+			err := r.updateStatusCondition(ctx, backup, metav1.Condition{
 				Type:   mantlev1.BackupConditionReadyToUse,
 				Status: metav1.ConditionFalse,
 				Reason: mantlev1.BackupReasonFailedToCreateBackup,
@@ -237,7 +237,7 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	err = r.Get(ctx, types.NamespacedName{Namespace: pvcNamespace, Name: pvcName}, &pvc)
 	if err != nil {
 		logger.Error("failed to get PVC", "namespace", pvcNamespace, "name", pvcName, "error", err)
-		err2 := r.updateStatus(ctx, &backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionFalse, Reason: mantlev1.BackupReasonFailedToCreateBackup})
+		err2 := r.updateStatusCondition(ctx, &backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionFalse, Reason: mantlev1.BackupReasonFailedToCreateBackup})
 		if err2 != nil {
 			return ctrl.Result{}, err2
 		}
@@ -261,7 +261,7 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	clusterID, err := getCephClusterIDFromPVC(ctx, logger, r.Client, &pvc)
 	if err != nil {
 		logger.Error("failed to get clusterID from PVC", "namespace", req.Namespace, "name", pvcName, "error", err)
-		err2 := r.updateStatus(ctx, &backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionFalse, Reason: mantlev1.BackupReasonFailedToCreateBackup})
+		err2 := r.updateStatusCondition(ctx, &backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionFalse, Reason: mantlev1.BackupReasonFailedToCreateBackup})
 		if err2 != nil {
 			return ctrl.Result{}, err2
 		}
@@ -274,7 +274,7 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	if pvc.Status.Phase != corev1.ClaimBound {
-		err := r.updateStatus(ctx, &backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionFalse, Reason: mantlev1.BackupReasonFailedToCreateBackup})
+		err := r.updateStatusCondition(ctx, &backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionFalse, Reason: mantlev1.BackupReasonFailedToCreateBackup})
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -293,7 +293,7 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	err = r.Get(ctx, types.NamespacedName{Namespace: req.NamespacedName.Namespace, Name: pvName}, &pv)
 	if err != nil {
 		logger.Error("failed to get PV", "namespace", req.NamespacedName.Namespace, "name", pvName, "error", err)
-		err2 := r.updateStatus(ctx, &backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionFalse, Reason: mantlev1.BackupReasonFailedToCreateBackup})
+		err2 := r.updateStatusCondition(ctx, &backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionFalse, Reason: mantlev1.BackupReasonFailedToCreateBackup})
 		if err2 != nil {
 			return ctrl.Result{}, err2
 		}
@@ -335,7 +335,7 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			logger.Error("failed to add finalizer", "finalizer", MantleBackupFinalizerName, "error", err)
 			return ctrl.Result{}, err
 		}
-		err := r.updateStatus(ctx, &backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionFalse, Reason: mantlev1.BackupReasonNone})
+		err := r.updateStatusCondition(ctx, &backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionFalse, Reason: mantlev1.BackupReasonNone})
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -504,7 +504,7 @@ func (r *MantleBackupReconciler) replicate(
 	}
 
 	// Update the status of the MantleBackup.
-	if err := r.updateStatus(ctx, backup, metav1.Condition{
+	if err := r.updateStatusCondition(ctx, backup, metav1.Condition{
 		Type:   mantlev1.BackupConditionSyncedToRemote,
 		Status: metav1.ConditionTrue,
 		Reason: mantlev1.BackupReasonNone,
