@@ -356,7 +356,10 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 	}
 
-	// Attach local-backup-target-pvc-uid label
+	// Attach local-backup-target-pvc-uid label before trying to create a RBD
+	// snapshot corresponding to the given MantleBackup, so that we can make
+	// sure that every MantleBackup that has a RBD snapshot is labelled with
+	// local-backup-target-pvc-uid.
 	if _, err := ctrl.CreateOrUpdate(ctx, r.Client, &backup, func() error {
 		if backup.Labels == nil {
 			backup.Labels = map[string]string{}
