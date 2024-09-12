@@ -36,3 +36,16 @@ func getCephClusterIDFromPVC(ctx context.Context, logger *slog.Logger, k8sClient
 
 	return clusterID, nil
 }
+
+func updateStatus(ctx context.Context, client client.Client, obj client.Object, mutator func() error) error {
+	if err := client.Get(ctx, types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}, obj); err != nil {
+		return err
+	}
+	if err := mutator(); err != nil {
+		return err
+	}
+	if err := client.Status().Update(ctx, obj); err != nil {
+		return err
+	}
+	return nil
+}

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
+	corev1 "k8s.io/api/core/v1"
 )
 
 const (
@@ -127,4 +128,8 @@ func getObject[T any](clusterNo int, kind, namespace, name string) (*T, error) {
 
 func getMB(clusterNo int, namespace, name string) (*mantlev1.MantleBackup, error) {
 	return getObject[mantlev1.MantleBackup](clusterNo, "mantlebackup", namespace, name)
+}
+
+func getPVC(clusterNo int, namespace, name string) (*corev1.PersistentVolumeClaim, error) {
+	return getObject[corev1.PersistentVolumeClaim](clusterNo, "pvc", namespace, name)
 }

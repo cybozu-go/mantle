@@ -38,7 +38,7 @@ type MantleBackupStatus struct {
 	PVManifest string `json:"pvManifest,omitempty"`
 
 	// 'snapID' indicates SNAPID of `rbd snap ls`
-	SnapID int `json:"snapID,omitempty"`
+	SnapID *int `json:"snapID,omitempty"`
 }
 
 const (

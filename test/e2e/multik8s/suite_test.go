@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"errors"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -48,7 +50,7 @@ func waitControllerToBeReady() {
 
 func replicationTestSuite() {
 	Describe("replication test", func() {
-		It("should eventually set SyncedToRemote of a MantleBackup to True after it is created", func() {
+		It("should correctly replicate PVC and MantleBackup resources", func() {
 			namespace := util.GetUniqueName("ns-")
 			pvcName := util.GetUniqueName("pvc-")
 			backupName := util.GetUniqueName("mb-")
@@ -60,7 +62,13 @@ func replicationTestSuite() {
 				return createNamespace(primaryK8sCluster, namespace)
 			}).Should(Succeed())
 			Eventually(func() error {
+				return createNamespace(secondaryK8sCluster, namespace)
+			}).Should(Succeed())
+			Eventually(func() error {
 				return applyRBDPoolAndSCTemplate(primaryK8sCluster, cephClusterNamespace, poolName, scName)
+			}).Should(Succeed())
+			Eventually(func() error {
+				return applyRBDPoolAndSCTemplate(secondaryK8sCluster, cephClusterNamespace, poolName, scName)
 			}).Should(Succeed())
 			Eventually(func() error {
 				return applyPVCTemplate(primaryK8sCluster, namespace, pvcName, scName)
@@ -84,6 +92,77 @@ func replicationTestSuite() {
 				if cond.Status != metav1.ConditionTrue {
 					return errors.New("status of SyncedToRemote condition is not True")
 				}
+				return nil
+			}, "5m", "1s").Should(Succeed())
+
+			By("checking PVC is replicated")
+			Eventually(func() error {
+				primaryPVC, err := getPVC(primaryK8sCluster, namespace, pvcName)
+				if err != nil {
+					return err
+				}
+
+				pvc, err := getPVC(secondaryK8sCluster, namespace, pvcName)
+				if err != nil {
+					return err
+				}
+				if pvc.Annotations == nil ||
+					pvc.Annotations["mantle.cybozu.io/remote-uid"] != string(primaryPVC.GetUID()) {
+					return errors.New("invalid remote-uid annotation")
+				}
+				if !reflect.DeepEqual(primaryPVC.Spec, pvc.Spec) {
+					return errors.New("spec not equal")
+				}
+				return nil
+			}).Should(Succeed())
+
+			By("checking MantleBackup is replicated")
+			Eventually(func() error {
+				primaryPVC, err := getPVC(primaryK8sCluster, namespace, pvcName)
+				if err != nil {
+					return err
+				}
+				secondaryPVC, err := getPVC(secondaryK8sCluster, namespace, pvcName)
+				if err != nil {
+					return err
+				}
+				primaryMB, err := getMB(primaryK8sCluster, namespace, backupName)
+				if err != nil {
+					return err
+				}
+
+				secondaryMB, err := getMB(secondaryK8sCluster, namespace, backupName)
+				if err != nil {
+					return err
+				}
+				if !controllerutil.ContainsFinalizer(secondaryMB, "mantlebackup.mantle.cybozu.io/finalizer") {
+					return errors.New("finalizer not found")
+				}
+				if secondaryMB.Labels == nil ||
+					secondaryMB.Labels["mantle.cybozu.io/local-backup-target-pvc-uid"] != string(secondaryPVC.GetUID()) ||
+					secondaryMB.Labels["mantle.cybozu.io/remote-backup-target-pvc-uid"] != string(primaryPVC.GetUID()) {
+					return errors.New("local/remote-backup-target-pvc-uid label not matched")
+				}
+				if secondaryMB.Annotations == nil ||
+					secondaryMB.Annotations["mantle.cybozu.io/remote-uid"] != string(primaryMB.GetUID()) {
+					return errors.New("remote-uid not matched")
+				}
+				if !reflect.DeepEqual(primaryMB.Spec, secondaryMB.Spec) {
+					return errors.New("spec not equal")
+				}
+				if secondaryMB.Status.CreatedAt.IsZero() {
+					return errors.New(".Status.CreatedAt is zero")
+				}
+				if secondaryMB.Status.SnapID != nil {
+					return errors.New(".Status.SapID is incorrectly populated")
+				}
+				if secondaryMB.Status.PVManifest != "" {
+					return errors.New(".Status.PVManifest is incorrectly populated")
+				}
+				if secondaryMB.Status.PVCManifest != "" {
+					return errors.New(".Status.PVCManifest is incorrectly populated")
+				}
+
 				return nil
 			}).Should(Succeed())
 		})

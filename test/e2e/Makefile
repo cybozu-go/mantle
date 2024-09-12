@@ -62,7 +62,6 @@ test-multiple-k8s-clusters:
 		NAMESPACE=$(CEPH_CLUSTER1_NAMESPACE) \
 		HELM_RELEASE=mantle \
 		VALUES_YAML=testdata/values-mantle-secondary.yaml
-	$(KUBECTL) apply -f testdata/secondary-mantle-service.yaml
 # set up a k8s cluster for primary mantle
 	$(MAKE) launch-minikube MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_PRIMARY)
 	$(MAKE) install-rook-ceph-operator

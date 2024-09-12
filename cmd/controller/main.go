@@ -198,7 +198,7 @@ func setupSecondary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup
 		),
 	))
 
-	proto.RegisterMantleServiceServer(serv, &controller.SecondaryServer{})
+	proto.RegisterMantleServiceServer(serv, controller.NewSecondaryServer(mgr.GetClient(), mgr.GetAPIReader()))
 
 	l, err := net.Listen("tcp", mantleServiceEndpoint)
 	if err != nil {
