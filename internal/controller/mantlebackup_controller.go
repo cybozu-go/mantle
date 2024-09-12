@@ -170,25 +170,25 @@ func findRBDSnapshot(poolName, imageName, snapshotName string) (*Snapshot, error
 	return nil, fmt.Errorf("snapshot not found: %s: %s: %s", poolName, imageName, snapshotName)
 }
 
-func (r *MantleBackupReconciler) createRBDSnapshot(ctx context.Context, poolName, imageName string, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
+func (r *MantleBackupReconciler) createRBDSnapshot(ctx context.Context, poolName, imageName string, backup *mantlev1.MantleBackup) error {
 	command := []string{"rbd", "snap", "create", poolName + "/" + imageName + "@" + backup.Name}
 	_, err := executeCommand(command, nil)
 	if err != nil {
 		_, err := findRBDSnapshot(poolName, imageName, backup.Name)
 		if err != nil {
 			logger.Error("failed to find rbd snapshot", "error", err)
-			err := r.updateStatusCondition(ctx, backup, metav1.Condition{
+			err2 := r.updateStatusCondition(ctx, backup, metav1.Condition{
 				Type:   mantlev1.BackupConditionReadyToUse,
 				Status: metav1.ConditionFalse,
 				Reason: mantlev1.BackupReasonFailedToCreateBackup,
 			})
-			if err != nil {
-				return ctrl.Result{}, err
+			if err2 != nil {
+				logger.Error("failed to update status condition", "error", err2)
 			}
-			return ctrl.Result{Requeue: true}, nil
+			return err
 		}
 	}
-	return ctrl.Result{}, nil
+	return nil
 }
 
 //+kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlebackups,verbs=get;list;watch;create;update;patch;delete
@@ -367,9 +367,8 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
-	result, err := r.createRBDSnapshot(ctx, poolName, imageName, &backup)
-	if err != nil {
-		return result, err
+	if err := r.createRBDSnapshot(ctx, poolName, imageName, &backup); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	if err := updateStatus(ctx, r.Client, &backup, func() error {
