@@ -41,6 +41,11 @@ spec:
           spec:
             description: MantleBackupSpec defines the desired state of MantleBackup
             properties:
+              expire:
+                description: '''expire'' specifies the expiration duration of the
+                  backup'
+                format: duration
+                type: string
               namespace:
                 description: '''namespace'' specifies backup target Namespace'
                 type: string

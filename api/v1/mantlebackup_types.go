@@ -19,6 +19,13 @@ type MantleBackupSpec struct {
 	// 'namespace' specifies backup target Namespace
 	// +kubebuilder:validation:Required
 	Namespace string `json:"namespace,omitempty"`
+
+	// NOTE: we CANNOT use metav1.Duration for Expire due to an unresolved k8s bug.
+	// See https://github.com/kubernetes/apiextensions-apiserver/issues/56 for the details.
+
+	// 'expire' specifies the expiration duration of the backup
+	//+kubebuilder:validation:Format:="duration"
+	Expire string `json:"expire,omitempty"`
 }
 
 // MantleBackupStatus defines the observed state of MantleBackup
