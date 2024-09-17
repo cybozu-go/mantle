@@ -542,10 +542,10 @@ func (r *MantleBackupReconciler) createRBDSnapshotAndUpdateStatus(
 	}
 
 	// If the given MantleBackup is not ready to use, create a new RBD snapshot and update its status.
-	if cond := meta.FindStatusCondition(
+	if meta.IsStatusConditionTrue(
 		backup.Status.Conditions,
 		mantlev1.BackupConditionReadyToUse,
-	); cond != nil && cond.Status == metav1.ConditionTrue {
+	) {
 		return nil
 	}
 
