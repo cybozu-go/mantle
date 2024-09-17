@@ -210,6 +210,23 @@ func (r *MantleBackupReconciler) checkPVCInManagedCluster(ctx context.Context, b
 	return nil
 }
 
+func (r *MantleBackupReconciler) isPVCBound(ctx context.Context, backup *mantlev1.MantleBackup, pvc *corev1.PersistentVolumeClaim) (bool, error) {
+	if pvc.Status.Phase != corev1.ClaimBound {
+		err := r.updateStatusCondition(ctx, backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionFalse, Reason: mantlev1.BackupReasonFailedToCreateBackup})
+		if err != nil {
+			return false, err
+		}
+
+		if pvc.Status.Phase == corev1.ClaimPending {
+			return false, nil
+		} else {
+			logger.Error("PVC phase is neither bound nor pending", "status.phase", pvc.Status.Phase)
+			return false, fmt.Errorf("PVC phase is neither bound nor pending (status.phase: %s)", pvc.Status.Phase)
+		}
+	}
+	return true, nil
+}
+
 type snapshotTarget struct {
 	pvc       *corev1.PersistentVolumeClaim
 	pv        *corev1.PersistentVolume
@@ -255,19 +272,13 @@ func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *
 		return nil, ctrl.Result{}, err
 	}
 
-	if pvc.Status.Phase != corev1.ClaimBound {
-		err := r.updateStatusCondition(ctx, backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionFalse, Reason: mantlev1.BackupReasonFailedToCreateBackup})
-		if err != nil {
-			return nil, ctrl.Result{}, err
-		}
-
-		if pvc.Status.Phase == corev1.ClaimPending {
-			logger.Info("waiting for PVC bound.")
-			return nil, ctrl.Result{Requeue: true}, nil
-		} else {
-			logger.Error("PVC phase is neither bound nor pending", "status.phase", pvc.Status.Phase)
-			return nil, ctrl.Result{}, fmt.Errorf("PVC phase is neither bound nor pending (status.phase: %s)", pvc.Status.Phase)
-		}
+	ok, err := r.isPVCBound(ctx, backup, &pvc)
+	if err != nil {
+		return nil, ctrl.Result{}, err
+	}
+	if !ok {
+		logger.Info("waiting for PVC bound.")
+		return nil, ctrl.Result{Requeue: true}, nil
 	}
 
 	pvName := pvc.Spec.VolumeName
