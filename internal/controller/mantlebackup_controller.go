@@ -191,6 +191,25 @@ func (r *MantleBackupReconciler) createRBDSnapshot(ctx context.Context, poolName
 	return nil
 }
 
+func (r *MantleBackupReconciler) checkPVCInManagedCluster(ctx context.Context, backup *mantlev1.MantleBackup, pvc *corev1.PersistentVolumeClaim) error {
+	clusterID, err := getCephClusterIDFromPVC(ctx, logger, r.Client, pvc)
+	if err != nil {
+		logger.Error("failed to get clusterID from PVC", "namespace", pvc.Namespace, "name", pvc.Name, "error", err)
+		err2 := r.updateStatusCondition(ctx, backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionFalse, Reason: mantlev1.BackupReasonFailedToCreateBackup})
+		if err2 != nil {
+			return err2
+		}
+
+		return err
+	}
+	if clusterID != r.managedCephClusterID {
+		logger.Info("clusterID not matched", "namespace", backup.Namespace, "backup", backup.Name, "pvc", pvc.Name, "clusterID", clusterID, "managedCephClusterID", r.managedCephClusterID)
+		return errSkipProcessing
+	}
+
+	return nil
+}
+
 type snapshotTarget struct {
 	pvc       *corev1.PersistentVolumeClaim
 	pv        *corev1.PersistentVolume
@@ -232,19 +251,8 @@ func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *
 		return nil, ctrl.Result{}, err
 	}
 
-	clusterID, err := getCephClusterIDFromPVC(ctx, logger, r.Client, &pvc)
-	if err != nil {
-		logger.Error("failed to get clusterID from PVC", "namespace", pvc.Namespace, "name", pvc.Name, "error", err)
-		err2 := r.updateStatusCondition(ctx, backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionFalse, Reason: mantlev1.BackupReasonFailedToCreateBackup})
-		if err2 != nil {
-			return nil, ctrl.Result{}, err2
-		}
-
+	if err := r.checkPVCInManagedCluster(ctx, backup, &pvc); err != nil {
 		return nil, ctrl.Result{}, err
-	}
-	if clusterID != r.managedCephClusterID {
-		logger.Info("clusterID not matched", "namespace", backup.Namespace, "backup", backup.Name, "pvc", pvc.Name, "clusterID", clusterID, "managedCephClusterID", r.managedCephClusterID)
-		return nil, ctrl.Result{}, errSkipProcessing
 	}
 
 	if pvc.Status.Phase != corev1.ClaimBound {
