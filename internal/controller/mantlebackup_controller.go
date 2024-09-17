@@ -236,6 +236,15 @@ type snapshotTarget struct {
 
 var errSkipProcessing = fmt.Errorf("skip processing")
 
+type errTargetPVCNotFound struct {
+	error
+}
+
+func isErrTargetPVCNotFound(err error) bool {
+	_, ok := err.(errTargetPVCNotFound)
+	return ok
+}
+
 func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *mantlev1.MantleBackup) (
 	*snapshotTarget,
 	ctrl.Result,
@@ -252,18 +261,7 @@ func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *
 			return nil, ctrl.Result{}, err2
 		}
 		if errors.IsNotFound(err) {
-			if !backup.ObjectMeta.DeletionTimestamp.IsZero() {
-				if controllerutil.ContainsFinalizer(backup, MantleBackupFinalizerName) {
-					controllerutil.RemoveFinalizer(backup, MantleBackupFinalizerName)
-					err = r.Update(ctx, backup)
-					if err != nil {
-						logger.Error("failed to remove finalizer", "finalizer", MantleBackupFinalizerName, "error", err)
-						return nil, ctrl.Result{}, err
-					}
-				}
-
-				return nil, ctrl.Result{}, errSkipProcessing
-			}
+			return nil, ctrl.Result{}, errTargetPVCNotFound{err}
 		}
 		return nil, ctrl.Result{}, err
 	}
@@ -346,12 +344,15 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
-	target, result, err := r.getSnapshotTarget(ctx, &backup)
-	if err != nil {
-		if err == errSkipProcessing {
-			return ctrl.Result{}, nil
-		}
-		return ctrl.Result{}, err
+	target, result, getSnapshotTargetErr := r.getSnapshotTarget(ctx, &backup)
+	switch {
+	case getSnapshotTargetErr == errSkipProcessing:
+		return ctrl.Result{}, nil
+	case isErrTargetPVCNotFound(getSnapshotTargetErr):
+		// deletion logic may run.
+	case getSnapshotTargetErr == nil:
+	default:
+		return ctrl.Result{}, getSnapshotTargetErr
 	}
 	if result.Requeue {
 		return result, nil
@@ -359,9 +360,11 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	if !backup.ObjectMeta.DeletionTimestamp.IsZero() {
 		if controllerutil.ContainsFinalizer(&backup, MantleBackupFinalizerName) {
-			err := r.removeRBDSnapshot(target.poolName, target.imageName, backup.Name)
-			if err != nil {
-				return ctrl.Result{}, err
+			if !isErrTargetPVCNotFound(getSnapshotTargetErr) {
+				err := r.removeRBDSnapshot(target.poolName, target.imageName, backup.Name)
+				if err != nil {
+					return ctrl.Result{}, err
+				}
 			}
 
 			controllerutil.RemoveFinalizer(&backup, MantleBackupFinalizerName)
@@ -373,6 +376,10 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 
 		return ctrl.Result{}, nil
+	}
+
+	if getSnapshotTargetErr != nil {
+		return ctrl.Result{}, getSnapshotTargetErr
 	}
 
 	if !controllerutil.ContainsFinalizer(&backup, MantleBackupFinalizerName) {
