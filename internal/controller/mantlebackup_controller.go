@@ -290,9 +290,9 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	pvName := pvc.Spec.VolumeName
 	var pv corev1.PersistentVolume
-	err = r.Get(ctx, types.NamespacedName{Namespace: req.NamespacedName.Namespace, Name: pvName}, &pv)
+	err = r.Get(ctx, types.NamespacedName{Name: pvName}, &pv)
 	if err != nil {
-		logger.Error("failed to get PV", "namespace", req.NamespacedName.Namespace, "name", pvName, "error", err)
+		logger.Error("failed to get PV", "name", pvName, "error", err)
 		err2 := r.updateStatusCondition(ctx, &backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionFalse, Reason: mantlev1.BackupReasonFailedToCreateBackup})
 		if err2 != nil {
 			return ctrl.Result{}, err2
