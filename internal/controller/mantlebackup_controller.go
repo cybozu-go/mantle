@@ -410,28 +410,8 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 	}
 
-	// Attach local-backup-target-pvc-uid label before trying to create a RBD
-	// snapshot corresponding to the given MantleBackup, so that we can make
-	// sure that every MantleBackup that has a RBD snapshot is labelled with
-	// local-backup-target-pvc-uid.
-	if _, err := ctrl.CreateOrUpdate(ctx, r.Client, &backup, func() error {
-		if backup.Labels == nil {
-			backup.Labels = map[string]string{}
-		}
-		backup.Labels[labelLocalBackupTargetPVCUID] = string(target.pvc.GetUID())
-		return nil
-	}); err != nil {
+	if err := r.createRBDSnapshotAndUpdateStatus(ctx, &backup, target); err != nil {
 		return ctrl.Result{}, err
-	}
-
-	// If the given MantleBackup is not ready to use, create a new RBD snapshot and update its status.
-	if cond := meta.FindStatusCondition(
-		backup.Status.Conditions,
-		mantlev1.BackupConditionReadyToUse,
-	); cond == nil || cond.Status != metav1.ConditionTrue {
-		if err := r.createRBDSnapshotAndUpdateStatus(ctx, target.poolName, target.imageName, &backup, target.pvc, target.pv); err != nil {
-			return ctrl.Result{}, err
-		}
 	}
 
 	if r.role == RolePrimary {
@@ -544,31 +524,51 @@ func (r *MantleBackupReconciler) replicate(
 
 func (r *MantleBackupReconciler) createRBDSnapshotAndUpdateStatus(
 	ctx context.Context,
-	poolName, imageName string,
 	backup *mantlev1.MantleBackup,
-	pvc *corev1.PersistentVolumeClaim,
-	pv *corev1.PersistentVolume,
+	target *snapshotTarget,
 ) error {
-	if err := r.createRBDSnapshot(ctx, poolName, imageName, backup); err != nil {
+	// Attach local-backup-target-pvc-uid label before trying to create a RBD
+	// snapshot corresponding to the given MantleBackup, so that we can make
+	// sure that every MantleBackup that has a RBD snapshot is labelled with
+	// local-backup-target-pvc-uid.
+	if _, err := ctrl.CreateOrUpdate(ctx, r.Client, backup, func() error {
+		if backup.Labels == nil {
+			backup.Labels = map[string]string{}
+		}
+		backup.Labels[labelLocalBackupTargetPVCUID] = string(target.pvc.GetUID())
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	// If the given MantleBackup is not ready to use, create a new RBD snapshot and update its status.
+	if cond := meta.FindStatusCondition(
+		backup.Status.Conditions,
+		mantlev1.BackupConditionReadyToUse,
+	); cond != nil && cond.Status == metav1.ConditionTrue {
+		return nil
+	}
+
+	if err := r.createRBDSnapshot(ctx, target.poolName, target.imageName, backup); err != nil {
 		return err
 	}
 
 	if err := updateStatus(ctx, r.Client, backup, func() error {
-		pvcJs, err := json.Marshal(*pvc)
+		pvcJs, err := json.Marshal(target.pvc)
 		if err != nil {
 			logger.Error("failed to marshal PVC", "error", err)
 			return err
 		}
 		backup.Status.PVCManifest = string(pvcJs)
 
-		pvJs, err := json.Marshal(*pv)
+		pvJs, err := json.Marshal(target.pv)
 		if err != nil {
 			logger.Error("failed to marshal PV", "error", err)
 			return err
 		}
 		backup.Status.PVManifest = string(pvJs)
 
-		snapshot, err := findRBDSnapshot(poolName, imageName, backup.Name)
+		snapshot, err := findRBDSnapshot(target.poolName, target.imageName, backup.Name)
 		if err != nil {
 			return err
 		}
