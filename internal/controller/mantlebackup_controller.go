@@ -421,7 +421,7 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		backup.Labels[labelLocalBackupTargetPVCUID] = string(target.pvc.GetUID())
 		return nil
 	}); err != nil {
-		return ctrl.Result{}, nil
+		return ctrl.Result{}, err
 	}
 
 	// If the given MantleBackup is not ready to use, create a new RBD snapshot and update its status.
