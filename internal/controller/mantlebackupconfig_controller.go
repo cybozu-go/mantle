@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -64,6 +65,8 @@ func NewMantleBackupConfigReconciler(
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.16.3/pkg/reconcile
 func (r *MantleBackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	logger := gLogger.With("MantleBackupConfig", req.NamespacedName)
+
 	if r.role == RoleSecondary {
 		return ctrl.Result{}, nil
 	}
@@ -126,6 +129,7 @@ func (r *MantleBackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.R
 	// Create or update the CronJob
 	if err := r.createOrUpdateCronJob(
 		ctx,
+		logger,
 		&mbc,
 		cronJobInfo.namespace,
 		cronJobInfo.serviceAccountName,
@@ -194,7 +198,7 @@ func (r *MantleBackupConfigReconciler) SetupWithManager(mgr ctrl.Manager) error 
 		Complete(r)
 }
 
-func (r *MantleBackupConfigReconciler) createOrUpdateCronJob(ctx context.Context, mbc *mantlev1.MantleBackupConfig, namespace, serviceAccountName, image string) error {
+func (r *MantleBackupConfigReconciler) createOrUpdateCronJob(ctx context.Context, logger *slog.Logger, mbc *mantlev1.MantleBackupConfig, namespace, serviceAccountName, image string) error {
 	cronJobName := getMBCCronJobName(mbc)
 
 	cronJob := &batchv1.CronJob{}

@@ -52,7 +52,7 @@ func updateStatus(ctx context.Context, client client.Client, obj client.Object, 
 	return nil
 }
 
-func executeCommandImpl(command []string, input io.Reader) ([]byte, error) {
+func executeCommandImpl(logger *slog.Logger, command []string, input io.Reader) ([]byte, error) {
 	cmd := exec.Command(command[0], command[1:]...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

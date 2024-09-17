@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"time"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
@@ -175,7 +176,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		err = reconciler.SetupWithManager(mgr)
 		Expect(err).NotTo(HaveOccurred())
 
-		executeCommand = func(_ []string, _ io.Reader) ([]byte, error) {
+		executeCommand = func(_ *slog.Logger, _ []string, _ io.Reader) ([]byte, error) {
 			return nil, nil
 		}
 
