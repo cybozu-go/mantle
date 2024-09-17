@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os/exec"
 	"syscall"
 	"time"
@@ -62,55 +61,6 @@ func NewMantleBackupReconciler(client client.Client, scheme *runtime.Scheme, man
 		primarySettings:      primarySettings,
 	}
 }
-
-func executeCommandImpl(command []string, input io.Reader) ([]byte, error) {
-	cmd := exec.Command(command[0], command[1:]...)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		err := stdout.Close()
-		if err != nil {
-			logger.Error("failed to stdout.Close", "error", err)
-		}
-	}()
-
-	if input != nil {
-		stdin, err := cmd.StdinPipe()
-		if err != nil {
-			return nil, err
-		}
-		go func() {
-			defer func() {
-				err := stdin.Close()
-				if err != nil {
-					logger.Error("failed to stdin.Close", "error", err)
-				}
-			}()
-			if _, err = io.Copy(stdin, input); err != nil {
-				logger.Error("failed to io.Copy", "error", err)
-			}
-		}()
-	}
-
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-
-	r, err := io.ReadAll(stdout)
-	if err != nil {
-		return r, err
-	}
-
-	if err := cmd.Wait(); err != nil {
-		return r, err
-	}
-
-	return r, nil
-}
-
-var executeCommand = executeCommandImpl
 
 func (r *MantleBackupReconciler) updateStatusCondition(ctx context.Context, backup *mantlev1.MantleBackup, condition metav1.Condition) error {
 	err := updateStatus(ctx, r.Client, backup, func() error {
