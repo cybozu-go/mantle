@@ -136,7 +136,8 @@ func createMantleBackup(ctx context.Context, cli client.Client, mbc *mantlev1.Ma
 			Labels:    map[string]string{MantleBackupConfigUID: string(mbc.GetUID())},
 		},
 		Spec: mantlev1.MantleBackupSpec{
-			PVC: mbc.Spec.PVC,
+			Expire: mbc.Spec.Expire,
+			PVC:    mbc.Spec.PVC,
 		},
 	})
 	if err == nil {
