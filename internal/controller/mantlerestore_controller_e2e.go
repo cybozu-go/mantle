@@ -26,6 +26,6 @@ func (r *MantleRestoreReconcilerE2E) CloneImageFromBackup(logger *slog.Logger, r
 	return r.cloneImageFromBackup(logger, restore, backup)
 }
 
-func (r *MantleRestoreReconcilerE2E) RemoveRBDImage(restore *mantlev1.MantleRestore) error {
-	return r.removeRBDImage(restore)
+func (r *MantleRestoreReconcilerE2E) RemoveRBDImage(logger *slog.Logger, restore *mantlev1.MantleRestore) error {
+	return r.removeRBDImage(logger, restore)
 }

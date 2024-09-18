@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"time"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
@@ -39,7 +40,7 @@ var _ = Describe("MantleBackup controller", func() {
 		err := reconciler.SetupWithManager(mgrUtil.GetManager())
 		Expect(err).NotTo(HaveOccurred())
 
-		executeCommand = func(command []string, _ io.Reader) ([]byte, error) {
+		executeCommand = func(logger *slog.Logger, command []string, _ io.Reader) ([]byte, error) {
 			if command[0] == "rbd" && command[1] == "snap" && command[2] == "ls" {
 				return []byte(fmt.Sprintf("[{\"id\":1000,\"name\":\"backup\"," +
 					"\"timestamp\":\"Mon Sep  2 00:42:00 2024\"}]")), nil

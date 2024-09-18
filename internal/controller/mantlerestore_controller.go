@@ -52,7 +52,7 @@ func NewMantleRestoreReconciler(cli client.Client, scheme *runtime.Scheme, manag
 }
 
 func (r *MantleRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := logger.With("MantleRestore", req.NamespacedName)
+	logger := gLogger.With("MantleRestore", req.NamespacedName)
 
 	if r.role == RoleSecondary {
 		return ctrl.Result{}, nil
@@ -347,7 +347,7 @@ func (r *MantleRestoreReconciler) cleanup(ctx context.Context, logger *slog.Logg
 	}
 
 	// delete the clone image
-	if err := r.removeRBDImage(restore); err != nil {
+	if err := r.removeRBDImage(logger, restore); err != nil {
 		logger.Error("failed to remove image", "restore", restore.Name, "namespace", restore.Namespace, "error", err)
 		return ctrl.Result{}, err
 	}
@@ -419,7 +419,7 @@ func (r *MantleRestoreReconciler) deleteRestoringPV(ctx context.Context, restore
 	}
 }
 
-func (r *MantleRestoreReconciler) removeRBDImage(restore *mantlev1.MantleRestore) error {
+func (r *MantleRestoreReconciler) removeRBDImage(logger *slog.Logger, restore *mantlev1.MantleRestore) error {
 	image := r.restoringRBDImageName(restore)
 	pool := restore.Status.Pool
 	logger.Info("removing image", "restore", restore.Name, "namespace", restore.Namespace, "pool", pool, "image", image)

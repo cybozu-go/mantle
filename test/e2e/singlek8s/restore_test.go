@@ -577,7 +577,7 @@ func (test *restoreTest) testRemoveImage() {
 			_, err := getRBDInfo(cephCluster1Namespace, test.poolName, cloneImageName)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = reconciler.RemoveRBDImage(restore)
+			err = reconciler.RemoveRBDImage(slog.Default(), restore)
 			Expect(err).NotTo(HaveOccurred())
 
 			// should get an error since the image is removed
@@ -586,7 +586,7 @@ func (test *restoreTest) testRemoveImage() {
 		})
 
 		It("should skip removing the image if it does not exist", func() {
-			err := reconciler.RemoveRBDImage(restore)
+			err := reconciler.RemoveRBDImage(slog.Default(), restore)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
