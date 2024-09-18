@@ -361,7 +361,7 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 	}
 
-	if err := r.createRBDSnapshotAndUpdateStatus(ctx, logger, &backup, target); err != nil {
+	if err := r.provisionRBDSnapshot(ctx, logger, &backup, target); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -474,7 +474,7 @@ func (r *MantleBackupReconciler) replicate(
 	return nil
 }
 
-func (r *MantleBackupReconciler) createRBDSnapshotAndUpdateStatus(
+func (r *MantleBackupReconciler) provisionRBDSnapshot(
 	ctx context.Context,
 	logger *slog.Logger,
 	backup *mantlev1.MantleBackup,
