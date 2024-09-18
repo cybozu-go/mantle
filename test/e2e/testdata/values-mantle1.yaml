@@ -1,3 +1,2 @@
 controller:
-  expireOffset: 1w6d23h59m50s # 2w - 10s
   overwriteMBCSchedule: "* * * * *"
