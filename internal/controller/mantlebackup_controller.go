@@ -35,6 +35,7 @@ const (
 	labelRemoteBackupTargetPVCUID = "mantle.cybozu.io/remote-backup-target-pvc-uid"
 	annotRemoteUID                = "mantle.cybozu.io/remote-uid"
 	annotDiffTo                   = "mantle.cybozu.io/diff-to"
+	annotRetainIfExpired          = "mantle.cybozu.io/retain-if-expired"
 )
 
 // MantleBackupReconciler reconciles a MantleBackup object
@@ -237,6 +238,12 @@ func (r *MantleBackupReconciler) expire(ctx context.Context, backup *mantlev1.Ma
 	logger := log.FromContext(ctx)
 	if backup.Status.CreatedAt.IsZero() {
 		// the RBD snapshot has not be taken yet, do nothing.
+		return nil
+	}
+
+	if v, ok := backup.Annotations[annotRetainIfExpired]; ok && v == "true" {
+		// retain this backup.
+		// If the annotation is deleted, reconciliation will run, so no need to schedule.
 		return nil
 	}
 

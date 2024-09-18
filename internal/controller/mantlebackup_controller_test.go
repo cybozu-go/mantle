@@ -252,6 +252,24 @@ var _ = Describe("MantleBackup controller", func() {
 		Entry("a near expiring backup should be deleted after expiration", 10*time.Second),
 	)
 
+	It("should retain the backup if it has the retain-if-expired annotation", func(ctx SpecContext) {
+		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
+		Expect(err).NotTo(HaveOccurred())
+
+		backup, err := resMgr.CreateUniqueBackupFor(ctx, pvc)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("waiting for the backup to be ready")
+		resMgr.WaitForBackupReady(ctx, backup)
+
+		By("simulate backup expiration")
+		simulateExpire(ctx, backup, -time.Hour)
+
+		By("checking the backup is not deleted")
+		err = k8sClient.Get(ctx, types.NamespacedName{Name: backup.Name, Namespace: backup.Namespace}, backup)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
 	It("should not be ready to use if the PVC is the lost state from the beginning", func(ctx SpecContext) {
 		pv, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
