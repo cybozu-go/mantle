@@ -25,10 +25,11 @@ import (
 )
 
 const (
+	MantleBackupFinalizerName = "mantlebackup.mantle.cybozu.io/finalizer"
+
 	labelLocalBackupTargetPVCUID  = "mantle.cybozu.io/local-backup-target-pvc-uid"
 	labelRemoteBackupTargetPVCUID = "mantle.cybozu.io/remote-backup-target-pvc-uid"
 	annotRemoteUID                = "mantle.cybozu.io/remote-uid"
-	finalizerMantleBackup         = "mantlebackup.mantle.cybozu.io/finalizer"
 )
 
 // MantleBackupReconciler reconciles a MantleBackup object
@@ -47,10 +48,6 @@ type Snapshot struct {
 	Protected bool   `json:"protected,string,omitempty"`
 	Timestamp string `json:"timestamp,omitempty"`
 }
-
-const (
-	MantleBackupFinalizerName = "mantlebackup.mantle.cybozu.io/finalizer"
-)
 
 // NewMantleBackupReconciler returns NodeReconciler.
 func NewMantleBackupReconciler(client client.Client, scheme *runtime.Scheme, managedCephClusterID, role string, primarySettings *PrimarySettings) *MantleBackupReconciler {
@@ -447,7 +444,7 @@ func (r *MantleBackupReconciler) replicate(
 		labelLocalBackupTargetPVCUID:  resp.Uid,
 		labelRemoteBackupTargetPVCUID: string(pvc.GetUID()),
 	})
-	backupSent.SetFinalizers([]string{finalizerMantleBackup})
+	backupSent.SetFinalizers([]string{MantleBackupFinalizerName})
 	backupSent.Spec = backup.Spec
 	backupSent.Status.CreatedAt = backup.Status.CreatedAt
 	backupSentJson, err := json.Marshal(backupSent)
