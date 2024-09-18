@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"time"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
@@ -14,13 +15,16 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/kube-openapi/pkg/validation/strfmt"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 )
 
 var _ = Describe("MantleBackup controller", func() {
 	var mgrUtil testutil.ManagerUtil
 	var reconciler *MantleBackupReconciler
 	var ns string
+	var lastExpireQueuedBackups sync.Map
 
 	waitForBackupNotReady := func(ctx context.Context, backup *mantlev1.MantleBackup) {
 		EventuallyWithOffset(1, func(g Gomega, ctx context.Context) {
@@ -50,6 +54,41 @@ var _ = Describe("MantleBackup controller", func() {
 		}).WithContext(ctx).Should(Succeed())
 	}
 
+	simulateExpire := func(ctx context.Context, backup *mantlev1.MantleBackup, offset time.Duration) time.Time {
+		err := k8sClient.Get(ctx, types.NamespacedName{Name: backup.Name, Namespace: backup.Namespace}, backup)
+		Expect(err).NotTo(HaveOccurred())
+
+		// set the creation time to expire the backup after the offset from now
+		expire, err := strfmt.ParseDuration(backup.Spec.Expire)
+		Expect(err).NotTo(HaveOccurred())
+		// trim nsec because kubernetes seems not to save nsec.
+		now := time.Unix(time.Now().Unix(), 0).UTC()
+		newCreatedAt := now.Add(-expire).Add(offset)
+		backup.Status.CreatedAt = metav1.NewTime(newCreatedAt)
+		err = k8sClient.Status().Update(ctx, backup)
+		Expect(err).NotTo(HaveOccurred())
+
+		return newCreatedAt
+	}
+
+	// sniffing the expire queue to check the expiration is deferred.
+	setupExpireQueueSniffer := func() {
+		origCh := reconciler.expireQueueCh
+		newCh := make(chan event.GenericEvent)
+		reconciler.expireQueueCh = newCh
+		go func() {
+			for event := range newCh {
+				lastExpireQueuedBackups.Store(
+					types.NamespacedName{
+						Namespace: event.Object.GetNamespace(),
+						Name:      event.Object.GetName(),
+					},
+					event.Object.DeepCopyObject())
+				origCh <- event
+			}
+		}()
+	}
+
 	BeforeEach(func() {
 		mgrUtil = testutil.NewManagerUtil(context.Background(), cfg, scheme.Scheme)
 
@@ -63,6 +102,8 @@ var _ = Describe("MantleBackup controller", func() {
 		reconciler.ceph = testutil.NewFakeRBD()
 		err := reconciler.SetupWithManager(mgrUtil.GetManager())
 		Expect(err).NotTo(HaveOccurred())
+
+		setupExpireQueueSniffer()
 
 		mgrUtil.Start()
 		time.Sleep(100 * time.Millisecond)
@@ -176,6 +217,40 @@ var _ = Describe("MantleBackup controller", func() {
 		err = k8sClient.Update(ctx, backup)
 		Expect(err).To(MatchError(ContainSubstring("spec.expire is immutable")))
 	})
+
+	DescribeTable("MantleBackup expiration",
+		func(ctx SpecContext, offset time.Duration) {
+			_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+
+			backup, err := resMgr.CreateUniqueBackupFor(ctx, pvc)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("waiting for the backup to be ready")
+			resMgr.WaitForBackupReady(ctx, backup)
+
+			expectCreatedAt := backup.Status.CreatedAt.Time
+
+			By("simulate backup expiration")
+			newCreatedAt := simulateExpire(ctx, backup, offset)
+
+			By("wait for the backup to be deleted")
+			testutil.CheckDeletedEventually[mantlev1.MantleBackup](ctx, k8sClient, backup.Name, backup.Namespace)
+
+			By("check the queued backup has the correct createdAt")
+			// If expiration is deferred, the backup with the new createdAt is queued.
+			// Otherwise, the backup is not queued after updating the createdAt, so the backup has the original createdAt.
+			if offset > 0 {
+				expectCreatedAt = newCreatedAt
+			}
+			v, ok := lastExpireQueuedBackups.Load(types.NamespacedName{Namespace: backup.Namespace, Name: backup.Name})
+			Expect(ok).To(BeTrue())
+			createdAt := v.(*mantlev1.MantleBackup).Status.CreatedAt.Time
+			Expect(createdAt).To(BeTemporally("==", expectCreatedAt))
+		},
+		Entry("an already expired backup should be deleted immediately", -time.Hour),
+		Entry("a near expiring backup should be deleted after expiration", 10*time.Second),
+	)
 
 	It("should not be ready to use if the PVC is the lost state from the beginning", func(ctx SpecContext) {
 		pv, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)

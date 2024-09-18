@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/ceph"
@@ -16,10 +17,15 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/workqueue"
+	"k8s.io/kube-openapi/pkg/validation/strfmt"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 const (
@@ -39,6 +45,7 @@ type MantleBackupReconciler struct {
 	managedCephClusterID string
 	role                 string
 	primarySettings      *PrimarySettings // This should be non-nil if and only if role equals 'primary'.
+	expireQueueCh        chan event.GenericEvent
 }
 
 type Snapshot struct {
@@ -58,6 +65,7 @@ func NewMantleBackupReconciler(client client.Client, scheme *runtime.Scheme, man
 		managedCephClusterID: managedCephClusterID,
 		role:                 role,
 		primarySettings:      primarySettings,
+		expireQueueCh:        make(chan event.GenericEvent),
 	}
 }
 
@@ -222,6 +230,37 @@ func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *
 	return &snapshotTarget{&pvc, &pv, imageName, poolName}, ctrl.Result{}, nil
 }
 
+// expire deletes the backup if it is already expired. Otherwise it schedules deletion.
+// Note that this function does not use requeue to scheduled deletion because the caller
+// will do other tasks after this function returns.
+func (r *MantleBackupReconciler) expire(ctx context.Context, backup *mantlev1.MantleBackup) error {
+	logger := log.FromContext(ctx)
+	if backup.Status.CreatedAt.IsZero() {
+		// the RBD snapshot has not be taken yet, do nothing.
+		return nil
+	}
+
+	expire, err := strfmt.ParseDuration(backup.Spec.Expire)
+	if err != nil {
+		return err
+	}
+	expireAt := backup.Status.CreatedAt.Add(expire)
+	if time.Now().UTC().After(expireAt) {
+		// already expired, delete it immediately.
+		logger.Info("delete expired backup", "createdAt", backup.Status.CreatedAt, "expire", expire)
+		return r.Delete(ctx, backup)
+	}
+
+	// not expired yet. schedule deletion.
+	// The event may be sent many times, but it is safe because workqueue AddAfter
+	// deduplicates events for same object.
+	r.expireQueueCh <- event.GenericEvent{
+		Object: backup,
+	}
+
+	return nil
+}
+
 //+kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlebackups,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlebackups/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlebackups/finalizers,verbs=update
@@ -305,6 +344,10 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	if err := r.expire(ctx, &backup); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	if err := r.provisionRBDSnapshot(ctx, &backup, target); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -321,10 +364,29 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	return ctrl.Result{}, nil
 }
 
+func scheduleExpire(_ context.Context, evt event.GenericEvent, q workqueue.RateLimitingInterface) {
+	backup := evt.Object.(*mantlev1.MantleBackup)
+	// the parse never fails because expire method checked it.
+	expire, _ := strfmt.ParseDuration(backup.Spec.Expire)
+	q.AddAfter(
+		ctrl.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: backup.GetNamespace(),
+				Name:      backup.GetName(),
+			},
+		},
+		time.Until(backup.Status.CreatedAt.Add(expire)),
+	)
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *MantleBackupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&mantlev1.MantleBackup{}).
+		WatchesRawSource(
+			&source.Channel{Source: r.expireQueueCh},
+			handler.Funcs{GenericFunc: scheduleExpire},
+		).
 		Complete(r)
 }
 
