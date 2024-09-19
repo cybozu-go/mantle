@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	MantleBackupConfigFinalizerName     = "mantle.cybozu.io/mbc-finalizer"
+	MantleBackupConfigFinalizerName     = "mantlebackupconfig.mantle.cybozu.io/finalizer"
 	MantleBackupConfigCronJobNamePrefix = "mbc-"
 )
 
