@@ -366,7 +366,7 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	if r.role == RolePrimary {
-		if err := r.replicate(ctx, logger, &backup, target.pvc); err != nil {
+		if err := r.replicate(ctx, logger, &backup); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
@@ -385,8 +385,13 @@ func (r *MantleBackupReconciler) replicate(
 	ctx context.Context,
 	logger *slog.Logger,
 	backup *mantlev1.MantleBackup,
-	pvc *corev1.PersistentVolumeClaim,
 ) error {
+	// Unmarshal the PVC manifest stored in the status of the MantleBackup resource.
+	var pvc corev1.PersistentVolumeClaim
+	if err := json.Unmarshal([]byte(backup.Status.PVCManifest), &pvc); err != nil {
+		return fmt.Errorf("failed to unmarshal the PVC stored in the status of the MantleBackup resource: %w", err)
+	}
+
 	// Make sure the arguments are valid
 	if backup.Status.SnapID == nil {
 		return fmt.Errorf("backup.Status.SnapID should not be nil: %s: %s", backup.GetName(), backup.GetNamespace())
