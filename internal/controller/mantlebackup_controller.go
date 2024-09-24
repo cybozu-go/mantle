@@ -366,9 +366,7 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	if r.role == RolePrimary {
-		if err := r.replicate(ctx, logger, &backup, target.pvc); err != nil {
-			return ctrl.Result{}, err
-		}
+		return r.replicate(ctx, logger, &backup)
 	}
 
 	return ctrl.Result{}, nil
@@ -385,11 +383,16 @@ func (r *MantleBackupReconciler) replicate(
 	ctx context.Context,
 	logger *slog.Logger,
 	backup *mantlev1.MantleBackup,
-	pvc *corev1.PersistentVolumeClaim,
-) error {
+) (ctrl.Result, error) {
+	// Unmarshal the PVC manifest stored in the status of the MantleBackup resource.
+	var pvc corev1.PersistentVolumeClaim
+	if err := json.Unmarshal([]byte(backup.Status.PVCManifest), &pvc); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to unmarshal the PVC stored in the status of the MantleBackup resource: %w", err)
+	}
+
 	// Make sure the arguments are valid
 	if backup.Status.SnapID == nil {
-		return fmt.Errorf("backup.Status.SnapID should not be nil: %s: %s", backup.GetName(), backup.GetNamespace())
+		return ctrl.Result{}, fmt.Errorf("backup.Status.SnapID should not be nil: %s: %s", backup.GetName(), backup.GetNamespace())
 	}
 
 	// Make sure all of the preceding backups for the same PVC have already been replicated.
@@ -397,14 +400,14 @@ func (r *MantleBackupReconciler) replicate(
 	if err := r.Client.List(ctx, &backupList, &client.ListOptions{
 		LabelSelector: labels.SelectorFromSet(map[string]string{labelLocalBackupTargetPVCUID: string(pvc.GetUID())}),
 	}); err != nil {
-		return err
+		return ctrl.Result{}, err
 	}
 	for _, backup1 := range backupList.Items {
-		cond := meta.FindStatusCondition(backup1.Status.Conditions, mantlev1.BackupConditionSyncedToRemote)
-		if (backup1.Status.SnapID == nil || *backup1.Status.SnapID < *backup.Status.SnapID) &&
-			backup1.ObjectMeta.DeletionTimestamp.IsZero() &&
-			(cond == nil || cond.Status != metav1.ConditionTrue) {
-			return fmt.Errorf("waiting for preceding backups to be replicated: %s: %s", backup.GetName(), backup.GetNamespace())
+		if backup1.Status.SnapID == nil ||
+			*backup1.Status.SnapID < *backup.Status.SnapID &&
+				backup1.ObjectMeta.DeletionTimestamp.IsZero() &&
+				!meta.IsStatusConditionTrue(backup1.Status.Conditions, mantlev1.BackupConditionSyncedToRemote) {
+			return ctrl.Result{Requeue: true}, nil
 		}
 	}
 
@@ -418,7 +421,7 @@ func (r *MantleBackupReconciler) replicate(
 	pvcSent.Spec = pvc.Spec
 	pvcSentJson, err := json.Marshal(pvcSent)
 	if err != nil {
-		return err
+		return ctrl.Result{}, err
 	}
 
 	// Call CreateOrUpdatePVC
@@ -430,7 +433,7 @@ func (r *MantleBackupReconciler) replicate(
 		},
 	)
 	if err != nil {
-		return err
+		return ctrl.Result{}, err
 	}
 
 	// Create a MantleBackup that should be sent to the secondary mantle.
@@ -449,7 +452,7 @@ func (r *MantleBackupReconciler) replicate(
 	backupSent.Status.CreatedAt = backup.Status.CreatedAt
 	backupSentJson, err := json.Marshal(backupSent)
 	if err != nil {
-		return err
+		return ctrl.Result{}, err
 	}
 
 	// Call CreateOrUpdateMantleBackup.
@@ -459,7 +462,7 @@ func (r *MantleBackupReconciler) replicate(
 			MantleBackup: string(backupSentJson),
 		},
 	); err != nil {
-		return err
+		return ctrl.Result{}, err
 	}
 
 	// Update the status of the MantleBackup.
@@ -468,10 +471,10 @@ func (r *MantleBackupReconciler) replicate(
 		Status: metav1.ConditionTrue,
 		Reason: mantlev1.BackupReasonNone,
 	}); err != nil {
-		return err
+		return ctrl.Result{}, err
 	}
 
-	return nil
+	return ctrl.Result{}, nil
 }
 
 func (r *MantleBackupReconciler) provisionRBDSnapshot(
