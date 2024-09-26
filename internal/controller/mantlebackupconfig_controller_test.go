@@ -41,7 +41,7 @@ func setMockedGetRunningPod(namespace string) {
 	}
 }
 
-func createBoundPVC(ctx context.Context, ns, pvName, pvcName, storageClassName string) error {
+func createBoundPVC(ctx context.Context, ns, pvName, pvcName string) error {
 	csiPVSource := corev1.CSIPersistentVolumeSource{
 		Driver:       "driver",
 		VolumeHandle: "handle",
@@ -85,7 +85,7 @@ func createBoundPVC(ctx context.Context, ns, pvName, pvcName, storageClassName s
 					corev1.ResourceStorage: *resource.NewQuantity(1, resource.BinarySI),
 				},
 			},
-			StorageClassName: &storageClassName,
+			StorageClassName: &resMgr.StorageClassName,
 		},
 	}
 	if err := k8sClient.Create(ctx, &pvc); err != nil {
@@ -156,13 +156,10 @@ var _ = Describe("MantleBackupConfig controller", func() {
 	var mgrUtil testutil.ManagerUtil
 	var reconciler *MantleBackupConfigReconciler
 
-	storageClassClusterID := dummyStorageClassClusterID
-	storageClassName := dummyStorageClassName
-
 	BeforeEach(func() {
 		mgrUtil = testutil.NewManagerUtil(ctx, cfg, scheme.Scheme)
 
-		reconciler = NewMantleBackupConfigReconciler(k8sClient, mgrUtil.GetScheme(), storageClassClusterID, "0s", "", RoleStandalone)
+		reconciler = NewMantleBackupConfigReconciler(k8sClient, mgrUtil.GetScheme(), resMgr.ClusterID, "0s", "", RoleStandalone)
 		err := reconciler.SetupWithManager(mgrUtil.GetManager())
 		Expect(err).NotTo(HaveOccurred())
 
@@ -185,7 +182,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 			pvName := util.GetUniqueName("pv-")
 			pvcName := util.GetUniqueName("pvc-")
 
-			err := createBoundPVC(ctx, ns, pvName, pvcName, storageClassName)
+			err := createBoundPVC(ctx, ns, pvName, pvcName)
 			Expect(err).NotTo(HaveOccurred())
 
 			mbc := mantlev1.MantleBackupConfig{
@@ -217,7 +214,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		pvName := util.GetUniqueName("pv-")
 		pvcName := util.GetUniqueName("pvc-")
 
-		err := createBoundPVC(ctx, ns, pvName, pvcName, storageClassName)
+		err := createBoundPVC(ctx, ns, pvName, pvcName)
 		Expect(err).NotTo(HaveOccurred())
 
 		schedules := []string{}
@@ -259,7 +256,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 			pvcName := util.GetUniqueName("pvc-")
 			ns := createNamespace()
 
-			err := createBoundPVC(ctx, ns, pvName, pvcName, storageClassName)
+			err := createBoundPVC(ctx, ns, pvName, pvcName)
 			Expect(err).NotTo(HaveOccurred())
 
 			mbc := mantlev1.MantleBackupConfig{
@@ -300,7 +297,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		oldSuspend := false
 		newSuspend := true
 
-		err := createBoundPVC(ctx, ns, pvName, pvcName, storageClassName)
+		err := createBoundPVC(ctx, ns, pvName, pvcName)
 		Expect(err).NotTo(HaveOccurred())
 
 		mbc := mantlev1.MantleBackupConfig{
@@ -335,9 +332,9 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		oldExpire := "2w"
 		newExpire := "1w"
 
-		err := createBoundPVC(ctx, ns, pvName1, oldPVC, storageClassName)
+		err := createBoundPVC(ctx, ns, pvName1, oldPVC)
 		Expect(err).NotTo(HaveOccurred())
-		err = createBoundPVC(ctx, ns, pvName2, newPVC, storageClassName)
+		err = createBoundPVC(ctx, ns, pvName2, newPVC)
 		Expect(err).NotTo(HaveOccurred())
 
 		mbc := mantlev1.MantleBackupConfig{
@@ -378,7 +375,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		schedule := "0 0 * * *"
 		suspend := false
 
-		err := createBoundPVC(ctx, ns, pvName, pvcName, storageClassName)
+		err := createBoundPVC(ctx, ns, pvName, pvcName)
 		Expect(err).NotTo(HaveOccurred())
 
 		err = createMBC(ctx, mbcName, mbcNamespace, pvcName, schedule, "2w", suspend)
@@ -417,7 +414,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		pvcName := util.GetUniqueName("pvc-")
 		mbcName := util.GetUniqueName("mbc-")
 
-		err := createBoundPVC(ctx, ns, pvName, pvcName, storageClassName)
+		err := createBoundPVC(ctx, ns, pvName, pvcName)
 		Expect(err).NotTo(HaveOccurred())
 
 		err = createMBC(ctx, mbcName, mbcNamespace, pvcName, "59 23 * * *", "2w", false)

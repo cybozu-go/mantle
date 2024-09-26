@@ -26,9 +26,7 @@ type mantleRestoreControllerUnitTest struct {
 	reconciler      *MantleRestoreReconciler
 	mgrUtil         testutil.ManagerUtil
 	tenantNamespace string
-	cephClusterID   string
 	poolName        string
-	scName          string
 	srcPVC          *corev1.PersistentVolumeClaim
 	srcPV           *corev1.PersistentVolume
 	backupName      string
@@ -38,9 +36,7 @@ type mantleRestoreControllerUnitTest struct {
 var _ = Describe("MantleRestoreReconciler unit test", func() {
 	test := &mantleRestoreControllerUnitTest{
 		tenantNamespace: util.GetUniqueName("ns-"),
-		cephClusterID:   util.GetUniqueName("ceph-"),
 		poolName:        util.GetUniqueName("pool-"),
-		scName:          util.GetUniqueName("sc-"),
 		backupName:      util.GetUniqueName("backup-"),
 	}
 
@@ -77,23 +73,20 @@ func (test *mantleRestoreControllerUnitTest) setupEnv() {
 			return nil, nil
 		}
 		test.mgrUtil = testutil.NewManagerUtil(ctx, cfg, scheme.Scheme)
-		backupReconciler := NewMantleBackupReconciler(k8sClient, test.mgrUtil.GetScheme(), test.cephClusterID, RoleStandalone, nil)
+		backupReconciler := NewMantleBackupReconciler(k8sClient, test.mgrUtil.GetScheme(), resMgr.ClusterID, RoleStandalone, nil)
 		err := backupReconciler.SetupWithManager(test.mgrUtil.GetManager())
 		Expect(err).NotTo(HaveOccurred())
 
 		By("prepare MantleRestore reconciler")
 		// just allocate the reconciler, and does not start it.
-		test.reconciler = NewMantleRestoreReconciler(k8sClient, test.mgrUtil.GetScheme(), test.cephClusterID, RoleStandalone)
+		test.reconciler = NewMantleRestoreReconciler(k8sClient, test.mgrUtil.GetScheme(), resMgr.ClusterID, RoleStandalone)
 
 		test.mgrUtil.Start()
 		time.Sleep(100 * time.Millisecond)
 	})
 
 	It("create backup resources", func() {
-		err := testutil.CreateStorageClass(ctx, k8sClient, test.scName, "rook-ceph.rbd.csi.ceph.com", test.cephClusterID)
-		Expect(err).NotTo(HaveOccurred())
-
-		test.srcPV, test.srcPVC = test.createPVAndPVC(test.scName, util.GetUniqueName("pv-"), util.GetUniqueName("pvc-"), util.GetUniqueName("image-"))
+		test.srcPV, test.srcPVC = test.createPVAndPVC(util.GetUniqueName("pv-"), util.GetUniqueName("pvc-"), util.GetUniqueName("image-"))
 		test.backup = test.createBackup(test.srcPVC, test.backupName)
 
 		By("waiting for the backup to be ready")
@@ -434,7 +427,7 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPV() {
 }
 
 // helper function to create a PV and PVC
-func (test *mantleRestoreControllerUnitTest) createPVAndPVC(scName, pvName, pvcName, imageName string) (*corev1.PersistentVolume, *corev1.PersistentVolumeClaim) {
+func (test *mantleRestoreControllerUnitTest) createPVAndPVC(pvName, pvcName, imageName string) (*corev1.PersistentVolume, *corev1.PersistentVolumeClaim) {
 	accessModes := []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
 	size := resource.MustParse("1Gi")
 	volumeMode := corev1.PersistentVolumeFilesystem
@@ -450,7 +443,7 @@ func (test *mantleRestoreControllerUnitTest) createPVAndPVC(scName, pvName, pvcN
 				CSI: &corev1.CSIPersistentVolumeSource{
 					Driver: "restore.rbd.csi.ceph.com",
 					VolumeAttributes: map[string]string{
-						"clusterID":                        test.cephClusterID,
+						"clusterID":                        resMgr.ClusterID,
 						"csi.storage.k8s.io/pv/name":       pvName,
 						"csi.storage.k8s.io/pvc/name":      pvcName,
 						"csi.storage.k8s.io/pvc/namespace": test.tenantNamespace,
@@ -465,7 +458,7 @@ func (test *mantleRestoreControllerUnitTest) createPVAndPVC(scName, pvName, pvcN
 				},
 			},
 			PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimDelete,
-			StorageClassName:              scName,
+			StorageClassName:              resMgr.StorageClassName,
 			VolumeMode:                    &volumeMode,
 		},
 	}
@@ -481,7 +474,7 @@ func (test *mantleRestoreControllerUnitTest) createPVAndPVC(scName, pvName, pvcN
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes:      accessModes,
-			StorageClassName: &scName,
+			StorageClassName: &resMgr.StorageClassName,
 			Resources: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{
 					corev1.ResourceStorage: size,

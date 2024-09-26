@@ -26,13 +26,10 @@ var _ = Describe("MantleBackup controller", func() {
 	var mgrUtil testutil.ManagerUtil
 	var reconciler *MantleBackupReconciler
 
-	storageClassClusterID := dummyStorageClassClusterID
-	storageClassName := dummyStorageClassName
-
 	BeforeEach(func() {
 		mgrUtil = testutil.NewManagerUtil(ctx, cfg, scheme.Scheme)
 
-		reconciler = NewMantleBackupReconciler(k8sClient, mgrUtil.GetScheme(), storageClassClusterID, RoleStandalone, nil)
+		reconciler = NewMantleBackupReconciler(k8sClient, mgrUtil.GetScheme(), resMgr.ClusterID, RoleStandalone, nil)
 		err := reconciler.SetupWithManager(mgrUtil.GetManager())
 		Expect(err).NotTo(HaveOccurred())
 
@@ -98,7 +95,7 @@ var _ = Describe("MantleBackup controller", func() {
 						corev1.ResourceStorage: *resource.NewQuantity(1, resource.BinarySI),
 					},
 				},
-				StorageClassName: &storageClassName,
+				StorageClassName: &resMgr.StorageClassName,
 			},
 		}
 		err = k8sClient.Create(ctx, &pvc)
@@ -244,7 +241,7 @@ var _ = Describe("MantleBackup controller", func() {
 						corev1.ResourceStorage: *resource.NewQuantity(1, resource.BinarySI),
 					},
 				},
-				StorageClassName: &storageClassName,
+				StorageClassName: &resMgr.StorageClassName,
 			},
 		}
 		err = k8sClient.Create(ctx, &pvc)
@@ -380,7 +377,7 @@ var _ = Describe("MantleBackup controller", func() {
 						corev1.ResourceStorage: *resource.NewQuantity(1, resource.BinarySI),
 					},
 				},
-				StorageClassName: &storageClassName,
+				StorageClassName: &resMgr.StorageClassName,
 			},
 		}
 		err = k8sClient.Create(ctx, &pvc)
@@ -508,7 +505,7 @@ var _ = Describe("MantleBackup controller", func() {
 						corev1.ResourceStorage: *resource.NewQuantity(1, resource.BinarySI),
 					},
 				},
-				StorageClassName: &storageClassName,
+				StorageClassName: &resMgr.StorageClassName,
 			},
 		}
 		err = k8sClient.Create(ctx, &pvc)

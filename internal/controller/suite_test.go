@@ -32,11 +32,7 @@ var cfg *rest.Config
 var k8sClient client.Client
 var testEnv *envtest.Environment
 
-var (
-	dummyStorageClassName        = "dummy-sc"
-	dummyStorageClassClusterID   = "rook-ceph"
-	dummyStorageClassProvisioner = "rook-ceph.rbd.csi.ceph.com"
-)
+var resMgr *testutil.ResourceManager
 
 var namespaceCounter = 0 // EnvTest cannot delete namespace. So, we have to use another new namespace.
 func createNamespace() string {
@@ -61,7 +57,7 @@ func TestControllers(t *testing.T) {
 	RunSpecs(t, "Controller Suite")
 }
 
-var _ = BeforeSuite(func() {
+var _ = BeforeSuite(func(ctx SpecContext) {
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
 
 	By("bootstrapping test environment")
@@ -93,8 +89,9 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
 
-	err = testutil.CreateStorageClass(context.Background(), k8sClient, dummyStorageClassName,
-		dummyStorageClassProvisioner, dummyStorageClassClusterID)
+	By("Setup common resources")
+	resMgr = testutil.NewResourceManager(k8sClient)
+	err = resMgr.CreateStorageClass(ctx)
 	Expect(err).NotTo(HaveOccurred())
 })
 
