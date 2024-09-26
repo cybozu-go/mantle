@@ -9,17 +9,13 @@ import (
 	"time"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
-	"github.com/cybozu-go/mantle/test/util"
-
+	"github.com/cybozu-go/mantle/internal/controller/internal/testutil"
 	. "github.com/onsi/ginkgo/v2"
-
 	. "github.com/onsi/gomega"
-
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -27,14 +23,14 @@ import (
 
 var _ = Describe("MantleBackup controller", func() {
 	ctx := context.Background()
-	var mgrUtil util.ManagerUtil
+	var mgrUtil testutil.ManagerUtil
 	var reconciler *MantleBackupReconciler
 
 	storageClassClusterID := dummyStorageClassClusterID
 	storageClassName := dummyStorageClassName
 
 	BeforeEach(func() {
-		mgrUtil = util.NewManagerUtil(ctx, cfg, scheme.Scheme)
+		mgrUtil = testutil.NewManagerUtil(ctx, cfg, scheme.Scheme)
 
 		reconciler = NewMantleBackupReconciler(k8sClient, mgrUtil.GetScheme(), storageClassClusterID, RoleStandalone, nil)
 		err := reconciler.SetupWithManager(mgrUtil.GetManager())

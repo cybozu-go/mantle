@@ -8,7 +8,8 @@ import (
 	"time"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
-	testutil "github.com/cybozu-go/mantle/test/util"
+	"github.com/cybozu-go/mantle/internal/controller/internal/testutil"
+	"github.com/cybozu-go/mantle/test/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -36,11 +37,11 @@ type mantleRestoreControllerUnitTest struct {
 
 var _ = Describe("MantleRestoreReconciler unit test", func() {
 	test := &mantleRestoreControllerUnitTest{
-		tenantNamespace: testutil.GetUniqueName("ns-"),
-		cephClusterID:   testutil.GetUniqueName("ceph-"),
-		poolName:        testutil.GetUniqueName("pool-"),
-		scName:          testutil.GetUniqueName("sc-"),
-		backupName:      testutil.GetUniqueName("backup-"),
+		tenantNamespace: util.GetUniqueName("ns-"),
+		cephClusterID:   util.GetUniqueName("ceph-"),
+		poolName:        util.GetUniqueName("pool-"),
+		scName:          util.GetUniqueName("sc-"),
+		backupName:      util.GetUniqueName("backup-"),
 	}
 
 	Describe("setup environment", test.setupEnv)
@@ -92,7 +93,7 @@ func (test *mantleRestoreControllerUnitTest) setupEnv() {
 		err := testutil.CreateStorageClass(ctx, k8sClient, test.scName, "rook-ceph.rbd.csi.ceph.com", test.cephClusterID)
 		Expect(err).NotTo(HaveOccurred())
 
-		test.srcPV, test.srcPVC = test.createPVAndPVC(test.scName, testutil.GetUniqueName("pv-"), testutil.GetUniqueName("pvc-"), testutil.GetUniqueName("image-"))
+		test.srcPV, test.srcPVC = test.createPVAndPVC(test.scName, util.GetUniqueName("pv-"), util.GetUniqueName("pvc-"), util.GetUniqueName("image-"))
 		test.backup = test.createBackup(test.srcPVC, test.backupName)
 
 		By("waiting for the backup to be ready")
@@ -158,9 +159,9 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPV() {
 	var pv1 corev1.PersistentVolume
 	restore := &mantlev1.MantleRestore{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      testutil.GetUniqueName("restore-"),
+			Name:      util.GetUniqueName("restore-"),
 			Namespace: test.tenantNamespace,
-			UID:       types.UID(testutil.GetUniqueName("uid-")),
+			UID:       types.UID(util.GetUniqueName("uid-")),
 		},
 		Spec: mantlev1.MantleRestoreSpec{
 			Backup: test.backupName,
@@ -209,7 +210,7 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPV() {
 
 	It("should return an error, if the PV already exists and having different RestoredBy annotation", func() {
 		restoreDifferent := restore.DeepCopy()
-		restoreDifferent.UID = types.UID(testutil.GetUniqueName("uid-"))
+		restoreDifferent.UID = types.UID(util.GetUniqueName("uid-"))
 
 		err := test.reconciler.createRestoringPV(context.Background(), restoreDifferent, test.backup)
 		Expect(err).To(HaveOccurred())
@@ -231,9 +232,9 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPVC() {
 	var pvc1 corev1.PersistentVolumeClaim
 	restore := &mantlev1.MantleRestore{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      testutil.GetUniqueName("restore-"),
+			Name:      util.GetUniqueName("restore-"),
 			Namespace: test.tenantNamespace,
-			UID:       types.UID(testutil.GetUniqueName("uid-")),
+			UID:       types.UID(util.GetUniqueName("uid-")),
 		},
 		Spec: mantlev1.MantleRestoreSpec{
 			Backup: test.backupName,
@@ -274,7 +275,7 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPVC() {
 
 	It("should return an error, if the PVC already exists and having different RestoredBy annotation", func() {
 		restoreDifferent := restore.DeepCopy()
-		restoreDifferent.UID = types.UID(testutil.GetUniqueName("uid-"))
+		restoreDifferent.UID = types.UID(util.GetUniqueName("uid-"))
 
 		err := test.reconciler.createRestoringPVC(context.Background(), restoreDifferent, test.backup)
 		Expect(err).To(HaveOccurred())
@@ -295,9 +296,9 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPVC() {
 func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPVC() {
 	restore := &mantlev1.MantleRestore{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      testutil.GetUniqueName("restore-"),
+			Name:      util.GetUniqueName("restore-"),
 			Namespace: test.tenantNamespace,
-			UID:       types.UID(testutil.GetUniqueName("uid-")),
+			UID:       types.UID(util.GetUniqueName("uid-")),
 		},
 		Spec: mantlev1.MantleRestoreSpec{
 			Backup: test.backupName,
@@ -333,7 +334,7 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPVC() {
 	It("should an error, if the PVC having different RestoredBy annotation", func() {
 		var pvc corev1.PersistentVolumeClaim
 		restoreDifferent := restore.DeepCopy()
-		restoreDifferent.UID = types.UID(testutil.GetUniqueName("uid-"))
+		restoreDifferent.UID = types.UID(util.GetUniqueName("uid-"))
 
 		err := test.reconciler.createRestoringPVC(context.Background(), restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
@@ -365,9 +366,9 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPVC() {
 func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPV() {
 	restore := &mantlev1.MantleRestore{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      testutil.GetUniqueName("restore-"),
+			Name:      util.GetUniqueName("restore-"),
 			Namespace: test.tenantNamespace,
-			UID:       types.UID(testutil.GetUniqueName("uid-")),
+			UID:       types.UID(util.GetUniqueName("uid-")),
 		},
 		Spec: mantlev1.MantleRestoreSpec{
 			Backup: test.backupName,
@@ -403,7 +404,7 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPV() {
 	It("should an error, if the PV having different RestoredBy annotation", func() {
 		var pv corev1.PersistentVolume
 		restoreDifferent := restore.DeepCopy()
-		restoreDifferent.UID = types.UID(testutil.GetUniqueName("uid-"))
+		restoreDifferent.UID = types.UID(util.GetUniqueName("uid-"))
 
 		err := test.reconciler.createRestoringPV(context.Background(), restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())

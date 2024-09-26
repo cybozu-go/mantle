@@ -21,7 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
-	"github.com/cybozu-go/mantle/test/util"
+	"github.com/cybozu-go/mantle/internal/controller/internal/testutil"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -93,7 +93,7 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
 
-	err = util.CreateStorageClass(context.Background(), k8sClient, dummyStorageClassName,
+	err = testutil.CreateStorageClass(context.Background(), k8sClient, dummyStorageClassName,
 		dummyStorageClassProvisioner, dummyStorageClassClusterID)
 	Expect(err).NotTo(HaveOccurred())
 })
