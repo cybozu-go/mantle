@@ -8,6 +8,7 @@ import (
 	"time"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
+	"github.com/cybozu-go/mantle/internal/controller/internal/testutil"
 	"github.com/cybozu-go/mantle/test/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -16,9 +17,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	ctrl "sigs.k8s.io/controller-runtime"
+	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -152,45 +152,31 @@ func checkDeletedEventually[T any, OC ObjectConstraint[T]](ctx context.Context, 
 
 var _ = Describe("MantleBackupConfig controller", func() {
 	ctx := context.Background()
-	var stopFunc func()
-	errCh := make(chan error)
 
+	var mgrUtil testutil.ManagerUtil
 	var reconciler *MantleBackupConfigReconciler
-	scheme := runtime.NewScheme()
 
 	storageClassClusterID := dummyStorageClassClusterID
 	storageClassName := dummyStorageClassName
 
 	BeforeEach(func() {
-		err := batchv1.AddToScheme(scheme)
-		Expect(err).NotTo(HaveOccurred())
-		err = mantlev1.AddToScheme(scheme)
-		Expect(err).NotTo(HaveOccurred())
+		mgrUtil = testutil.NewManagerUtil(ctx, cfg, scheme.Scheme)
 
-		mgr, err := ctrl.NewManager(cfg, ctrl.Options{
-			Scheme: scheme,
-		})
-		Expect(err).ToNot(HaveOccurred())
-
-		reconciler = NewMantleBackupConfigReconciler(k8sClient, mgr.GetScheme(), storageClassClusterID, "0s", "", RoleStandalone)
-		err = reconciler.SetupWithManager(mgr)
+		reconciler = NewMantleBackupConfigReconciler(k8sClient, mgrUtil.GetScheme(), storageClassClusterID, "0s", "", RoleStandalone)
+		err := reconciler.SetupWithManager(mgrUtil.GetManager())
 		Expect(err).NotTo(HaveOccurred())
 
 		executeCommand = func(_ *slog.Logger, _ []string, _ io.Reader) ([]byte, error) {
 			return nil, nil
 		}
 
-		ctx, cancel := context.WithCancel(ctx)
-		stopFunc = cancel
-		go func() {
-			errCh <- mgr.Start(ctx)
-		}()
+		mgrUtil.Start()
 		time.Sleep(100 * time.Millisecond)
 	})
 
 	AfterEach(func() {
-		stopFunc()
-		Expect(<-errCh).NotTo(HaveOccurred())
+		err := mgrUtil.Stop()
+		Expect(err).NotTo(HaveOccurred())
 	})
 
 	DescribeTable("MantleBackupConfigs with correct fields",
