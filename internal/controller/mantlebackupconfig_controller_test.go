@@ -57,13 +57,11 @@ func createMBC(ctx context.Context, mbcName, mbcNamespace, pvcName, schedule, ex
 }
 
 var _ = Describe("MantleBackupConfig controller", func() {
-	ctx := context.Background()
-
 	var mgrUtil testutil.ManagerUtil
 	var reconciler *MantleBackupConfigReconciler
 
 	BeforeEach(func() {
-		mgrUtil = testutil.NewManagerUtil(ctx, cfg, scheme.Scheme)
+		mgrUtil = testutil.NewManagerUtil(context.Background(), cfg, scheme.Scheme)
 
 		reconciler = NewMantleBackupConfigReconciler(k8sClient, mgrUtil.GetScheme(), resMgr.ClusterID, "0s", "", RoleStandalone)
 		err := reconciler.SetupWithManager(mgrUtil.GetManager())
@@ -79,7 +77,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 	})
 
 	DescribeTable("MantleBackupConfigs with correct fields",
-		func(schedule, expire string) {
+		func(ctx SpecContext, schedule, expire string) {
 			ns := resMgr.CreateNamespace()
 			_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 			Expect(err).NotTo(HaveOccurred())
@@ -108,7 +106,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		Entry("unusual spacing", "  0   0 *   * *     ", "2w"),
 	)
 
-	It("should accept MantleBackupConfigs with all possible schedules", func() {
+	It("should accept MantleBackupConfigs with all possible schedules", func(ctx SpecContext) {
 		ns := resMgr.CreateNamespace()
 
 		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
@@ -148,7 +146,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 	})
 
 	DescribeTable("MantleBackupConfigs with incorrect fields",
-		func(schedule, expire string) {
+		func(ctx SpecContext, schedule, expire string) {
 			ns := resMgr.CreateNamespace()
 
 			_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
@@ -181,7 +179,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		Entry("too long expires 1", "0 0 * * *", "15d1s"),
 	)
 
-	It("should accept MantleBackupConfigs with modified mutable fields", func() {
+	It("should accept MantleBackupConfigs with modified mutable fields", func(ctx SpecContext) {
 		ns := resMgr.CreateNamespace()
 
 		oldSchedule := "0 0 * * *"
@@ -214,7 +212,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("should reject MantleBackupConfigs with modified immutable fields", func() {
+	It("should reject MantleBackupConfigs with modified immutable fields", func(ctx SpecContext) {
 		ns := resMgr.CreateNamespace()
 
 		oldExpire := "2w"
@@ -251,8 +249,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		Expect(err).To(HaveOccurred())
 	})
 
-	It("should create a CronJob for a valid MantleBackupConfig resource and delete the CronJob when the MantleBackupConfig is deleted", func() {
-		ctx := context.Background()
+	It("should create a CronJob for a valid MantleBackupConfig resource and delete the CronJob when the MantleBackupConfig is deleted", func(ctx SpecContext) {
 		ns := resMgr.CreateNamespace()
 		mbcNamespace := ns
 		controllerNs := resMgr.CreateNamespace()
@@ -290,8 +287,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		testutil.CheckDeletedEventually[mantlev1.MantleBackupConfig](ctx, k8sClient, mbcName, mbcNamespace)
 	})
 
-	It("should re-create the CronJob when someone deleted it", func() {
-		ctx := context.Background()
+	It("should re-create the CronJob when someone deleted it", func(ctx SpecContext) {
 		ns := resMgr.CreateNamespace()
 		mbcNamespace := ns
 		controllerNs := resMgr.CreateNamespace()

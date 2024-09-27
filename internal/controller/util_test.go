@@ -1,8 +1,6 @@
 package controller
 
 import (
-	"context"
-
 	"github.com/cybozu-go/mantle/test/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -21,9 +19,7 @@ var _ = Describe("util.getCephClusterIDFromPVC", func() {
 	})
 
 	DescribeTable("matrix test",
-		func(sc *storagev1.StorageClass, pvc *corev1.PersistentVolumeClaim, expectedClusterID string) {
-			ctx := context.Background()
-
+		func(ctx SpecContext, sc *storagev1.StorageClass, pvc *corev1.PersistentVolumeClaim, expectedClusterID string) {
 			// create resources
 			if sc != nil {
 				err := k8sClient.Create(ctx, sc)

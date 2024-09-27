@@ -21,7 +21,6 @@ import (
 )
 
 var _ = Describe("MantleBackup controller", func() {
-	ctx := context.Background()
 	var mgrUtil testutil.ManagerUtil
 	var reconciler *MantleBackupReconciler
 
@@ -57,7 +56,7 @@ var _ = Describe("MantleBackup controller", func() {
 	}
 
 	BeforeEach(func() {
-		mgrUtil = testutil.NewManagerUtil(ctx, cfg, scheme.Scheme)
+		mgrUtil = testutil.NewManagerUtil(context.Background(), cfg, scheme.Scheme)
 
 		reconciler = NewMantleBackupReconciler(k8sClient, mgrUtil.GetScheme(), resMgr.ClusterID, RoleStandalone, nil)
 		err := reconciler.SetupWithManager(mgrUtil.GetManager())
@@ -80,7 +79,7 @@ var _ = Describe("MantleBackup controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("should be ready to use", func() {
+	It("should be ready to use", func(ctx SpecContext) {
 		ns := resMgr.CreateNamespace()
 
 		pv, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
@@ -116,8 +115,7 @@ var _ = Describe("MantleBackup controller", func() {
 		testutil.CheckDeletedEventually[mantlev1.MantleBackup](ctx, k8sClient, backup.Name, backup.Namespace)
 	})
 
-	It("should still be ready to use even if the PVC lost", func() {
-		ctx := context.Background()
+	It("should still be ready to use even if the PVC lost", func(ctx SpecContext) {
 		ns := resMgr.CreateNamespace()
 
 		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
@@ -136,8 +134,7 @@ var _ = Describe("MantleBackup controller", func() {
 		resMgr.WaitForBackupReady(ctx, backup)
 	})
 
-	It("should not be ready to use if the PVC is the lost state from the beginning", func() {
-		ctx := context.Background()
+	It("should not be ready to use if the PVC is the lost state from the beginning", func(ctx SpecContext) {
 		ns := resMgr.CreateNamespace()
 
 		pv, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
@@ -155,8 +152,7 @@ var _ = Describe("MantleBackup controller", func() {
 		waitForBackupNotReady(ctx, backup)
 	})
 
-	It("should not be ready to use if specified non-existent PVC name", func() {
-		ctx := context.Background()
+	It("should not be ready to use if specified non-existent PVC name", func(ctx SpecContext) {
 		ns := resMgr.CreateNamespace()
 
 		var err error
@@ -171,8 +167,7 @@ var _ = Describe("MantleBackup controller", func() {
 		waitForBackupNotReady(ctx, backup)
 	})
 
-	It("should fail the resource creation the second time if the same MantleBackup is created twice", func() {
-		ctx := context.Background()
+	It("should fail the resource creation the second time if the same MantleBackup is created twice", func(ctx SpecContext) {
 		ns := resMgr.CreateNamespace()
 
 		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
