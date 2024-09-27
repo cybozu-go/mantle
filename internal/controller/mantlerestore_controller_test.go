@@ -27,14 +27,12 @@ type mantleRestoreControllerUnitTest struct {
 	tenantNamespace string
 	srcPVC          *corev1.PersistentVolumeClaim
 	srcPV           *corev1.PersistentVolume
-	backupName      string
 	backup          *mantlev1.MantleBackup
 }
 
 var _ = Describe("MantleRestoreReconciler unit test", func() {
 	test := &mantleRestoreControllerUnitTest{
 		tenantNamespace: util.GetUniqueName("ns-"),
-		backupName:      util.GetUniqueName("backup-"),
 	}
 
 	Describe("setup environment", test.setupEnv)
@@ -63,12 +61,6 @@ func (test *mantleRestoreControllerUnitTest) setupEnv() {
 
 	It("prepare reconcilers", func() {
 		By("prepare MantleBackup reconciler")
-		executeCommand = func(_ *slog.Logger, command []string, _ io.Reader) ([]byte, error) {
-			if command[0] == "rbd" && command[1] == "snap" && command[2] == "ls" {
-				return []byte(fmt.Sprintf("[{\"id\":1000,\"name\":\"%s\",\"timestamp\":\"Mon Sep  2 00:42:00 2024\"}]", test.backupName)), nil
-			}
-			return nil, nil
-		}
 		test.mgrUtil = testutil.NewManagerUtil(ctx, cfg, scheme.Scheme)
 		backupReconciler := NewMantleBackupReconciler(k8sClient, test.mgrUtil.GetScheme(), resMgr.ClusterID, RoleStandalone, nil)
 		err := backupReconciler.SetupWithManager(test.mgrUtil.GetManager())
@@ -86,8 +78,15 @@ func (test *mantleRestoreControllerUnitTest) setupEnv() {
 		var err error
 		test.srcPV, test.srcPVC, err = resMgr.CreateUniquePVAndPVC(context.Background(), test.tenantNamespace)
 		Expect(err).NotTo(HaveOccurred())
-		test.backup, err = resMgr.CreateBackupFor(context.Background(), test.backupName, test.srcPVC)
+		test.backup, err = resMgr.CreateUniqueBackupFor(context.Background(), test.srcPVC)
 		Expect(err).NotTo(HaveOccurred())
+
+		executeCommand = func(_ *slog.Logger, command []string, _ io.Reader) ([]byte, error) {
+			if command[0] == "rbd" && command[1] == "snap" && command[2] == "ls" {
+				return []byte(fmt.Sprintf("[{\"id\":1000,\"name\":\"%s\",\"timestamp\":\"Mon Sep  2 00:42:00 2024\"}]", test.backup.Name)), nil
+			}
+			return nil, nil
+		}
 
 		By("waiting for the backup to be ready")
 
@@ -150,16 +149,11 @@ func (test *mantleRestoreControllerUnitTest) testPvName() {
 
 func (test *mantleRestoreControllerUnitTest) testCreateRestoringPV() {
 	var pv1 corev1.PersistentVolume
-	restore := &mantlev1.MantleRestore{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      util.GetUniqueName("restore-"),
-			Namespace: test.tenantNamespace,
-			UID:       types.UID(util.GetUniqueName("uid-")),
-		},
-		Spec: mantlev1.MantleRestoreSpec{
-			Backup: test.backupName,
-		},
-	}
+	var restore *mantlev1.MantleRestore
+
+	It("should prepare restore resource", func() {
+		restore = test.restoreResource()
+	})
 
 	It("should create a correct PV", func() {
 		err := test.reconciler.createRestoringPV(context.Background(), restore, test.backup)
@@ -223,16 +217,11 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPV() {
 
 func (test *mantleRestoreControllerUnitTest) testCreateRestoringPVC() {
 	var pvc1 corev1.PersistentVolumeClaim
-	restore := &mantlev1.MantleRestore{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      util.GetUniqueName("restore-"),
-			Namespace: test.tenantNamespace,
-			UID:       types.UID(util.GetUniqueName("uid-")),
-		},
-		Spec: mantlev1.MantleRestoreSpec{
-			Backup: test.backupName,
-		},
-	}
+	var restore *mantlev1.MantleRestore
+
+	It("should prepare restore resource", func() {
+		restore = test.restoreResource()
+	})
 
 	It("should create a correct PVC", func() {
 		err := test.reconciler.createRestoringPVC(context.Background(), restore, test.backup)
@@ -287,16 +276,11 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPVC() {
 }
 
 func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPVC() {
-	restore := &mantlev1.MantleRestore{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      util.GetUniqueName("restore-"),
-			Namespace: test.tenantNamespace,
-			UID:       types.UID(util.GetUniqueName("uid-")),
-		},
-		Spec: mantlev1.MantleRestoreSpec{
-			Backup: test.backupName,
-		},
-	}
+	var restore *mantlev1.MantleRestore
+
+	It("should prepare restore resource", func() {
+		restore = test.restoreResource()
+	})
 
 	It("should delete the PVC", func() {
 		var pvc corev1.PersistentVolumeClaim
@@ -357,16 +341,11 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPVC() {
 }
 
 func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPV() {
-	restore := &mantlev1.MantleRestore{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      util.GetUniqueName("restore-"),
-			Namespace: test.tenantNamespace,
-			UID:       types.UID(util.GetUniqueName("uid-")),
-		},
-		Spec: mantlev1.MantleRestoreSpec{
-			Backup: test.backupName,
-		},
-	}
+	var restore *mantlev1.MantleRestore
+
+	It("should prepare restore resource", func() {
+		restore = test.restoreResource()
+	})
 
 	It("should delete the PV", func() {
 		var pv corev1.PersistentVolume
@@ -424,4 +403,18 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPV() {
 		err = test.reconciler.deleteRestoringPV(context.Background(), restore)
 		Expect(err).To(HaveOccurred())
 	})
+}
+
+// helper function to get MantleRestore object
+func (test *mantleRestoreControllerUnitTest) restoreResource() *mantlev1.MantleRestore {
+	return &mantlev1.MantleRestore{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      util.GetUniqueName("restore-"),
+			Namespace: test.tenantNamespace,
+			UID:       types.UID(util.GetUniqueName("uid-")),
+		},
+		Spec: mantlev1.MantleRestoreSpec{
+			Backup: test.backup.Name,
+		},
+	}
 }

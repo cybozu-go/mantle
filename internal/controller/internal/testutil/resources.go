@@ -149,11 +149,11 @@ func (r *ResourceManager) createPVAndPVC(ctx context.Context, ns, pvName, pvcNam
 	return &pv, &pvc, err
 }
 
-func (r *ResourceManager) CreateBackupFor(ctx context.Context, backupName string, pvc *corev1.PersistentVolumeClaim) (
+func (r *ResourceManager) CreateUniqueBackupFor(ctx context.Context, pvc *corev1.PersistentVolumeClaim) (
 	*mantlev1.MantleBackup, error) {
 	backup := &mantlev1.MantleBackup{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      backupName,
+			Name:      util.GetUniqueName("backup-"),
 			Namespace: pvc.Namespace,
 		},
 		Spec: mantlev1.MantleBackupSpec{

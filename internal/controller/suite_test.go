@@ -3,6 +3,8 @@ package controller
 import (
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -93,6 +95,11 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 	resMgr = testutil.NewResourceManager(k8sClient)
 	err = resMgr.CreateStorageClass(ctx)
 	Expect(err).NotTo(HaveOccurred())
+
+	By("Assign noop executeCommand")
+	executeCommand = func(_ *slog.Logger, _ []string, _ io.Reader) ([]byte, error) {
+		return nil, nil
+	}
 })
 
 var _ = AfterSuite(func() {

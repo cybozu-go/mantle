@@ -25,6 +25,9 @@ var _ = Describe("MantleBackup controller", func() {
 	var mgrUtil testutil.ManagerUtil
 	var reconciler *MantleBackupReconciler
 
+	// Not to access backup.Name before created, set the pointer to an empty object.
+	backup := &mantlev1.MantleBackup{}
+
 	BeforeEach(func() {
 		mgrUtil = testutil.NewManagerUtil(ctx, cfg, scheme.Scheme)
 
@@ -34,8 +37,8 @@ var _ = Describe("MantleBackup controller", func() {
 
 		executeCommand = func(logger *slog.Logger, command []string, _ io.Reader) ([]byte, error) {
 			if command[0] == "rbd" && command[1] == "snap" && command[2] == "ls" {
-				return []byte(fmt.Sprintf("[{\"id\":1000,\"name\":\"backup\"," +
-					"\"timestamp\":\"Mon Sep  2 00:42:00 2024\"}]")), nil
+				return []byte(fmt.Sprintf("[{\"id\":1000,\"name\":\"%s\","+
+					"\"timestamp\":\"Mon Sep  2 00:42:00 2024\"}]", backup.Name)), nil
 			}
 			return nil, nil
 		}
@@ -55,7 +58,7 @@ var _ = Describe("MantleBackup controller", func() {
 		pv, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 
-		backup, err := resMgr.CreateBackupFor(ctx, "backup", pvc)
+		backup, err = resMgr.CreateUniqueBackupFor(ctx, pvc)
 		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(func() error {
@@ -143,7 +146,7 @@ var _ = Describe("MantleBackup controller", func() {
 		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 
-		backup, err := resMgr.CreateBackupFor(ctx, "backup", pvc)
+		backup, err = resMgr.CreateUniqueBackupFor(ctx, pvc)
 		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(func() error {
@@ -227,7 +230,7 @@ var _ = Describe("MantleBackup controller", func() {
 		err = k8sClient.Status().Update(ctx, pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		backup, err := resMgr.CreateBackupFor(ctx, "backup", pvc)
+		backup, err = resMgr.CreateUniqueBackupFor(ctx, pvc)
 		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(func() error {
@@ -256,7 +259,8 @@ var _ = Describe("MantleBackup controller", func() {
 		ctx := context.Background()
 		ns := createNamespace()
 
-		backup, err := resMgr.CreateBackupFor(ctx, "backup", &corev1.PersistentVolumeClaim{
+		var err error
+		backup, err = resMgr.CreateUniqueBackupFor(ctx, &corev1.PersistentVolumeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "non-existent-pvc",
 				Namespace: ns,
@@ -293,7 +297,7 @@ var _ = Describe("MantleBackup controller", func() {
 		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 
-		backup, err := resMgr.CreateBackupFor(ctx, "backup", pvc)
+		backup, err = resMgr.CreateUniqueBackupFor(ctx, pvc)
 		Expect(err).NotTo(HaveOccurred())
 
 		err = k8sClient.Create(ctx, backup)

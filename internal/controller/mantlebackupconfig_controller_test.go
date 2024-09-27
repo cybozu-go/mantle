@@ -3,8 +3,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"io"
-	"log/slog"
 	"time"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
@@ -102,10 +100,6 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		reconciler = NewMantleBackupConfigReconciler(k8sClient, mgrUtil.GetScheme(), resMgr.ClusterID, "0s", "", RoleStandalone)
 		err := reconciler.SetupWithManager(mgrUtil.GetManager())
 		Expect(err).NotTo(HaveOccurred())
-
-		executeCommand = func(_ *slog.Logger, _ []string, _ io.Reader) ([]byte, error) {
-			return nil, nil
-		}
 
 		mgrUtil.Start()
 		time.Sleep(100 * time.Millisecond)
