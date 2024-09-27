@@ -14,7 +14,6 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -80,14 +79,7 @@ func (test *mantleRestoreControllerUnitTest) setupEnv() {
 		}
 
 		By("waiting for the backup to be ready")
-
-		Eventually(func() bool {
-			err := k8sClient.Get(context.Background(), types.NamespacedName{Name: test.backup.Name, Namespace: test.backup.Namespace}, test.backup)
-			Expect(err).NotTo(HaveOccurred())
-
-			cond := meta.FindStatusCondition(test.backup.Status.Conditions, mantlev1.BackupConditionReadyToUse)
-			return cond != nil && cond.Status == metav1.ConditionTrue
-		}, 10*time.Second, 1*time.Second).Should(BeTrue())
+		resMgr.WaitForBackupReady(ctx, test.backup)
 	})
 }
 

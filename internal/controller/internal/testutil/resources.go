@@ -8,6 +8,7 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -180,4 +181,13 @@ func (r *ResourceManager) CreateUniqueBackupFor(ctx context.Context, pvc *corev1
 	}
 
 	return backup, nil
+}
+
+func (r *ResourceManager) WaitForBackupReady(ctx context.Context, backup *mantlev1.MantleBackup) {
+	EventuallyWithOffset(1, func(g Gomega, ctx context.Context) {
+		err := r.client.Get(ctx, types.NamespacedName{Name: backup.Name, Namespace: backup.Namespace}, backup)
+		g.Expect(err).NotTo(HaveOccurred())
+
+		g.Expect(meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse)).Should(BeTrue())
+	}).WithContext(ctx).Should(Succeed())
 }

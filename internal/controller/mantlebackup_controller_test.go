@@ -28,6 +28,21 @@ var _ = Describe("MantleBackup controller", func() {
 	// Not to access backup.Name before created, set the pointer to an empty object.
 	backup := &mantlev1.MantleBackup{}
 
+	waitForBackupNotReady := func(ctx context.Context, backup *mantlev1.MantleBackup) {
+		EventuallyWithOffset(1, func(g Gomega, ctx context.Context) {
+			namespacedName := types.NamespacedName{
+				Namespace: backup.Namespace,
+				Name:      backup.Name,
+			}
+			err := k8sClient.Get(ctx, namespacedName, backup)
+			g.Expect(err).NotTo(HaveOccurred())
+			condition := meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse)
+			g.Expect(condition).NotTo(BeNil())
+			g.Expect(condition.Status).To(Equal(metav1.ConditionFalse))
+			g.Expect(condition.Reason).NotTo(Equal(mantlev1.BackupReasonNone))
+		}).WithContext(ctx).Should(Succeed())
+	}
+
 	BeforeEach(func() {
 		mgrUtil = testutil.NewManagerUtil(ctx, cfg, scheme.Scheme)
 
@@ -85,22 +100,7 @@ var _ = Describe("MantleBackup controller", func() {
 			return nil
 		}).Should(Succeed())
 
-		Eventually(func() error {
-			namespacedName := types.NamespacedName{
-				Namespace: ns,
-				Name:      backup.Name,
-			}
-			err = k8sClient.Get(ctx, namespacedName, backup)
-			if err != nil {
-				return err
-			}
-
-			if meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse).Status != metav1.ConditionTrue {
-				return fmt.Errorf("not ready to use yet")
-			}
-
-			return nil
-		}).Should(Succeed())
+		resMgr.WaitForBackupReady(ctx, backup)
 
 		pvcJS := backup.Status.PVCManifest
 		Expect(pvcJS).NotTo(BeEmpty())
@@ -173,48 +173,13 @@ var _ = Describe("MantleBackup controller", func() {
 			return nil
 		}).Should(Succeed())
 
-		Eventually(func() error {
-			namespacedName := types.NamespacedName{
-				Namespace: ns,
-				Name:      backup.Name,
-			}
-			err = k8sClient.Get(ctx, namespacedName, backup)
-			if err != nil {
-				return err
-			}
-
-			if meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse).Status != metav1.ConditionTrue {
-				return fmt.Errorf("not ready to use yet")
-			}
-
-			return nil
-		}).Should(Succeed())
+		resMgr.WaitForBackupReady(ctx, backup)
 
 		pvc.Status.Phase = corev1.ClaimLost // simulate lost PVC
 		err = k8sClient.Status().Update(ctx, pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		Eventually(func() error {
-			namespacedName := types.NamespacedName{
-				Namespace: ns,
-				Name:      backup.Name,
-			}
-			err = k8sClient.Get(ctx, namespacedName, backup)
-			if err != nil {
-				return err
-			}
-
-			condition := meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse)
-			if condition == nil {
-				return fmt.Errorf("condition is not set")
-			}
-
-			if condition.Status != metav1.ConditionTrue {
-				return fmt.Errorf("should keep ready to use")
-			}
-
-			return nil
-		}).Should(Succeed())
+		resMgr.WaitForBackupReady(ctx, backup)
 	})
 
 	It("should not be ready to use if the PVC is the lost state from the beginning", func() {
@@ -233,26 +198,7 @@ var _ = Describe("MantleBackup controller", func() {
 		backup, err = resMgr.CreateUniqueBackupFor(ctx, pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		Eventually(func() error {
-			namespacedName := types.NamespacedName{
-				Namespace: ns,
-				Name:      backup.Name,
-			}
-			err = k8sClient.Get(ctx, namespacedName, backup)
-			if err != nil {
-				return err
-			}
-
-			condition := meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse)
-			if condition == nil {
-				return fmt.Errorf("condition is not set")
-			}
-			if !(condition.Status == metav1.ConditionFalse && condition.Reason != mantlev1.BackupReasonNone) {
-				return fmt.Errorf("should not be ready to use")
-			}
-
-			return nil
-		}).Should(Succeed())
+		waitForBackupNotReady(ctx, backup)
 	})
 
 	It("should not be ready to use if specified non-existent PVC name", func() {
@@ -268,26 +214,7 @@ var _ = Describe("MantleBackup controller", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 
-		Eventually(func() error {
-			namespacedName := types.NamespacedName{
-				Namespace: ns,
-				Name:      backup.Name,
-			}
-			err = k8sClient.Get(ctx, namespacedName, backup)
-			if err != nil {
-				return err
-			}
-
-			condition := meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse)
-			if condition == nil {
-				return fmt.Errorf("condition is not set")
-			}
-			if !(condition.Status == metav1.ConditionFalse && condition.Reason != mantlev1.BackupReasonNone) {
-				return fmt.Errorf("should not be ready to use")
-			}
-
-			return nil
-		}).Should(Succeed())
+		waitForBackupNotReady(ctx, backup)
 	})
 
 	It("should fail the resource creation the second time if the same MantleBackup is created twice", func() {
