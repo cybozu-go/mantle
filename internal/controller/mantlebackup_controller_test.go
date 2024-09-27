@@ -55,16 +55,7 @@ var _ = Describe("MantleBackup controller", func() {
 		pv, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 
-		backup := mantlev1.MantleBackup{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "backup",
-				Namespace: ns,
-			},
-			Spec: mantlev1.MantleBackupSpec{
-				PVC: pvc.Name,
-			},
-		}
-		err = k8sClient.Create(ctx, &backup)
+		backup, err := resMgr.CreateBackupFor(ctx, "backup", pvc)
 		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(func() error {
@@ -72,7 +63,7 @@ var _ = Describe("MantleBackup controller", func() {
 				Namespace: ns,
 				Name:      backup.Name,
 			}
-			err = k8sClient.Get(ctx, namespacedName, &backup)
+			err = k8sClient.Get(ctx, namespacedName, backup)
 			if err != nil {
 				return err
 			}
@@ -96,7 +87,7 @@ var _ = Describe("MantleBackup controller", func() {
 				Namespace: ns,
 				Name:      backup.Name,
 			}
-			err = k8sClient.Get(ctx, namespacedName, &backup)
+			err = k8sClient.Get(ctx, namespacedName, backup)
 			if err != nil {
 				return err
 			}
@@ -126,7 +117,7 @@ var _ = Describe("MantleBackup controller", func() {
 		snapID := backup.Status.SnapID
 		Expect(*snapID).To(Equal(1000))
 
-		err = k8sClient.Delete(ctx, &backup)
+		err = k8sClient.Delete(ctx, backup)
 		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(func() error {
@@ -134,7 +125,7 @@ var _ = Describe("MantleBackup controller", func() {
 				Namespace: ns,
 				Name:      backup.Name,
 			}
-			err = k8sClient.Get(ctx, namespacedName, &backup)
+			err = k8sClient.Get(ctx, namespacedName, backup)
 			if errors.IsNotFound(err) {
 				return nil
 			}
@@ -152,16 +143,7 @@ var _ = Describe("MantleBackup controller", func() {
 		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 
-		backup := mantlev1.MantleBackup{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "backup",
-				Namespace: ns,
-			},
-			Spec: mantlev1.MantleBackupSpec{
-				PVC: pvc.Name,
-			},
-		}
-		err = k8sClient.Create(ctx, &backup)
+		backup, err := resMgr.CreateBackupFor(ctx, "backup", pvc)
 		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(func() error {
@@ -169,7 +151,7 @@ var _ = Describe("MantleBackup controller", func() {
 				Namespace: ns,
 				Name:      backup.Name,
 			}
-			err = k8sClient.Get(ctx, namespacedName, &backup)
+			err = k8sClient.Get(ctx, namespacedName, backup)
 			if err != nil {
 				return err
 			}
@@ -193,7 +175,7 @@ var _ = Describe("MantleBackup controller", func() {
 				Namespace: ns,
 				Name:      backup.Name,
 			}
-			err = k8sClient.Get(ctx, namespacedName, &backup)
+			err = k8sClient.Get(ctx, namespacedName, backup)
 			if err != nil {
 				return err
 			}
@@ -214,7 +196,7 @@ var _ = Describe("MantleBackup controller", func() {
 				Namespace: ns,
 				Name:      backup.Name,
 			}
-			err = k8sClient.Get(ctx, namespacedName, &backup)
+			err = k8sClient.Get(ctx, namespacedName, backup)
 			if err != nil {
 				return err
 			}
@@ -245,16 +227,7 @@ var _ = Describe("MantleBackup controller", func() {
 		err = k8sClient.Status().Update(ctx, pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		backup := mantlev1.MantleBackup{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "backup",
-				Namespace: ns,
-			},
-			Spec: mantlev1.MantleBackupSpec{
-				PVC: pvc.Name,
-			},
-		}
-		err = k8sClient.Create(ctx, &backup)
+		backup, err := resMgr.CreateBackupFor(ctx, "backup", pvc)
 		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(func() error {
@@ -262,7 +235,7 @@ var _ = Describe("MantleBackup controller", func() {
 				Namespace: ns,
 				Name:      backup.Name,
 			}
-			err = k8sClient.Get(ctx, namespacedName, &backup)
+			err = k8sClient.Get(ctx, namespacedName, backup)
 			if err != nil {
 				return err
 			}
@@ -283,16 +256,12 @@ var _ = Describe("MantleBackup controller", func() {
 		ctx := context.Background()
 		ns := createNamespace()
 
-		backup := mantlev1.MantleBackup{
+		backup, err := resMgr.CreateBackupFor(ctx, "backup", &corev1.PersistentVolumeClaim{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "backup",
+				Name:      "non-existent-pvc",
 				Namespace: ns,
 			},
-			Spec: mantlev1.MantleBackupSpec{
-				PVC: "non-existent-pvc",
-			},
-		}
-		err := k8sClient.Create(ctx, &backup)
+		})
 		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(func() error {
@@ -300,7 +269,7 @@ var _ = Describe("MantleBackup controller", func() {
 				Namespace: ns,
 				Name:      backup.Name,
 			}
-			err = k8sClient.Get(ctx, namespacedName, &backup)
+			err = k8sClient.Get(ctx, namespacedName, backup)
 			if err != nil {
 				return err
 			}
@@ -324,19 +293,10 @@ var _ = Describe("MantleBackup controller", func() {
 		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 
-		backup := mantlev1.MantleBackup{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "backup",
-				Namespace: ns,
-			},
-			Spec: mantlev1.MantleBackupSpec{
-				PVC: pvc.Name,
-			},
-		}
-		err = k8sClient.Create(ctx, &backup)
+		backup, err := resMgr.CreateBackupFor(ctx, "backup", pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = k8sClient.Create(ctx, &backup)
+		err = k8sClient.Create(ctx, backup)
 		Expect(err).To(HaveOccurred())
 	})
 })

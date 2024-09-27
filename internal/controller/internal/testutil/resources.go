@@ -3,6 +3,7 @@ package testutil
 import (
 	"context"
 
+	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/test/util"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -146,4 +147,23 @@ func (r *ResourceManager) createPVAndPVC(ctx context.Context, ns, pvName, pvcNam
 	}
 
 	return &pv, &pvc, err
+}
+
+func (r *ResourceManager) CreateBackupFor(ctx context.Context, backupName string, pvc *corev1.PersistentVolumeClaim) (
+	*mantlev1.MantleBackup, error) {
+	backup := &mantlev1.MantleBackup{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      backupName,
+			Namespace: pvc.Namespace,
+		},
+		Spec: mantlev1.MantleBackupSpec{
+			PVC: pvc.Name,
+		},
+	}
+	err := r.client.Create(ctx, backup)
+	if err != nil {
+		return nil, err
+	}
+
+	return backup, nil
 }

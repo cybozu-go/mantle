@@ -86,7 +86,8 @@ func (test *mantleRestoreControllerUnitTest) setupEnv() {
 		var err error
 		test.srcPV, test.srcPVC, err = resMgr.CreateUniquePVAndPVC(context.Background(), test.tenantNamespace)
 		Expect(err).NotTo(HaveOccurred())
-		test.backup = test.createBackup(test.srcPVC, test.backupName)
+		test.backup, err = resMgr.CreateBackupFor(context.Background(), test.backupName, test.srcPVC)
+		Expect(err).NotTo(HaveOccurred())
 
 		By("waiting for the backup to be ready")
 
@@ -423,27 +424,4 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPV() {
 		err = test.reconciler.deleteRestoringPV(context.Background(), restore)
 		Expect(err).To(HaveOccurred())
 	})
-}
-
-// helper function to create a MantleBackup
-func (test *mantleRestoreControllerUnitTest) createBackup(pvc *corev1.PersistentVolumeClaim, backupName string) *mantlev1.MantleBackup {
-	backup := &mantlev1.MantleBackup{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      backupName,
-			Namespace: test.tenantNamespace,
-		},
-		Spec: mantlev1.MantleBackupSpec{
-			PVC: pvc.Name,
-		},
-	}
-	err := k8sClient.Create(context.Background(), backup)
-	if err != nil {
-		panic(err)
-	}
-	err = k8sClient.Get(context.Background(), types.NamespacedName{Name: backupName, Namespace: pvc.Namespace}, backup)
-	if err != nil {
-		panic(err)
-	}
-
-	return backup
 }
