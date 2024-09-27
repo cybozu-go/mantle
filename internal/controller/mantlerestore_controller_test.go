@@ -15,7 +15,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -26,7 +25,6 @@ type mantleRestoreControllerUnitTest struct {
 	reconciler      *MantleRestoreReconciler
 	mgrUtil         testutil.ManagerUtil
 	tenantNamespace string
-	poolName        string
 	srcPVC          *corev1.PersistentVolumeClaim
 	srcPV           *corev1.PersistentVolume
 	backupName      string
@@ -36,7 +34,6 @@ type mantleRestoreControllerUnitTest struct {
 var _ = Describe("MantleRestoreReconciler unit test", func() {
 	test := &mantleRestoreControllerUnitTest{
 		tenantNamespace: util.GetUniqueName("ns-"),
-		poolName:        util.GetUniqueName("pool-"),
 		backupName:      util.GetUniqueName("backup-"),
 	}
 
@@ -86,7 +83,9 @@ func (test *mantleRestoreControllerUnitTest) setupEnv() {
 	})
 
 	It("create backup resources", func() {
-		test.srcPV, test.srcPVC = test.createPVAndPVC(util.GetUniqueName("pv-"), util.GetUniqueName("pvc-"), util.GetUniqueName("image-"))
+		var err error
+		test.srcPV, test.srcPVC, err = resMgr.CreatePVAndPVC(context.Background(), test.tenantNamespace, util.GetUniqueName("pv-"), util.GetUniqueName("pvc-"))
+		Expect(err).NotTo(HaveOccurred())
 		test.backup = test.createBackup(test.srcPVC, test.backupName)
 
 		By("waiting for the backup to be ready")
@@ -424,103 +423,6 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPV() {
 		err = test.reconciler.deleteRestoringPV(context.Background(), restore)
 		Expect(err).To(HaveOccurred())
 	})
-}
-
-// helper function to create a PV and PVC
-func (test *mantleRestoreControllerUnitTest) createPVAndPVC(pvName, pvcName, imageName string) (*corev1.PersistentVolume, *corev1.PersistentVolumeClaim) {
-	accessModes := []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
-	size := resource.MustParse("1Gi")
-	volumeMode := corev1.PersistentVolumeFilesystem
-
-	pv := corev1.PersistentVolume{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: pvName,
-		},
-		Spec: corev1.PersistentVolumeSpec{
-			AccessModes: accessModes,
-			Capacity:    corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("5Gi")},
-			PersistentVolumeSource: corev1.PersistentVolumeSource{
-				CSI: &corev1.CSIPersistentVolumeSource{
-					Driver: "restore.rbd.csi.ceph.com",
-					VolumeAttributes: map[string]string{
-						"clusterID":                        resMgr.ClusterID,
-						"csi.storage.k8s.io/pv/name":       pvName,
-						"csi.storage.k8s.io/pvc/name":      pvcName,
-						"csi.storage.k8s.io/pvc/namespace": test.tenantNamespace,
-						"imageFeatures":                    "layering",
-						"imageFormat":                      "2",
-						"imageName":                        imageName,
-						"journalPool":                      test.poolName,
-						"pool":                             test.poolName,
-						"storage.kubernetes.io/csiProvisionerIdentity": "dummy",
-					},
-					VolumeHandle: "dummy",
-				},
-			},
-			PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimDelete,
-			StorageClassName:              resMgr.StorageClassName,
-			VolumeMode:                    &volumeMode,
-		},
-	}
-	err := k8sClient.Create(context.Background(), &pv)
-	if err != nil {
-		panic(err)
-	}
-
-	pvc := corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      pvcName,
-			Namespace: test.tenantNamespace,
-		},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes:      accessModes,
-			StorageClassName: &resMgr.StorageClassName,
-			Resources: corev1.ResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: size,
-				},
-			},
-			VolumeMode: &volumeMode,
-			VolumeName: pvName,
-		},
-	}
-	err = k8sClient.Create(context.Background(), &pvc)
-	if err != nil {
-		panic(err)
-	}
-	pvc.Status.Phase = corev1.ClaimBound
-	err = k8sClient.Status().Update(context.Background(), &pvc)
-	if err != nil {
-		panic(err)
-	}
-
-	err = k8sClient.Get(context.Background(), types.NamespacedName{Name: pvcName, Namespace: test.tenantNamespace}, &pvc)
-	if err != nil {
-		panic(err)
-	}
-
-	pv.Spec.ClaimRef = &corev1.ObjectReference{
-		Name:      pvcName,
-		Namespace: pvc.Namespace,
-		UID:       pvc.UID,
-	}
-	err = k8sClient.Update(context.Background(), &pv)
-	if err != nil {
-		panic(err)
-	}
-
-	pv.Status.Phase = corev1.VolumeBound
-	err = k8sClient.Status().Update(context.Background(), &pv)
-	if err != nil {
-		panic(err)
-	}
-
-	err = k8sClient.Get(context.Background(), types.NamespacedName{Name: pvName}, &pv)
-	if err != nil {
-		panic(err)
-	}
-
-	return &pv, &pvc
 }
 
 // helper function to create a MantleBackup

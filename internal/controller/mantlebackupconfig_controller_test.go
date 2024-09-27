@@ -15,7 +15,6 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -39,65 +38,6 @@ func setMockedGetRunningPod(namespace string) {
 			},
 		}, nil
 	}
-}
-
-func createBoundPVC(ctx context.Context, ns, pvName, pvcName string) error {
-	csiPVSource := corev1.CSIPersistentVolumeSource{
-		Driver:       "driver",
-		VolumeHandle: "handle",
-		VolumeAttributes: map[string]string{
-			"imageName": "imageName",
-			"pool":      "pool",
-		},
-	}
-	pv := corev1.PersistentVolume{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: pvName,
-		},
-		Spec: corev1.PersistentVolumeSpec{
-			Capacity: corev1.ResourceList{
-				"storage": resource.MustParse("5Gi"),
-			},
-			PersistentVolumeSource: corev1.PersistentVolumeSource{
-				CSI: &csiPVSource,
-			},
-			AccessModes: []corev1.PersistentVolumeAccessMode{
-				corev1.ReadWriteOnce,
-			},
-		},
-	}
-	if err := k8sClient.Create(ctx, &pv); err != nil {
-		return err
-	}
-
-	pvc := corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      pvcName,
-			Namespace: ns,
-		},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: []corev1.PersistentVolumeAccessMode{
-				corev1.ReadWriteOnce,
-			},
-			VolumeName: pv.Name,
-			Resources: corev1.ResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: *resource.NewQuantity(1, resource.BinarySI),
-				},
-			},
-			StorageClassName: &resMgr.StorageClassName,
-		},
-	}
-	if err := k8sClient.Create(ctx, &pvc); err != nil {
-		return err
-	}
-
-	pvc.Status.Phase = corev1.ClaimBound
-	if err := k8sClient.Status().Update(ctx, &pvc); err != nil {
-		return err
-	}
-
-	return nil
 }
 
 func createMBC(ctx context.Context, mbcName, mbcNamespace, pvcName, schedule, expire string, suspend bool) error {
@@ -182,7 +122,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 			pvName := util.GetUniqueName("pv-")
 			pvcName := util.GetUniqueName("pvc-")
 
-			err := createBoundPVC(ctx, ns, pvName, pvcName)
+			_, _, err := resMgr.CreatePVAndPVC(ctx, ns, pvName, pvcName)
 			Expect(err).NotTo(HaveOccurred())
 
 			mbc := mantlev1.MantleBackupConfig{
@@ -214,7 +154,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		pvName := util.GetUniqueName("pv-")
 		pvcName := util.GetUniqueName("pvc-")
 
-		err := createBoundPVC(ctx, ns, pvName, pvcName)
+		_, _, err := resMgr.CreatePVAndPVC(ctx, ns, pvName, pvcName)
 		Expect(err).NotTo(HaveOccurred())
 
 		schedules := []string{}
@@ -256,7 +196,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 			pvcName := util.GetUniqueName("pvc-")
 			ns := createNamespace()
 
-			err := createBoundPVC(ctx, ns, pvName, pvcName)
+			_, _, err := resMgr.CreatePVAndPVC(ctx, ns, pvName, pvcName)
 			Expect(err).NotTo(HaveOccurred())
 
 			mbc := mantlev1.MantleBackupConfig{
@@ -297,7 +237,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		oldSuspend := false
 		newSuspend := true
 
-		err := createBoundPVC(ctx, ns, pvName, pvcName)
+		_, _, err := resMgr.CreatePVAndPVC(ctx, ns, pvName, pvcName)
 		Expect(err).NotTo(HaveOccurred())
 
 		mbc := mantlev1.MantleBackupConfig{
@@ -332,9 +272,9 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		oldExpire := "2w"
 		newExpire := "1w"
 
-		err := createBoundPVC(ctx, ns, pvName1, oldPVC)
+		_, _, err := resMgr.CreatePVAndPVC(ctx, ns, pvName1, oldPVC)
 		Expect(err).NotTo(HaveOccurred())
-		err = createBoundPVC(ctx, ns, pvName2, newPVC)
+		_, _, err = resMgr.CreatePVAndPVC(ctx, ns, pvName2, newPVC)
 		Expect(err).NotTo(HaveOccurred())
 
 		mbc := mantlev1.MantleBackupConfig{
@@ -375,7 +315,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		schedule := "0 0 * * *"
 		suspend := false
 
-		err := createBoundPVC(ctx, ns, pvName, pvcName)
+		_, _, err := resMgr.CreatePVAndPVC(ctx, ns, pvName, pvcName)
 		Expect(err).NotTo(HaveOccurred())
 
 		err = createMBC(ctx, mbcName, mbcNamespace, pvcName, schedule, "2w", suspend)
@@ -414,7 +354,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		pvcName := util.GetUniqueName("pvc-")
 		mbcName := util.GetUniqueName("mbc-")
 
-		err := createBoundPVC(ctx, ns, pvName, pvcName)
+		_, _, err := resMgr.CreatePVAndPVC(ctx, ns, pvName, pvcName)
 		Expect(err).NotTo(HaveOccurred())
 
 		err = createMBC(ctx, mbcName, mbcNamespace, pvcName, "59 23 * * *", "2w", false)

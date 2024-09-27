@@ -15,7 +15,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -53,56 +52,7 @@ var _ = Describe("MantleBackup controller", func() {
 	It("should be ready to use", func() {
 		ns := createNamespace()
 
-		csiPVSource := corev1.CSIPersistentVolumeSource{
-			Driver:       "driver",
-			VolumeHandle: "handle",
-			VolumeAttributes: map[string]string{
-				"imageName": "imageName",
-				"pool":      "pool",
-			},
-		}
-		pv := corev1.PersistentVolume{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "pv",
-			},
-			Spec: corev1.PersistentVolumeSpec{
-				Capacity: corev1.ResourceList{
-					"storage": resource.MustParse("5Gi"),
-				},
-				PersistentVolumeSource: corev1.PersistentVolumeSource{
-					CSI: &csiPVSource,
-				},
-				AccessModes: []corev1.PersistentVolumeAccessMode{
-					corev1.ReadWriteOnce,
-				},
-			},
-		}
-		err := k8sClient.Create(ctx, &pv)
-		Expect(err).NotTo(HaveOccurred())
-
-		pvc := corev1.PersistentVolumeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "pvc",
-				Namespace: ns,
-			},
-			Spec: corev1.PersistentVolumeClaimSpec{
-				AccessModes: []corev1.PersistentVolumeAccessMode{
-					corev1.ReadWriteOnce,
-				},
-				VolumeName: pv.Name,
-				Resources: corev1.ResourceRequirements{
-					Requests: corev1.ResourceList{
-						corev1.ResourceStorage: *resource.NewQuantity(1, resource.BinarySI),
-					},
-				},
-				StorageClassName: &resMgr.StorageClassName,
-			},
-		}
-		err = k8sClient.Create(ctx, &pvc)
-		Expect(err).NotTo(HaveOccurred())
-
-		pvc.Status.Phase = corev1.ClaimBound
-		err = k8sClient.Status().Update(ctx, &pvc)
+		pv, pvc, err := resMgr.CreatePVAndPVC(ctx, ns, "pv", "pvc")
 		Expect(err).NotTo(HaveOccurred())
 
 		backup := mantlev1.MantleBackup{
@@ -199,56 +149,7 @@ var _ = Describe("MantleBackup controller", func() {
 		ctx := context.Background()
 		ns := createNamespace()
 
-		csiPVSource := corev1.CSIPersistentVolumeSource{
-			Driver:       "driver",
-			VolumeHandle: "handle",
-			VolumeAttributes: map[string]string{
-				"imageName": "imageName",
-				"pool":      "pool",
-			},
-		}
-		pv := corev1.PersistentVolume{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "pv2",
-			},
-			Spec: corev1.PersistentVolumeSpec{
-				Capacity: corev1.ResourceList{
-					"storage": resource.MustParse("5Gi"),
-				},
-				PersistentVolumeSource: corev1.PersistentVolumeSource{
-					CSI: &csiPVSource,
-				},
-				AccessModes: []corev1.PersistentVolumeAccessMode{
-					corev1.ReadWriteOnce,
-				},
-			},
-		}
-		err := k8sClient.Create(ctx, &pv)
-		Expect(err).NotTo(HaveOccurred())
-
-		pvc := corev1.PersistentVolumeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "pvc",
-				Namespace: ns,
-			},
-			Spec: corev1.PersistentVolumeClaimSpec{
-				AccessModes: []corev1.PersistentVolumeAccessMode{
-					corev1.ReadWriteOnce,
-				},
-				VolumeName: pv.Name,
-				Resources: corev1.ResourceRequirements{
-					Requests: corev1.ResourceList{
-						corev1.ResourceStorage: *resource.NewQuantity(1, resource.BinarySI),
-					},
-				},
-				StorageClassName: &resMgr.StorageClassName,
-			},
-		}
-		err = k8sClient.Create(ctx, &pvc)
-		Expect(err).NotTo(HaveOccurred())
-
-		pvc.Status.Phase = corev1.ClaimBound
-		err = k8sClient.Status().Update(ctx, &pvc)
+		_, pvc, err := resMgr.CreatePVAndPVC(ctx, ns, "pv2", "pvc")
 		Expect(err).NotTo(HaveOccurred())
 
 		backup := mantlev1.MantleBackup{
@@ -305,7 +206,7 @@ var _ = Describe("MantleBackup controller", func() {
 		}).Should(Succeed())
 
 		pvc.Status.Phase = corev1.ClaimLost // simulate lost PVC
-		err = k8sClient.Status().Update(ctx, &pvc)
+		err = k8sClient.Status().Update(ctx, pvc)
 		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(func() error {
@@ -335,56 +236,13 @@ var _ = Describe("MantleBackup controller", func() {
 		ctx := context.Background()
 		ns := createNamespace()
 
-		csiPVSource := corev1.CSIPersistentVolumeSource{
-			Driver:       "driver",
-			VolumeHandle: "handle",
-			VolumeAttributes: map[string]string{
-				"imageName": "imageName",
-				"pool":      "pool",
-			},
-		}
-		pv := corev1.PersistentVolume{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "pv3",
-			},
-			Spec: corev1.PersistentVolumeSpec{
-				Capacity: corev1.ResourceList{
-					"storage": resource.MustParse("5Gi"),
-				},
-				PersistentVolumeSource: corev1.PersistentVolumeSource{
-					CSI: &csiPVSource,
-				},
-				AccessModes: []corev1.PersistentVolumeAccessMode{
-					corev1.ReadWriteOnce,
-				},
-			},
-		}
-		err := k8sClient.Create(ctx, &pv)
+		pv, pvc, err := resMgr.CreatePVAndPVC(ctx, ns, "pv3", "pvc")
 		Expect(err).NotTo(HaveOccurred())
-
-		pvc := corev1.PersistentVolumeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "pvc",
-				Namespace: ns,
-			},
-			Spec: corev1.PersistentVolumeClaimSpec{
-				AccessModes: []corev1.PersistentVolumeAccessMode{
-					corev1.ReadWriteOnce,
-				},
-				VolumeName: pv.Name,
-				Resources: corev1.ResourceRequirements{
-					Requests: corev1.ResourceList{
-						corev1.ResourceStorage: *resource.NewQuantity(1, resource.BinarySI),
-					},
-				},
-				StorageClassName: &resMgr.StorageClassName,
-			},
-		}
-		err = k8sClient.Create(ctx, &pvc)
+		pv.Status.Phase = corev1.VolumeAvailable
+		err = k8sClient.Status().Update(ctx, pv)
 		Expect(err).NotTo(HaveOccurred())
-
 		pvc.Status.Phase = corev1.ClaimLost
-		err = k8sClient.Status().Update(ctx, &pvc)
+		err = k8sClient.Status().Update(ctx, pvc)
 		Expect(err).NotTo(HaveOccurred())
 
 		backup := mantlev1.MantleBackup{
@@ -463,56 +321,7 @@ var _ = Describe("MantleBackup controller", func() {
 		ctx := context.Background()
 		ns := createNamespace()
 
-		csiPVSource := corev1.CSIPersistentVolumeSource{
-			Driver:       "driver",
-			VolumeHandle: "handle",
-			VolumeAttributes: map[string]string{
-				"imageName": "imageName",
-				"pool":      "pool",
-			},
-		}
-		pv := corev1.PersistentVolume{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "pv4",
-			},
-			Spec: corev1.PersistentVolumeSpec{
-				Capacity: corev1.ResourceList{
-					"storage": resource.MustParse("5Gi"),
-				},
-				PersistentVolumeSource: corev1.PersistentVolumeSource{
-					CSI: &csiPVSource,
-				},
-				AccessModes: []corev1.PersistentVolumeAccessMode{
-					corev1.ReadWriteOnce,
-				},
-			},
-		}
-		err := k8sClient.Create(ctx, &pv)
-		Expect(err).NotTo(HaveOccurred())
-
-		pvc := corev1.PersistentVolumeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "pvc",
-				Namespace: ns,
-			},
-			Spec: corev1.PersistentVolumeClaimSpec{
-				AccessModes: []corev1.PersistentVolumeAccessMode{
-					corev1.ReadWriteOnce,
-				},
-				VolumeName: pv.Name,
-				Resources: corev1.ResourceRequirements{
-					Requests: corev1.ResourceList{
-						corev1.ResourceStorage: *resource.NewQuantity(1, resource.BinarySI),
-					},
-				},
-				StorageClassName: &resMgr.StorageClassName,
-			},
-		}
-		err = k8sClient.Create(ctx, &pvc)
-		Expect(err).NotTo(HaveOccurred())
-
-		pvc.Status.Phase = corev1.ClaimBound
-		err = k8sClient.Status().Update(ctx, &pvc)
+		_, pvc, err := resMgr.CreatePVAndPVC(ctx, ns, "pv4", "pvc")
 		Expect(err).NotTo(HaveOccurred())
 
 		backup := mantlev1.MantleBackup{
