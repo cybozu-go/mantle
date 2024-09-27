@@ -12,7 +12,6 @@ import (
 	. "github.com/onsi/gomega"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -55,37 +54,6 @@ func createMBC(ctx context.Context, mbcName, mbcNamespace, pvcName, schedule, ex
 		return err
 	}
 	return nil
-}
-
-// cf. https://go.googlesource.com/proposal/+/refs/heads/master/design/43651-type-parameters.md#pointer-method-example
-type ObjectConstraint[T any] interface {
-	client.Object
-	*T
-}
-
-func checkCreatedEventually[T any, OC ObjectConstraint[T]](ctx context.Context, name, namespace string) {
-	var obj T
-	Eventually(func() error {
-		err := k8sClient.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, OC(&obj))
-		if err != nil {
-			return err
-		}
-		return nil
-	}).Should(Succeed())
-}
-
-func checkDeletedEventually[T any, OC ObjectConstraint[T]](ctx context.Context, name, namespace string) {
-	var obj T
-	Eventually(func() error {
-		err := k8sClient.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, OC(&obj))
-		if errors.IsNotFound(err) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		return fmt.Errorf("\"%s\" is not deleted yet", name)
-	}).Should(Succeed())
 }
 
 var _ = Describe("MantleBackupConfig controller", func() {
@@ -304,7 +272,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		cronJobName := "mbc-" + string(mbc.UID)
-		checkCreatedEventually[batchv1.CronJob](ctx, cronJobName, controllerNs)
+		testutil.CheckCreatedEventually[batchv1.CronJob](ctx, k8sClient, cronJobName, controllerNs)
 
 		var cronJob batchv1.CronJob
 		err = k8sClient.Get(ctx, types.NamespacedName{Name: cronJobName, Namespace: controllerNs}, &cronJob)
@@ -318,8 +286,8 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		err = k8sClient.Delete(ctx, &mbc)
 		Expect(err).NotTo(HaveOccurred())
 
-		checkDeletedEventually[batchv1.CronJob](ctx, cronJobName, controllerNs)
-		checkDeletedEventually[mantlev1.MantleBackupConfig](ctx, mbcName, mbcNamespace)
+		testutil.CheckDeletedEventually[batchv1.CronJob](ctx, k8sClient, cronJobName, controllerNs)
+		testutil.CheckDeletedEventually[mantlev1.MantleBackupConfig](ctx, k8sClient, mbcName, mbcNamespace)
 	})
 
 	It("should re-create the CronJob when someone deleted it", func() {
@@ -341,14 +309,14 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		cronJobName := "mbc-" + string(mbc.UID)
-		checkCreatedEventually[batchv1.CronJob](ctx, cronJobName, controllerNs)
+		testutil.CheckCreatedEventually[batchv1.CronJob](ctx, k8sClient, cronJobName, controllerNs)
 
 		var cronJob batchv1.CronJob
 		err = k8sClient.Get(ctx, types.NamespacedName{Name: cronJobName, Namespace: controllerNs}, &cronJob)
 		Expect(err).NotTo(HaveOccurred())
 		err = k8sClient.Delete(ctx, &cronJob)
 		Expect(err).NotTo(HaveOccurred())
-		checkDeletedEventually[batchv1.CronJob](ctx, cronJobName, controllerNs)
-		checkCreatedEventually[batchv1.CronJob](ctx, cronJobName, controllerNs)
+		testutil.CheckDeletedEventually[batchv1.CronJob](ctx, k8sClient, cronJobName, controllerNs)
+		testutil.CheckCreatedEventually[batchv1.CronJob](ctx, k8sClient, cronJobName, controllerNs)
 	})
 })

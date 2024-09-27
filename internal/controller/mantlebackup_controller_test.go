@@ -13,7 +13,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -114,20 +113,7 @@ var _ = Describe("MantleBackup controller", func() {
 		err = k8sClient.Delete(ctx, backup)
 		Expect(err).NotTo(HaveOccurred())
 
-		Eventually(func() error {
-			namespacedName := types.NamespacedName{
-				Namespace: ns,
-				Name:      backup.Name,
-			}
-			err = k8sClient.Get(ctx, namespacedName, backup)
-			if errors.IsNotFound(err) {
-				return nil
-			}
-			if err != nil {
-				return err
-			}
-			return fmt.Errorf("\"%s\" is not deleted yet", backup.Name)
-		}).Should(Succeed())
+		testutil.CheckDeletedEventually[mantlev1.MantleBackup](ctx, k8sClient, backup.Name, backup.Namespace)
 	})
 
 	It("should still be ready to use even if the PVC lost", func() {

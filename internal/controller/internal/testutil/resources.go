@@ -2,12 +2,14 @@ package testutil
 
 import (
 	"context"
+	"fmt"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/test/util"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -189,5 +191,29 @@ func (r *ResourceManager) WaitForBackupReady(ctx context.Context, backup *mantle
 		g.Expect(err).NotTo(HaveOccurred())
 
 		g.Expect(meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse)).Should(BeTrue())
+	}).WithContext(ctx).Should(Succeed())
+}
+
+// cf. https://go.googlesource.com/proposal/+/refs/heads/master/design/43651-type-parameters.md#pointer-method-example
+type ObjectConstraint[T any] interface {
+	client.Object
+	*T
+}
+
+// These functions cannot belong to ResourceManager because they use generics.
+
+func CheckCreatedEventually[T any, OC ObjectConstraint[T]](ctx context.Context, client client.Client, name, namespace string) {
+	var obj T
+	EventuallyWithOffset(1, func(g Gomega, ctx context.Context) {
+		err := client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, OC(&obj))
+		g.Expect(err).NotTo(HaveOccurred())
+	}).WithContext(ctx).Should(Succeed())
+}
+
+func CheckDeletedEventually[T any, OC ObjectConstraint[T]](ctx context.Context, client client.Client, name, namespace string) {
+	var obj T
+	EventuallyWithOffset(1, func(g Gomega, ctx context.Context) {
+		err := client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, OC(&obj))
+		g.Expect(err).To(Satisfy(errors.IsNotFound), fmt.Sprintf(`"%s" is not deleted yet`, name))
 	}).WithContext(ctx).Should(Succeed())
 }
