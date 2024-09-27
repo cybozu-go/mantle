@@ -84,7 +84,7 @@ func (test *mantleRestoreControllerUnitTest) setupEnv() {
 
 	It("create backup resources", func() {
 		var err error
-		test.srcPV, test.srcPVC, err = resMgr.CreatePVAndPVC(context.Background(), test.tenantNamespace, util.GetUniqueName("pv-"), util.GetUniqueName("pvc-"))
+		test.srcPV, test.srcPVC, err = resMgr.CreateUniquePVAndPVC(context.Background(), test.tenantNamespace)
 		Expect(err).NotTo(HaveOccurred())
 		test.backup = test.createBackup(test.srcPVC, test.backupName)
 

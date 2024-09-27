@@ -45,7 +45,13 @@ func (r *ResourceManager) CreateStorageClass(ctx context.Context) error {
 	return r.client.Create(ctx, &sc)
 }
 
-func (r *ResourceManager) CreatePVAndPVC(ctx context.Context, ns, pvName, pvcName string) (
+// CreateUniquePVAndPVC creates a unique named PV and PVC. The PV is bound to the PVC.
+func (r *ResourceManager) CreateUniquePVAndPVC(ctx context.Context, ns string) (
+	*corev1.PersistentVolume, *corev1.PersistentVolumeClaim, error) {
+	return r.createPVAndPVC(ctx, ns, util.GetUniqueName("pv-"), util.GetUniqueName("pvc-"))
+}
+
+func (r *ResourceManager) createPVAndPVC(ctx context.Context, ns, pvName, pvcName string) (
 	*corev1.PersistentVolume, *corev1.PersistentVolumeClaim, error) {
 	accessModes := []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
 	size := resource.MustParse("1Gi")

@@ -119,10 +119,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 	DescribeTable("MantleBackupConfigs with correct fields",
 		func(schedule, expire string) {
 			ns := createNamespace()
-			pvName := util.GetUniqueName("pv-")
-			pvcName := util.GetUniqueName("pvc-")
-
-			_, _, err := resMgr.CreatePVAndPVC(ctx, ns, pvName, pvcName)
+			_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 			Expect(err).NotTo(HaveOccurred())
 
 			mbc := mantlev1.MantleBackupConfig{
@@ -131,7 +128,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 					Namespace: ns,
 				},
 				Spec: mantlev1.MantleBackupConfigSpec{
-					PVC:      pvcName,
+					PVC:      pvc.Name,
 					Schedule: schedule,
 					Expire:   expire,
 					Suspend:  false,
@@ -151,10 +148,8 @@ var _ = Describe("MantleBackupConfig controller", func() {
 
 	It("should accept MantleBackupConfigs with all possible schedules", func() {
 		ns := createNamespace()
-		pvName := util.GetUniqueName("pv-")
-		pvcName := util.GetUniqueName("pvc-")
 
-		_, _, err := resMgr.CreatePVAndPVC(ctx, ns, pvName, pvcName)
+		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 
 		schedules := []string{}
@@ -179,7 +174,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 					Namespace: ns,
 				},
 				Spec: mantlev1.MantleBackupConfigSpec{
-					PVC:      pvcName,
+					PVC:      pvc.Name,
 					Schedule: schedule,
 					Expire:   "2w",
 					Suspend:  false,
@@ -192,11 +187,9 @@ var _ = Describe("MantleBackupConfig controller", func() {
 
 	DescribeTable("MantleBackupConfigs with incorrect fields",
 		func(schedule, expire string) {
-			pvName := util.GetUniqueName("pv-")
-			pvcName := util.GetUniqueName("pvc-")
 			ns := createNamespace()
 
-			_, _, err := resMgr.CreatePVAndPVC(ctx, ns, pvName, pvcName)
+			_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 			Expect(err).NotTo(HaveOccurred())
 
 			mbc := mantlev1.MantleBackupConfig{
@@ -205,7 +198,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 					Namespace: ns,
 				},
 				Spec: mantlev1.MantleBackupConfigSpec{
-					PVC:      pvcName,
+					PVC:      pvc.Name,
 					Schedule: schedule,
 					Expire:   expire,
 					Suspend:  false,
@@ -229,15 +222,12 @@ var _ = Describe("MantleBackupConfig controller", func() {
 	It("should accept MantleBackupConfigs with modified mutable fields", func() {
 		ns := createNamespace()
 
-		pvName := util.GetUniqueName("pv-")
-		pvcName := util.GetUniqueName("pvc-")
-
 		oldSchedule := "0 0 * * *"
 		newSchedule := "0 10 * * *"
 		oldSuspend := false
 		newSuspend := true
 
-		_, _, err := resMgr.CreatePVAndPVC(ctx, ns, pvName, pvcName)
+		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 
 		mbc := mantlev1.MantleBackupConfig{
@@ -246,7 +236,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 				Namespace: ns,
 			},
 			Spec: mantlev1.MantleBackupConfigSpec{
-				PVC:      pvcName,
+				PVC:      pvc.Name,
 				Schedule: oldSchedule,
 				Expire:   "2w",
 				Suspend:  oldSuspend,
@@ -265,16 +255,12 @@ var _ = Describe("MantleBackupConfig controller", func() {
 	It("should reject MantleBackupConfigs with modified immutable fields", func() {
 		ns := createNamespace()
 
-		pvName1 := util.GetUniqueName("pv-")
-		pvName2 := util.GetUniqueName("pv-")
-		oldPVC := util.GetUniqueName("pvc-")
-		newPVC := util.GetUniqueName("pvc-")
 		oldExpire := "2w"
 		newExpire := "1w"
 
-		_, _, err := resMgr.CreatePVAndPVC(ctx, ns, pvName1, oldPVC)
+		_, oldPVC, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
-		_, _, err = resMgr.CreatePVAndPVC(ctx, ns, pvName2, newPVC)
+		_, newPVC, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 
 		mbc := mantlev1.MantleBackupConfig{
@@ -283,7 +269,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 				Namespace: ns,
 			},
 			Spec: mantlev1.MantleBackupConfigSpec{
-				PVC:      oldPVC,
+				PVC:      oldPVC.Name,
 				Schedule: "0 0 * * *",
 				Expire:   oldExpire,
 				Suspend:  false,
@@ -293,7 +279,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		mbc1 := mbc.DeepCopy()
-		mbc1.Spec.PVC = newPVC
+		mbc1.Spec.PVC = newPVC.Name
 		err = k8sClient.Update(ctx, mbc1)
 		Expect(err).To(HaveOccurred())
 
@@ -309,16 +295,14 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		mbcNamespace := ns
 		controllerNs := createNamespace()
 		setMockedGetRunningPod(controllerNs)
-		pvName := util.GetUniqueName("pv-")
-		pvcName := util.GetUniqueName("pvc-")
 		mbcName := util.GetUniqueName("mbc-")
 		schedule := "0 0 * * *"
 		suspend := false
 
-		_, _, err := resMgr.CreatePVAndPVC(ctx, ns, pvName, pvcName)
+		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = createMBC(ctx, mbcName, mbcNamespace, pvcName, schedule, "2w", suspend)
+		err = createMBC(ctx, mbcName, mbcNamespace, pvc.Name, schedule, "2w", suspend)
 		Expect(err).NotTo(HaveOccurred())
 
 		var mbc mantlev1.MantleBackupConfig
@@ -350,14 +334,12 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		mbcNamespace := ns
 		controllerNs := createNamespace()
 		setMockedGetRunningPod(controllerNs)
-		pvName := util.GetUniqueName("pv-")
-		pvcName := util.GetUniqueName("pvc-")
 		mbcName := util.GetUniqueName("mbc-")
 
-		_, _, err := resMgr.CreatePVAndPVC(ctx, ns, pvName, pvcName)
+		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = createMBC(ctx, mbcName, mbcNamespace, pvcName, "59 23 * * *", "2w", false)
+		err = createMBC(ctx, mbcName, mbcNamespace, pvc.Name, "59 23 * * *", "2w", false)
 		Expect(err).NotTo(HaveOccurred())
 
 		var mbc mantlev1.MantleBackupConfig

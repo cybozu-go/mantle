@@ -52,7 +52,7 @@ var _ = Describe("MantleBackup controller", func() {
 	It("should be ready to use", func() {
 		ns := createNamespace()
 
-		pv, pvc, err := resMgr.CreatePVAndPVC(ctx, ns, "pv", "pvc")
+		pv, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 
 		backup := mantlev1.MantleBackup{
@@ -149,7 +149,7 @@ var _ = Describe("MantleBackup controller", func() {
 		ctx := context.Background()
 		ns := createNamespace()
 
-		_, pvc, err := resMgr.CreatePVAndPVC(ctx, ns, "pv2", "pvc")
+		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 
 		backup := mantlev1.MantleBackup{
@@ -236,7 +236,7 @@ var _ = Describe("MantleBackup controller", func() {
 		ctx := context.Background()
 		ns := createNamespace()
 
-		pv, pvc, err := resMgr.CreatePVAndPVC(ctx, ns, "pv3", "pvc")
+		pv, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 		pv.Status.Phase = corev1.VolumeAvailable
 		err = k8sClient.Status().Update(ctx, pv)
@@ -321,7 +321,7 @@ var _ = Describe("MantleBackup controller", func() {
 		ctx := context.Background()
 		ns := createNamespace()
 
-		_, pvc, err := resMgr.CreatePVAndPVC(ctx, ns, "pv4", "pvc")
+		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 
 		backup := mantlev1.MantleBackup{
