@@ -18,6 +18,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 var _ = Describe("MantleBackup controller", func() {
@@ -40,6 +41,19 @@ var _ = Describe("MantleBackup controller", func() {
 			g.Expect(condition).NotTo(BeNil())
 			g.Expect(condition.Status).To(Equal(metav1.ConditionFalse))
 			g.Expect(condition.Reason).NotTo(Equal(mantlev1.BackupReasonNone))
+		}).WithContext(ctx).Should(Succeed())
+	}
+
+	waitForHavingFinalizer := func(ctx context.Context, backup *mantlev1.MantleBackup) {
+		EventuallyWithOffset(1, func(g Gomega, ctx context.Context) {
+			namespacedName := types.NamespacedName{
+				Namespace: backup.Namespace,
+				Name:      backup.Name,
+			}
+			err := k8sClient.Get(ctx, namespacedName, backup)
+			g.Expect(err).NotTo(HaveOccurred())
+
+			g.Expect(controllerutil.ContainsFinalizer(backup, MantleBackupFinalizerName)).To(BeTrue(), "finalizer does not set yet")
 		}).WithContext(ctx).Should(Succeed())
 	}
 
@@ -76,30 +90,7 @@ var _ = Describe("MantleBackup controller", func() {
 		backup, err = resMgr.CreateUniqueBackupFor(ctx, pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		Eventually(func() error {
-			namespacedName := types.NamespacedName{
-				Namespace: ns,
-				Name:      backup.Name,
-			}
-			err = k8sClient.Get(ctx, namespacedName, backup)
-			if err != nil {
-				return err
-			}
-
-			existFinalizer := false
-			for _, f := range backup.Finalizers {
-				if f == MantleBackupFinalizerName {
-					existFinalizer = true
-					break
-				}
-			}
-			if !existFinalizer {
-				return fmt.Errorf("finalizer does not set yet")
-			}
-
-			return nil
-		}).Should(Succeed())
-
+		waitForHavingFinalizer(ctx, backup)
 		resMgr.WaitForBackupReady(ctx, backup)
 
 		pvcJS := backup.Status.PVCManifest
@@ -149,30 +140,7 @@ var _ = Describe("MantleBackup controller", func() {
 		backup, err = resMgr.CreateUniqueBackupFor(ctx, pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		Eventually(func() error {
-			namespacedName := types.NamespacedName{
-				Namespace: ns,
-				Name:      backup.Name,
-			}
-			err = k8sClient.Get(ctx, namespacedName, backup)
-			if err != nil {
-				return err
-			}
-
-			existFinalizer := false
-			for _, f := range backup.Finalizers {
-				if f == MantleBackupFinalizerName {
-					existFinalizer = true
-					break
-				}
-			}
-			if !existFinalizer {
-				return fmt.Errorf("finalizer does not set yet")
-			}
-
-			return nil
-		}).Should(Succeed())
-
+		waitForHavingFinalizer(ctx, backup)
 		resMgr.WaitForBackupReady(ctx, backup)
 
 		pvc.Status.Phase = corev1.ClaimLost // simulate lost PVC
