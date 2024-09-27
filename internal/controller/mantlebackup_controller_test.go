@@ -53,7 +53,7 @@ var _ = Describe("MantleBackup controller", func() {
 	})
 
 	It("should be ready to use", func() {
-		ns := createNamespace()
+		ns := resMgr.CreateNamespace()
 
 		pv, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
@@ -141,7 +141,7 @@ var _ = Describe("MantleBackup controller", func() {
 
 	It("should still be ready to use even if the PVC lost", func() {
 		ctx := context.Background()
-		ns := createNamespace()
+		ns := resMgr.CreateNamespace()
 
 		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
@@ -219,7 +219,7 @@ var _ = Describe("MantleBackup controller", func() {
 
 	It("should not be ready to use if the PVC is the lost state from the beginning", func() {
 		ctx := context.Background()
-		ns := createNamespace()
+		ns := resMgr.CreateNamespace()
 
 		pv, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
@@ -257,7 +257,7 @@ var _ = Describe("MantleBackup controller", func() {
 
 	It("should not be ready to use if specified non-existent PVC name", func() {
 		ctx := context.Background()
-		ns := createNamespace()
+		ns := resMgr.CreateNamespace()
 
 		var err error
 		backup, err = resMgr.CreateUniqueBackupFor(ctx, &corev1.PersistentVolumeClaim{
@@ -292,7 +292,7 @@ var _ = Describe("MantleBackup controller", func() {
 
 	It("should fail the resource creation the second time if the same MantleBackup is created twice", func() {
 		ctx := context.Background()
-		ns := createNamespace()
+		ns := resMgr.CreateNamespace()
 
 		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())

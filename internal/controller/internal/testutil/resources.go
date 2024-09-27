@@ -5,6 +5,7 @@ import (
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/test/util"
+	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -31,6 +32,19 @@ func NewResourceManager(client client.Client) *ResourceManager {
 		ClusterID:        util.GetUniqueName("ceph-"),
 		poolName:         util.GetUniqueName("pool-"),
 	}
+}
+
+// EnvTest cannot delete namespace. So, we have to use another new namespace.
+func (r *ResourceManager) CreateNamespace() string {
+	name := util.GetUniqueName("test-")
+	ns := corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+		},
+	}
+	err := r.client.Create(context.Background(), &ns)
+	Expect(err).NotTo(HaveOccurred())
+	return name
 }
 
 func (r *ResourceManager) CreateStorageClass(ctx context.Context) error {

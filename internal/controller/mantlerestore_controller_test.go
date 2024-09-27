@@ -31,9 +31,7 @@ type mantleRestoreControllerUnitTest struct {
 }
 
 var _ = Describe("MantleRestoreReconciler unit test", func() {
-	test := &mantleRestoreControllerUnitTest{
-		tenantNamespace: util.GetUniqueName("ns-"),
-	}
+	var test mantleRestoreControllerUnitTest
 
 	Describe("setup environment", test.setupEnv)
 	Describe("test imageName", test.testImageName)
@@ -49,14 +47,7 @@ func (test *mantleRestoreControllerUnitTest) setupEnv() {
 	ctx := context.Background()
 
 	It("creating namespace for test", func() {
-		ns := &corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: test.tenantNamespace,
-			},
-		}
-
-		err := k8sClient.Create(ctx, ns)
-		Expect(err).NotTo(HaveOccurred())
+		test.tenantNamespace = resMgr.CreateNamespace()
 	})
 
 	It("prepare reconcilers", func() {

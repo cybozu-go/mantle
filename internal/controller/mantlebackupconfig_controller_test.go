@@ -112,7 +112,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 
 	DescribeTable("MantleBackupConfigs with correct fields",
 		func(schedule, expire string) {
-			ns := createNamespace()
+			ns := resMgr.CreateNamespace()
 			_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -141,7 +141,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 	)
 
 	It("should accept MantleBackupConfigs with all possible schedules", func() {
-		ns := createNamespace()
+		ns := resMgr.CreateNamespace()
 
 		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
@@ -181,7 +181,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 
 	DescribeTable("MantleBackupConfigs with incorrect fields",
 		func(schedule, expire string) {
-			ns := createNamespace()
+			ns := resMgr.CreateNamespace()
 
 			_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 			Expect(err).NotTo(HaveOccurred())
@@ -214,7 +214,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 	)
 
 	It("should accept MantleBackupConfigs with modified mutable fields", func() {
-		ns := createNamespace()
+		ns := resMgr.CreateNamespace()
 
 		oldSchedule := "0 0 * * *"
 		newSchedule := "0 10 * * *"
@@ -247,7 +247,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 	})
 
 	It("should reject MantleBackupConfigs with modified immutable fields", func() {
-		ns := createNamespace()
+		ns := resMgr.CreateNamespace()
 
 		oldExpire := "2w"
 		newExpire := "1w"
@@ -285,9 +285,9 @@ var _ = Describe("MantleBackupConfig controller", func() {
 
 	It("should create a CronJob for a valid MantleBackupConfig resource and delete the CronJob when the MantleBackupConfig is deleted", func() {
 		ctx := context.Background()
-		ns := createNamespace()
+		ns := resMgr.CreateNamespace()
 		mbcNamespace := ns
-		controllerNs := createNamespace()
+		controllerNs := resMgr.CreateNamespace()
 		setMockedGetRunningPod(controllerNs)
 		mbcName := util.GetUniqueName("mbc-")
 		schedule := "0 0 * * *"
@@ -324,9 +324,9 @@ var _ = Describe("MantleBackupConfig controller", func() {
 
 	It("should re-create the CronJob when someone deleted it", func() {
 		ctx := context.Background()
-		ns := createNamespace()
+		ns := resMgr.CreateNamespace()
 		mbcNamespace := ns
-		controllerNs := createNamespace()
+		controllerNs := resMgr.CreateNamespace()
 		setMockedGetRunningPod(controllerNs)
 		mbcName := util.GetUniqueName("mbc-")
 
