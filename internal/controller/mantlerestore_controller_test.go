@@ -50,13 +50,13 @@ func (test *mantleRestoreControllerUnitTest) setupEnv() {
 	It("prepare reconcilers", func() {
 		By("prepare MantleBackup reconciler")
 		test.mgrUtil = testutil.NewManagerUtil(context.Background(), cfg, scheme.Scheme)
-		backupReconciler := NewMantleBackupReconciler(k8sClient, test.mgrUtil.GetScheme(), resMgr.ClusterID, RoleStandalone, nil)
+		backupReconciler := NewMantleBackupReconciler(test.mgrUtil.GetClient(), test.mgrUtil.GetScheme(), resMgr.ClusterID, RoleStandalone, nil)
 		err := backupReconciler.SetupWithManager(test.mgrUtil.GetManager())
 		Expect(err).NotTo(HaveOccurred())
 
 		By("prepare MantleRestore reconciler")
 		// just allocate the reconciler, and does not start it.
-		test.reconciler = NewMantleRestoreReconciler(k8sClient, test.mgrUtil.GetScheme(), resMgr.ClusterID, RoleStandalone)
+		test.reconciler = NewMantleRestoreReconciler(test.mgrUtil.GetClient(), test.mgrUtil.GetScheme(), resMgr.ClusterID, RoleStandalone)
 
 		test.mgrUtil.Start()
 		time.Sleep(100 * time.Millisecond)
