@@ -1,9 +1,36 @@
 package ceph
 
+import (
+	"strings"
+	"time"
+)
+
 type RBDInfo struct {
 	ParentPool  string
 	ParentImage string
 	ParentSnap  string
+}
+
+type RBDTimeStamp struct {
+	time.Time
+}
+
+func NewRBDTimeStamp(t time.Time) RBDTimeStamp {
+	return RBDTimeStamp{t}
+}
+
+func (t *RBDTimeStamp) UnmarshalJSON(data []byte) error {
+	var err error
+	t.Time, err = time.Parse("Mon Jan  2 15:04:05 2006", strings.Trim(string(data), `"`))
+	return err
+}
+
+type RBDSnapshot struct {
+	Id        int          `json:"id,omitempty"`
+	Name      string       `json:"name,omitempty"`
+	Size      int          `json:"size,omitempty"`
+	Protected bool         `json:"protected,string,omitempty"`
+	Timestamp RBDTimeStamp `json:"timestamp,omitempty"`
 }
 
 type CephCmd interface {
@@ -11,6 +38,9 @@ type CephCmd interface {
 	RBDInfo(pool, image string) (*RBDInfo, error)
 	RBDLs(pool string) ([]string, error)
 	RBDRm(pool, image string) error
+	RBDSnapCreate(pool, image, snap string) error
+	RBDSnapLs(pool, image string) ([]RBDSnapshot, error)
+	RBDSnapRm(pool, image, snap string) error
 }
 
 type cephCmdImpl struct {
