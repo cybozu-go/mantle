@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"io"
 	"time"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
@@ -56,6 +55,7 @@ func (test *mantleRestoreControllerUnitTest) setupEnv() {
 			RoleStandalone,
 			nil,
 		)
+		backupReconciler.ceph = testutil.NewFakeRBD()
 		err := backupReconciler.SetupWithManager(test.mgrUtil.GetManager())
 		Expect(err).NotTo(HaveOccurred())
 
@@ -79,13 +79,6 @@ func (test *mantleRestoreControllerUnitTest) setupEnv() {
 		Expect(err).NotTo(HaveOccurred())
 		test.backup, err = resMgr.CreateUniqueBackupFor(ctx, test.srcPVC)
 		Expect(err).NotTo(HaveOccurred())
-
-		executeCommand = func(_ context.Context, command []string, _ io.Reader) ([]byte, error) {
-			if command[0] == "rbd" && command[1] == "snap" && command[2] == "ls" {
-				return []byte(fmt.Sprintf("[{\"id\":1000,\"name\":\"%s\",\"timestamp\":\"Mon Sep  2 00:42:00 2024\"}]", test.backup.Name)), nil
-			}
-			return nil, nil
-		}
 
 		By("waiting for the backup to be ready")
 		resMgr.WaitForBackupReady(ctx, test.backup)

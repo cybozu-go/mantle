@@ -3,8 +3,6 @@ package controller
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"io"
 	"time"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
@@ -23,9 +21,6 @@ var _ = Describe("MantleBackup controller", func() {
 	var mgrUtil testutil.ManagerUtil
 	var reconciler *MantleBackupReconciler
 	var ns string
-
-	// Not to access backup.Name before created, set the pointer to an empty object.
-	backup := &mantlev1.MantleBackup{}
 
 	waitForBackupNotReady := func(ctx context.Context, backup *mantlev1.MantleBackup) {
 		EventuallyWithOffset(1, func(g Gomega, ctx context.Context) {
@@ -65,16 +60,9 @@ var _ = Describe("MantleBackup controller", func() {
 			RoleStandalone,
 			nil,
 		)
+		reconciler.ceph = testutil.NewFakeRBD()
 		err := reconciler.SetupWithManager(mgrUtil.GetManager())
 		Expect(err).NotTo(HaveOccurred())
-
-		executeCommand = func(_ context.Context, command []string, _ io.Reader) ([]byte, error) {
-			if command[0] == "rbd" && command[1] == "snap" && command[2] == "ls" {
-				return []byte(fmt.Sprintf("[{\"id\":1000,\"name\":\"%s\","+
-					"\"timestamp\":\"Mon Sep  2 00:42:00 2024\"}]", backup.Name)), nil
-			}
-			return nil, nil
-		}
 
 		mgrUtil.Start()
 		time.Sleep(100 * time.Millisecond)
@@ -91,7 +79,7 @@ var _ = Describe("MantleBackup controller", func() {
 		pv, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 
-		backup, err = resMgr.CreateUniqueBackupFor(ctx, pvc)
+		backup, err := resMgr.CreateUniqueBackupFor(ctx, pvc)
 		Expect(err).NotTo(HaveOccurred())
 
 		waitForHavingFinalizer(ctx, backup)
@@ -112,8 +100,11 @@ var _ = Describe("MantleBackup controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(pvStored.Name).To(Equal(pv.Name))
 
+		snaps, err := reconciler.ceph.RBDSnapLs(resMgr.PoolName, pv.Spec.CSI.VolumeAttributes["imageName"])
+		Expect(err).NotTo(HaveOccurred())
+		Expect(snaps).To(HaveLen(1))
 		snapID := backup.Status.SnapID
-		Expect(*snapID).To(Equal(1000))
+		Expect(snapID).To(Equal(&snaps[0].Id))
 
 		err = k8sClient.Delete(ctx, backup)
 		Expect(err).NotTo(HaveOccurred())
@@ -125,7 +116,7 @@ var _ = Describe("MantleBackup controller", func() {
 		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 
-		backup, err = resMgr.CreateUniqueBackupFor(ctx, pvc)
+		backup, err := resMgr.CreateUniqueBackupFor(ctx, pvc)
 		Expect(err).NotTo(HaveOccurred())
 
 		waitForHavingFinalizer(ctx, backup)
@@ -196,7 +187,7 @@ var _ = Describe("MantleBackup controller", func() {
 		err = k8sClient.Status().Update(ctx, pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		backup, err = resMgr.CreateUniqueBackupFor(ctx, pvc)
+		backup, err := resMgr.CreateUniqueBackupFor(ctx, pvc)
 		Expect(err).NotTo(HaveOccurred())
 
 		waitForBackupNotReady(ctx, backup)
@@ -204,7 +195,7 @@ var _ = Describe("MantleBackup controller", func() {
 
 	It("should not be ready to use if specified non-existent PVC name", func(ctx SpecContext) {
 		var err error
-		backup, err = resMgr.CreateUniqueBackupFor(ctx, &corev1.PersistentVolumeClaim{
+		backup, err := resMgr.CreateUniqueBackupFor(ctx, &corev1.PersistentVolumeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "non-existent-pvc",
 				Namespace: ns,
@@ -219,7 +210,7 @@ var _ = Describe("MantleBackup controller", func() {
 		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 
-		backup, err = resMgr.CreateUniqueBackupFor(ctx, pvc)
+		backup, err := resMgr.CreateUniqueBackupFor(ctx, pvc)
 		Expect(err).NotTo(HaveOccurred())
 
 		err = k8sClient.Create(ctx, backup)

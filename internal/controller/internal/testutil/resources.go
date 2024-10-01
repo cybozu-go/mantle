@@ -26,7 +26,7 @@ type ResourceManager struct {
 	client           client.Client
 	ClusterID        string
 	StorageClassName string
-	poolName         string
+	PoolName         string
 }
 
 func NewResourceManager(client client.Client) *ResourceManager {
@@ -34,7 +34,7 @@ func NewResourceManager(client client.Client) *ResourceManager {
 		client:           client,
 		StorageClassName: util.GetUniqueName("sc-"),
 		ClusterID:        util.GetUniqueName("ceph-"),
-		poolName:         util.GetUniqueName("pool-"),
+		PoolName:         util.GetUniqueName("pool-"),
 	}
 }
 
@@ -94,8 +94,8 @@ func (r *ResourceManager) createPVAndPVC(ctx context.Context, ns, pvName, pvcNam
 						"imageFeatures":                    "layering",
 						"imageFormat":                      "2",
 						"imageName":                        util.GetUniqueName("image-"),
-						"journalPool":                      r.poolName,
-						"pool":                             r.poolName,
+						"journalPool":                      r.PoolName,
+						"pool":                             r.PoolName,
 						"storage.kubernetes.io/csiProvisionerIdentity": "dummy",
 					},
 					VolumeHandle: "dummy",

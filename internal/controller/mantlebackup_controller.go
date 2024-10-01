@@ -3,13 +3,14 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"os/exec"
-	"syscall"
-	"time"
 
+	mantlev1 "github.com/cybozu-go/mantle/api/v1"
+	"github.com/cybozu-go/mantle/internal/ceph"
+	"github.com/cybozu-go/mantle/pkg/controller/proto"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	aerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -19,9 +20,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-
-	mantlev1 "github.com/cybozu-go/mantle/api/v1"
-	"github.com/cybozu-go/mantle/pkg/controller/proto"
 )
 
 const (
@@ -37,6 +35,7 @@ const (
 type MantleBackupReconciler struct {
 	client.Client
 	Scheme               *runtime.Scheme
+	ceph                 ceph.CephCmd
 	managedCephClusterID string
 	role                 string
 	primarySettings      *PrimarySettings // This should be non-nil if and only if role equals 'primary'.
@@ -55,6 +54,7 @@ func NewMantleBackupReconciler(client client.Client, scheme *runtime.Scheme, man
 	return &MantleBackupReconciler{
 		Client:               client,
 		Scheme:               scheme,
+		ceph:                 ceph.NewCephCmd(),
 		managedCephClusterID: managedCephClusterID,
 		role:                 role,
 		primarySettings:      primarySettings,
@@ -76,71 +76,34 @@ func (r *MantleBackupReconciler) updateStatusCondition(ctx context.Context, back
 
 func (r *MantleBackupReconciler) removeRBDSnapshot(ctx context.Context, poolName, imageName, snapshotName string) error {
 	logger := log.FromContext(ctx)
-	command := []string{"rbd", "snap", "rm", poolName + "/" + imageName + "@" + snapshotName}
-	_, err := executeCommand(ctx, command, nil)
-	if err != nil {
-		if exitError, ok := err.(*exec.ExitError); ok {
-			waitStatus := exitError.Sys().(syscall.WaitStatus)
-			exitCode := waitStatus.ExitStatus()
-			if exitCode != int(syscall.ENOENT) {
-				logger.Error(err, "failed to remove rbd snapshot", "poolName", poolName, "imageName", imageName, "snapshotName", snapshotName, "exitCode", exitCode)
-				return fmt.Errorf("failed to remove rbd snapshot")
-			}
+	rmErr := r.ceph.RBDSnapRm(poolName, imageName, snapshotName)
+	if rmErr != nil {
+		_, findErr := ceph.FindRBDSnapshot(r.ceph, poolName, imageName, snapshotName)
+		if findErr != nil && findErr != ceph.ErrSnapshotNotFound {
+			err := errors.Join(rmErr, findErr)
+			logger.Error(err, "failed to remove rbd snapshot", "poolName", poolName, "imageName", imageName, "snapshotName", snapshotName)
+			return fmt.Errorf("failed to remove rbd snapshot: %w", err)
 		}
-		logger.Info("rbd snapshot has already been removed", "poolName", poolName, "imageName", imageName, "snapshotName", snapshotName, "error", err)
+		logger.Info("rbd snapshot has already been removed", "poolName", poolName, "imageName", imageName, "snapshotName", snapshotName)
+		return nil
 	}
 	return nil
 }
 
-func listRBDSnapshots(ctx context.Context, poolName, imageName string) ([]Snapshot, error) {
-	command := []string{"rbd", "snap", "ls", poolName + "/" + imageName, "--format=json"}
-	out, err := executeCommand(ctx, command, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to execute `rbd snap ls`: %s: %s: %w", poolName, imageName, err)
-	}
-
-	var snapshots []Snapshot
-	err = json.Unmarshal(out, &snapshots)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal the output of `rbd snap ls`: %s: %s: %w", poolName, imageName, err)
-	}
-
-	return snapshots, nil
-}
-
-func findRBDSnapshot(ctx context.Context, poolName, imageName, snapshotName string) (*Snapshot, error) {
-	snapshots, err := listRBDSnapshots(ctx, poolName, imageName)
-	if err != nil {
-		return nil, err
-	}
-	for _, s := range snapshots {
-		if s.Name == snapshotName {
-			return &s, nil
-		}
-	}
-	return nil, fmt.Errorf("snapshot not found: %s: %s: %s", poolName, imageName, snapshotName)
-}
-
-func (r *MantleBackupReconciler) createRBDSnapshot(ctx context.Context, poolName, imageName string, backup *mantlev1.MantleBackup) error {
+func (r *MantleBackupReconciler) createRBDSnapshot(ctx context.Context, poolName, imageName string, backup *mantlev1.MantleBackup) (*ceph.RBDSnapshot, error) {
 	logger := log.FromContext(ctx)
-	command := []string{"rbd", "snap", "create", poolName + "/" + imageName + "@" + backup.Name}
-	_, err := executeCommand(ctx, command, nil)
-	if err != nil {
-		_, err := findRBDSnapshot(ctx, poolName, imageName, backup.Name)
-		if err != nil {
-			logger.Error(err, "failed to find rbd snapshot")
-			err2 := r.updateStatusCondition(ctx, backup, metav1.Condition{
-				Type:   mantlev1.BackupConditionReadyToUse,
-				Status: metav1.ConditionFalse,
-				Reason: mantlev1.BackupReasonFailedToCreateBackup,
-			})
-			if err2 != nil {
-				logger.Error(err, "failed to update status condition")
-			}
-			return err
-		}
+	createErr := r.ceph.RBDSnapCreate(poolName, imageName, backup.Name)
+	snap, findErr := ceph.FindRBDSnapshot(r.ceph, poolName, imageName, backup.Name)
+	if findErr != nil {
+		logger.Error(errors.Join(createErr, findErr), "failed to find rbd snapshot")
+		updateStatusErr := r.updateStatusCondition(ctx, backup, metav1.Condition{
+			Type:   mantlev1.BackupConditionReadyToUse,
+			Status: metav1.ConditionFalse,
+			Reason: mantlev1.BackupReasonFailedToCreateBackup,
+		})
+		return nil, errors.Join(createErr, findErr, updateStatusErr)
 	}
-	return nil
+	return snap, nil
 }
 
 func (r *MantleBackupReconciler) checkPVCInManagedCluster(ctx context.Context, backup *mantlev1.MantleBackup, pvc *corev1.PersistentVolumeClaim) error {
@@ -215,7 +178,7 @@ func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *
 		if err2 != nil {
 			return nil, ctrl.Result{}, err2
 		}
-		if errors.IsNotFound(err) {
+		if aerrors.IsNotFound(err) {
 			return nil, ctrl.Result{}, errTargetPVCNotFound{err}
 		}
 		return nil, ctrl.Result{}, err
@@ -290,7 +253,7 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	err := r.Get(ctx, req.NamespacedName, &backup)
-	if errors.IsNotFound(err) {
+	if aerrors.IsNotFound(err) {
 		logger.Info("MantleBackup is not found", "error", err)
 		return ctrl.Result{}, nil
 	}
@@ -500,7 +463,8 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 		return nil
 	}
 
-	if err := r.createRBDSnapshot(ctx, target.poolName, target.imageName, backup); err != nil {
+	snapshot, err := r.createRBDSnapshot(ctx, target.poolName, target.imageName, backup)
+	if err != nil {
 		return err
 	}
 
@@ -519,17 +483,8 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 		}
 		backup.Status.PVManifest = string(pvJs)
 
-		snapshot, err := findRBDSnapshot(ctx, target.poolName, target.imageName, backup.Name)
-		if err != nil {
-			return err
-		}
 		backup.Status.SnapID = &snapshot.Id
-
-		createdAt, err := time.Parse("Mon Jan  2 15:04:05 2006", snapshot.Timestamp)
-		if err != nil {
-			return err
-		}
-		backup.Status.CreatedAt = metav1.NewTime(createdAt)
+		backup.Status.CreatedAt = metav1.NewTime(snapshot.Timestamp.Time)
 
 		meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
 			Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionTrue, Reason: mantlev1.BackupReasonNone})
