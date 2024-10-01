@@ -292,20 +292,7 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
-	// Make sure that the reconciled MantleBackup is created not by the secondary mantle but by the primary mantle.
-	if backup.Labels != nil {
-		_, ok1 := backup.Labels[labelLocalBackupTargetPVCUID]
-		_, ok2 := backup.Labels[labelRemoteBackupTargetPVCUID]
-		if ok1 && ok2 {
-			logger.Warn(
-				"skipping to reconcile the MantleBackup created by a remote mantle-controller to prevent accidental data loss",
-				"name", backup.GetName(),
-				"namespace", backup.GetNamespace(),
-			)
-			return ctrl.Result{}, nil
-		}
-	}
-	if _, ok := backup.Annotations[annotRemoteUID]; ok {
+	if isCreatedWhenMantleControllerWasSecondary(&backup) {
 		logger.Warn(
 			"skipping to reconcile the MantleBackup created by a remote mantle-controller to prevent accidental data loss",
 			"name", backup.GetName(),
@@ -550,4 +537,11 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 	}
 
 	return nil
+}
+
+// isCreatedWhenMantleControllerWasSecondary returns true iff the MantleBackup
+// is created by the secondary mantle.
+func isCreatedWhenMantleControllerWasSecondary(backup *mantlev1.MantleBackup) bool {
+	_, ok := backup.Annotations[annotRemoteUID]
+	return ok
 }
