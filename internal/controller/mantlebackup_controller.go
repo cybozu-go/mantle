@@ -305,6 +305,14 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			return ctrl.Result{}, nil
 		}
 	}
+	if _, ok := backup.Annotations[annotRemoteUID]; ok {
+		logger.Warn(
+			"skipping to reconcile the MantleBackup created by a remote mantle-controller to prevent accidental data loss",
+			"name", backup.GetName(),
+			"namespace", backup.GetNamespace(),
+		)
+		return ctrl.Result{}, nil
+	}
 
 	target, result, getSnapshotTargetErr := r.getSnapshotTarget(ctx, logger, &backup)
 	switch {
