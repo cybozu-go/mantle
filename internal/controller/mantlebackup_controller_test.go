@@ -22,6 +22,7 @@ import (
 var _ = Describe("MantleBackup controller", func() {
 	var mgrUtil testutil.ManagerUtil
 	var reconciler *MantleBackupReconciler
+	var ns string
 
 	// Not to access backup.Name before created, set the pointer to an empty object.
 	backup := &mantlev1.MantleBackup{}
@@ -77,6 +78,8 @@ var _ = Describe("MantleBackup controller", func() {
 
 		mgrUtil.Start()
 		time.Sleep(100 * time.Millisecond)
+
+		ns = resMgr.CreateNamespace()
 	})
 
 	AfterEach(func() {
@@ -85,8 +88,6 @@ var _ = Describe("MantleBackup controller", func() {
 	})
 
 	It("should be ready to use", func(ctx SpecContext) {
-		ns := resMgr.CreateNamespace()
-
 		pv, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -121,8 +122,6 @@ var _ = Describe("MantleBackup controller", func() {
 	})
 
 	It("should still be ready to use even if the PVC lost", func(ctx SpecContext) {
-		ns := resMgr.CreateNamespace()
-
 		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -140,8 +139,6 @@ var _ = Describe("MantleBackup controller", func() {
 	})
 
 	It("should not be ready to use if the PVC is the lost state from the beginning", func(ctx SpecContext) {
-		ns := resMgr.CreateNamespace()
-
 		pv, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 		pv.Status.Phase = corev1.VolumeAvailable
@@ -158,8 +155,6 @@ var _ = Describe("MantleBackup controller", func() {
 	})
 
 	It("should not be ready to use if specified non-existent PVC name", func(ctx SpecContext) {
-		ns := resMgr.CreateNamespace()
-
 		var err error
 		backup, err = resMgr.CreateUniqueBackupFor(ctx, &corev1.PersistentVolumeClaim{
 			ObjectMeta: metav1.ObjectMeta{
@@ -173,8 +168,6 @@ var _ = Describe("MantleBackup controller", func() {
 	})
 
 	It("should fail the resource creation the second time if the same MantleBackup is created twice", func(ctx SpecContext) {
-		ns := resMgr.CreateNamespace()
-
 		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 
