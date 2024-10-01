@@ -363,6 +363,8 @@ func (r *MantleRestoreReconciler) cleanup(ctx context.Context, logger *slog.Logg
 	return ctrl.Result{}, nil
 }
 
+// deleteRestoringPVC deletes the restoring PVC.
+// To delete RBD image, it returns an error if it still exists to ensure no one uses the PVC.
 func (r *MantleRestoreReconciler) deleteRestoringPVC(ctx context.Context, restore *mantlev1.MantleRestore) error {
 	pvcName := restore.Name
 	pvcNamespace := restore.Namespace
@@ -392,6 +394,8 @@ func (r *MantleRestoreReconciler) deleteRestoringPVC(ctx context.Context, restor
 	}
 }
 
+// deleteRestoringPV deletes the restoring PV.
+// To delete RBD image, it returns an error if it still exists to ensure no one uses the PV.
 func (r *MantleRestoreReconciler) deleteRestoringPV(ctx context.Context, restore *mantlev1.MantleRestore) error {
 	pv := corev1.PersistentVolume{}
 	if err := r.Get(ctx, client.ObjectKey{Name: r.restoringPVName(restore)}, &pv); err != nil {

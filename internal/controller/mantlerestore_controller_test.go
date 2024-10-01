@@ -276,8 +276,10 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPVC() {
 		err = k8sClient.Update(ctx, &pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = test.reconciler.deleteRestoringPVC(ctx, restore)
-		Expect(err).NotTo(HaveOccurred())
+		Eventually(func(g Gomega, ctx context.Context) {
+			err := test.reconciler.deleteRestoringPVC(ctx, restore)
+			g.Expect(err).NotTo(HaveOccurred())
+		}).WithContext(ctx).Should(Succeed())
 
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &pvc)
 		Expect(err).To(HaveOccurred())
@@ -308,8 +310,11 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPVC() {
 		Expect(err).To(HaveOccurred())
 
 		// cleanup
-		err = test.reconciler.deleteRestoringPVC(ctx, restore)
-		Expect(err).NotTo(HaveOccurred())
+		Eventually(func(g Gomega, ctx context.Context) {
+			err := test.reconciler.deleteRestoringPVC(ctx, restore)
+			g.Expect(err).NotTo(HaveOccurred())
+		}).WithContext(ctx).Should(Succeed())
+
 	})
 
 	It("should return an error, if the PVC having finalizer", func(ctx SpecContext) {
@@ -341,8 +346,10 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPV() {
 		err = k8sClient.Update(ctx, &pv)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = test.reconciler.deleteRestoringPV(ctx, restore)
-		Expect(err).NotTo(HaveOccurred())
+		Eventually(func(g Gomega, ctx context.Context) {
+			err := test.reconciler.deleteRestoringPV(ctx, restore)
+			g.Expect(err).NotTo(HaveOccurred())
+		}).WithContext(ctx).Should(Succeed())
 
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: test.reconciler.restoringPVName(restore)}, &pv)
 		Expect(err).To(HaveOccurred())
@@ -373,8 +380,10 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPV() {
 		Expect(err).To(HaveOccurred())
 
 		// cleanup
-		err = test.reconciler.deleteRestoringPV(ctx, restore)
-		Expect(err).NotTo(HaveOccurred())
+		Eventually(func(g Gomega, ctx context.Context) {
+			err := test.reconciler.deleteRestoringPV(ctx, restore)
+			g.Expect(err).NotTo(HaveOccurred())
+		}).WithContext(ctx).Should(Succeed())
 	})
 
 	It("should return an error, if the PV having finalizer", func(ctx SpecContext) {
