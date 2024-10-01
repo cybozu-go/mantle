@@ -292,6 +292,20 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
+	// Make sure that the reconciled MantleBackup is created not by the secondary mantle but by the primary mantle.
+	if backup.Labels != nil {
+		_, ok1 := backup.Labels[labelLocalBackupTargetPVCUID]
+		_, ok2 := backup.Labels[labelRemoteBackupTargetPVCUID]
+		if ok1 && ok2 {
+			logger.Warn(
+				"skipping to reconcile the MantleBackup created by a remote mantle-controller to prevent accidental data loss",
+				"name", backup.GetName(),
+				"namespace", backup.GetNamespace(),
+			)
+			return ctrl.Result{}, nil
+		}
+	}
+
 	target, result, getSnapshotTargetErr := r.getSnapshotTarget(ctx, logger, &backup)
 	switch {
 	case getSnapshotTargetErr == errSkipProcessing:
@@ -342,20 +356,6 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{Requeue: true}, nil
-	}
-
-	// Make sure that the reconciled MantleBackup is created not by the secondary mantle but by the primary mantle.
-	if backup.Labels != nil {
-		_, ok1 := backup.Labels[labelLocalBackupTargetPVCUID]
-		_, ok2 := backup.Labels[labelRemoteBackupTargetPVCUID]
-		if ok1 && ok2 {
-			logger.Warn(
-				"skipping to reconcile the MantleBackup created by a remote mantle-controller to prevent accidental data loss",
-				"name", backup.GetName(),
-				"namespace", backup.GetNamespace(),
-			)
-			return ctrl.Result{}, nil
-		}
 	}
 
 	if err := r.provisionRBDSnapshot(ctx, logger, &backup, target); err != nil {
