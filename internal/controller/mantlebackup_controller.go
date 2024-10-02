@@ -352,6 +352,10 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		if err != nil || result != (ctrl.Result{}) {
 			return result, err
 		}
+		_, result, err = r.prepareForDataSynchronization(ctx, &backup, r.primarySettings.Client)
+		if err != nil || result != (ctrl.Result{}) {
+			return result, err
+		}
 	}
 
 	return ctrl.Result{}, nil
@@ -569,4 +573,22 @@ func (r *MantleBackupReconciler) finalize(
 	}
 
 	return ctrl.Result{}, nil
+}
+
+type dataSyncPrepareResult struct {
+	isIncremental                     bool
+	isSecondaryMantleBackupReadyToUse bool
+	diffFrom                          *mantlev1.MantleBackup // non-nil value iff isIncremental is true.
+}
+
+func (r *MantleBackupReconciler) prepareForDataSynchronization(
+	_ context.Context,
+	_ *mantlev1.MantleBackup,
+	_ proto.MantleServiceClient,
+) (*dataSyncPrepareResult, ctrl.Result, error) { //nolint:unparam
+	return &dataSyncPrepareResult{
+		isIncremental:                     false,
+		isSecondaryMantleBackupReadyToUse: true,
+		diffFrom:                          nil,
+	}, ctrl.Result{}, nil
 }
