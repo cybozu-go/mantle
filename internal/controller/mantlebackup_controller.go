@@ -342,6 +342,11 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
+	// Skip replication if SyncedToRemote condition is true.
+	if meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionSyncedToRemote) {
+		return ctrl.Result{}, nil
+	}
+
 	if r.role == RolePrimary {
 		return r.replicate(ctx, logger, &backup)
 	}
