@@ -348,7 +348,10 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	if r.role == RolePrimary {
-		return r.replicate(ctx, logger, &backup)
+		result, err := r.replicate(ctx, logger, &backup)
+		if err != nil || result != (ctrl.Result{}) {
+			return result, err
+		}
 	}
 
 	return ctrl.Result{}, nil
