@@ -352,9 +352,15 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		if err != nil || result != (ctrl.Result{}) {
 			return result, err
 		}
-		_, result, err = r.prepareForDataSynchronization(ctx, &backup, r.primarySettings.Client)
+		prepareResult, result, err := r.prepareForDataSynchronization(ctx, &backup, r.primarySettings.Client)
 		if err != nil || result != (ctrl.Result{}) {
 			return result, err
+		}
+		if !prepareResult.isSecondaryMantleBackupReadyToUse {
+			result, err := r.export(ctx, &backup, r.primarySettings.Client, prepareResult)
+			if err != nil || result != (ctrl.Result{}) {
+				return result, err
+			}
 		}
 	}
 
@@ -591,4 +597,16 @@ func (r *MantleBackupReconciler) prepareForDataSynchronization(
 		isSecondaryMantleBackupReadyToUse: true,
 		diffFrom:                          nil,
 	}, ctrl.Result{}, nil
+}
+
+func (r *MantleBackupReconciler) export(
+	_ context.Context,
+	_ *mantlev1.MantleBackup,
+	_ proto.MantleServiceClient,
+	prepareResult *dataSyncPrepareResult,
+) (ctrl.Result, error) { //nolint:unparam
+	if prepareResult.isIncremental {
+		return ctrl.Result{}, fmt.Errorf("incremental backup is not implemented")
+	}
+	return ctrl.Result{}, nil
 }
