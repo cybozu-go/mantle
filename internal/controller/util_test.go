@@ -1,8 +1,6 @@
 package controller
 
 import (
-	"context"
-
 	"github.com/cybozu-go/mantle/test/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -13,29 +11,21 @@ import (
 )
 
 var _ = Describe("util.getCephClusterIDFromPVC", func() {
-	namespace := util.GetUniqueName("ns-")
+	var namespace string
 	storageClassName := util.GetUniqueName("sc-")
 
 	It("should create namespace", func() {
-		ns := &corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: namespace,
-			},
-		}
-
-		err := k8sClient.Create(context.Background(), ns)
-		Expect(err).NotTo(HaveOccurred())
+		namespace = resMgr.CreateNamespace()
 	})
 
 	DescribeTable("matrix test",
-		func(sc *storagev1.StorageClass, pvc *corev1.PersistentVolumeClaim, expectedClusterID string) {
-			ctx := context.Background()
-
+		func(ctx SpecContext, sc *storagev1.StorageClass, pvc *corev1.PersistentVolumeClaim, expectedClusterID string) {
 			// create resources
 			if sc != nil {
 				err := k8sClient.Create(ctx, sc)
 				Expect(err).NotTo(HaveOccurred())
 			}
+			pvc.Namespace = namespace
 			err := k8sClient.Create(ctx, pvc)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -64,8 +54,7 @@ var _ = Describe("util.getCephClusterIDFromPVC", func() {
 			},
 			&corev1.PersistentVolumeClaim{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      util.GetUniqueName("pvc-"),
-					Namespace: namespace,
+					Name: util.GetUniqueName("pvc-"),
 				},
 				Spec: corev1.PersistentVolumeClaimSpec{
 					AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
@@ -82,8 +71,7 @@ var _ = Describe("util.getCephClusterIDFromPVC", func() {
 			nil,
 			&corev1.PersistentVolumeClaim{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-pvc",
-					Namespace: namespace,
+					Name: "test-pvc",
 				},
 				Spec: corev1.PersistentVolumeClaimSpec{
 					AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
@@ -104,8 +92,7 @@ var _ = Describe("util.getCephClusterIDFromPVC", func() {
 			},
 			&corev1.PersistentVolumeClaim{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      util.GetUniqueName("pvc-"),
-					Namespace: namespace,
+					Name: util.GetUniqueName("pvc-"),
 				},
 				Spec: corev1.PersistentVolumeClaimSpec{
 					AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
@@ -127,8 +114,7 @@ var _ = Describe("util.getCephClusterIDFromPVC", func() {
 			},
 			&corev1.PersistentVolumeClaim{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      util.GetUniqueName("pvc-"),
-					Namespace: namespace,
+					Name: util.GetUniqueName("pvc-"),
 				},
 				Spec: corev1.PersistentVolumeClaimSpec{
 					AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},

@@ -9,41 +9,63 @@ import (
 	"time"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
-	"github.com/cybozu-go/mantle/test/util"
-
+	"github.com/cybozu-go/mantle/internal/controller/internal/testutil"
 	. "github.com/onsi/ginkgo/v2"
-
 	. "github.com/onsi/gomega"
-
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/api/resource"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 var _ = Describe("MantleBackup controller", func() {
-	ctx := context.Background()
-	var mgrUtil util.ManagerUtil
+	var mgrUtil testutil.ManagerUtil
 	var reconciler *MantleBackupReconciler
 
-	storageClassClusterID := dummyStorageClassClusterID
-	storageClassName := dummyStorageClassName
+	// Not to access backup.Name before created, set the pointer to an empty object.
+	backup := &mantlev1.MantleBackup{}
+
+	waitForBackupNotReady := func(ctx context.Context, backup *mantlev1.MantleBackup) {
+		EventuallyWithOffset(1, func(g Gomega, ctx context.Context) {
+			namespacedName := types.NamespacedName{
+				Namespace: backup.Namespace,
+				Name:      backup.Name,
+			}
+			err := k8sClient.Get(ctx, namespacedName, backup)
+			g.Expect(err).NotTo(HaveOccurred())
+			condition := meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse)
+			g.Expect(condition).NotTo(BeNil())
+			g.Expect(condition.Status).To(Equal(metav1.ConditionFalse))
+			g.Expect(condition.Reason).NotTo(Equal(mantlev1.BackupReasonNone))
+		}).WithContext(ctx).Should(Succeed())
+	}
+
+	waitForHavingFinalizer := func(ctx context.Context, backup *mantlev1.MantleBackup) {
+		EventuallyWithOffset(1, func(g Gomega, ctx context.Context) {
+			namespacedName := types.NamespacedName{
+				Namespace: backup.Namespace,
+				Name:      backup.Name,
+			}
+			err := k8sClient.Get(ctx, namespacedName, backup)
+			g.Expect(err).NotTo(HaveOccurred())
+
+			g.Expect(controllerutil.ContainsFinalizer(backup, MantleBackupFinalizerName)).To(BeTrue(), "finalizer does not set yet")
+		}).WithContext(ctx).Should(Succeed())
+	}
 
 	BeforeEach(func() {
-		mgrUtil = util.NewManagerUtil(ctx, cfg, scheme.Scheme)
+		mgrUtil = testutil.NewManagerUtil(context.Background(), cfg, scheme.Scheme)
 
-		reconciler = NewMantleBackupReconciler(k8sClient, mgrUtil.GetScheme(), storageClassClusterID, RoleStandalone, nil)
+		reconciler = NewMantleBackupReconciler(mgrUtil.GetClient(), mgrUtil.GetScheme(), resMgr.ClusterID, RoleStandalone, nil)
 		err := reconciler.SetupWithManager(mgrUtil.GetManager())
 		Expect(err).NotTo(HaveOccurred())
 
 		executeCommand = func(logger *slog.Logger, command []string, _ io.Reader) ([]byte, error) {
 			if command[0] == "rbd" && command[1] == "snap" && command[2] == "ls" {
-				return []byte(fmt.Sprintf("[{\"id\":1000,\"name\":\"backup\"," +
-					"\"timestamp\":\"Mon Sep  2 00:42:00 2024\"}]")), nil
+				return []byte(fmt.Sprintf("[{\"id\":1000,\"name\":\"%s\","+
+					"\"timestamp\":\"Mon Sep  2 00:42:00 2024\"}]", backup.Name)), nil
 			}
 			return nil, nil
 		}
@@ -57,113 +79,17 @@ var _ = Describe("MantleBackup controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("should be ready to use", func() {
-		ns := createNamespace()
+	It("should be ready to use", func(ctx SpecContext) {
+		ns := resMgr.CreateNamespace()
 
-		csiPVSource := corev1.CSIPersistentVolumeSource{
-			Driver:       "driver",
-			VolumeHandle: "handle",
-			VolumeAttributes: map[string]string{
-				"imageName": "imageName",
-				"pool":      "pool",
-			},
-		}
-		pv := corev1.PersistentVolume{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "pv",
-			},
-			Spec: corev1.PersistentVolumeSpec{
-				Capacity: corev1.ResourceList{
-					"storage": resource.MustParse("5Gi"),
-				},
-				PersistentVolumeSource: corev1.PersistentVolumeSource{
-					CSI: &csiPVSource,
-				},
-				AccessModes: []corev1.PersistentVolumeAccessMode{
-					corev1.ReadWriteOnce,
-				},
-			},
-		}
-		err := k8sClient.Create(ctx, &pv)
+		pv, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 
-		pvc := corev1.PersistentVolumeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "pvc",
-				Namespace: ns,
-			},
-			Spec: corev1.PersistentVolumeClaimSpec{
-				AccessModes: []corev1.PersistentVolumeAccessMode{
-					corev1.ReadWriteOnce,
-				},
-				VolumeName: pv.Name,
-				Resources: corev1.ResourceRequirements{
-					Requests: corev1.ResourceList{
-						corev1.ResourceStorage: *resource.NewQuantity(1, resource.BinarySI),
-					},
-				},
-				StorageClassName: &storageClassName,
-			},
-		}
-		err = k8sClient.Create(ctx, &pvc)
+		backup, err = resMgr.CreateUniqueBackupFor(ctx, pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		pvc.Status.Phase = corev1.ClaimBound
-		err = k8sClient.Status().Update(ctx, &pvc)
-		Expect(err).NotTo(HaveOccurred())
-
-		backup := mantlev1.MantleBackup{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "backup",
-				Namespace: ns,
-			},
-			Spec: mantlev1.MantleBackupSpec{
-				PVC: pvc.Name,
-			},
-		}
-		err = k8sClient.Create(ctx, &backup)
-		Expect(err).NotTo(HaveOccurred())
-
-		Eventually(func() error {
-			namespacedName := types.NamespacedName{
-				Namespace: ns,
-				Name:      backup.Name,
-			}
-			err = k8sClient.Get(ctx, namespacedName, &backup)
-			if err != nil {
-				return err
-			}
-
-			existFinalizer := false
-			for _, f := range backup.Finalizers {
-				if f == MantleBackupFinalizerName {
-					existFinalizer = true
-					break
-				}
-			}
-			if !existFinalizer {
-				return fmt.Errorf("finalizer does not set yet")
-			}
-
-			return nil
-		}).Should(Succeed())
-
-		Eventually(func() error {
-			namespacedName := types.NamespacedName{
-				Namespace: ns,
-				Name:      backup.Name,
-			}
-			err = k8sClient.Get(ctx, namespacedName, &backup)
-			if err != nil {
-				return err
-			}
-
-			if meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse).Status != metav1.ConditionTrue {
-				return fmt.Errorf("not ready to use yet")
-			}
-
-			return nil
-		}).Should(Succeed())
+		waitForHavingFinalizer(ctx, backup)
+		resMgr.WaitForBackupReady(ctx, backup)
 
 		pvcJS := backup.Status.PVCManifest
 		Expect(pvcJS).NotTo(BeEmpty())
@@ -183,358 +109,74 @@ var _ = Describe("MantleBackup controller", func() {
 		snapID := backup.Status.SnapID
 		Expect(*snapID).To(Equal(1000))
 
-		err = k8sClient.Delete(ctx, &backup)
+		err = k8sClient.Delete(ctx, backup)
 		Expect(err).NotTo(HaveOccurred())
 
-		Eventually(func() error {
-			namespacedName := types.NamespacedName{
-				Namespace: ns,
-				Name:      backup.Name,
-			}
-			err = k8sClient.Get(ctx, namespacedName, &backup)
-			if errors.IsNotFound(err) {
-				return nil
-			}
-			if err != nil {
-				return err
-			}
-			return fmt.Errorf("\"%s\" is not deleted yet", backup.Name)
-		}).Should(Succeed())
+		testutil.CheckDeletedEventually[mantlev1.MantleBackup](ctx, k8sClient, backup.Name, backup.Namespace)
 	})
 
-	It("should still be ready to use even if the PVC lost", func() {
-		ctx := context.Background()
-		ns := createNamespace()
+	It("should still be ready to use even if the PVC lost", func(ctx SpecContext) {
+		ns := resMgr.CreateNamespace()
 
-		csiPVSource := corev1.CSIPersistentVolumeSource{
-			Driver:       "driver",
-			VolumeHandle: "handle",
-			VolumeAttributes: map[string]string{
-				"imageName": "imageName",
-				"pool":      "pool",
-			},
-		}
-		pv := corev1.PersistentVolume{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "pv2",
-			},
-			Spec: corev1.PersistentVolumeSpec{
-				Capacity: corev1.ResourceList{
-					"storage": resource.MustParse("5Gi"),
-				},
-				PersistentVolumeSource: corev1.PersistentVolumeSource{
-					CSI: &csiPVSource,
-				},
-				AccessModes: []corev1.PersistentVolumeAccessMode{
-					corev1.ReadWriteOnce,
-				},
-			},
-		}
-		err := k8sClient.Create(ctx, &pv)
+		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 
-		pvc := corev1.PersistentVolumeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "pvc",
-				Namespace: ns,
-			},
-			Spec: corev1.PersistentVolumeClaimSpec{
-				AccessModes: []corev1.PersistentVolumeAccessMode{
-					corev1.ReadWriteOnce,
-				},
-				VolumeName: pv.Name,
-				Resources: corev1.ResourceRequirements{
-					Requests: corev1.ResourceList{
-						corev1.ResourceStorage: *resource.NewQuantity(1, resource.BinarySI),
-					},
-				},
-				StorageClassName: &storageClassName,
-			},
-		}
-		err = k8sClient.Create(ctx, &pvc)
+		backup, err = resMgr.CreateUniqueBackupFor(ctx, pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		pvc.Status.Phase = corev1.ClaimBound
-		err = k8sClient.Status().Update(ctx, &pvc)
-		Expect(err).NotTo(HaveOccurred())
-
-		backup := mantlev1.MantleBackup{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "backup",
-				Namespace: ns,
-			},
-			Spec: mantlev1.MantleBackupSpec{
-				PVC: pvc.Name,
-			},
-		}
-		err = k8sClient.Create(ctx, &backup)
-		Expect(err).NotTo(HaveOccurred())
-
-		Eventually(func() error {
-			namespacedName := types.NamespacedName{
-				Namespace: ns,
-				Name:      backup.Name,
-			}
-			err = k8sClient.Get(ctx, namespacedName, &backup)
-			if err != nil {
-				return err
-			}
-
-			existFinalizer := false
-			for _, f := range backup.Finalizers {
-				if f == MantleBackupFinalizerName {
-					existFinalizer = true
-					break
-				}
-			}
-			if !existFinalizer {
-				return fmt.Errorf("finalizer does not set yet")
-			}
-
-			return nil
-		}).Should(Succeed())
-
-		Eventually(func() error {
-			namespacedName := types.NamespacedName{
-				Namespace: ns,
-				Name:      backup.Name,
-			}
-			err = k8sClient.Get(ctx, namespacedName, &backup)
-			if err != nil {
-				return err
-			}
-
-			if meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse).Status != metav1.ConditionTrue {
-				return fmt.Errorf("not ready to use yet")
-			}
-
-			return nil
-		}).Should(Succeed())
+		waitForHavingFinalizer(ctx, backup)
+		resMgr.WaitForBackupReady(ctx, backup)
 
 		pvc.Status.Phase = corev1.ClaimLost // simulate lost PVC
-		err = k8sClient.Status().Update(ctx, &pvc)
+		err = k8sClient.Status().Update(ctx, pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		Eventually(func() error {
-			namespacedName := types.NamespacedName{
-				Namespace: ns,
-				Name:      backup.Name,
-			}
-			err = k8sClient.Get(ctx, namespacedName, &backup)
-			if err != nil {
-				return err
-			}
-
-			condition := meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse)
-			if condition == nil {
-				return fmt.Errorf("condition is not set")
-			}
-
-			if condition.Status != metav1.ConditionTrue {
-				return fmt.Errorf("should keep ready to use")
-			}
-
-			return nil
-		}).Should(Succeed())
+		resMgr.WaitForBackupReady(ctx, backup)
 	})
 
-	It("should not be ready to use if the PVC is the lost state from the beginning", func() {
-		ctx := context.Background()
-		ns := createNamespace()
+	It("should not be ready to use if the PVC is the lost state from the beginning", func(ctx SpecContext) {
+		ns := resMgr.CreateNamespace()
 
-		csiPVSource := corev1.CSIPersistentVolumeSource{
-			Driver:       "driver",
-			VolumeHandle: "handle",
-			VolumeAttributes: map[string]string{
-				"imageName": "imageName",
-				"pool":      "pool",
-			},
-		}
-		pv := corev1.PersistentVolume{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "pv3",
-			},
-			Spec: corev1.PersistentVolumeSpec{
-				Capacity: corev1.ResourceList{
-					"storage": resource.MustParse("5Gi"),
-				},
-				PersistentVolumeSource: corev1.PersistentVolumeSource{
-					CSI: &csiPVSource,
-				},
-				AccessModes: []corev1.PersistentVolumeAccessMode{
-					corev1.ReadWriteOnce,
-				},
-			},
-		}
-		err := k8sClient.Create(ctx, &pv)
+		pv, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
-
-		pvc := corev1.PersistentVolumeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "pvc",
-				Namespace: ns,
-			},
-			Spec: corev1.PersistentVolumeClaimSpec{
-				AccessModes: []corev1.PersistentVolumeAccessMode{
-					corev1.ReadWriteOnce,
-				},
-				VolumeName: pv.Name,
-				Resources: corev1.ResourceRequirements{
-					Requests: corev1.ResourceList{
-						corev1.ResourceStorage: *resource.NewQuantity(1, resource.BinarySI),
-					},
-				},
-				StorageClassName: &storageClassName,
-			},
-		}
-		err = k8sClient.Create(ctx, &pvc)
+		pv.Status.Phase = corev1.VolumeAvailable
+		err = k8sClient.Status().Update(ctx, pv)
 		Expect(err).NotTo(HaveOccurred())
-
 		pvc.Status.Phase = corev1.ClaimLost
-		err = k8sClient.Status().Update(ctx, &pvc)
+		err = k8sClient.Status().Update(ctx, pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		backup := mantlev1.MantleBackup{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "backup",
-				Namespace: ns,
-			},
-			Spec: mantlev1.MantleBackupSpec{
-				PVC: pvc.Name,
-			},
-		}
-		err = k8sClient.Create(ctx, &backup)
+		backup, err = resMgr.CreateUniqueBackupFor(ctx, pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		Eventually(func() error {
-			namespacedName := types.NamespacedName{
-				Namespace: ns,
-				Name:      backup.Name,
-			}
-			err = k8sClient.Get(ctx, namespacedName, &backup)
-			if err != nil {
-				return err
-			}
-
-			condition := meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse)
-			if condition == nil {
-				return fmt.Errorf("condition is not set")
-			}
-			if !(condition.Status == metav1.ConditionFalse && condition.Reason != mantlev1.BackupReasonNone) {
-				return fmt.Errorf("should not be ready to use")
-			}
-
-			return nil
-		}).Should(Succeed())
+		waitForBackupNotReady(ctx, backup)
 	})
 
-	It("should not be ready to use if specified non-existent PVC name", func() {
-		ctx := context.Background()
-		ns := createNamespace()
+	It("should not be ready to use if specified non-existent PVC name", func(ctx SpecContext) {
+		ns := resMgr.CreateNamespace()
 
-		backup := mantlev1.MantleBackup{
+		var err error
+		backup, err = resMgr.CreateUniqueBackupFor(ctx, &corev1.PersistentVolumeClaim{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "backup",
+				Name:      "non-existent-pvc",
 				Namespace: ns,
 			},
-			Spec: mantlev1.MantleBackupSpec{
-				PVC: "non-existent-pvc",
-			},
-		}
-		err := k8sClient.Create(ctx, &backup)
+		})
 		Expect(err).NotTo(HaveOccurred())
 
-		Eventually(func() error {
-			namespacedName := types.NamespacedName{
-				Namespace: ns,
-				Name:      backup.Name,
-			}
-			err = k8sClient.Get(ctx, namespacedName, &backup)
-			if err != nil {
-				return err
-			}
-
-			condition := meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse)
-			if condition == nil {
-				return fmt.Errorf("condition is not set")
-			}
-			if !(condition.Status == metav1.ConditionFalse && condition.Reason != mantlev1.BackupReasonNone) {
-				return fmt.Errorf("should not be ready to use")
-			}
-
-			return nil
-		}).Should(Succeed())
+		waitForBackupNotReady(ctx, backup)
 	})
 
-	It("should fail the resource creation the second time if the same MantleBackup is created twice", func() {
-		ctx := context.Background()
-		ns := createNamespace()
+	It("should fail the resource creation the second time if the same MantleBackup is created twice", func(ctx SpecContext) {
+		ns := resMgr.CreateNamespace()
 
-		csiPVSource := corev1.CSIPersistentVolumeSource{
-			Driver:       "driver",
-			VolumeHandle: "handle",
-			VolumeAttributes: map[string]string{
-				"imageName": "imageName",
-				"pool":      "pool",
-			},
-		}
-		pv := corev1.PersistentVolume{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "pv4",
-			},
-			Spec: corev1.PersistentVolumeSpec{
-				Capacity: corev1.ResourceList{
-					"storage": resource.MustParse("5Gi"),
-				},
-				PersistentVolumeSource: corev1.PersistentVolumeSource{
-					CSI: &csiPVSource,
-				},
-				AccessModes: []corev1.PersistentVolumeAccessMode{
-					corev1.ReadWriteOnce,
-				},
-			},
-		}
-		err := k8sClient.Create(ctx, &pv)
+		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 
-		pvc := corev1.PersistentVolumeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "pvc",
-				Namespace: ns,
-			},
-			Spec: corev1.PersistentVolumeClaimSpec{
-				AccessModes: []corev1.PersistentVolumeAccessMode{
-					corev1.ReadWriteOnce,
-				},
-				VolumeName: pv.Name,
-				Resources: corev1.ResourceRequirements{
-					Requests: corev1.ResourceList{
-						corev1.ResourceStorage: *resource.NewQuantity(1, resource.BinarySI),
-					},
-				},
-				StorageClassName: &storageClassName,
-			},
-		}
-		err = k8sClient.Create(ctx, &pvc)
+		backup, err = resMgr.CreateUniqueBackupFor(ctx, pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		pvc.Status.Phase = corev1.ClaimBound
-		err = k8sClient.Status().Update(ctx, &pvc)
-		Expect(err).NotTo(HaveOccurred())
-
-		backup := mantlev1.MantleBackup{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "backup",
-				Namespace: ns,
-			},
-			Spec: mantlev1.MantleBackupSpec{
-				PVC: pvc.Name,
-			},
-		}
-		err = k8sClient.Create(ctx, &backup)
-		Expect(err).NotTo(HaveOccurred())
-
-		err = k8sClient.Create(ctx, &backup)
+		err = k8sClient.Create(ctx, backup)
 		Expect(err).To(HaveOccurred())
 	})
 })

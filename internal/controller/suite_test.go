@@ -1,8 +1,9 @@
 package controller
 
 import (
-	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -11,8 +12,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -21,7 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
-	"github.com/cybozu-go/mantle/test/util"
+	"github.com/cybozu-go/mantle/internal/controller/internal/testutil"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -32,25 +31,7 @@ var cfg *rest.Config
 var k8sClient client.Client
 var testEnv *envtest.Environment
 
-var (
-	dummyStorageClassName        = "dummy-sc"
-	dummyStorageClassClusterID   = "rook-ceph"
-	dummyStorageClassProvisioner = "rook-ceph.rbd.csi.ceph.com"
-)
-
-var namespaceCounter = 0 // EnvTest cannot delete namespace. So, we have to use another new namespace.
-func createNamespace() string {
-	namespaceCounter += 1
-	name := fmt.Sprintf("test-%d", namespaceCounter)
-	ns := corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-		},
-	}
-	err := k8sClient.Create(context.Background(), &ns)
-	Expect(err).NotTo(HaveOccurred())
-	return name
-}
+var resMgr *testutil.ResourceManager
 
 func TestControllers(t *testing.T) {
 	RegisterFailHandler(Fail)
@@ -61,7 +42,7 @@ func TestControllers(t *testing.T) {
 	RunSpecs(t, "Controller Suite")
 }
 
-var _ = BeforeSuite(func() {
+var _ = BeforeSuite(func(ctx SpecContext) {
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
 
 	By("bootstrapping test environment")
@@ -93,9 +74,15 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
 
-	err = util.CreateStorageClass(context.Background(), k8sClient, dummyStorageClassName,
-		dummyStorageClassProvisioner, dummyStorageClassClusterID)
+	By("Setup common resources")
+	resMgr = testutil.NewResourceManager(k8sClient)
+	err = resMgr.CreateStorageClass(ctx)
 	Expect(err).NotTo(HaveOccurred())
+
+	By("Assign noop executeCommand")
+	executeCommand = func(_ *slog.Logger, _ []string, _ io.Reader) ([]byte, error) {
+		return nil, nil
+	}
 })
 
 var _ = AfterSuite(func() {

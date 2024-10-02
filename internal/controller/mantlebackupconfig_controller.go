@@ -180,6 +180,7 @@ func (r *MantleBackupConfigReconciler) SetupWithManager(mgr ctrl.Manager) error 
 				if err := r.Client.List(ctx, &mbcs, &client.ListOptions{
 					FieldSelector: fields.OneTermEqualSelector(".metadata.uid", uid),
 				}); err != nil {
+					gLogger.Debug("List of MantleBackup failed", "error", err)
 					return []reconcile.Request{}
 				}
 				if len(mbcs.Items) != 1 {

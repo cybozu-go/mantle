@@ -3,22 +3,18 @@ package controller
 import (
 	"context"
 	"fmt"
-	"io"
-	"log/slog"
 	"time"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
+	"github.com/cybozu-go/mantle/internal/controller/internal/testutil"
 	"github.com/cybozu-go/mantle/test/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	ctrl "sigs.k8s.io/controller-runtime"
+	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -41,65 +37,6 @@ func setMockedGetRunningPod(namespace string) {
 	}
 }
 
-func createBoundPVC(ctx context.Context, ns, pvName, pvcName, storageClassName string) error {
-	csiPVSource := corev1.CSIPersistentVolumeSource{
-		Driver:       "driver",
-		VolumeHandle: "handle",
-		VolumeAttributes: map[string]string{
-			"imageName": "imageName",
-			"pool":      "pool",
-		},
-	}
-	pv := corev1.PersistentVolume{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: pvName,
-		},
-		Spec: corev1.PersistentVolumeSpec{
-			Capacity: corev1.ResourceList{
-				"storage": resource.MustParse("5Gi"),
-			},
-			PersistentVolumeSource: corev1.PersistentVolumeSource{
-				CSI: &csiPVSource,
-			},
-			AccessModes: []corev1.PersistentVolumeAccessMode{
-				corev1.ReadWriteOnce,
-			},
-		},
-	}
-	if err := k8sClient.Create(ctx, &pv); err != nil {
-		return err
-	}
-
-	pvc := corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      pvcName,
-			Namespace: ns,
-		},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: []corev1.PersistentVolumeAccessMode{
-				corev1.ReadWriteOnce,
-			},
-			VolumeName: pv.Name,
-			Resources: corev1.ResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: *resource.NewQuantity(1, resource.BinarySI),
-				},
-			},
-			StorageClassName: &storageClassName,
-		},
-	}
-	if err := k8sClient.Create(ctx, &pvc); err != nil {
-		return err
-	}
-
-	pvc.Status.Phase = corev1.ClaimBound
-	if err := k8sClient.Status().Update(ctx, &pvc); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func createMBC(ctx context.Context, mbcName, mbcNamespace, pvcName, schedule, expire string, suspend bool) error {
 	mbc := mantlev1.MantleBackupConfig{
 		ObjectMeta: metav1.ObjectMeta{
@@ -119,87 +56,30 @@ func createMBC(ctx context.Context, mbcName, mbcNamespace, pvcName, schedule, ex
 	return nil
 }
 
-// cf. https://go.googlesource.com/proposal/+/refs/heads/master/design/43651-type-parameters.md#pointer-method-example
-type ObjectConstraint[T any] interface {
-	client.Object
-	*T
-}
-
-func checkCreatedEventually[T any, OC ObjectConstraint[T]](ctx context.Context, name, namespace string) {
-	var obj T
-	Eventually(func() error {
-		err := k8sClient.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, OC(&obj))
-		if err != nil {
-			return err
-		}
-		return nil
-	}).Should(Succeed())
-}
-
-func checkDeletedEventually[T any, OC ObjectConstraint[T]](ctx context.Context, name, namespace string) {
-	var obj T
-	Eventually(func() error {
-		err := k8sClient.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, OC(&obj))
-		if errors.IsNotFound(err) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		return fmt.Errorf("\"%s\" is not deleted yet", name)
-	}).Should(Succeed())
-}
-
 var _ = Describe("MantleBackupConfig controller", func() {
-	ctx := context.Background()
-	var stopFunc func()
-	errCh := make(chan error)
-
+	var mgrUtil testutil.ManagerUtil
 	var reconciler *MantleBackupConfigReconciler
-	scheme := runtime.NewScheme()
-
-	storageClassClusterID := dummyStorageClassClusterID
-	storageClassName := dummyStorageClassName
 
 	BeforeEach(func() {
-		err := batchv1.AddToScheme(scheme)
-		Expect(err).NotTo(HaveOccurred())
-		err = mantlev1.AddToScheme(scheme)
-		Expect(err).NotTo(HaveOccurred())
+		mgrUtil = testutil.NewManagerUtil(context.Background(), cfg, scheme.Scheme)
 
-		mgr, err := ctrl.NewManager(cfg, ctrl.Options{
-			Scheme: scheme,
-		})
-		Expect(err).ToNot(HaveOccurred())
-
-		reconciler = NewMantleBackupConfigReconciler(k8sClient, mgr.GetScheme(), storageClassClusterID, "0s", "", RoleStandalone)
-		err = reconciler.SetupWithManager(mgr)
+		reconciler = NewMantleBackupConfigReconciler(mgrUtil.GetClient(), mgrUtil.GetScheme(), resMgr.ClusterID, "0s", "", RoleStandalone)
+		err := reconciler.SetupWithManager(mgrUtil.GetManager())
 		Expect(err).NotTo(HaveOccurred())
 
-		executeCommand = func(_ *slog.Logger, _ []string, _ io.Reader) ([]byte, error) {
-			return nil, nil
-		}
-
-		ctx, cancel := context.WithCancel(ctx)
-		stopFunc = cancel
-		go func() {
-			errCh <- mgr.Start(ctx)
-		}()
+		mgrUtil.Start()
 		time.Sleep(100 * time.Millisecond)
 	})
 
 	AfterEach(func() {
-		stopFunc()
-		Expect(<-errCh).NotTo(HaveOccurred())
+		err := mgrUtil.Stop()
+		Expect(err).NotTo(HaveOccurred())
 	})
 
 	DescribeTable("MantleBackupConfigs with correct fields",
-		func(schedule, expire string) {
-			ns := createNamespace()
-			pvName := util.GetUniqueName("pv-")
-			pvcName := util.GetUniqueName("pvc-")
-
-			err := createBoundPVC(ctx, ns, pvName, pvcName, storageClassName)
+		func(ctx SpecContext, schedule, expire string) {
+			ns := resMgr.CreateNamespace()
+			_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 			Expect(err).NotTo(HaveOccurred())
 
 			mbc := mantlev1.MantleBackupConfig{
@@ -208,7 +88,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 					Namespace: ns,
 				},
 				Spec: mantlev1.MantleBackupConfigSpec{
-					PVC:      pvcName,
+					PVC:      pvc.Name,
 					Schedule: schedule,
 					Expire:   expire,
 					Suspend:  false,
@@ -226,12 +106,10 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		Entry("unusual spacing", "  0   0 *   * *     ", "2w"),
 	)
 
-	It("should accept MantleBackupConfigs with all possible schedules", func() {
-		ns := createNamespace()
-		pvName := util.GetUniqueName("pv-")
-		pvcName := util.GetUniqueName("pvc-")
+	It("should accept MantleBackupConfigs with all possible schedules", func(ctx SpecContext) {
+		ns := resMgr.CreateNamespace()
 
-		err := createBoundPVC(ctx, ns, pvName, pvcName, storageClassName)
+		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 
 		schedules := []string{}
@@ -256,7 +134,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 					Namespace: ns,
 				},
 				Spec: mantlev1.MantleBackupConfigSpec{
-					PVC:      pvcName,
+					PVC:      pvc.Name,
 					Schedule: schedule,
 					Expire:   "2w",
 					Suspend:  false,
@@ -268,12 +146,10 @@ var _ = Describe("MantleBackupConfig controller", func() {
 	})
 
 	DescribeTable("MantleBackupConfigs with incorrect fields",
-		func(schedule, expire string) {
-			pvName := util.GetUniqueName("pv-")
-			pvcName := util.GetUniqueName("pvc-")
-			ns := createNamespace()
+		func(ctx SpecContext, schedule, expire string) {
+			ns := resMgr.CreateNamespace()
 
-			err := createBoundPVC(ctx, ns, pvName, pvcName, storageClassName)
+			_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 			Expect(err).NotTo(HaveOccurred())
 
 			mbc := mantlev1.MantleBackupConfig{
@@ -282,7 +158,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 					Namespace: ns,
 				},
 				Spec: mantlev1.MantleBackupConfigSpec{
-					PVC:      pvcName,
+					PVC:      pvc.Name,
 					Schedule: schedule,
 					Expire:   expire,
 					Suspend:  false,
@@ -303,18 +179,15 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		Entry("too long expires 1", "0 0 * * *", "15d1s"),
 	)
 
-	It("should accept MantleBackupConfigs with modified mutable fields", func() {
-		ns := createNamespace()
-
-		pvName := util.GetUniqueName("pv-")
-		pvcName := util.GetUniqueName("pvc-")
+	It("should accept MantleBackupConfigs with modified mutable fields", func(ctx SpecContext) {
+		ns := resMgr.CreateNamespace()
 
 		oldSchedule := "0 0 * * *"
 		newSchedule := "0 10 * * *"
 		oldSuspend := false
 		newSuspend := true
 
-		err := createBoundPVC(ctx, ns, pvName, pvcName, storageClassName)
+		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 
 		mbc := mantlev1.MantleBackupConfig{
@@ -323,7 +196,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 				Namespace: ns,
 			},
 			Spec: mantlev1.MantleBackupConfigSpec{
-				PVC:      pvcName,
+				PVC:      pvc.Name,
 				Schedule: oldSchedule,
 				Expire:   "2w",
 				Suspend:  oldSuspend,
@@ -339,19 +212,15 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("should reject MantleBackupConfigs with modified immutable fields", func() {
-		ns := createNamespace()
+	It("should reject MantleBackupConfigs with modified immutable fields", func(ctx SpecContext) {
+		ns := resMgr.CreateNamespace()
 
-		pvName1 := util.GetUniqueName("pv-")
-		pvName2 := util.GetUniqueName("pv-")
-		oldPVC := util.GetUniqueName("pvc-")
-		newPVC := util.GetUniqueName("pvc-")
 		oldExpire := "2w"
 		newExpire := "1w"
 
-		err := createBoundPVC(ctx, ns, pvName1, oldPVC, storageClassName)
+		_, oldPVC, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
-		err = createBoundPVC(ctx, ns, pvName2, newPVC, storageClassName)
+		_, newPVC, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 
 		mbc := mantlev1.MantleBackupConfig{
@@ -360,7 +229,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 				Namespace: ns,
 			},
 			Spec: mantlev1.MantleBackupConfigSpec{
-				PVC:      oldPVC,
+				PVC:      oldPVC.Name,
 				Schedule: "0 0 * * *",
 				Expire:   oldExpire,
 				Suspend:  false,
@@ -370,7 +239,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		mbc1 := mbc.DeepCopy()
-		mbc1.Spec.PVC = newPVC
+		mbc1.Spec.PVC = newPVC.Name
 		err = k8sClient.Update(ctx, mbc1)
 		Expect(err).To(HaveOccurred())
 
@@ -380,22 +249,19 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		Expect(err).To(HaveOccurred())
 	})
 
-	It("should create a CronJob for a valid MantleBackupConfig resource and delete the CronJob when the MantleBackupConfig is deleted", func() {
-		ctx := context.Background()
-		ns := createNamespace()
+	It("should create a CronJob for a valid MantleBackupConfig resource and delete the CronJob when the MantleBackupConfig is deleted", func(ctx SpecContext) {
+		ns := resMgr.CreateNamespace()
 		mbcNamespace := ns
-		controllerNs := createNamespace()
+		controllerNs := resMgr.CreateNamespace()
 		setMockedGetRunningPod(controllerNs)
-		pvName := util.GetUniqueName("pv-")
-		pvcName := util.GetUniqueName("pvc-")
 		mbcName := util.GetUniqueName("mbc-")
 		schedule := "0 0 * * *"
 		suspend := false
 
-		err := createBoundPVC(ctx, ns, pvName, pvcName, storageClassName)
+		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = createMBC(ctx, mbcName, mbcNamespace, pvcName, schedule, "2w", suspend)
+		err = createMBC(ctx, mbcName, mbcNamespace, pvc.Name, schedule, "2w", suspend)
 		Expect(err).NotTo(HaveOccurred())
 
 		var mbc mantlev1.MantleBackupConfig
@@ -403,7 +269,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		cronJobName := "mbc-" + string(mbc.UID)
-		checkCreatedEventually[batchv1.CronJob](ctx, cronJobName, controllerNs)
+		testutil.CheckCreatedEventually[batchv1.CronJob](ctx, k8sClient, cronJobName, controllerNs)
 
 		var cronJob batchv1.CronJob
 		err = k8sClient.Get(ctx, types.NamespacedName{Name: cronJobName, Namespace: controllerNs}, &cronJob)
@@ -417,24 +283,21 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		err = k8sClient.Delete(ctx, &mbc)
 		Expect(err).NotTo(HaveOccurred())
 
-		checkDeletedEventually[batchv1.CronJob](ctx, cronJobName, controllerNs)
-		checkDeletedEventually[mantlev1.MantleBackupConfig](ctx, mbcName, mbcNamespace)
+		testutil.CheckDeletedEventually[batchv1.CronJob](ctx, k8sClient, cronJobName, controllerNs)
+		testutil.CheckDeletedEventually[mantlev1.MantleBackupConfig](ctx, k8sClient, mbcName, mbcNamespace)
 	})
 
-	It("should re-create the CronJob when someone deleted it", func() {
-		ctx := context.Background()
-		ns := createNamespace()
+	It("should re-create the CronJob when someone deleted it", func(ctx SpecContext) {
+		ns := resMgr.CreateNamespace()
 		mbcNamespace := ns
-		controllerNs := createNamespace()
+		controllerNs := resMgr.CreateNamespace()
 		setMockedGetRunningPod(controllerNs)
-		pvName := util.GetUniqueName("pv-")
-		pvcName := util.GetUniqueName("pvc-")
 		mbcName := util.GetUniqueName("mbc-")
 
-		err := createBoundPVC(ctx, ns, pvName, pvcName, storageClassName)
+		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = createMBC(ctx, mbcName, mbcNamespace, pvcName, "59 23 * * *", "2w", false)
+		err = createMBC(ctx, mbcName, mbcNamespace, pvc.Name, "59 23 * * *", "2w", false)
 		Expect(err).NotTo(HaveOccurred())
 
 		var mbc mantlev1.MantleBackupConfig
@@ -442,14 +305,14 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		cronJobName := "mbc-" + string(mbc.UID)
-		checkCreatedEventually[batchv1.CronJob](ctx, cronJobName, controllerNs)
+		testutil.CheckCreatedEventually[batchv1.CronJob](ctx, k8sClient, cronJobName, controllerNs)
 
 		var cronJob batchv1.CronJob
 		err = k8sClient.Get(ctx, types.NamespacedName{Name: cronJobName, Namespace: controllerNs}, &cronJob)
 		Expect(err).NotTo(HaveOccurred())
 		err = k8sClient.Delete(ctx, &cronJob)
 		Expect(err).NotTo(HaveOccurred())
-		checkDeletedEventually[batchv1.CronJob](ctx, cronJobName, controllerNs)
-		checkCreatedEventually[batchv1.CronJob](ctx, cronJobName, controllerNs)
+		testutil.CheckDeletedEventually[batchv1.CronJob](ctx, k8sClient, cronJobName, controllerNs)
+		testutil.CheckCreatedEventually[batchv1.CronJob](ctx, k8sClient, cronJobName, controllerNs)
 	})
 })

@@ -1,4 +1,4 @@
-package util
+package testutil
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
@@ -16,6 +17,7 @@ type ManagerUtil interface {
 	Stop() error
 	GetManager() manager.Manager
 	GetScheme() *runtime.Scheme
+	GetClient() client.Client
 }
 
 type managerUtilImpl struct {
@@ -63,4 +65,8 @@ func (m *managerUtilImpl) GetManager() manager.Manager {
 
 func (m *managerUtilImpl) GetScheme() *runtime.Scheme {
 	return m.mgr.GetScheme()
+}
+
+func (m *managerUtilImpl) GetClient() client.Client {
+	return m.mgr.GetClient()
 }
