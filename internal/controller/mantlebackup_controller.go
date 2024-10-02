@@ -316,23 +316,7 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	if !backup.ObjectMeta.DeletionTimestamp.IsZero() {
-		if controllerutil.ContainsFinalizer(&backup, MantleBackupFinalizerName) {
-			if !isErrTargetPVCNotFound(getSnapshotTargetErr) {
-				err := r.removeRBDSnapshot(logger, target.poolName, target.imageName, backup.Name)
-				if err != nil {
-					return ctrl.Result{}, err
-				}
-			}
-
-			controllerutil.RemoveFinalizer(&backup, MantleBackupFinalizerName)
-			err = r.Update(ctx, &backup)
-			if err != nil {
-				logger.Error("failed to remove finalizer", "finalizer", MantleBackupFinalizerName, "error", err)
-				return ctrl.Result{}, err
-			}
-		}
-
-		return ctrl.Result{}, nil
+		return r.finalize(ctx, logger, &backup, target, isErrTargetPVCNotFound(getSnapshotTargetErr))
 	}
 
 	if getSnapshotTargetErr != nil {
@@ -544,4 +528,32 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 func isCreatedWhenMantleControllerWasSecondary(backup *mantlev1.MantleBackup) bool {
 	_, ok := backup.Annotations[annotRemoteUID]
 	return ok
+}
+
+func (r *MantleBackupReconciler) finalize(
+	ctx context.Context,
+	logger *slog.Logger,
+	backup *mantlev1.MantleBackup,
+	target *snapshotTarget,
+	targetPVCNotFound bool,
+) (ctrl.Result, error) {
+	if !controllerutil.ContainsFinalizer(backup, MantleBackupFinalizerName) {
+		return ctrl.Result{}, nil
+	}
+
+	if !targetPVCNotFound {
+		err := r.removeRBDSnapshot(logger, target.poolName, target.imageName, backup.Name)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	controllerutil.RemoveFinalizer(backup, MantleBackupFinalizerName)
+	err := r.Update(ctx, backup)
+	if err != nil {
+		logger.Error("failed to remove finalizer", "finalizer", MantleBackupFinalizerName, "error", err)
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
 }
