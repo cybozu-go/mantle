@@ -30,6 +30,7 @@ const (
 	labelLocalBackupTargetPVCUID  = "mantle.cybozu.io/local-backup-target-pvc-uid"
 	labelRemoteBackupTargetPVCUID = "mantle.cybozu.io/remote-backup-target-pvc-uid"
 	annotRemoteUID                = "mantle.cybozu.io/remote-uid"
+	annotDiffTo                   = "mantle.cybozu.io/diff-to"
 )
 
 // MantleBackupReconciler reconciles a MantleBackup object
@@ -537,6 +538,10 @@ func (r *MantleBackupReconciler) finalize(
 	target *snapshotTarget,
 	targetPVCNotFound bool,
 ) (ctrl.Result, error) {
+	if _, ok := backup.GetAnnotations()[annotDiffTo]; ok {
+		return ctrl.Result{Requeue: true}, nil
+	}
+
 	if !controllerutil.ContainsFinalizer(backup, MantleBackupFinalizerName) {
 		return ctrl.Result{}, nil
 	}
