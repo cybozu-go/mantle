@@ -356,12 +356,10 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		if err != nil || result != (ctrl.Result{}) {
 			return result, err
 		}
-		if !prepareResult.isSecondaryMantleBackupReadyToUse {
-			result, err := r.export(ctx, &backup, r.primarySettings.Client, prepareResult)
-			if err != nil || result != (ctrl.Result{}) {
-				return result, err
-			}
+		if prepareResult.isSecondaryMantleBackupReadyToUse {
+			return r.primaryCleanup(ctx, logger, &backup)
 		}
+		return r.export(ctx, &backup, r.primarySettings.Client, prepareResult)
 	}
 
 	return ctrl.Result{}, nil
@@ -560,6 +558,11 @@ func (r *MantleBackupReconciler) finalize(
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	result, err := r.primaryCleanup(ctx, logger, backup)
+	if err != nil || result != (ctrl.Result{}) {
+		return result, err
+	}
+
 	if !controllerutil.ContainsFinalizer(backup, MantleBackupFinalizerName) {
 		return ctrl.Result{}, nil
 	}
@@ -572,8 +575,7 @@ func (r *MantleBackupReconciler) finalize(
 	}
 
 	controllerutil.RemoveFinalizer(backup, MantleBackupFinalizerName)
-	err := r.Update(ctx, backup)
-	if err != nil {
+	if err := r.Update(ctx, backup); err != nil {
 		logger.Error("failed to remove finalizer", "finalizer", MantleBackupFinalizerName, "error", err)
 		return ctrl.Result{}, err
 	}
@@ -608,5 +610,26 @@ func (r *MantleBackupReconciler) export(
 	if prepareResult.isIncremental {
 		return ctrl.Result{}, fmt.Errorf("incremental backup is not implemented")
 	}
+	return ctrl.Result{}, nil
+}
+
+func (r *MantleBackupReconciler) primaryCleanup(
+	ctx context.Context,
+	logger *slog.Logger,
+	backup *mantlev1.MantleBackup,
+) (ctrl.Result, error) { // nolint:unparam
+	if !backup.DeletionTimestamp.IsZero() {
+		return ctrl.Result{}, nil
+	}
+
+	// Update the status of the MantleBackup.
+	if err := r.updateStatusCondition(ctx, logger, backup, metav1.Condition{
+		Type:   mantlev1.BackupConditionSyncedToRemote,
+		Status: metav1.ConditionTrue,
+		Reason: mantlev1.BackupReasonNone,
+	}); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	return ctrl.Result{}, nil
 }
