@@ -21,7 +21,8 @@ import (
 
 // MantleRestoreReconciler reconciles a MantleRestore object
 type MantleRestoreReconciler struct {
-	client.Client
+	client               client.Client
+	reader               client.Reader
 	Scheme               *runtime.Scheme
 	managedCephClusterID string
 	ceph                 ceph.CephCmd
@@ -41,9 +42,16 @@ const (
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get;list;watch;create;update;patch;delete
 
-func NewMantleRestoreReconciler(cli client.Client, scheme *runtime.Scheme, managedCephClusterID, role string) *MantleRestoreReconciler {
+func NewMantleRestoreReconciler(
+	client client.Client,
+	reader client.Reader,
+	scheme *runtime.Scheme,
+	managedCephClusterID,
+	role string,
+) *MantleRestoreReconciler {
 	return &MantleRestoreReconciler{
-		Client:               cli,
+		client:               client,
+		reader:               reader,
 		Scheme:               scheme,
 		managedCephClusterID: managedCephClusterID,
 		ceph:                 ceph.NewCephCmd(),
@@ -59,7 +67,7 @@ func (r *MantleRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	var restore mantlev1.MantleRestore
-	err := r.Get(ctx, req.NamespacedName, &restore)
+	err := r.client.Get(ctx, req.NamespacedName, &restore)
 	if errors.IsNotFound(err) {
 		logger.Info("MantleRestore resource not found", "name", req.Name, "error", err)
 		return ctrl.Result{}, nil
@@ -87,7 +95,7 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, logger *slog.Logg
 
 	// get the MantleBackup resource bound to this MantleRestore
 	var backup mantlev1.MantleBackup
-	err := r.Get(ctx, client.ObjectKey{Name: restore.Spec.Backup, Namespace: restore.Namespace}, &backup)
+	err := r.client.Get(ctx, client.ObjectKey{Name: restore.Spec.Backup, Namespace: restore.Namespace}, &backup)
 	if err != nil {
 		logger.Error("failed to get MantleBackup", "name", restore.Spec.Backup, "namespace", restore.Namespace, "error", err)
 		return ctrl.Result{}, err
@@ -101,7 +109,7 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, logger *slog.Logg
 	}
 
 	// check if the PVC is managed by the target Ceph cluster
-	clusterID, err := getCephClusterIDFromPVC(ctx, logger, r.Client, &pvc)
+	clusterID, err := getCephClusterIDFromPVC(ctx, logger, r.client, &pvc)
 	if err != nil {
 		logger.Error("failed to get Ceph cluster ID", "backup", backup.Name, "namespace", backup.Namespace, "error", err)
 		return ctrl.Result{}, err
@@ -113,7 +121,7 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, logger *slog.Logg
 
 	// store the cluster ID in the status
 	restore.Status.ClusterID = clusterID
-	err = r.Status().Update(ctx, restore)
+	err = r.client.Status().Update(ctx, restore)
 	if err != nil {
 		logger.Error("failed to update status.clusterID", "status", restore.Status, "error", err)
 		return ctrl.Result{}, err
@@ -121,7 +129,7 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, logger *slog.Logg
 
 	// set the finalizer to this MantleRestore
 	controllerutil.AddFinalizer(restore, MantleRestoreFinalizerName)
-	err = r.Update(ctx, restore)
+	err = r.client.Update(ctx, restore)
 	if err != nil {
 		logger.Error("failed to add finalizer", "restore", restore.Name, "namespace", restore.Namespace, "error", err)
 		return ctrl.Result{}, err
@@ -146,7 +154,7 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, logger *slog.Logg
 		logger.Error("pool not found in PV manifest", "backup", backup.Name, "namespace", backup.Namespace)
 		return ctrl.Result{}, fmt.Errorf("pool not found in PV manifest")
 	}
-	err = r.Status().Update(ctx, restore)
+	err = r.client.Status().Update(ctx, restore)
 	if err != nil {
 		logger.Error("failed to update status.pool", "status", restore.Status, "error", err)
 		return ctrl.Result{}, err
@@ -176,7 +184,7 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, logger *slog.Logg
 		Status: metav1.ConditionTrue,
 		Reason: mantlev1.RestoreReasonNone,
 	})
-	err = r.Status().Update(ctx, restore)
+	err = r.client.Status().Update(ctx, restore)
 	if err != nil {
 		logger.Error("failed to update status", "status", restore.Status, "error", err)
 		return ctrl.Result{}, err
@@ -242,7 +250,7 @@ func (r *MantleRestoreReconciler) createRestoringPV(ctx context.Context, restore
 
 	// check if the PV already exists
 	existingPV := corev1.PersistentVolume{}
-	if err := r.Get(ctx, client.ObjectKey{Name: pvName}, &existingPV); err != nil {
+	if err := r.client.Get(ctx, client.ObjectKey{Name: pvName}, &existingPV); err != nil {
 		if !errors.IsNotFound(err) {
 			return fmt.Errorf("failed to get existing PV: %v", err)
 		}
@@ -281,7 +289,7 @@ func (r *MantleRestoreReconciler) createRestoringPV(ctx context.Context, restore
 	newPV.Spec.CSI.VolumeHandle = r.restoringRBDImageName(restore)
 	newPV.Spec.PersistentVolumeReclaimPolicy = corev1.PersistentVolumeReclaimRetain
 
-	return r.Create(ctx, &newPV)
+	return r.client.Create(ctx, &newPV)
 }
 
 func (r *MantleRestoreReconciler) createRestoringPVC(ctx context.Context, restore *mantlev1.MantleRestore, backup *mantlev1.MantleBackup) error {
@@ -291,7 +299,7 @@ func (r *MantleRestoreReconciler) createRestoringPVC(ctx context.Context, restor
 
 	// check if the PVC already exists
 	existingPVC := corev1.PersistentVolumeClaim{}
-	if err := r.Get(ctx, client.ObjectKey{Name: pvcName, Namespace: pvcNamespace}, &existingPVC); err != nil {
+	if err := r.client.Get(ctx, client.ObjectKey{Name: pvcName, Namespace: pvcNamespace}, &existingPVC); err != nil {
 		if !errors.IsNotFound(err) {
 			return fmt.Errorf("failed to get existing PVC: %v", err)
 		}
@@ -322,7 +330,7 @@ func (r *MantleRestoreReconciler) createRestoringPVC(ctx context.Context, restor
 	}
 	newPVC.Spec.VolumeName = r.restoringPVName(restore)
 
-	return r.Create(ctx, &newPVC)
+	return r.client.Create(ctx, &newPVC)
 }
 
 func (r *MantleRestoreReconciler) cleanup(ctx context.Context, logger *slog.Logger, restore *mantlev1.MantleRestore) (ctrl.Result, error) {
@@ -354,7 +362,7 @@ func (r *MantleRestoreReconciler) cleanup(ctx context.Context, logger *slog.Logg
 
 	// remove the finalizer
 	controllerutil.RemoveFinalizer(restore, MantleRestoreFinalizerName)
-	err = r.Update(ctx, restore)
+	err = r.client.Update(ctx, restore)
 	if err != nil {
 		logger.Error("failed to remove finalizer", "restore", restore.Name, "namespace", restore.Namespace, "error", err)
 		return ctrl.Result{}, err
@@ -365,11 +373,12 @@ func (r *MantleRestoreReconciler) cleanup(ctx context.Context, logger *slog.Logg
 
 // deleteRestoringPVC deletes the restoring PVC.
 // To delete RBD image, it returns an error if it still exists to ensure no one uses the PVC.
+// Note: it must use reader rather than client to check PVC existence to avoid oversighting a PVC not in the cache.
 func (r *MantleRestoreReconciler) deleteRestoringPVC(ctx context.Context, restore *mantlev1.MantleRestore) error {
 	pvcName := restore.Name
 	pvcNamespace := restore.Namespace
 	pvc := corev1.PersistentVolumeClaim{}
-	if err := r.Get(ctx, client.ObjectKey{Name: pvcName, Namespace: pvcNamespace}, &pvc); err != nil {
+	if err := r.reader.Get(ctx, client.ObjectKey{Name: pvcName, Namespace: pvcNamespace}, &pvc); err != nil {
 		if errors.IsNotFound(err) {
 			return nil
 		}
@@ -380,11 +389,11 @@ func (r *MantleRestoreReconciler) deleteRestoringPVC(ctx context.Context, restor
 		return fmt.Errorf("PVC is having different MantleRestore UID: %s, %s", pvcName, pvc.Annotations[PVCAnnotationRestoredBy])
 	}
 
-	if err := r.Delete(ctx, &pvc); err != nil {
+	if err := r.client.Delete(ctx, &pvc); err != nil {
 		return fmt.Errorf("failed to delete PVC: %v", err)
 	}
 
-	if err := r.Get(ctx, client.ObjectKey{Name: pvcName, Namespace: pvcNamespace}, &pvc); err != nil {
+	if err := r.reader.Get(ctx, client.ObjectKey{Name: pvcName, Namespace: pvcNamespace}, &pvc); err != nil {
 		if errors.IsNotFound(err) {
 			return nil
 		}
@@ -396,9 +405,10 @@ func (r *MantleRestoreReconciler) deleteRestoringPVC(ctx context.Context, restor
 
 // deleteRestoringPV deletes the restoring PV.
 // To delete RBD image, it returns an error if it still exists to ensure no one uses the PV.
+// Note: it must use reader rather than client to check PVC existence to avoid oversighting a PV not in the cache.
 func (r *MantleRestoreReconciler) deleteRestoringPV(ctx context.Context, restore *mantlev1.MantleRestore) error {
 	pv := corev1.PersistentVolume{}
-	if err := r.Get(ctx, client.ObjectKey{Name: r.restoringPVName(restore)}, &pv); err != nil {
+	if err := r.reader.Get(ctx, client.ObjectKey{Name: r.restoringPVName(restore)}, &pv); err != nil {
 		if errors.IsNotFound(err) {
 			return nil
 		}
@@ -409,11 +419,11 @@ func (r *MantleRestoreReconciler) deleteRestoringPV(ctx context.Context, restore
 		return fmt.Errorf("PV is having different MantleRestore UID: %s, %s", pv.Name, pv.Annotations[PVAnnotationRestoredBy])
 	}
 
-	if err := r.Delete(ctx, &pv); err != nil {
+	if err := r.client.Delete(ctx, &pv); err != nil {
 		return fmt.Errorf("failed to delete PV: %v", err)
 	}
 
-	if err := r.Get(ctx, client.ObjectKey{Name: r.restoringPVName(restore)}, &pv); err != nil {
+	if err := r.reader.Get(ctx, client.ObjectKey{Name: r.restoringPVName(restore)}, &pv); err != nil {
 		if errors.IsNotFound(err) {
 			return nil
 		}

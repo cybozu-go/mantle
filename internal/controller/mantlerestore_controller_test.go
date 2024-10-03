@@ -50,13 +50,25 @@ func (test *mantleRestoreControllerUnitTest) setupEnv() {
 	It("prepare reconcilers", func() {
 		By("prepare MantleBackup reconciler")
 		test.mgrUtil = testutil.NewManagerUtil(context.Background(), cfg, scheme.Scheme)
-		backupReconciler := NewMantleBackupReconciler(test.mgrUtil.GetClient(), test.mgrUtil.GetScheme(), resMgr.ClusterID, RoleStandalone, nil)
+		backupReconciler := NewMantleBackupReconciler(
+			test.mgrUtil.GetManager().GetClient(),
+			test.mgrUtil.GetManager().GetScheme(),
+			resMgr.ClusterID,
+			RoleStandalone,
+			nil,
+		)
 		err := backupReconciler.SetupWithManager(test.mgrUtil.GetManager())
 		Expect(err).NotTo(HaveOccurred())
 
 		By("prepare MantleRestore reconciler")
 		// just allocate the reconciler, and does not start it.
-		test.reconciler = NewMantleRestoreReconciler(test.mgrUtil.GetClient(), test.mgrUtil.GetScheme(), resMgr.ClusterID, RoleStandalone)
+		test.reconciler = NewMantleRestoreReconciler(
+			test.mgrUtil.GetManager().GetClient(),
+			test.mgrUtil.GetManager().GetAPIReader(),
+			test.mgrUtil.GetManager().GetScheme(),
+			resMgr.ClusterID,
+			RoleStandalone,
+		)
 
 		test.mgrUtil.Start()
 		time.Sleep(100 * time.Millisecond)
@@ -276,10 +288,8 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPVC() {
 		err = k8sClient.Update(ctx, &pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		Eventually(func(g Gomega, ctx context.Context) {
-			err := test.reconciler.deleteRestoringPVC(ctx, restore)
-			g.Expect(err).NotTo(HaveOccurred())
-		}).WithContext(ctx).Should(Succeed())
+		err = test.reconciler.deleteRestoringPVC(ctx, restore)
+		Expect(err).NotTo(HaveOccurred())
 
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &pvc)
 		Expect(err).To(HaveOccurred())
@@ -310,11 +320,8 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPVC() {
 		Expect(err).To(HaveOccurred())
 
 		// cleanup
-		Eventually(func(g Gomega, ctx context.Context) {
-			err := test.reconciler.deleteRestoringPVC(ctx, restore)
-			g.Expect(err).NotTo(HaveOccurred())
-		}).WithContext(ctx).Should(Succeed())
-
+		err = test.reconciler.deleteRestoringPVC(ctx, restore)
+		Expect(err).NotTo(HaveOccurred())
 	})
 
 	It("should return an error, if the PVC having finalizer", func(ctx SpecContext) {
@@ -346,10 +353,8 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPV() {
 		err = k8sClient.Update(ctx, &pv)
 		Expect(err).NotTo(HaveOccurred())
 
-		Eventually(func(g Gomega, ctx context.Context) {
-			err := test.reconciler.deleteRestoringPV(ctx, restore)
-			g.Expect(err).NotTo(HaveOccurred())
-		}).WithContext(ctx).Should(Succeed())
+		err = test.reconciler.deleteRestoringPV(ctx, restore)
+		Expect(err).NotTo(HaveOccurred())
 
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: test.reconciler.restoringPVName(restore)}, &pv)
 		Expect(err).To(HaveOccurred())
@@ -380,10 +385,8 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPV() {
 		Expect(err).To(HaveOccurred())
 
 		// cleanup
-		Eventually(func(g Gomega, ctx context.Context) {
-			err := test.reconciler.deleteRestoringPV(ctx, restore)
-			g.Expect(err).NotTo(HaveOccurred())
-		}).WithContext(ctx).Should(Succeed())
+		err = test.reconciler.deleteRestoringPV(ctx, restore)
+		Expect(err).NotTo(HaveOccurred())
 	})
 
 	It("should return an error, if the PV having finalizer", func(ctx SpecContext) {
