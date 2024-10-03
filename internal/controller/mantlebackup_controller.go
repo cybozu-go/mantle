@@ -348,18 +348,7 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	if r.role == RolePrimary {
-		result, err := r.replicate(ctx, logger, &backup)
-		if err != nil || result != (ctrl.Result{}) {
-			return result, err
-		}
-		prepareResult, result, err := r.prepareForDataSynchronization(ctx, &backup, r.primarySettings.Client)
-		if err != nil || result != (ctrl.Result{}) {
-			return result, err
-		}
-		if prepareResult.isSecondaryMantleBackupReadyToUse {
-			return r.primaryCleanup(ctx, logger, &backup)
-		}
-		return r.export(ctx, &backup, r.primarySettings.Client, prepareResult)
+		return r.replicate(ctx, logger, &backup)
 	}
 
 	return ctrl.Result{}, nil
@@ -373,6 +362,25 @@ func (r *MantleBackupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 func (r *MantleBackupReconciler) replicate(
+	ctx context.Context,
+	logger *slog.Logger,
+	backup *mantlev1.MantleBackup,
+) (ctrl.Result, error) {
+	result, err := r.replicateManifests(ctx, logger, backup)
+	if err != nil || result != (ctrl.Result{}) {
+		return result, err
+	}
+	prepareResult, result, err := r.prepareForDataSynchronization(ctx, backup, r.primarySettings.Client)
+	if err != nil || result != (ctrl.Result{}) {
+		return result, err
+	}
+	if prepareResult.isSecondaryMantleBackupReadyToUse {
+		return r.primaryCleanup(ctx, logger, backup)
+	}
+	return r.export(ctx, backup, r.primarySettings.Client, prepareResult)
+}
+
+func (r *MantleBackupReconciler) replicateManifests(
 	ctx context.Context,
 	_ *slog.Logger,
 	backup *mantlev1.MantleBackup,
