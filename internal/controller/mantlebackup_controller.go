@@ -374,7 +374,7 @@ func (r *MantleBackupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 func (r *MantleBackupReconciler) replicate(
 	ctx context.Context,
-	logger *slog.Logger,
+	_ *slog.Logger,
 	backup *mantlev1.MantleBackup,
 ) (ctrl.Result, error) {
 	// Unmarshal the PVC manifest stored in the status of the MantleBackup resource.
@@ -455,15 +455,6 @@ func (r *MantleBackupReconciler) replicate(
 			MantleBackup: string(backupSentJson),
 		},
 	); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	// Update the status of the MantleBackup.
-	if err := r.updateStatusCondition(ctx, logger, backup, metav1.Condition{
-		Type:   mantlev1.BackupConditionSyncedToRemote,
-		Status: metav1.ConditionTrue,
-		Reason: mantlev1.BackupReasonNone,
-	}); err != nil {
 		return ctrl.Result{}, err
 	}
 
