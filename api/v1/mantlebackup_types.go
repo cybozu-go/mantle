@@ -25,7 +25,10 @@ type MantleBackupSpec struct {
 
 	// 'expire' specifies the expiration duration of the backup
 	//+kubebuilder:validation:Format:="duration"
-	Expire string `json:"expire,omitempty"`
+	//+kubebuilder:validation:XValidation:message="expire must be >= 1d",rule="self >= duration('24h')"
+	//+kubebuilder:validation:XValidation:message="expire must be <= 15d",rule="self <= duration('360h')"
+	//+kubebuilder:validation:XValidation:message="spec.expire is immutable",rule="self == oldSelf"
+	Expire string `json:"expire"`
 }
 
 // MantleBackupStatus defines the observed state of MantleBackup

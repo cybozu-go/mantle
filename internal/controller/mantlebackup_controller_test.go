@@ -138,6 +138,54 @@ var _ = Describe("MantleBackup controller", func() {
 		resMgr.WaitForBackupReady(ctx, backup)
 	})
 
+	DescribeTable("MantleBackup with correct expiration",
+		func(ctx SpecContext, expire string) {
+			_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, err = resMgr.CreateUniqueBackupFor(ctx, pvc, func(backup *mantlev1.MantleBackup) {
+				backup.Spec.Expire = expire
+			})
+			Expect(err).NotTo(HaveOccurred())
+		},
+		Entry("min expire", "1d"),
+		Entry("max expire", "15d"),
+		Entry("complex expire", "1w2d3h4m5s"),
+	)
+
+	DescribeTable("MantleBackup with incorrect expiration",
+		func(ctx SpecContext, expire string) {
+			_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, err = resMgr.CreateUniqueBackupFor(ctx, pvc, func(backup *mantlev1.MantleBackup) {
+				backup.Spec.Expire = expire
+			})
+			Expect(err).To(Or(
+				MatchError(ContainSubstring("expire must be")),
+				MatchError(ContainSubstring("body must be of type duration")),
+			))
+		},
+		Entry("invalid short expire", "23h"),
+		Entry("invalid long expire", "15d1s"),
+		Entry("invalid duration", "foo"),
+	)
+
+	It("Should reject updating the expire field", func(ctx SpecContext) {
+		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
+		Expect(err).NotTo(HaveOccurred())
+
+		backup, err := resMgr.CreateUniqueBackupFor(ctx, pvc)
+		Expect(err).NotTo(HaveOccurred())
+
+		expire, err := strfmt.ParseDuration(backup.Spec.Expire)
+		Expect(err).NotTo(HaveOccurred())
+		expire += time.Hour
+		backup.Spec.Expire = expire.String()
+		err = k8sClient.Update(ctx, backup)
+		Expect(err).To(MatchError(ContainSubstring("spec.expire is immutable")))
+	})
+
 	It("should not be ready to use if the PVC is the lost state from the beginning", func(ctx SpecContext) {
 		pv, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())

@@ -18,7 +18,8 @@ import (
 )
 
 const (
-	provisioner = "rook-ceph.rbd.csi.ceph.com"
+	provisioner   = "rook-ceph.rbd.csi.ceph.com"
+	defaultExpire = "1d"
 )
 
 type ResourceManager struct {
@@ -166,7 +167,7 @@ func (r *ResourceManager) createPVAndPVC(ctx context.Context, ns, pvName, pvcNam
 	return &pv, &pvc, err
 }
 
-func (r *ResourceManager) CreateUniqueBackupFor(ctx context.Context, pvc *corev1.PersistentVolumeClaim) (
+func (r *ResourceManager) CreateUniqueBackupFor(ctx context.Context, pvc *corev1.PersistentVolumeClaim, mutateFn ...func(*mantlev1.MantleBackup)) (
 	*mantlev1.MantleBackup, error) {
 	backup := &mantlev1.MantleBackup{
 		ObjectMeta: metav1.ObjectMeta{
@@ -174,8 +175,12 @@ func (r *ResourceManager) CreateUniqueBackupFor(ctx context.Context, pvc *corev1
 			Namespace: pvc.Namespace,
 		},
 		Spec: mantlev1.MantleBackupSpec{
-			PVC: pvc.Name,
+			PVC:    pvc.Name,
+			Expire: defaultExpire,
 		},
+	}
+	for _, fn := range mutateFn {
+		fn(backup)
 	}
 	err := r.client.Create(ctx, backup)
 	if err != nil {
