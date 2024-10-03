@@ -6,7 +6,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
@@ -16,8 +15,6 @@ type ManagerUtil interface {
 	Start()
 	Stop() error
 	GetManager() manager.Manager
-	GetScheme() *runtime.Scheme
-	GetClient() client.Client
 }
 
 type managerUtilImpl struct {
@@ -61,12 +58,4 @@ func (m *managerUtilImpl) Stop() error {
 
 func (m *managerUtilImpl) GetManager() manager.Manager {
 	return m.mgr
-}
-
-func (m *managerUtilImpl) GetScheme() *runtime.Scheme {
-	return m.mgr.GetScheme()
-}
-
-func (m *managerUtilImpl) GetClient() client.Client {
-	return m.mgr.GetClient()
 }

@@ -63,7 +63,14 @@ var _ = Describe("MantleBackupConfig controller", func() {
 	BeforeEach(func() {
 		mgrUtil = testutil.NewManagerUtil(context.Background(), cfg, scheme.Scheme)
 
-		reconciler = NewMantleBackupConfigReconciler(mgrUtil.GetClient(), mgrUtil.GetScheme(), resMgr.ClusterID, "0s", "", RoleStandalone)
+		reconciler = NewMantleBackupConfigReconciler(
+			mgrUtil.GetManager().GetClient(),
+			mgrUtil.GetManager().GetScheme(),
+			resMgr.ClusterID,
+			"0s",
+			"",
+			RoleStandalone,
+		)
 		err := reconciler.SetupWithManager(mgrUtil.GetManager())
 		Expect(err).NotTo(HaveOccurred())
 

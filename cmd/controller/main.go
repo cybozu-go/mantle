@@ -128,6 +128,7 @@ func setupReconcilers(mgr manager.Manager, primarySettings *controller.PrimarySe
 
 	restoreReconciler := controller.NewMantleRestoreReconciler(
 		mgr.GetClient(),
+		mgr.GetAPIReader(),
 		mgr.GetScheme(),
 		managedCephClusterID,
 		role,
