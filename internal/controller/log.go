@@ -1,11 +1,19 @@
 package controller
 
 import (
+	"io"
 	"log/slog"
 	"os"
 )
 
-var gLogger *slog.Logger
+var (
+	gLogger *slog.Logger
+	writer  swappableWriter = swappableWriter{os.Stderr}
+)
+
+type swappableWriter struct {
+	io.Writer
+}
 
 func init() {
 	hostname, err := os.Hostname()
@@ -13,7 +21,7 @@ func init() {
 		panic(err)
 	}
 
-	gLogger = slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+	gLogger = slog.New(slog.NewJSONHandler(&writer, &slog.HandlerOptions{
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
 			switch a.Key {
 			case slog.TimeKey:
@@ -26,4 +34,8 @@ func init() {
 			return a
 		},
 	})).With(slog.String("utsname", hostname))
+}
+
+func setLoggerWriter(w io.Writer) {
+	writer.Writer = w
 }
