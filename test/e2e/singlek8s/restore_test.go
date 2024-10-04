@@ -197,8 +197,7 @@ func (test *restoreTest) testRestore() {
 		Expect(err).NotTo(HaveOccurred())
 
 		By("checking if the status is updated")
-		readyToUseCondition := meta.FindStatusCondition(restore.Status.Conditions, mantlev1.RestoreConditionReadyToUse)
-		Expect(readyToUseCondition.Status).To(Equal(metav1.ConditionTrue))
+		Expect(meta.IsStatusConditionTrue(restore.Status.Conditions, mantlev1.RestoreConditionReadyToUse)).To(BeTrue())
 	})
 
 	It("should not update clone image if it is already created", func() {
@@ -487,8 +486,7 @@ func (test *restoreTest) testCloneImageFromBackup() {
 				return err
 			}
 
-			condition := meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse)
-			if condition == nil || condition.Status != metav1.ConditionTrue {
+			if !meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse) {
 				return fmt.Errorf("backup is not ready")
 			}
 			return nil
