@@ -17,7 +17,6 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -412,8 +411,7 @@ func isMantleBackupReady(namespace, name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	cond := meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse).Status
-	return cond == metav1.ConditionTrue, nil
+	return meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse), nil
 }
 
 func isMantleRestoreReady(namespace, name string) bool {
@@ -431,8 +429,7 @@ func isMantleRestoreReady(namespace, name string) bool {
 	if restore.Status.Conditions == nil {
 		return false
 	}
-	readyToUseCondition := meta.FindStatusCondition(restore.Status.Conditions, mantlev1.RestoreConditionReadyToUse)
-	return readyToUseCondition.Status == metav1.ConditionTrue
+	return meta.IsStatusConditionTrue(restore.Status.Conditions, mantlev1.RestoreConditionReadyToUse)
 }
 
 func writeTestData(namespace, pvc string, data []byte) error {

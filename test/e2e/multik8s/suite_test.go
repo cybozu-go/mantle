@@ -15,7 +15,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestMtest(t *testing.T) {
@@ -85,11 +84,7 @@ func replicationTestSuite() {
 				if err != nil {
 					return err
 				}
-				cond := meta.FindStatusCondition(mb.Status.Conditions, mantlev1.BackupConditionSyncedToRemote)
-				if cond == nil {
-					return errors.New("couldn't find condition SyncedToRemote")
-				}
-				if cond.Status != metav1.ConditionTrue {
+				if !meta.IsStatusConditionTrue(mb.Status.Conditions, mantlev1.BackupConditionSyncedToRemote) {
 					return errors.New("status of SyncedToRemote condition is not True")
 				}
 				return nil
