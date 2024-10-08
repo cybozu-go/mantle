@@ -325,7 +325,7 @@ func deleteNamespacedResource(namespace, kind string) error {
 		if name == "" {
 			continue
 		}
-		_, stderr, err = kubectl("delete", kind, "-n", namespace, name)
+		_, stderr, err = kubectl("delete", kind, "-n", namespace, "--ignore-not-found=true", name)
 		if err != nil {
 			return fmt.Errorf("kubectl delete failed. ns: %s, kind: %s, name: %s, stderr: %s, err: %w",
 				namespace, kind, name, string(stderr), err)
