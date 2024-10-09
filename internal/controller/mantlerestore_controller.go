@@ -69,11 +69,11 @@ func (r *MantleRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	var restore mantlev1.MantleRestore
 	err := r.client.Get(ctx, req.NamespacedName, &restore)
 	if errors.IsNotFound(err) {
-		logger.Info("MantleRestore resource not found", "name", req.Name, "error", err)
+		logger.Info("MantleRestore resource not found", "error", err)
 		return ctrl.Result{}, nil
 	}
 	if err != nil {
-		logger.Error(err, "failed to get MantleRestore", "name", req.NamespacedName)
+		logger.Error(err, "failed to get MantleRestore")
 		return ctrl.Result{}, err
 	}
 
@@ -86,7 +86,7 @@ func (r *MantleRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 func (r *MantleRestoreReconciler) restore(ctx context.Context, restore *mantlev1.MantleRestore) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	logger.Info("restoring", "name", restore.Name, "namespace", restore.Namespace, "backup", restore.Spec.Backup)
+	logger.Info("restoring", "backup", restore.Spec.Backup)
 
 	// skip if already ReadyToUse
 	if meta.IsStatusConditionTrue(restore.Status.Conditions, mantlev1.RestoreConditionReadyToUse) {
@@ -131,7 +131,7 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, restore *mantlev1
 	controllerutil.AddFinalizer(restore, MantleRestoreFinalizerName)
 	err = r.client.Update(ctx, restore)
 	if err != nil {
-		logger.Error(err, "failed to add finalizer", "restore", restore.Name, "namespace", restore.Namespace)
+		logger.Error(err, "failed to add finalizer")
 		return ctrl.Result{}, err
 	}
 
@@ -168,13 +168,13 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, restore *mantlev1
 
 	// create a restore PV with the clone image
 	if err := r.createRestoringPV(ctx, restore, &backup); err != nil {
-		logger.Error(err, "failed to create PV", "restore", restore.Name, "namespace", restore.Namespace)
+		logger.Error(err, "failed to create PV")
 		return ctrl.Result{}, err
 	}
 
 	// create a restore PVC with the restore PV
 	if err := r.createRestoringPVC(ctx, restore, &backup); err != nil {
-		logger.Error(err, "failed to create PVC", "restore", restore.Name, "namespace", restore.Namespace)
+		logger.Error(err, "failed to create PVC")
 		return ctrl.Result{}, err
 	}
 
@@ -341,24 +341,24 @@ func (r *MantleRestoreReconciler) cleanup(ctx context.Context, restore *mantlev1
 		return ctrl.Result{}, nil
 	}
 
-	logger.Info("deleting", "name", restore.Name, "namespace", restore.Namespace)
+	logger.Info("deleting")
 
 	// delete the PVC
 	if err := r.deleteRestoringPVC(ctx, restore); err != nil {
-		logger.Error(err, "failed to delete PVC", "restore", restore.Name, "namespace", restore.Namespace)
+		logger.Error(err, "failed to delete PVC")
 		return ctrl.Result{}, err
 	}
 
 	// delete the PV
 	err := r.deleteRestoringPV(ctx, restore)
 	if err != nil {
-		logger.Error(err, "failed to get PV", "restore", restore.Name, "namespace", restore.Namespace)
+		logger.Error(err, "failed to get PV")
 		return ctrl.Result{}, err
 	}
 
 	// delete the clone image
 	if err := r.removeRBDImage(ctx, restore); err != nil {
-		logger.Error(err, "failed to remove image", "restore", restore.Name, "namespace", restore.Namespace)
+		logger.Error(err, "failed to remove image")
 		return ctrl.Result{}, err
 	}
 
@@ -366,7 +366,7 @@ func (r *MantleRestoreReconciler) cleanup(ctx context.Context, restore *mantlev1
 	controllerutil.RemoveFinalizer(restore, MantleRestoreFinalizerName)
 	err = r.client.Update(ctx, restore)
 	if err != nil {
-		logger.Error(err, "failed to remove finalizer", "restore", restore.Name, "namespace", restore.Namespace)
+		logger.Error(err, "failed to remove finalizer")
 		return ctrl.Result{}, err
 	}
 
@@ -439,7 +439,7 @@ func (r *MantleRestoreReconciler) removeRBDImage(ctx context.Context, restore *m
 	logger := log.FromContext(ctx)
 	image := r.restoringRBDImageName(restore)
 	pool := restore.Status.Pool
-	logger.Info("removing image", "restore", restore.Name, "namespace", restore.Namespace, "pool", pool, "image", image)
+	logger.Info("removing image", "pool", pool, "image", image)
 	images, err := r.ceph.RBDLs(pool)
 	if err != nil {
 		return fmt.Errorf("failed to list RBD images: %v", err)

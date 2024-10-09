@@ -81,7 +81,7 @@ func (r *MantleBackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.R
 	var mbc mantlev1.MantleBackupConfig
 	if err := r.Client.Get(ctx, req.NamespacedName, &mbc); err != nil {
 		if errors.IsNotFound(err) {
-			logger.Info("MantleBackupConfig not found", "name", req.Name, "namespace", req.Namespace, "error", err)
+			logger.Info("MantleBackupConfig not found", "error", err)
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("failed to get MantleBackupConfig: %w", err)
@@ -91,7 +91,7 @@ func (r *MantleBackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.R
 	if !mbc.ObjectMeta.DeletionTimestamp.IsZero() {
 		if controllerutil.ContainsFinalizer(&mbc, MantleBackupConfigFinalizerName) {
 			// Delete the CronJob. If we failed to delete it because it's not found, ignore the error.
-			logger.Info("start deleting cronjobs", "name", mbc.Name, "namespace", mbc.Namespace)
+			logger.Info("start deleting cronjobs")
 			if err := r.deleteCronJob(ctx, &mbc, cronJobInfo.namespace); err != nil && !errors.IsNotFound(err) {
 				return ctrl.Result{}, fmt.Errorf("failed to delete cronjob: %w", err)
 			}
@@ -114,7 +114,7 @@ func (r *MantleBackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return ctrl.Result{}, fmt.Errorf("failed to get Ceph cluster ID: %s: %s: %w", mbc.Namespace, mbc.Spec.PVC, err)
 	}
 	if clusterID != r.managedCephClusterID {
-		logger.Info("the target pvc is not managed by this controller", "name", req.Name, "namespace", req.Namespace, "error", err)
+		logger.Info("the target pvc is not managed by this controller", "error", err)
 		return ctrl.Result{}, nil
 	}
 

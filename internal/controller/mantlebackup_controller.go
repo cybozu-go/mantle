@@ -156,7 +156,7 @@ func (r *MantleBackupReconciler) checkPVCInManagedCluster(ctx context.Context, b
 		return err
 	}
 	if clusterID != r.managedCephClusterID {
-		logger.Info("clusterID not matched", "namespace", backup.Namespace, "backup", backup.Name, "pvc", pvc.Name, "clusterID", clusterID, "managedCephClusterID", r.managedCephClusterID)
+		logger.Info("clusterID not matched", "pvc", pvc.Name, "clusterID", clusterID, "managedCephClusterID", r.managedCephClusterID)
 		return errSkipProcessing
 	}
 
@@ -291,19 +291,17 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	err := r.Get(ctx, req.NamespacedName, &backup)
 	if errors.IsNotFound(err) {
-		logger.Info("MantleBackup is not found", "name", backup.Name, "error", err)
+		logger.Info("MantleBackup is not found", "error", err)
 		return ctrl.Result{}, nil
 	}
 	if err != nil {
-		logger.Error(err, "failed to get MantleBackup", "name", req.NamespacedName)
+		logger.Error(err, "failed to get MantleBackup")
 		return ctrl.Result{}, err
 	}
 
 	if isCreatedWhenMantleControllerWasSecondary(&backup) {
 		logger.Info(
 			"skipping to reconcile the MantleBackup created by a remote mantle-controller to prevent accidental data loss",
-			"name", backup.GetName(),
-			"namespace", backup.GetNamespace(),
 		)
 		return ctrl.Result{}, nil
 	}
