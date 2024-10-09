@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"strings"
 
@@ -15,6 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
@@ -65,7 +65,7 @@ func NewMantleBackupConfigReconciler(
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.16.3/pkg/reconcile
 func (r *MantleBackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := gLogger.With("MantleBackupConfig", req.NamespacedName)
+	logger := log.FromContext(ctx)
 
 	if r.role == RoleSecondary {
 		return ctrl.Result{}, nil
@@ -109,7 +109,7 @@ func (r *MantleBackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.R
 	if err := r.Client.Get(ctx, types.NamespacedName{Namespace: mbc.Namespace, Name: mbc.Spec.PVC}, &pvc); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to get PVC: %s: %s: %w", mbc.Namespace, mbc.Spec.PVC, err)
 	}
-	clusterID, err := getCephClusterIDFromPVC(ctx, logger, r.Client, &pvc)
+	clusterID, err := getCephClusterIDFromPVC(ctx, r.Client, &pvc)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to get Ceph cluster ID: %s: %s: %w", mbc.Namespace, mbc.Spec.PVC, err)
 	}
@@ -129,7 +129,6 @@ func (r *MantleBackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.R
 	// Create or update the CronJob
 	if err := r.createOrUpdateCronJob(
 		ctx,
-		logger,
 		&mbc,
 		cronJobInfo.namespace,
 		cronJobInfo.serviceAccountName,
@@ -180,7 +179,7 @@ func (r *MantleBackupConfigReconciler) SetupWithManager(mgr ctrl.Manager) error 
 				if err := r.Client.List(ctx, &mbcs, &client.ListOptions{
 					FieldSelector: fields.OneTermEqualSelector(".metadata.uid", uid),
 				}); err != nil {
-					gLogger.Debug("List of MantleBackup failed", "error", err)
+					mgr.GetLogger().Info("List of MantleBackup failed", "error", err)
 					return []reconcile.Request{}
 				}
 				if len(mbcs.Items) != 1 {
@@ -199,7 +198,8 @@ func (r *MantleBackupConfigReconciler) SetupWithManager(mgr ctrl.Manager) error 
 		Complete(r)
 }
 
-func (r *MantleBackupConfigReconciler) createOrUpdateCronJob(ctx context.Context, logger *slog.Logger, mbc *mantlev1.MantleBackupConfig, namespace, serviceAccountName, image string) error {
+func (r *MantleBackupConfigReconciler) createOrUpdateCronJob(ctx context.Context, mbc *mantlev1.MantleBackupConfig, namespace, serviceAccountName, image string) error {
+	logger := log.FromContext(ctx)
 	cronJobName := getMBCCronJobName(mbc)
 
 	cronJob := &batchv1.CronJob{}

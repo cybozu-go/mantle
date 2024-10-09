@@ -1,7 +1,7 @@
 package controller
 
 import (
-	"log/slog"
+	"context"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/ceph"
@@ -22,10 +22,10 @@ func NewMantleRestoreReconcilerE2E(managedCephClusterID, toolsNamespace string) 
 	}
 }
 
-func (r *MantleRestoreReconcilerE2E) CloneImageFromBackup(logger *slog.Logger, restore *mantlev1.MantleRestore, backup *mantlev1.MantleBackup) error {
-	return r.cloneImageFromBackup(logger, restore, backup)
+func (r *MantleRestoreReconcilerE2E) CloneImageFromBackup(ctx context.Context, restore *mantlev1.MantleRestore, backup *mantlev1.MantleBackup) error {
+	return r.cloneImageFromBackup(ctx, restore, backup)
 }
 
-func (r *MantleRestoreReconcilerE2E) RemoveRBDImage(logger *slog.Logger, restore *mantlev1.MantleRestore) error {
-	return r.removeRBDImage(logger, restore)
+func (r *MantleRestoreReconcilerE2E) RemoveRBDImage(ctx context.Context, restore *mantlev1.MantleRestore) error {
+	return r.removeRBDImage(ctx, restore)
 }

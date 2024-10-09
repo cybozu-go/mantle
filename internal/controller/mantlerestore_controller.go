@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"slices"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
@@ -17,6 +16,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // MantleRestoreReconciler reconciles a MantleRestore object
@@ -60,7 +60,7 @@ func NewMantleRestoreReconciler(
 }
 
 func (r *MantleRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := gLogger.With("MantleRestore", req.NamespacedName)
+	logger := log.FromContext(ctx)
 
 	if r.role == RoleSecondary {
 		return ctrl.Result{}, nil
@@ -73,18 +73,19 @@ func (r *MantleRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 	if err != nil {
-		logger.Error("failed to get MantleRestore", "name", req.NamespacedName, "error", err)
+		logger.Error(err, "failed to get MantleRestore", "name", req.NamespacedName)
 		return ctrl.Result{}, err
 	}
 
 	if restore.ObjectMeta.DeletionTimestamp.IsZero() {
-		return r.restore(ctx, logger, &restore)
+		return r.restore(ctx, &restore)
 	} else {
-		return r.cleanup(ctx, logger, &restore)
+		return r.cleanup(ctx, &restore)
 	}
 }
 
-func (r *MantleRestoreReconciler) restore(ctx context.Context, logger *slog.Logger, restore *mantlev1.MantleRestore) (ctrl.Result, error) {
+func (r *MantleRestoreReconciler) restore(ctx context.Context, restore *mantlev1.MantleRestore) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
 	logger.Info("restoring", "name", restore.Name, "namespace", restore.Namespace, "backup", restore.Spec.Backup)
 
 	// skip if already ReadyToUse
@@ -96,21 +97,21 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, logger *slog.Logg
 	var backup mantlev1.MantleBackup
 	err := r.client.Get(ctx, client.ObjectKey{Name: restore.Spec.Backup, Namespace: restore.Namespace}, &backup)
 	if err != nil {
-		logger.Error("failed to get MantleBackup", "name", restore.Spec.Backup, "namespace", restore.Namespace, "error", err)
+		logger.Error(err, "failed to get MantleBackup", "name", restore.Spec.Backup, "namespace", restore.Namespace)
 		return ctrl.Result{}, err
 	}
 
 	var pvc corev1.PersistentVolumeClaim
 	err = json.Unmarshal([]byte(backup.Status.PVCManifest), &pvc)
 	if err != nil {
-		logger.Error("failed to unmarshal PVC manifest", "backup", backup.Name, "namespace", backup.Namespace, "error", err)
+		logger.Error(err, "failed to unmarshal PVC manifest", "backup", backup.Name, "namespace", backup.Namespace)
 		return ctrl.Result{}, err
 	}
 
 	// check if the PVC is managed by the target Ceph cluster
-	clusterID, err := getCephClusterIDFromPVC(ctx, logger, r.client, &pvc)
+	clusterID, err := getCephClusterIDFromPVC(ctx, r.client, &pvc)
 	if err != nil {
-		logger.Error("failed to get Ceph cluster ID", "backup", backup.Name, "namespace", backup.Namespace, "error", err)
+		logger.Error(err, "failed to get Ceph cluster ID", "backup", backup.Name, "namespace", backup.Namespace)
 		return ctrl.Result{}, err
 	}
 	if clusterID != r.managedCephClusterID {
@@ -122,7 +123,7 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, logger *slog.Logg
 	restore.Status.ClusterID = clusterID
 	err = r.client.Status().Update(ctx, restore)
 	if err != nil {
-		logger.Error("failed to update status.clusterID", "status", restore.Status, "error", err)
+		logger.Error(err, "failed to update status.clusterID", "status", restore.Status)
 		return ctrl.Result{}, err
 	}
 
@@ -130,7 +131,7 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, logger *slog.Logg
 	controllerutil.AddFinalizer(restore, MantleRestoreFinalizerName)
 	err = r.client.Update(ctx, restore)
 	if err != nil {
-		logger.Error("failed to add finalizer", "restore", restore.Name, "namespace", restore.Namespace, "error", err)
+		logger.Error(err, "failed to add finalizer", "restore", restore.Name, "namespace", restore.Namespace)
 		return ctrl.Result{}, err
 	}
 
@@ -144,35 +145,36 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, logger *slog.Logg
 	var pv corev1.PersistentVolume
 	err = json.Unmarshal([]byte(backup.Status.PVManifest), &pv)
 	if err != nil {
-		logger.Error("failed to unmarshal PV manifest", "backup", backup.Name, "namespace", backup.Namespace, "error", err)
+		logger.Error(err, "failed to unmarshal PV manifest", "backup", backup.Name, "namespace", backup.Namespace)
 		return ctrl.Result{}, err
 	}
 	restore.Status.Pool = pv.Spec.CSI.VolumeAttributes["pool"]
 	if restore.Status.Pool == "" {
-		logger.Error("pool not found in PV manifest", "backup", backup.Name, "namespace", backup.Namespace)
-		return ctrl.Result{}, fmt.Errorf("pool not found in PV manifest")
+		err := fmt.Errorf("pool not found in PV manifest")
+		logger.Error(err, "status.pool cannot be set", "backup", backup.Name, "namespace", backup.Namespace)
+		return ctrl.Result{}, err
 	}
 	err = r.client.Status().Update(ctx, restore)
 	if err != nil {
-		logger.Error("failed to update status.pool", "status", restore.Status, "error", err)
+		logger.Error(err, "failed to update status.pool", "status", restore.Status)
 		return ctrl.Result{}, err
 	}
 
 	// create a clone image from the backup
-	if err := r.cloneImageFromBackup(logger, restore, &backup); err != nil {
-		logger.Error("failed to clone image from backup", "backup", backup.Name, "namespace", backup.Namespace, "error", err)
+	if err := r.cloneImageFromBackup(ctx, restore, &backup); err != nil {
+		logger.Error(err, "failed to clone image from backup", "backup", backup.Name, "namespace", backup.Namespace)
 		return ctrl.Result{}, err
 	}
 
 	// create a restore PV with the clone image
 	if err := r.createRestoringPV(ctx, restore, &backup); err != nil {
-		logger.Error("failed to create PV", "restore", restore.Name, "namespace", restore.Namespace, "error", err)
+		logger.Error(err, "failed to create PV", "restore", restore.Name, "namespace", restore.Namespace)
 		return ctrl.Result{}, err
 	}
 
 	// create a restore PVC with the restore PV
 	if err := r.createRestoringPVC(ctx, restore, &backup); err != nil {
-		logger.Error("failed to create PVC", "restore", restore.Name, "namespace", restore.Namespace, "error", err)
+		logger.Error(err, "failed to create PVC", "restore", restore.Name, "namespace", restore.Namespace)
 		return ctrl.Result{}, err
 	}
 
@@ -184,7 +186,7 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, logger *slog.Logg
 	})
 	err = r.client.Status().Update(ctx, restore)
 	if err != nil {
-		logger.Error("failed to update status", "status", restore.Status, "error", err)
+		logger.Error(err, "failed to update status", "status", restore.Status)
 		return ctrl.Result{}, err
 	}
 
@@ -199,7 +201,8 @@ func (r *MantleRestoreReconciler) restoringPVName(restore *mantlev1.MantleRestor
 	return fmt.Sprintf("mr-%s-%s", restore.Namespace, restore.Name)
 }
 
-func (r *MantleRestoreReconciler) cloneImageFromBackup(logger *slog.Logger, restore *mantlev1.MantleRestore, backup *mantlev1.MantleBackup) error {
+func (r *MantleRestoreReconciler) cloneImageFromBackup(ctx context.Context, restore *mantlev1.MantleRestore, backup *mantlev1.MantleBackup) error {
+	logger := log.FromContext(ctx)
 	pv := corev1.PersistentVolume{}
 	err := json.Unmarshal([]byte(backup.Status.PVManifest), &pv)
 	if err != nil {
@@ -331,7 +334,8 @@ func (r *MantleRestoreReconciler) createRestoringPVC(ctx context.Context, restor
 	return r.client.Create(ctx, &newPVC)
 }
 
-func (r *MantleRestoreReconciler) cleanup(ctx context.Context, logger *slog.Logger, restore *mantlev1.MantleRestore) (ctrl.Result, error) {
+func (r *MantleRestoreReconciler) cleanup(ctx context.Context, restore *mantlev1.MantleRestore) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
 	// check if the cluster ID matches
 	if restore.Status.ClusterID != r.managedCephClusterID {
 		return ctrl.Result{}, nil
@@ -341,20 +345,20 @@ func (r *MantleRestoreReconciler) cleanup(ctx context.Context, logger *slog.Logg
 
 	// delete the PVC
 	if err := r.deleteRestoringPVC(ctx, restore); err != nil {
-		logger.Error("failed to delete PVC", "restore", restore.Name, "namespace", restore.Namespace, "error", err)
+		logger.Error(err, "failed to delete PVC", "restore", restore.Name, "namespace", restore.Namespace)
 		return ctrl.Result{}, err
 	}
 
 	// delete the PV
 	err := r.deleteRestoringPV(ctx, restore)
 	if err != nil {
-		logger.Error("failed to get PV", "restore", restore.Name, "namespace", restore.Namespace, "error", err)
+		logger.Error(err, "failed to get PV", "restore", restore.Name, "namespace", restore.Namespace)
 		return ctrl.Result{}, err
 	}
 
 	// delete the clone image
-	if err := r.removeRBDImage(logger, restore); err != nil {
-		logger.Error("failed to remove image", "restore", restore.Name, "namespace", restore.Namespace, "error", err)
+	if err := r.removeRBDImage(ctx, restore); err != nil {
+		logger.Error(err, "failed to remove image", "restore", restore.Name, "namespace", restore.Namespace)
 		return ctrl.Result{}, err
 	}
 
@@ -362,7 +366,7 @@ func (r *MantleRestoreReconciler) cleanup(ctx context.Context, logger *slog.Logg
 	controllerutil.RemoveFinalizer(restore, MantleRestoreFinalizerName)
 	err = r.client.Update(ctx, restore)
 	if err != nil {
-		logger.Error("failed to remove finalizer", "restore", restore.Name, "namespace", restore.Namespace, "error", err)
+		logger.Error(err, "failed to remove finalizer", "restore", restore.Name, "namespace", restore.Namespace)
 		return ctrl.Result{}, err
 	}
 
@@ -431,7 +435,8 @@ func (r *MantleRestoreReconciler) deleteRestoringPV(ctx context.Context, restore
 	}
 }
 
-func (r *MantleRestoreReconciler) removeRBDImage(logger *slog.Logger, restore *mantlev1.MantleRestore) error {
+func (r *MantleRestoreReconciler) removeRBDImage(ctx context.Context, restore *mantlev1.MantleRestore) error {
+	logger := log.FromContext(ctx)
 	image := r.restoringRBDImageName(restore)
 	pool := restore.Status.Pool
 	logger.Info("removing image", "restore", restore.Name, "namespace", restore.Namespace, "pool", pool, "image", image)

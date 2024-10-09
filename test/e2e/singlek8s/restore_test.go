@@ -3,7 +3,6 @@ package singlek8s
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"time"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
@@ -465,7 +464,7 @@ func (test *restoreTest) testCloneImageFromBackup() {
 	}
 	var info *rbdInfo
 
-	It("should create a clone of the backup image", func() {
+	It("should create a clone of the backup image", func(ctx SpecContext) {
 		test.cleanup()
 
 		By("creating a PVC and a MantleBackup")
@@ -493,15 +492,15 @@ func (test *restoreTest) testCloneImageFromBackup() {
 		}).Should(Succeed())
 
 		By("creating a clone image from the backup")
-		err = reconciler.CloneImageFromBackup(slog.Default(), restore, backup)
+		err = reconciler.CloneImageFromBackup(ctx, restore, backup)
 		Expect(err).NotTo(HaveOccurred())
 
 		info, err = getRBDInfo(cephCluster1Namespace, test.poolName, cloneImageName)
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("should skip creating a clone if it already exists", func() {
-		err := reconciler.CloneImageFromBackup(slog.Default(), restore, backup)
+	It("should skip creating a clone if it already exists", func(ctx SpecContext) {
+		err := reconciler.CloneImageFromBackup(ctx, restore, backup)
 		Expect(err).NotTo(HaveOccurred())
 
 		info2, err := getRBDInfo(cephCluster1Namespace, test.poolName, cloneImageName)
@@ -511,16 +510,16 @@ func (test *restoreTest) testCloneImageFromBackup() {
 		Expect(info2.ModifyTimestamp).To(Equal(info.ModifyTimestamp))
 	})
 
-	It("should return an error, if the PV manifest is broken", func() {
+	It("should return an error, if the PV manifest is broken", func(ctx SpecContext) {
 		b := backup.DeepCopy()
 		b.Status.PVManifest = "broken"
 
-		err := reconciler.CloneImageFromBackup(slog.Default(), restore, b)
+		err := reconciler.CloneImageFromBackup(ctx, restore, b)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("failed to unmarshal PV manifest"))
 	})
 
-	It("should return an error, if imageName is not found", func() {
+	It("should return an error, if imageName is not found", func(ctx SpecContext) {
 		b := backup.DeepCopy()
 		var pv corev1.PersistentVolume
 		err := json.Unmarshal([]byte(backup.Status.PVManifest), &pv)
@@ -531,26 +530,27 @@ func (test *restoreTest) testCloneImageFromBackup() {
 		Expect(err).NotTo(HaveOccurred())
 		b.Status.PVManifest = string(bin)
 
-		err = reconciler.CloneImageFromBackup(slog.Default(), restore, b)
+		err = reconciler.CloneImageFromBackup(ctx, restore, b)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("imageName not found in PV manifest"))
 	})
 
-	It("should return an error, if the image already exists but is not a clone of the backup image", func() {
-		b := backup.DeepCopy()
-		var pv corev1.PersistentVolume
-		err := json.Unmarshal([]byte(backup.Status.PVManifest), &pv)
-		Expect(err).NotTo(HaveOccurred())
-		// override the imageName field
-		pv.Spec.CSI.VolumeAttributes["imageName"] = "different-image-name"
-		bin, err := json.Marshal(pv)
-		Expect(err).NotTo(HaveOccurred())
-		b.Status.PVManifest = string(bin)
+	It("should return an error, if the image already exists but is not a clone of the backup image",
+		func(ctx SpecContext) {
+			b := backup.DeepCopy()
+			var pv corev1.PersistentVolume
+			err := json.Unmarshal([]byte(backup.Status.PVManifest), &pv)
+			Expect(err).NotTo(HaveOccurred())
+			// override the imageName field
+			pv.Spec.CSI.VolumeAttributes["imageName"] = "different-image-name"
+			bin, err := json.Marshal(pv)
+			Expect(err).NotTo(HaveOccurred())
+			b.Status.PVManifest = string(bin)
 
-		err = reconciler.CloneImageFromBackup(slog.Default(), restore, b)
-		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring("image already exists but not a clone of the backup"))
-	})
+			err = reconciler.CloneImageFromBackup(ctx, restore, b)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("image already exists but not a clone of the backup"))
+		})
 }
 
 func (test *restoreTest) testRemoveImage() {
@@ -571,11 +571,11 @@ func (test *restoreTest) testRemoveImage() {
 	}
 
 	Describe("removeImage", func() {
-		It("should remove the image", func() {
+		It("should remove the image", func(ctx SpecContext) {
 			_, err := getRBDInfo(cephCluster1Namespace, test.poolName, cloneImageName)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = reconciler.RemoveRBDImage(slog.Default(), restore)
+			err = reconciler.RemoveRBDImage(ctx, restore)
 			Expect(err).NotTo(HaveOccurred())
 
 			// should get an error since the image is removed
@@ -583,8 +583,8 @@ func (test *restoreTest) testRemoveImage() {
 			Expect(err).To(HaveOccurred())
 		})
 
-		It("should skip removing the image if it does not exist", func() {
-			err := reconciler.RemoveRBDImage(slog.Default(), restore)
+		It("should skip removing the image if it does not exist", func(ctx SpecContext) {
+			err := reconciler.RemoveRBDImage(ctx, restore)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
