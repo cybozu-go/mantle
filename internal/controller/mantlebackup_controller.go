@@ -30,6 +30,7 @@ const (
 	labelLocalBackupTargetPVCUID  = "mantle.cybozu.io/local-backup-target-pvc-uid"
 	labelRemoteBackupTargetPVCUID = "mantle.cybozu.io/remote-backup-target-pvc-uid"
 	annotRemoteUID                = "mantle.cybozu.io/remote-uid"
+	annotDiffTo                   = "mantle.cybozu.io/diff-to"
 )
 
 // MantleBackupReconciler reconciles a MantleBackup object
@@ -292,6 +293,15 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
+	if isCreatedWhenMantleControllerWasSecondary(&backup) {
+		logger.Warn(
+			"skipping to reconcile the MantleBackup created by a remote mantle-controller to prevent accidental data loss",
+			"name", backup.GetName(),
+			"namespace", backup.GetNamespace(),
+		)
+		return ctrl.Result{}, nil
+	}
+
 	target, result, getSnapshotTargetErr := r.getSnapshotTarget(ctx, logger, &backup)
 	switch {
 	case getSnapshotTargetErr == errSkipProcessing:
@@ -307,23 +317,7 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	if !backup.ObjectMeta.DeletionTimestamp.IsZero() {
-		if controllerutil.ContainsFinalizer(&backup, MantleBackupFinalizerName) {
-			if !isErrTargetPVCNotFound(getSnapshotTargetErr) {
-				err := r.removeRBDSnapshot(logger, target.poolName, target.imageName, backup.Name)
-				if err != nil {
-					return ctrl.Result{}, err
-				}
-			}
-
-			controllerutil.RemoveFinalizer(&backup, MantleBackupFinalizerName)
-			err = r.Update(ctx, &backup)
-			if err != nil {
-				logger.Error("failed to remove finalizer", "finalizer", MantleBackupFinalizerName, "error", err)
-				return ctrl.Result{}, err
-			}
-		}
-
-		return ctrl.Result{}, nil
+		return r.finalize(ctx, logger, &backup, target, isErrTargetPVCNotFound(getSnapshotTargetErr))
 	}
 
 	if getSnapshotTargetErr != nil {
@@ -344,22 +338,13 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// Make sure that the reconciled MantleBackup is created not by the secondary mantle but by the primary mantle.
-	if backup.Labels != nil {
-		_, ok1 := backup.Labels[labelLocalBackupTargetPVCUID]
-		_, ok2 := backup.Labels[labelRemoteBackupTargetPVCUID]
-		if ok1 && ok2 {
-			logger.Warn(
-				"skipping to reconcile the MantleBackup created by a remote mantle-controller to prevent accidental data loss",
-				"name", backup.GetName(),
-				"namespace", backup.GetNamespace(),
-			)
-			return ctrl.Result{}, nil
-		}
-	}
-
 	if err := r.provisionRBDSnapshot(ctx, logger, &backup, target); err != nil {
 		return ctrl.Result{}, err
+	}
+
+	// Skip replication if SyncedToRemote condition is true.
+	if meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionSyncedToRemote) {
+		return ctrl.Result{}, nil
 	}
 
 	if r.role == RolePrimary {
@@ -379,6 +364,25 @@ func (r *MantleBackupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 func (r *MantleBackupReconciler) replicate(
 	ctx context.Context,
 	logger *slog.Logger,
+	backup *mantlev1.MantleBackup,
+) (ctrl.Result, error) {
+	result, err := r.replicateManifests(ctx, logger, backup)
+	if err != nil || result != (ctrl.Result{}) {
+		return result, err
+	}
+	prepareResult, result, err := r.prepareForDataSynchronization(ctx, backup, r.primarySettings.Client)
+	if err != nil || result != (ctrl.Result{}) {
+		return result, err
+	}
+	if prepareResult.isSecondaryMantleBackupReadyToUse {
+		return r.primaryCleanup(ctx, logger, backup)
+	}
+	return r.export(ctx, backup, r.primarySettings.Client, prepareResult)
+}
+
+func (r *MantleBackupReconciler) replicateManifests(
+	ctx context.Context,
+	_ *slog.Logger,
 	backup *mantlev1.MantleBackup,
 ) (ctrl.Result, error) {
 	// Unmarshal the PVC manifest stored in the status of the MantleBackup resource.
@@ -462,15 +466,6 @@ func (r *MantleBackupReconciler) replicate(
 		return ctrl.Result{}, err
 	}
 
-	// Update the status of the MantleBackup.
-	if err := r.updateStatusCondition(ctx, logger, backup, metav1.Condition{
-		Type:   mantlev1.BackupConditionSyncedToRemote,
-		Status: metav1.ConditionTrue,
-		Reason: mantlev1.BackupReasonNone,
-	}); err != nil {
-		return ctrl.Result{}, err
-	}
-
 	return ctrl.Result{}, nil
 }
 
@@ -542,4 +537,98 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 	}
 
 	return nil
+}
+
+// isCreatedWhenMantleControllerWasSecondary returns true iff the MantleBackup
+// is created by the secondary mantle.
+func isCreatedWhenMantleControllerWasSecondary(backup *mantlev1.MantleBackup) bool {
+	_, ok := backup.Annotations[annotRemoteUID]
+	return ok
+}
+
+func (r *MantleBackupReconciler) finalize(
+	ctx context.Context,
+	logger *slog.Logger,
+	backup *mantlev1.MantleBackup,
+	target *snapshotTarget,
+	targetPVCNotFound bool,
+) (ctrl.Result, error) {
+	if _, ok := backup.GetAnnotations()[annotDiffTo]; ok {
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	result, err := r.primaryCleanup(ctx, logger, backup)
+	if err != nil || result != (ctrl.Result{}) {
+		return result, err
+	}
+
+	if !controllerutil.ContainsFinalizer(backup, MantleBackupFinalizerName) {
+		return ctrl.Result{}, nil
+	}
+
+	if !targetPVCNotFound {
+		err := r.removeRBDSnapshot(logger, target.poolName, target.imageName, backup.Name)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	controllerutil.RemoveFinalizer(backup, MantleBackupFinalizerName)
+	if err := r.Update(ctx, backup); err != nil {
+		logger.Error("failed to remove finalizer", "finalizer", MantleBackupFinalizerName, "error", err)
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+type dataSyncPrepareResult struct {
+	isIncremental                     bool
+	isSecondaryMantleBackupReadyToUse bool
+	diffFrom                          *mantlev1.MantleBackup // non-nil value iff isIncremental is true.
+}
+
+func (r *MantleBackupReconciler) prepareForDataSynchronization(
+	_ context.Context,
+	_ *mantlev1.MantleBackup,
+	_ proto.MantleServiceClient,
+) (*dataSyncPrepareResult, ctrl.Result, error) { //nolint:unparam
+	return &dataSyncPrepareResult{
+		isIncremental:                     false,
+		isSecondaryMantleBackupReadyToUse: true,
+		diffFrom:                          nil,
+	}, ctrl.Result{}, nil
+}
+
+func (r *MantleBackupReconciler) export(
+	_ context.Context,
+	_ *mantlev1.MantleBackup,
+	_ proto.MantleServiceClient,
+	prepareResult *dataSyncPrepareResult,
+) (ctrl.Result, error) { //nolint:unparam
+	if prepareResult.isIncremental {
+		return ctrl.Result{}, fmt.Errorf("incremental backup is not implemented")
+	}
+	return ctrl.Result{}, nil
+}
+
+func (r *MantleBackupReconciler) primaryCleanup(
+	ctx context.Context,
+	logger *slog.Logger,
+	backup *mantlev1.MantleBackup,
+) (ctrl.Result, error) { // nolint:unparam
+	if !backup.DeletionTimestamp.IsZero() {
+		return ctrl.Result{}, nil
+	}
+
+	// Update the status of the MantleBackup.
+	if err := r.updateStatusCondition(ctx, logger, backup, metav1.Condition{
+		Type:   mantlev1.BackupConditionSyncedToRemote,
+		Status: metav1.ConditionTrue,
+		Reason: mantlev1.BackupReasonNone,
+	}); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
 }
