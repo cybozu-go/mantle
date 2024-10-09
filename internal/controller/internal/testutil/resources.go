@@ -199,6 +199,15 @@ func (r *ResourceManager) WaitForBackupReady(ctx context.Context, backup *mantle
 	}).WithContext(ctx).Should(Succeed())
 }
 
+func (r *ResourceManager) WaitForBackupSyncedToRemote(ctx context.Context, backup *mantlev1.MantleBackup) {
+	EventuallyWithOffset(1, func(g Gomega, ctx context.Context) {
+		err := r.client.Get(ctx, types.NamespacedName{Name: backup.Name, Namespace: backup.Namespace}, backup)
+		g.Expect(err).NotTo(HaveOccurred())
+
+		g.Expect(meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionSyncedToRemote)).Should(BeTrue())
+	}).WithContext(ctx).Should(Succeed())
+}
+
 // cf. https://go.googlesource.com/proposal/+/refs/heads/master/design/43651-type-parameters.md#pointer-method-example
 type ObjectConstraint[T any] interface {
 	client.Object
