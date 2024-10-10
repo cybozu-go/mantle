@@ -46,7 +46,6 @@ var (
 	enableLeaderElection  bool
 	probeAddr             string
 	zapOpts               zap.Options
-	expireOffset          string
 	overwriteMBCSchedule  string
 	role                  string
 	mantleServiceEndpoint string
@@ -62,9 +61,6 @@ func init() {
 	flags.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
-	flags.StringVar(&expireOffset, "expire-offset", "",
-		"An offset for MantleBackupConfig's .spec.expire field. A MantleBackup will expire after "+
-			"it has been active for (.spec.expire - expire-offset) time. This option is intended for testing purposes only.")
 	flags.StringVar(&overwriteMBCSchedule, "overwrite-mbc-schedule", "",
 		"By setting this option, every CronJob created by this controller for every MantleBackupConfig "+
 			"will use its value as .spec.schedule. This option is intended for testing purposes only.")
@@ -142,7 +138,6 @@ func setupReconcilers(mgr manager.Manager, primarySettings *controller.PrimarySe
 		mgr.GetClient(),
 		mgr.GetScheme(),
 		managedCephClusterID,
-		expireOffset,
 		overwriteMBCSchedule,
 		role,
 	).SetupWithManager(mgr); err != nil {

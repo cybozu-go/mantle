@@ -1,4 +1,4 @@
-package backupandrotate
+package backup
 
 import (
 	"context"
@@ -8,16 +8,13 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"time"
 
 	"github.com/spf13/cobra"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/kube-openapi/pkg/validation/strfmt"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
@@ -29,16 +26,14 @@ import (
 
 var (
 	mbcName, mbcNamespace string
-	expireOffset          string
 	zapOpts               zap.Options
 
 	scheme                = runtime.NewScheme()
 	MantleBackupConfigUID = "mantle.cybozu.io/mbc-uid"
-	MantleRetainIfExpired = "mantle.cybozu.io/retainIfExpired"
-	logger                = ctrl.Log.WithName("backup-and-rotate")
+	logger                = ctrl.Log.WithName("backup")
 
-	BackupAndRotateCmd = &cobra.Command{
-		Use: "backup-and-rotate",
+	BackupCmd = &cobra.Command{
+		Use: "backup",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return subMain(cmd.Context())
 		},
@@ -46,12 +41,9 @@ var (
 )
 
 func init() {
-	flags := BackupAndRotateCmd.Flags()
+	flags := BackupCmd.Flags()
 	flags.StringVar(&mbcName, "name", "", "MantleBackupConfig resource's name")
 	flags.StringVar(&mbcNamespace, "namespace", "", "MantleBackupConfig resource's namespace")
-	flags.StringVar(&expireOffset, "expire-offset", "0s",
-		"An offset for MantleBackupConfig's .spec.expire field. A MantleBackup will expire after "+
-			"it has been active for (.spec.expire - expire-offset) time. This option is intended for testing purposes only.")
 
 	goflags := flag.NewFlagSet("goflags", flag.ExitOnError)
 	zapOpts.Development = true
@@ -91,11 +83,6 @@ func fetchJobID() (string, error) {
 func subMain(ctx context.Context) error {
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zapOpts)))
 
-	parsedExpireOffset, err := strfmt.ParseDuration(expireOffset)
-	if err != nil {
-		return fmt.Errorf("couldn't parse the expire offset: %w", err)
-	}
-
 	cli, err := client.New(config.GetConfigOrDie(), client.Options{Scheme: scheme})
 	if err != nil {
 		return fmt.Errorf("couldn't create a new client: %w", err)
@@ -109,10 +96,6 @@ func subMain(ctx context.Context) error {
 
 	if err := createMantleBackup(ctx, cli, &mbc); err != nil {
 		return fmt.Errorf("backup failed: %s: %s: %w", mbcName, mbcNamespace, err)
-	}
-
-	if err := rotateMantleBackup(ctx, cli, &mbc, parsedExpireOffset); err != nil {
-		return fmt.Errorf("rotation failed: %s: %s: %w", mbcName, mbcNamespace, err)
 	}
 
 	return nil
@@ -136,7 +119,8 @@ func createMantleBackup(ctx context.Context, cli client.Client, mbc *mantlev1.Ma
 			Labels:    map[string]string{MantleBackupConfigUID: string(mbc.GetUID())},
 		},
 		Spec: mantlev1.MantleBackupSpec{
-			PVC: mbc.Spec.PVC,
+			Expire: mbc.Spec.Expire,
+			PVC:    mbc.Spec.PVC,
 		},
 	})
 	if err == nil {
@@ -167,64 +151,5 @@ func createMantleBackup(ctx context.Context, cli client.Client, mbc *mantlev1.Ma
 	logger.Info("MantleBackup already exists",
 		"mbName", mbName, "mbNamespace", mbNamespace,
 		"mbcName", mbcName, "mbcNamespace", mbcNamespace)
-	return nil
-}
-
-func rotateMantleBackup(
-	ctx context.Context,
-	cli client.Client,
-	mbc *mantlev1.MantleBackupConfig,
-	expireOffset time.Duration,
-) error {
-	// List all MantleBackup objects associated with the mbc.
-	var mbList mantlev1.MantleBackupList
-	if err := cli.List(ctx, &mbList, &client.ListOptions{
-		LabelSelector: labels.SelectorFromSet(map[string]string{MantleBackupConfigUID: string(mbc.GetUID())}),
-	}); err != nil {
-		return fmt.Errorf("couldn't list MantleBackups: %s: %w", string(mbc.UID), err)
-	}
-
-	// Delete the MantleBackup objects that are already expired and don't have the retainIfExpired label.
-	expire, err := strfmt.ParseDuration(mbc.Spec.Expire)
-	if err != nil {
-		return fmt.Errorf("couldn't parse spec.expire: %s: %w", mbc.Spec.Expire, err)
-	}
-	if expire >= expireOffset {
-		expire -= expireOffset
-	} else {
-		expire = 0
-	}
-	for _, mb := range mbList.Items {
-		if mb.Status.CreatedAt == (metav1.Time{}) {
-			// mb is not created yet (at least from the cache's perspective), so let's ignore it.
-			continue
-		}
-		elapsed := time.Since(mb.Status.CreatedAt.Time)
-		if elapsed <= expire {
-			continue
-		}
-		retain, ok := mb.GetAnnotations()[MantleRetainIfExpired]
-		if ok && retain == "true" {
-			continue
-		}
-
-		if err := cli.Delete(ctx, &mb, &client.DeleteOptions{
-			Preconditions: &metav1.Preconditions{
-				UID:             &mb.UID,
-				ResourceVersion: &mb.ResourceVersion,
-			},
-		}); err == nil || errors.IsNotFound(err) {
-			logger.Info("MantleBackup deleted",
-				"mb.Name", mb.Name, "mb.Namespace", mb.Namespace,
-				"mb.UID", mb.UID, "mb.ResourceVersion", mb.ResourceVersion,
-				"mbcName", mbcName, "mbcNamespace", mbcNamespace,
-				"elapsed", elapsed, "expire", expire,
-			)
-		} else {
-			return fmt.Errorf("couldn't delete MantleBackup: %s: %s: %s: %s: %w",
-				mb.Name, mb.Namespace, mb.UID, mb.ResourceVersion, err)
-		}
-	}
-
 	return nil
 }

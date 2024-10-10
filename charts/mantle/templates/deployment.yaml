@@ -64,9 +64,6 @@ spec:
             {{- with .Values.controller.mantleServiceEndpoint }}
             - --mantle-service-endpoint={{ . }}
             {{- end }}
-            {{- with .Values.controller.expireOffset }}
-            - --expire-offset={{ . }}
-            {{- end }}
             {{- with .Values.controller.overwriteMBCSchedule }}
             - --overwrite-mbc-schedule={{ . }}
             {{- end }}

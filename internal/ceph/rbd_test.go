@@ -2,6 +2,7 @@ package ceph
 
 import (
 	"fmt"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -185,6 +186,105 @@ var _ = Describe("CephCmd.RBDRm", func() {
 
 		cmd := mockedCephCmd(m)
 		err := cmd.RBDRm("pool", "image")
+		Expect(err).To(HaveOccurred())
+	})
+})
+
+var _ = Describe("CephCmd.RBDSnapCreate", func() {
+	var t reporter
+
+	It("should run without error", func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		m := NewMockcommand(ctrl)
+		m.EXPECT().
+			execute("rbd", "snap", "create", "pool/image@snap").
+			Return([]byte{}, nil)
+
+		cmd := mockedCephCmd(m)
+		err := cmd.RBDSnapCreate("pool", "image", "snap")
+		Expect(err).ToNot(HaveOccurred())
+	})
+
+	It("should return an error, if the command failed", func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		m := NewMockcommand(ctrl)
+		m.EXPECT().execute(gomock.Any()).Return([]byte{}, fmt.Errorf("error"))
+
+		cmd := mockedCephCmd(m)
+		err := cmd.RBDSnapCreate("pool", "image", "snap")
+		Expect(err).To(HaveOccurred())
+	})
+})
+
+var _ = Describe("CephCmd.RBDSnapLs", func() {
+	var t reporter
+
+	It("should return the correct RBDSnapshot", func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		m := NewMockcommand(ctrl)
+		m.EXPECT().
+			execute("rbd", "snap", "ls", "--format", "json", "pool/image").
+			Return([]byte(`
+		[{"id":4,"name":"test","size":10737418240,"protected":"false","timestamp":"Tue Oct  1 10:11:31 2024"}]
+		`), nil)
+
+		cmd := mockedCephCmd(m)
+		snaps, err := cmd.RBDSnapLs("pool", "image")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(snaps).To(HaveLen(1))
+		snap := snaps[0]
+		Expect(snap.Id).To(Equal(int(4)))
+		Expect(snap.Name).To(Equal("test"))
+		Expect(snap.Size).To(Equal(int(10737418240)))
+		Expect(snap.Protected).To(Equal(false))
+		Expect(snap.Timestamp).To(Equal(NewRBDTimeStamp(time.Date(2024, 10, 1, 10, 11, 31, 0, time.UTC))))
+	})
+
+	It("should return an error, if the command failed", func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		m := NewMockcommand(ctrl)
+		m.EXPECT().execute(gomock.Any()).Return([]byte{}, fmt.Errorf("error"))
+
+		cmd := mockedCephCmd(m)
+		_, err := cmd.RBDSnapLs("pool", "image")
+		Expect(err).To(HaveOccurred())
+	})
+})
+
+var _ = Describe("CephCmd.RBDSnapRm", func() {
+	var t reporter
+
+	It("should run without error", func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		m := NewMockcommand(ctrl)
+		m.EXPECT().
+			execute("rbd", "snap", "rm", "pool/image@snap").
+			Return([]byte{}, nil)
+
+		cmd := mockedCephCmd(m)
+		err := cmd.RBDSnapRm("pool", "image", "snap")
+		Expect(err).ToNot(HaveOccurred())
+	})
+
+	It("should return an error, if the command failed", func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		m := NewMockcommand(ctrl)
+		m.EXPECT().execute(gomock.Any()).Return([]byte{}, fmt.Errorf("error"))
+
+		cmd := mockedCephCmd(m)
+		err := cmd.RBDSnapRm("pool", "image", "snap")
 		Expect(err).To(HaveOccurred())
 	})
 })

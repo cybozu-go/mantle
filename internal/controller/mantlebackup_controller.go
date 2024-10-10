@@ -3,25 +3,29 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"os/exec"
-	"syscall"
 	"time"
 
+	mantlev1 "github.com/cybozu-go/mantle/api/v1"
+	"github.com/cybozu-go/mantle/internal/ceph"
+	"github.com/cybozu-go/mantle/pkg/controller/proto"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	aerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/workqueue"
+	"k8s.io/kube-openapi/pkg/validation/strfmt"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-
-	mantlev1 "github.com/cybozu-go/mantle/api/v1"
-	"github.com/cybozu-go/mantle/pkg/controller/proto"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 const (
@@ -31,23 +35,18 @@ const (
 	labelRemoteBackupTargetPVCUID = "mantle.cybozu.io/remote-backup-target-pvc-uid"
 	annotRemoteUID                = "mantle.cybozu.io/remote-uid"
 	annotDiffTo                   = "mantle.cybozu.io/diff-to"
+	annotRetainIfExpired          = "mantle.cybozu.io/retain-if-expired"
 )
 
 // MantleBackupReconciler reconciles a MantleBackup object
 type MantleBackupReconciler struct {
 	client.Client
 	Scheme               *runtime.Scheme
+	ceph                 ceph.CephCmd
 	managedCephClusterID string
 	role                 string
 	primarySettings      *PrimarySettings // This should be non-nil if and only if role equals 'primary'.
-}
-
-type Snapshot struct {
-	Id        int    `json:"id,omitempty"`
-	Name      string `json:"name,omitempty"`
-	Size      int    `json:"size,omitempty"`
-	Protected bool   `json:"protected,string,omitempty"`
-	Timestamp string `json:"timestamp,omitempty"`
+	expireQueueCh        chan event.GenericEvent
 }
 
 // NewMantleBackupReconciler returns NodeReconciler.
@@ -55,9 +54,11 @@ func NewMantleBackupReconciler(client client.Client, scheme *runtime.Scheme, man
 	return &MantleBackupReconciler{
 		Client:               client,
 		Scheme:               scheme,
+		ceph:                 ceph.NewCephCmd(),
 		managedCephClusterID: managedCephClusterID,
 		role:                 role,
 		primarySettings:      primarySettings,
+		expireQueueCh:        make(chan event.GenericEvent),
 	}
 }
 
@@ -76,71 +77,34 @@ func (r *MantleBackupReconciler) updateStatusCondition(ctx context.Context, back
 
 func (r *MantleBackupReconciler) removeRBDSnapshot(ctx context.Context, poolName, imageName, snapshotName string) error {
 	logger := log.FromContext(ctx)
-	command := []string{"rbd", "snap", "rm", poolName + "/" + imageName + "@" + snapshotName}
-	_, err := executeCommand(ctx, command, nil)
-	if err != nil {
-		if exitError, ok := err.(*exec.ExitError); ok {
-			waitStatus := exitError.Sys().(syscall.WaitStatus)
-			exitCode := waitStatus.ExitStatus()
-			if exitCode != int(syscall.ENOENT) {
-				logger.Error(err, "failed to remove rbd snapshot", "poolName", poolName, "imageName", imageName, "snapshotName", snapshotName, "exitCode", exitCode)
-				return fmt.Errorf("failed to remove rbd snapshot")
-			}
+	rmErr := r.ceph.RBDSnapRm(poolName, imageName, snapshotName)
+	if rmErr != nil {
+		_, findErr := ceph.FindRBDSnapshot(r.ceph, poolName, imageName, snapshotName)
+		if findErr != nil && findErr != ceph.ErrSnapshotNotFound {
+			err := errors.Join(rmErr, findErr)
+			logger.Error(err, "failed to remove rbd snapshot", "poolName", poolName, "imageName", imageName, "snapshotName", snapshotName)
+			return fmt.Errorf("failed to remove rbd snapshot: %w", err)
 		}
-		logger.Info("rbd snapshot has already been removed", "poolName", poolName, "imageName", imageName, "snapshotName", snapshotName, "error", err)
+		logger.Info("rbd snapshot has already been removed", "poolName", poolName, "imageName", imageName, "snapshotName", snapshotName)
+		return nil
 	}
 	return nil
 }
 
-func listRBDSnapshots(ctx context.Context, poolName, imageName string) ([]Snapshot, error) {
-	command := []string{"rbd", "snap", "ls", poolName + "/" + imageName, "--format=json"}
-	out, err := executeCommand(ctx, command, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to execute `rbd snap ls`: %s: %s: %w", poolName, imageName, err)
-	}
-
-	var snapshots []Snapshot
-	err = json.Unmarshal(out, &snapshots)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal the output of `rbd snap ls`: %s: %s: %w", poolName, imageName, err)
-	}
-
-	return snapshots, nil
-}
-
-func findRBDSnapshot(ctx context.Context, poolName, imageName, snapshotName string) (*Snapshot, error) {
-	snapshots, err := listRBDSnapshots(ctx, poolName, imageName)
-	if err != nil {
-		return nil, err
-	}
-	for _, s := range snapshots {
-		if s.Name == snapshotName {
-			return &s, nil
-		}
-	}
-	return nil, fmt.Errorf("snapshot not found: %s: %s: %s", poolName, imageName, snapshotName)
-}
-
-func (r *MantleBackupReconciler) createRBDSnapshot(ctx context.Context, poolName, imageName string, backup *mantlev1.MantleBackup) error {
+func (r *MantleBackupReconciler) createRBDSnapshot(ctx context.Context, poolName, imageName string, backup *mantlev1.MantleBackup) (*ceph.RBDSnapshot, error) {
 	logger := log.FromContext(ctx)
-	command := []string{"rbd", "snap", "create", poolName + "/" + imageName + "@" + backup.Name}
-	_, err := executeCommand(ctx, command, nil)
-	if err != nil {
-		_, err := findRBDSnapshot(ctx, poolName, imageName, backup.Name)
-		if err != nil {
-			logger.Error(err, "failed to find rbd snapshot")
-			err2 := r.updateStatusCondition(ctx, backup, metav1.Condition{
-				Type:   mantlev1.BackupConditionReadyToUse,
-				Status: metav1.ConditionFalse,
-				Reason: mantlev1.BackupReasonFailedToCreateBackup,
-			})
-			if err2 != nil {
-				logger.Error(err, "failed to update status condition")
-			}
-			return err
-		}
+	createErr := r.ceph.RBDSnapCreate(poolName, imageName, backup.Name)
+	snap, findErr := ceph.FindRBDSnapshot(r.ceph, poolName, imageName, backup.Name)
+	if findErr != nil {
+		logger.Error(errors.Join(createErr, findErr), "failed to find rbd snapshot")
+		updateStatusErr := r.updateStatusCondition(ctx, backup, metav1.Condition{
+			Type:   mantlev1.BackupConditionReadyToUse,
+			Status: metav1.ConditionFalse,
+			Reason: mantlev1.BackupReasonFailedToCreateBackup,
+		})
+		return nil, errors.Join(createErr, findErr, updateStatusErr)
 	}
-	return nil
+	return snap, nil
 }
 
 func (r *MantleBackupReconciler) checkPVCInManagedCluster(ctx context.Context, backup *mantlev1.MantleBackup, pvc *corev1.PersistentVolumeClaim) error {
@@ -215,7 +179,7 @@ func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *
 		if err2 != nil {
 			return nil, ctrl.Result{}, err2
 		}
-		if errors.IsNotFound(err) {
+		if aerrors.IsNotFound(err) {
 			return nil, ctrl.Result{}, errTargetPVCNotFound{err}
 		}
 		return nil, ctrl.Result{}, err
@@ -259,6 +223,43 @@ func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *
 	return &snapshotTarget{&pvc, &pv, imageName, poolName}, ctrl.Result{}, nil
 }
 
+// expire deletes the backup if it is already expired. Otherwise it schedules deletion.
+// Note that this function does not use requeue to scheduled deletion because the caller
+// will do other tasks after this function returns.
+func (r *MantleBackupReconciler) expire(ctx context.Context, backup *mantlev1.MantleBackup) error {
+	logger := log.FromContext(ctx)
+	if backup.Status.CreatedAt.IsZero() {
+		// the RBD snapshot has not be taken yet, do nothing.
+		return nil
+	}
+
+	if v, ok := backup.Annotations[annotRetainIfExpired]; ok && v == "true" {
+		// retain this backup.
+		// If the annotation is deleted, reconciliation will run, so no need to schedule.
+		return nil
+	}
+
+	expire, err := strfmt.ParseDuration(backup.Spec.Expire)
+	if err != nil {
+		return err
+	}
+	expireAt := backup.Status.CreatedAt.Add(expire)
+	if time.Now().UTC().After(expireAt) {
+		// already expired, delete it immediately.
+		logger.Info("delete expired backup", "createdAt", backup.Status.CreatedAt, "expire", expire)
+		return r.Delete(ctx, backup)
+	}
+
+	// not expired yet. schedule deletion.
+	// The event may be sent many times, but it is safe because workqueue AddAfter
+	// deduplicates events for same object.
+	r.expireQueueCh <- event.GenericEvent{
+		Object: backup,
+	}
+
+	return nil
+}
+
 //+kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlebackups,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlebackups/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlebackups/finalizers,verbs=update
@@ -290,7 +291,7 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	err := r.Get(ctx, req.NamespacedName, &backup)
-	if errors.IsNotFound(err) {
+	if aerrors.IsNotFound(err) {
 		logger.Info("MantleBackup is not found", "error", err)
 		return ctrl.Result{}, nil
 	}
@@ -342,6 +343,10 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	if err := r.expire(ctx, &backup); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	if err := r.provisionRBDSnapshot(ctx, &backup, target); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -358,10 +363,29 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	return ctrl.Result{}, nil
 }
 
+func scheduleExpire(_ context.Context, evt event.GenericEvent, q workqueue.RateLimitingInterface) {
+	backup := evt.Object.(*mantlev1.MantleBackup)
+	// the parse never fails because expire method checked it.
+	expire, _ := strfmt.ParseDuration(backup.Spec.Expire)
+	q.AddAfter(
+		ctrl.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: backup.GetNamespace(),
+				Name:      backup.GetName(),
+			},
+		},
+		time.Until(backup.Status.CreatedAt.Add(expire)),
+	)
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *MantleBackupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&mantlev1.MantleBackup{}).
+		WatchesRawSource(
+			&source.Channel{Source: r.expireQueueCh},
+			handler.Funcs{GenericFunc: scheduleExpire},
+		).
 		Complete(r)
 }
 
@@ -500,7 +524,8 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 		return nil
 	}
 
-	if err := r.createRBDSnapshot(ctx, target.poolName, target.imageName, backup); err != nil {
+	snapshot, err := r.createRBDSnapshot(ctx, target.poolName, target.imageName, backup)
+	if err != nil {
 		return err
 	}
 
@@ -519,17 +544,8 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 		}
 		backup.Status.PVManifest = string(pvJs)
 
-		snapshot, err := findRBDSnapshot(ctx, target.poolName, target.imageName, backup.Name)
-		if err != nil {
-			return err
-		}
 		backup.Status.SnapID = &snapshot.Id
-
-		createdAt, err := time.Parse("Mon Jan  2 15:04:05 2006", snapshot.Timestamp)
-		if err != nil {
-			return err
-		}
-		backup.Status.CreatedAt = metav1.NewTime(createdAt)
+		backup.Status.CreatedAt = metav1.NewTime(snapshot.Timestamp.Time)
 
 		meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
 			Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionTrue, Reason: mantlev1.BackupReasonNone})

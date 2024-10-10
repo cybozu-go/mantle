@@ -41,12 +41,26 @@ spec:
           spec:
             description: MantleBackupSpec defines the desired state of MantleBackup
             properties:
+              expire:
+                description: '''expire'' specifies the expiration duration of the
+                  backup'
+                format: duration
+                type: string
+                x-kubernetes-validations:
+                - message: expire must be >= 1d
+                  rule: self >= duration('24h')
+                - message: expire must be <= 15d
+                  rule: self <= duration('360h')
+                - message: spec.expire is immutable
+                  rule: self == oldSelf
               namespace:
                 description: '''namespace'' specifies backup target Namespace'
                 type: string
               pvc:
                 description: '''pvc'' specifies backup target PVC'
                 type: string
+            required:
+            - expire
             type: object
           status:
             description: MantleBackupStatus defines the observed state of MantleBackup

@@ -236,7 +236,7 @@ func (test *backupTest) testCase1() {
 }
 
 func (test *backupTest) testCase2() {
-	It("should create and rotate MantleBackups from MantleBackupConfig", func() {
+	It("should create MantleBackups from MantleBackupConfig", func() {
 		By("Creating MantleBackupConfig")
 		err := applyMantleBackupConfigTemplate(test.tenantNamespace, test.pvcName1, test.mantleBackupConfigName[2])
 		Expect(err).NotTo(HaveOccurred())
@@ -251,33 +251,18 @@ func (test *backupTest) testCase2() {
 		}).Should(Succeed())
 
 		// Because of the e2e's values-mantle.yaml, the CronJob's .spec.schedule
-		// is overwritten with "* * * * *", so backup-and-rotate subcommand
-		// should be triggered every minute. And every MantleBackup created at minute N will be deleted at minute (N+1),
-		// because of `expire-offset` setting in the e2e's values-mantle.yaml.
+		// is overwritten with "* * * * *", so backup subcommand
+		// should be triggered every minute.
 		By("Waiting for a MantleBackup to be created")
-		var mb mantlev1.MantleBackup
 		Eventually(func() error {
 			mbs, err := listMantleBackupsByMBCUID(test.tenantNamespace, string(mbc.UID))
 			if err != nil {
 				return err
 			}
-			if len(mbs) == 1 {
-				mb = mbs[0]
+			if len(mbs) > 0 {
 				return nil
 			}
 			return errors.New("MantleBackup not found")
-		}).Should(Succeed())
-
-		By("Waiting for MantleBackups to be rotated")
-		Eventually(func() error {
-			mbs, err := listMantleBackupsByMBCUID(test.tenantNamespace, string(mbc.UID))
-			if err != nil {
-				return err
-			}
-			if len(mbs) == 1 && mbs[0].Name != mb.Name {
-				return nil
-			}
-			return errors.New("MantleBackup not rotated")
 		}).Should(Succeed())
 	})
 
@@ -312,72 +297,6 @@ func (test *backupTest) testCase2() {
 			_, err := getMB(mb.Namespace, mb.Name)
 			return err
 		}, "5s", "1s").Should(Succeed())
-	})
-
-	It("should not delete a MantleBackup if it has an annotation of retainIfExpired", func() {
-		By("Creating MantleBackupConfig")
-		err := applyMantleBackupConfigTemplate(test.tenantNamespace, test.pvcName1, test.mantleBackupConfigName[1])
-		Expect(err).NotTo(HaveOccurred())
-
-		By("Waiting for a CronJob to be created")
-		mbc, err := getMBC(test.tenantNamespace, test.mantleBackupConfigName[1])
-		Expect(err).NotTo(HaveOccurred())
-		cronJobName := "mbc-" + string(mbc.UID)
-		Eventually(func() error {
-			_, err := getCronJob(cephCluster1Namespace, cronJobName)
-			return err
-		}).Should(Succeed())
-
-		By("Attaching an annotation of retainIfExpired to a MantleBackup")
-		var mb mantlev1.MantleBackup
-		Eventually(func() error {
-			mbs, err := listMantleBackupsByMBCUID(test.tenantNamespace, string(mbc.UID))
-			if err != nil {
-				return err
-			}
-			if len(mbs) == 0 {
-				return errors.New("no MantleBackup available")
-			}
-			mb = mbs[0]
-
-			_, _, err = kubectl("patch", "mantlebackup", "-n", mb.Namespace, mb.Name, "--type=json",
-				"-p", "[{\"op\":\"add\",\"path\":\"/metadata/annotations\","+
-					"\"value\":{\"mantle.cybozu.io/retainIfExpired\":\"true\"}}]")
-			return err
-		}, "120s", "1s").Should(Succeed())
-
-		By("Checking mb is NOT deleted thanks to retainIfExpired annotation")
-		Consistently(func() error {
-			_, _, err := kubectl("get", "mantlebackup", "-n", mb.Namespace, mb.Name)
-			return err
-		}, "70s", "10s").Should(Succeed())
-
-		By("Checking mbs not annotated with retainIfExpired are rotated")
-		Eventually(func() error {
-			mbs, err := listMantleBackupsByMBCUID(test.tenantNamespace, string(mbc.UID))
-			if err != nil {
-				return err
-			}
-
-			for _, mb1 := range mbs {
-				value, ok := mb1.Annotations["mantle.cybozu.io/retainIfExpired"]
-				if !ok || value != "true" {
-					mb = mb1
-					return nil
-				}
-			}
-			return errors.New("no MantleBackup available")
-		}).Should(Succeed())
-		Eventually(func() error {
-			_, stderr, err := kubectl("get", "mantlebackup", "-n", mb.Namespace, mb.Name)
-			if err != nil {
-				if strings.Contains(string(stderr), "NotFound") {
-					return nil
-				}
-				return err
-			}
-			return errors.New("still exists")
-		}).Should(Succeed())
 	})
 
 	It("should re-create a CronJob associated with a MantleBackup when it's deleted by someone", func() {

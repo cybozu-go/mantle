@@ -11,7 +11,7 @@ We want to backup and restore RBD PVCs managed by a Rook/Ceph cluster, either by
 3. Backup arbitrary RBD PVCs periodically.
 4. Copy backup data to another cluster in another data center.
 
-Currently, the goal 1 and 3 are implemented. Other goals will be achieved later.
+Currently, the goal 1, 2, and 3 are implemented. Other goals will be achieved later.
 
 ## Architecture
 
@@ -39,7 +39,7 @@ flowchart LR
       RC -- point --> RS
 
       %% backup config
-      MBCCronJob -- create/delete --> MB
+      MBCCronJob -- create --> MB
       MBCR -- watch --> MBC
       MBC -- point --> SRC_PVC
       MBCR -- create --> MBCCronJob
@@ -48,7 +48,7 @@ flowchart LR
       %% backup
       MB -.-|related| RS
       USER -- create/delete --> MB
-      MBR -- watch --> MB
+      MBR -- watch/delete --> MB
       MB -- point --> SRC_PVC
       SRC_PVC -- consume --> SRC_PV
       USER -- create/delete --> MBC
@@ -103,13 +103,20 @@ To create/delete a backup, mantle works as follows:
 
 ### Periodic backup flow
 
-To create and rotate backups periodically, Mantle works as follows:
+To create backups periodically, Mantle works as follows:
 
 1. Users create a `MantleBackupConfig`.
 2. The mantle-controller then creates a `CronJob` based on the `MantleBackupConfig`.
-3. The Pod, which is periodically created by the `CronJob`, creates a new `MantleBackup` and deletes any expired `MantleBackup` resources.
+3. The Pod, which is periodically created by the `CronJob`, creates a new `MantleBackup` resources.
 
-If a `MantleBackupConfig` is deleted, the associated `MantleBackup`s won't be removed automatically and won't expire on their own. The users need to delete them manually if they wish to do so.
+If a `MantleBackupConfig` is deleted, the associated `MantleBackup`s won't be removed automatically. The users need to delete them manually if they wish to do so, or use expiration.
+
+### Backup expiration flow
+
+`MantleBackup` resource has an `expire` field. If time will pass the `expire` duration, the controller will delete the `MantleBackup` resource.
+This process can be stopped by adding `mantle.cybozu.io/retain-if-expired` annotation to the `MantleBackup` resource.
+
+`MantleBackupConfig` also has an `expire` field. The `CronJob` set the value to the `MantleBackup` resource created by the `MantleBackupConfig`. Therefore, the periodic backups will be deleted automatically.
 
 ### Sample manifests
 
@@ -124,6 +131,7 @@ metadata:
 spec:
   # The name of the backup target PVC
   pvc: <target PVC name>
+  expire: 2w # when the MantleBackup should expire.
 status:
   conditions:
     # The corresponding backup data is ready to use if `status` is "True"
