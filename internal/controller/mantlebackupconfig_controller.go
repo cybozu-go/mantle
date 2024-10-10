@@ -114,7 +114,7 @@ func (r *MantleBackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return ctrl.Result{}, fmt.Errorf("failed to get Ceph cluster ID: %s: %s: %w", mbc.Namespace, mbc.Spec.PVC, err)
 	}
 	if clusterID != r.managedCephClusterID {
-		logger.Info("the target pvc is not managed by this controller", "error", err)
+		logger.Info("the target pvc is not managed by this controller")
 		return ctrl.Result{}, nil
 	}
 
