@@ -49,14 +49,6 @@ type MantleBackupReconciler struct {
 	expireQueueCh        chan event.GenericEvent
 }
 
-type Snapshot struct {
-	Id        int    `json:"id,omitempty"`
-	Name      string `json:"name,omitempty"`
-	Size      int    `json:"size,omitempty"`
-	Protected bool   `json:"protected,string,omitempty"`
-	Timestamp string `json:"timestamp,omitempty"`
-}
-
 // NewMantleBackupReconciler returns NodeReconciler.
 func NewMantleBackupReconciler(client client.Client, scheme *runtime.Scheme, managedCephClusterID, role string, primarySettings *PrimarySettings) *MantleBackupReconciler {
 	return &MantleBackupReconciler{

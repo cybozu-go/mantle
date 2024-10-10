@@ -11,7 +11,7 @@ import (
 	"time"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
-	"github.com/cybozu-go/mantle/internal/controller"
+	"github.com/cybozu-go/mantle/internal/ceph"
 	testutil "github.com/cybozu-go/mantle/test/util"
 	"gopkg.in/yaml.v2"
 	batchv1 "k8s.io/api/batch/v1"
@@ -179,25 +179,9 @@ func checkDeploymentReady(namespace, name string) error {
 }
 
 func checkSnapshotExist(namespace, poolName, imageName, backupName string) error {
-	stdout, stderr, err := kubectl(
-		"-n", namespace, "exec", "deploy/rook-ceph-tools", "--",
-		"rbd", "snap", "ls", poolName+"/"+imageName, "--format=json")
-	if err != nil {
-		return fmt.Errorf("rbd snap ls failed. stderr: %s, err: %w", string(stderr), err)
-	}
-	var snapshots []controller.Snapshot
-	err = json.Unmarshal(stdout, &snapshots)
-	if err != nil {
-		return err
-	}
-
-	for _, s := range snapshots {
-		if s.Name == backupName {
-			return nil
-		}
-	}
-
-	return fmt.Errorf("snapshot not exists. snapshotName: %s", backupName)
+	cephCmd := ceph.NewCephCmdWithTools(namespace)
+	_, err := ceph.FindRBDSnapshot(cephCmd, poolName, imageName, backupName)
+	return err
 }
 
 func createNamespace(name string) error {
@@ -496,18 +480,13 @@ func getImageAndSnapNames(namespace, pool string) ([]string, error) {
 		return nil, fmt.Errorf("failed to unmarshal output of rbd ls: %w", err)
 	}
 
+	cephCmd := ceph.NewCephCmdWithTools(namespace)
+
 	var snaps []string
 	for _, image := range images {
-		stdout, stderr, err := kubectl(
-			"-n", namespace, "exec", "deploy/rook-ceph-tools", "--",
-			"rbd", "snap", "ls", pool+"/"+image, "--format=json")
+		snapshots, err := cephCmd.RBDSnapLs(pool, image)
 		if err != nil {
-			return nil, fmt.Errorf("rbd snap ls failed. stderr: %s, err: %w", string(stderr), err)
-		}
-		var snapshots []controller.Snapshot
-		err = json.Unmarshal(stdout, &snapshots)
-		if err != nil {
-			return nil, fmt.Errorf("failed to unmarshal output of rbd snap ls: %w", err)
+			return nil, fmt.Errorf("rbd snap ls failed. err: %w", err)
 		}
 
 		for _, s := range snapshots {
