@@ -24,7 +24,19 @@ message CreateOrUpdateMantleBackupResponse {
     // nothing.
 }
 
+// ListMantleBackupRequest is a request message for ListMantleBackup RPC.
+message ListMantleBackupRequest {
+    string pvcUID = 1;
+    string namespace = 2;
+}
+
+// ListMantleBackupResponse is a response message for ListMantleBackup RPC.
+message ListMantleBackupResponse {
+    bytes mantleBackupList = 1;
+}
+
 service MantleService {
     rpc CreateOrUpdatePVC(CreateOrUpdatePVCRequest) returns (CreateOrUpdatePVCResponse);
     rpc CreateOrUpdateMantleBackup(CreateOrUpdateMantleBackupRequest) returns (CreateOrUpdateMantleBackupResponse);
+    rpc ListMantleBackup(ListMantleBackupRequest) returns (ListMantleBackupResponse);
 }
