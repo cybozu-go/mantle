@@ -30,7 +30,7 @@ var _ = Describe("util.getCephClusterIDFromPVC", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// test main
-			clusterID, err := getCephClusterIDFromPVC(ctx, gLogger, k8sClient, pvc)
+			clusterID, err := getCephClusterIDFromPVC(ctx, k8sClient, pvc)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(clusterID).To(Equal(expectedClusterID))
 

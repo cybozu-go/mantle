@@ -1,9 +1,9 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"io"
-	"log/slog"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -44,7 +44,6 @@ func TestControllers(t *testing.T) {
 
 var _ = BeforeSuite(func(ctx SpecContext) {
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
-	setLoggerWriter(GinkgoWriter)
 
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
@@ -81,7 +80,7 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 	Expect(err).NotTo(HaveOccurred())
 
 	By("Assign noop executeCommand")
-	executeCommand = func(_ *slog.Logger, _ []string, _ io.Reader) ([]byte, error) {
+	executeCommand = func(_ context.Context, _ []string, _ io.Reader) ([]byte, error) {
 		return nil, nil
 	}
 })

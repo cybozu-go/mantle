@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"io"
-	"log/slog"
 	"os/exec"
 	"strings"
 
@@ -11,9 +10,11 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-func getCephClusterIDFromPVC(ctx context.Context, logger *slog.Logger, k8sClient client.Client, pvc *corev1.PersistentVolumeClaim) (string, error) {
+func getCephClusterIDFromPVC(ctx context.Context, k8sClient client.Client, pvc *corev1.PersistentVolumeClaim) (string, error) {
+	logger := log.FromContext(ctx)
 	storageClassName := pvc.Spec.StorageClassName
 	if storageClassName == nil {
 		logger.Info("not managed storage class", "namespace", pvc.Namespace, "pvc", pvc.Name)
@@ -52,7 +53,8 @@ func updateStatus(ctx context.Context, client client.Client, obj client.Object, 
 	return nil
 }
 
-func executeCommandImpl(logger *slog.Logger, command []string, input io.Reader) ([]byte, error) {
+func executeCommandImpl(ctx context.Context, command []string, input io.Reader) ([]byte, error) {
+	logger := log.FromContext(ctx)
 	cmd := exec.Command(command[0], command[1:]...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -61,7 +63,7 @@ func executeCommandImpl(logger *slog.Logger, command []string, input io.Reader) 
 	defer func() {
 		err := stdout.Close()
 		if err != nil {
-			logger.Error("failed to stdout.Close", "error", err)
+			logger.Error(err, "failed to stdout.Close")
 		}
 	}()
 
@@ -74,11 +76,11 @@ func executeCommandImpl(logger *slog.Logger, command []string, input io.Reader) 
 			defer func() {
 				err := stdin.Close()
 				if err != nil {
-					logger.Error("failed to stdin.Close", "error", err)
+					logger.Error(err, "failed to stdin.Close")
 				}
 			}()
 			if _, err = io.Copy(stdin, input); err != nil {
-				logger.Error("failed to io.Copy", "error", err)
+				logger.Error(err, "failed to io.Copy")
 			}
 		}()
 	}

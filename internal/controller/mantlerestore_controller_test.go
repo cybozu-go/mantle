@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log/slog"
 	"time"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
@@ -81,7 +80,7 @@ func (test *mantleRestoreControllerUnitTest) setupEnv() {
 		test.backup, err = resMgr.CreateUniqueBackupFor(ctx, test.srcPVC)
 		Expect(err).NotTo(HaveOccurred())
 
-		executeCommand = func(_ *slog.Logger, command []string, _ io.Reader) ([]byte, error) {
+		executeCommand = func(_ context.Context, command []string, _ io.Reader) ([]byte, error) {
 			if command[0] == "rbd" && command[1] == "snap" && command[2] == "ls" {
 				return []byte(fmt.Sprintf("[{\"id\":1000,\"name\":\"%s\",\"timestamp\":\"Mon Sep  2 00:42:00 2024\"}]", test.backup.Name)), nil
 			}
