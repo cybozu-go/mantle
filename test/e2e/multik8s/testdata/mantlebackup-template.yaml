@@ -11,3 +11,4 @@ metadata:
   namespace: %s
 spec:
   pvc: %s
+  expire: "1d"

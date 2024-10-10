@@ -2,8 +2,6 @@ package controller
 
 import (
 	"context"
-	"io"
-	"os/exec"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -52,54 +50,3 @@ func updateStatus(ctx context.Context, client client.Client, obj client.Object, 
 	}
 	return nil
 }
-
-func executeCommandImpl(ctx context.Context, command []string, input io.Reader) ([]byte, error) {
-	logger := log.FromContext(ctx)
-	cmd := exec.Command(command[0], command[1:]...)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		err := stdout.Close()
-		if err != nil {
-			logger.Error(err, "failed to stdout.Close")
-		}
-	}()
-
-	if input != nil {
-		stdin, err := cmd.StdinPipe()
-		if err != nil {
-			return nil, err
-		}
-		go func() {
-			defer func() {
-				err := stdin.Close()
-				if err != nil {
-					logger.Error(err, "failed to stdin.Close")
-				}
-			}()
-			if _, err = io.Copy(stdin, input); err != nil {
-				logger.Error(err, "failed to io.Copy")
-			}
-		}()
-	}
-
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-
-	r, err := io.ReadAll(stdout)
-	if err != nil {
-		return r, err
-	}
-
-	if err := cmd.Wait(); err != nil {
-		return r, err
-	}
-
-	return r, nil
-}
-
-// It will replaced on tests.
-var executeCommand = executeCommandImpl

@@ -33,7 +33,6 @@ type MantleBackupConfigReconciler struct {
 	Client               client.Client
 	Scheme               *runtime.Scheme
 	managedCephClusterID string
-	expireOffset         string
 	overwriteMBCSchedule string
 	role                 string
 }
@@ -42,11 +41,10 @@ func NewMantleBackupConfigReconciler(
 	cli client.Client,
 	scheme *runtime.Scheme,
 	managedCephClusterID string,
-	expireOffset string,
 	overwriteMBCSchedule string,
 	role string,
 ) *MantleBackupConfigReconciler {
-	return &MantleBackupConfigReconciler{cli, scheme, managedCephClusterID, expireOffset, overwriteMBCSchedule, role}
+	return &MantleBackupConfigReconciler{cli, scheme, managedCephClusterID, overwriteMBCSchedule, role}
 }
 
 //+kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlebackupconfigs,verbs=get;list;watch;create;update;patch;delete
@@ -227,14 +225,13 @@ func (r *MantleBackupConfigReconciler) createOrUpdateCronJob(ctx context.Context
 			podSpec.Containers = append(podSpec.Containers, corev1.Container{})
 		}
 		container := &podSpec.Containers[0]
-		container.Name = "backup-and-rotate"
+		container.Name = "backup"
 		container.Image = image
 		container.Command = []string{
 			"/manager",
-			"backup-and-rotate",
+			"backup",
 			"--name", mbc.GetName(),
 			"--namespace", mbc.GetNamespace(),
-			"--expire-offset", r.expireOffset,
 		}
 		container.ImagePullPolicy = corev1.PullIfNotPresent
 		container.Env = []corev1.EnvVar{

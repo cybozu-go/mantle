@@ -81,3 +81,39 @@ func (c *cephCmdImpl) RBDRm(pool, image string) error {
 
 	return nil
 }
+
+// RBDSnapCreate creates an RBD snapshot.
+func (c *cephCmdImpl) RBDSnapCreate(pool, image, snap string) error {
+	_, err := c.command.execute("rbd", "snap", "create", fmt.Sprintf("%s/%s@%s", pool, image, snap))
+	if err != nil {
+		return fmt.Errorf("failed to create RBD snapshot: %v", err)
+	}
+
+	return nil
+}
+
+// RBDSnapLs lists RBD snapshots of an image.
+func (c *cephCmdImpl) RBDSnapLs(pool, image string) ([]RBDSnapshot, error) {
+	out, err := c.command.execute("rbd", "snap", "ls", "--format", "json", fmt.Sprintf("%s/%s", pool, image))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list RBD snapshots: %v", err)
+	}
+
+	var snapshots []RBDSnapshot
+	err = json.Unmarshal(out, &snapshots)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal RBD snapshots: %v", err)
+	}
+
+	return snapshots, nil
+}
+
+// RBDSnapRm removes an RBD snapshot.
+func (c *cephCmdImpl) RBDSnapRm(pool, image, snap string) error {
+	_, err := c.command.execute("rbd", "snap", "rm", fmt.Sprintf("%s/%s@%s", pool, image, snap))
+	if err != nil {
+		return fmt.Errorf("failed to remove RBD snapshot: %v", err)
+	}
+
+	return nil
+}

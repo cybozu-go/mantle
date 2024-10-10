@@ -67,7 +67,6 @@ var _ = Describe("MantleBackupConfig controller", func() {
 			mgrUtil.GetManager().GetClient(),
 			mgrUtil.GetManager().GetScheme(),
 			resMgr.ClusterID,
-			"0s",
 			"",
 			RoleStandalone,
 		)

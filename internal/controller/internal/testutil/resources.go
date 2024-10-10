@@ -18,14 +18,15 @@ import (
 )
 
 const (
-	provisioner = "rook-ceph.rbd.csi.ceph.com"
+	provisioner   = "rook-ceph.rbd.csi.ceph.com"
+	defaultExpire = "1d"
 )
 
 type ResourceManager struct {
 	client           client.Client
 	ClusterID        string
 	StorageClassName string
-	poolName         string
+	PoolName         string
 }
 
 func NewResourceManager(client client.Client) *ResourceManager {
@@ -33,7 +34,7 @@ func NewResourceManager(client client.Client) *ResourceManager {
 		client:           client,
 		StorageClassName: util.GetUniqueName("sc-"),
 		ClusterID:        util.GetUniqueName("ceph-"),
-		poolName:         util.GetUniqueName("pool-"),
+		PoolName:         util.GetUniqueName("pool-"),
 	}
 }
 
@@ -93,8 +94,8 @@ func (r *ResourceManager) createPVAndPVC(ctx context.Context, ns, pvName, pvcNam
 						"imageFeatures":                    "layering",
 						"imageFormat":                      "2",
 						"imageName":                        util.GetUniqueName("image-"),
-						"journalPool":                      r.poolName,
-						"pool":                             r.poolName,
+						"journalPool":                      r.PoolName,
+						"pool":                             r.PoolName,
 						"storage.kubernetes.io/csiProvisionerIdentity": "dummy",
 					},
 					VolumeHandle: "dummy",
@@ -166,7 +167,7 @@ func (r *ResourceManager) createPVAndPVC(ctx context.Context, ns, pvName, pvcNam
 	return &pv, &pvc, err
 }
 
-func (r *ResourceManager) CreateUniqueBackupFor(ctx context.Context, pvc *corev1.PersistentVolumeClaim) (
+func (r *ResourceManager) CreateUniqueBackupFor(ctx context.Context, pvc *corev1.PersistentVolumeClaim, mutateFn ...func(*mantlev1.MantleBackup)) (
 	*mantlev1.MantleBackup, error) {
 	backup := &mantlev1.MantleBackup{
 		ObjectMeta: metav1.ObjectMeta{
@@ -174,8 +175,12 @@ func (r *ResourceManager) CreateUniqueBackupFor(ctx context.Context, pvc *corev1
 			Namespace: pvc.Namespace,
 		},
 		Spec: mantlev1.MantleBackupSpec{
-			PVC: pvc.Name,
+			PVC:    pvc.Name,
+			Expire: defaultExpire,
 		},
+	}
+	for _, fn := range mutateFn {
+		fn(backup)
 	}
 	err := r.client.Create(ctx, backup)
 	if err != nil {
