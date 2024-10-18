@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"sync"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/cybozu-go/mantle/pkg/controller/proto"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -19,6 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/kube-openapi/pkg/validation/strfmt"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 )
@@ -545,5 +548,221 @@ var _ = Describe("searchDiffOriginMantleBackup", func() {
 		Entry("should skip the MantleBackup with the deletion timestamp",
 			&testMantleBackup, primaryBackupsWithDeletionTimestamp, testSecondaryMantleBackups,
 			true, "test1"),
+	)
+})
+
+type reporter struct{}
+
+func (g reporter) Errorf(format string, args ...any) {
+	Fail(fmt.Sprintf(format, args...))
+}
+
+func (g reporter) Fatalf(format string, args ...any) {
+	Fail(fmt.Sprintf(format, args...))
+}
+
+func newMantleBackup(
+	name string,
+	namespace string,
+	withDelTimestamp bool,
+	pvcUID string,
+	snapID int,
+	readyToUse metav1.ConditionStatus,
+	syncedToRemote metav1.ConditionStatus,
+) *mantlev1.MantleBackup {
+	newMB := &mantlev1.MantleBackup{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels: map[string]string{
+				labelLocalBackupTargetPVCUID: pvcUID,
+			},
+		},
+		Status: mantlev1.MantleBackupStatus{
+			SnapID: &snapID,
+		},
+	}
+	if withDelTimestamp {
+		now := metav1.Now()
+		newMB.SetDeletionTimestamp(&now)
+	}
+	meta.SetStatusCondition(&newMB.Status.Conditions, metav1.Condition{
+		Type:   mantlev1.BackupConditionReadyToUse,
+		Status: readyToUse,
+	})
+	meta.SetStatusCondition(&newMB.Status.Conditions, metav1.Condition{
+		Type:   mantlev1.BackupConditionSyncedToRemote,
+		Status: syncedToRemote,
+	})
+	return newMB
+}
+
+var _ = Describe("prepareForDataSynchronization", func() {
+	testPVCUID := "d3b07384-d9a7-4e6b-8a3b-1f4b7b7b7b7b"
+	testName := "test5"
+	testNamespace := "test-ns"
+	testMantleBackup := newMantleBackup(testName, testNamespace, false,
+		testPVCUID, 5, metav1.ConditionTrue, metav1.ConditionFalse)
+	DescribeTable("hoge",
+		func(
+			primaryBackups []*mantlev1.MantleBackup,
+			secondaryMantleBackups []*mantlev1.MantleBackup,
+			isIncremental bool,
+			isSecondaryMantleBackupReadyToUse bool,
+			diffFrom *mantlev1.MantleBackup,
+		) {
+			var t reporter
+			mockCtrl := gomock.NewController(t)
+			defer mockCtrl.Finish()
+			grpcClient := proto.NewMockMantleServiceClient(mockCtrl)
+
+			data, err := json.Marshal(secondaryMantleBackups)
+			Expect(err).NotTo(HaveOccurred())
+			grpcClient.EXPECT().ListMantleBackup(gomock.Any(),
+				&proto.ListMantleBackupRequest{
+					PvcUID:    testPVCUID,
+					Namespace: testNamespace,
+				}).Times(1).Return(
+				&proto.ListMantleBackupResponse{
+					MantleBackupList: data,
+				}, nil)
+
+			ctrlClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+			Expect(ctrlClient).NotTo(BeNil())
+			for _, backup := range primaryBackups {
+				shouldbeDeleted := false
+				if !backup.DeletionTimestamp.IsZero() {
+					shouldbeDeleted = true
+				}
+
+				err := ctrlClient.Create(context.Background(), backup)
+				Expect(err).NotTo(HaveOccurred())
+				if shouldbeDeleted {
+					err := ctrlClient.Delete(context.Background(), backup)
+					Expect(err).NotTo(HaveOccurred())
+				}
+			}
+
+			mbr := NewMantleBackupReconciler(ctrlClient,
+				ctrlClient.Scheme(), "test", RolePrimary, nil)
+
+			ret, err := mbr.prepareForDataSynchronization(context.Background(),
+				testMantleBackup, grpcClient)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ret.isIncremental).To(Equal(isIncremental))
+			Expect(ret.isSecondaryMantleBackupReadyToUse).To(Equal(isSecondaryMantleBackupReadyToUse))
+			if isIncremental {
+				Expect(ret.diffFrom).NotTo(BeNil())
+				Expect(ret.diffFrom.GetName()).To(Equal(diffFrom.GetName()))
+			} else {
+				Expect(ret.diffFrom).To(BeNil())
+			}
+		},
+		Entry("No synced MantleBackup exists",
+			[]*mantlev1.MantleBackup{
+				testMantleBackup.DeepCopy(),
+			},
+			[]*mantlev1.MantleBackup{
+				newMantleBackup(testName, testNamespace, false, testPVCUID, 5,
+					metav1.ConditionFalse, metav1.ConditionUnknown),
+			}, false, false, nil),
+		Entry("Synced but not reflected to the condition",
+			[]*mantlev1.MantleBackup{
+				testMantleBackup.DeepCopy(),
+			},
+			[]*mantlev1.MantleBackup{
+				newMantleBackup(testName, testNamespace, false, testPVCUID, 5,
+					metav1.ConditionTrue, metav1.ConditionUnknown),
+			}, false, true, nil),
+		Entry("Synced MantleBackup exists but deletionTimestamp is set on both clusters",
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("test3", testNamespace, true, testPVCUID, 3,
+					metav1.ConditionTrue, metav1.ConditionTrue),
+				testMantleBackup.DeepCopy(),
+			},
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("test3", testNamespace, true, testPVCUID, 3,
+					metav1.ConditionTrue, metav1.ConditionUnknown),
+				newMantleBackup(testName, testNamespace, false, testPVCUID, 5,
+					metav1.ConditionFalse, metav1.ConditionUnknown),
+			}, false, false, nil),
+		Entry("Synced MantleBackup exists but deletionTimestamp is set on the primary cluster",
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("test3", testNamespace, true, testPVCUID, 3,
+					metav1.ConditionTrue, metav1.ConditionTrue),
+				testMantleBackup.DeepCopy(),
+			},
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("test3", testNamespace, false, testPVCUID, 3,
+					metav1.ConditionTrue, metav1.ConditionUnknown),
+				newMantleBackup(testName, testNamespace, false, testPVCUID, 5,
+					metav1.ConditionFalse, metav1.ConditionUnknown),
+			}, false, false, nil),
+		Entry("Synced MantleBackup exists but deletionTimestamp is set on the secondary cluster",
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("test3", testNamespace, false, testPVCUID, 3,
+					metav1.ConditionTrue, metav1.ConditionTrue),
+				testMantleBackup.DeepCopy(),
+			},
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("test3", testNamespace, true, testPVCUID, 3,
+					metav1.ConditionTrue, metav1.ConditionUnknown),
+				newMantleBackup(testName, testNamespace, false, testPVCUID, 5,
+					metav1.ConditionFalse, metav1.ConditionUnknown),
+			}, false, false, nil),
+		Entry("The candidate for the diff origin MantleBackup does not exist on the primary cluster",
+			[]*mantlev1.MantleBackup{
+				testMantleBackup.DeepCopy(),
+			},
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("test3", testNamespace, false, testPVCUID, 3,
+					metav1.ConditionTrue, metav1.ConditionUnknown),
+				newMantleBackup(testName, testNamespace, false, testPVCUID, 5,
+					metav1.ConditionFalse, metav1.ConditionUnknown),
+			}, false, false, nil),
+		Entry("The candidate for the diff origin MantleBackup does not exist on the secondary cluster",
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("test3", testNamespace, false, testPVCUID, 3,
+					metav1.ConditionTrue, metav1.ConditionTrue),
+				testMantleBackup.DeepCopy(),
+			},
+			[]*mantlev1.MantleBackup{
+				newMantleBackup(testName, testNamespace, false, testPVCUID, 5,
+					metav1.ConditionFalse, metav1.ConditionUnknown),
+			}, false, false, nil),
+		Entry("Incremental backup",
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("test1", testNamespace, false, testPVCUID, 1,
+					metav1.ConditionTrue, metav1.ConditionTrue),
+				newMantleBackup("test3", testNamespace, false, testPVCUID, 3,
+					metav1.ConditionTrue, metav1.ConditionTrue),
+				testMantleBackup.DeepCopy(),
+			},
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("test1", testNamespace, false, testPVCUID, 1,
+					metav1.ConditionTrue, metav1.ConditionUnknown),
+				newMantleBackup("test3", testNamespace, false, testPVCUID, 3,
+					metav1.ConditionTrue, metav1.ConditionUnknown),
+				newMantleBackup(testName, testNamespace, false, testPVCUID, 5,
+					metav1.ConditionFalse, metav1.ConditionUnknown),
+			}, true, false, newMantleBackup("test3", testNamespace, false,
+				testPVCUID, 3, metav1.ConditionTrue, metav1.ConditionTrue),
+		),
+		Entry("Incremental backup but skips the MantleBackup which only exists on the primary cluster",
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("test1", testNamespace, false, testPVCUID, 1,
+					metav1.ConditionTrue, metav1.ConditionTrue),
+				newMantleBackup("test3", testNamespace, false, testPVCUID, 3,
+					metav1.ConditionTrue, metav1.ConditionTrue),
+				testMantleBackup.DeepCopy(),
+			},
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("test1", testNamespace, false, testPVCUID, 1,
+					metav1.ConditionTrue, metav1.ConditionUnknown),
+				newMantleBackup(testName, testNamespace, false, testPVCUID, 5,
+					metav1.ConditionFalse, metav1.ConditionUnknown),
+			}, true, false, newMantleBackup("test1", testNamespace, false,
+				testPVCUID, 1, metav1.ConditionTrue, metav1.ConditionTrue),
+		),
 	)
 })
