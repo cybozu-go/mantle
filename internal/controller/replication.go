@@ -9,6 +9,7 @@ import (
 	"github.com/cybozu-go/mantle/pkg/controller/proto"
 	"google.golang.org/grpc"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -183,4 +184,23 @@ func (s *SecondaryServer) CreateOrUpdateMantleBackup(
 	}
 
 	return &proto.CreateOrUpdateMantleBackupResponse{}, nil
+}
+
+func (s *SecondaryServer) ListMantleBackup(
+	ctx context.Context,
+	req *proto.ListMantleBackupRequest,
+) (*proto.ListMantleBackupResponse, error) {
+	var backupList mantlev1.MantleBackupList
+	err := s.reader.List(ctx, &backupList, &client.ListOptions{
+		LabelSelector: labels.SelectorFromSet(map[string]string{labelRemoteBackupTargetPVCUID: req.PvcUID}),
+		Namespace:     req.Namespace,
+	})
+	if err != nil {
+		return nil, err
+	}
+	data, err := json.Marshal(backupList.Items)
+	if err != nil {
+		return nil, err
+	}
+	return &proto.ListMantleBackupResponse{MantleBackupList: data}, nil
 }
