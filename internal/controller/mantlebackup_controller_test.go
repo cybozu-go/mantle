@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"sync"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/cybozu-go/mantle/pkg/controller/proto"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -19,6 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/kube-openapi/pkg/validation/strfmt"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 )
@@ -545,5 +548,276 @@ var _ = Describe("searchDiffOriginMantleBackup", func() {
 		Entry("should skip the MantleBackup with the deletion timestamp",
 			&testMantleBackup, primaryBackupsWithDeletionTimestamp, testSecondaryMantleBackups,
 			true, "test1"),
+	)
+})
+
+type reporter struct{}
+
+func (g reporter) Errorf(format string, args ...any) {
+	Fail(fmt.Sprintf(format, args...))
+}
+
+func (g reporter) Fatalf(format string, args ...any) {
+	Fail(fmt.Sprintf(format, args...))
+}
+
+func newMantleBackup(
+	name string,
+	namespace string,
+	annotations map[string]string,
+	labels map[string]string,
+	withDelTimestamp bool,
+	snapID int,
+	readyToUse metav1.ConditionStatus,
+	syncedToRemote metav1.ConditionStatus,
+) *mantlev1.MantleBackup {
+	newMB := &mantlev1.MantleBackup{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   namespace,
+			Annotations: annotations,
+			Labels:      labels,
+		},
+		Status: mantlev1.MantleBackupStatus{
+			SnapID: &snapID,
+		},
+	}
+	if withDelTimestamp {
+		now := metav1.Now()
+		newMB.SetDeletionTimestamp(&now)
+	}
+	meta.SetStatusCondition(&newMB.Status.Conditions, metav1.Condition{
+		Type:   mantlev1.BackupConditionReadyToUse,
+		Status: readyToUse,
+	})
+	meta.SetStatusCondition(&newMB.Status.Conditions, metav1.Condition{
+		Type:   mantlev1.BackupConditionSyncedToRemote,
+		Status: syncedToRemote,
+	})
+	return newMB
+}
+
+var _ = Describe("prepareForDataSynchronization", func() {
+	testPVCUID := "d3b07384-d9a7-4e6b-8a3b-1f4b7b7b7b7b"
+	testName := "testSnap5"
+	testNamespace := "test-ns"
+	primaryLabels := map[string]string{
+		labelLocalBackupTargetPVCUID: testPVCUID,
+	}
+	secondaryLabels := map[string]string{
+		labelRemoteBackupTargetPVCUID: testPVCUID,
+	}
+	testMantleBackup := newMantleBackup(testName, testNamespace, nil, primaryLabels,
+		false, 5, metav1.ConditionTrue, metav1.ConditionFalse)
+
+	doTest := func(
+		backup *mantlev1.MantleBackup,
+		primaryBackupsWithoutTarget []*mantlev1.MantleBackup,
+		secondaryMantleBackups []*mantlev1.MantleBackup,
+		isIncremental bool,
+		isSecondaryMantleBackupReadyToUse bool,
+		diffFrom *mantlev1.MantleBackup,
+	) {
+		var t reporter
+		mockCtrl := gomock.NewController(t)
+		defer mockCtrl.Finish()
+		grpcClient := proto.NewMockMantleServiceClient(mockCtrl)
+
+		data, err := json.Marshal(secondaryMantleBackups)
+		Expect(err).NotTo(HaveOccurred())
+		grpcClient.EXPECT().ListMantleBackup(gomock.Any(),
+			&proto.ListMantleBackupRequest{
+				PvcUID:    testPVCUID,
+				Namespace: testNamespace,
+			}).Times(1).Return(
+			&proto.ListMantleBackupResponse{
+				MantleBackupList: data,
+			}, nil)
+
+		ctrlClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+		Expect(ctrlClient).NotTo(BeNil())
+		primaryBackups := append(primaryBackupsWithoutTarget, backup.DeepCopy())
+		for _, backup := range primaryBackups {
+			shouldBeDeleted := false
+			if !backup.DeletionTimestamp.IsZero() {
+				shouldBeDeleted = true
+			}
+
+			err := ctrlClient.Create(context.Background(), backup)
+			Expect(err).NotTo(HaveOccurred())
+			if shouldBeDeleted {
+				// Add a finalizer to prevent the immediate deletion.
+				_ = controllerutil.AddFinalizer(backup, MantleBackupFinalizerName)
+				err = ctrlClient.Update(context.Background(), backup)
+				Expect(err).NotTo(HaveOccurred())
+				err := ctrlClient.Delete(context.Background(), backup)
+				Expect(err).NotTo(HaveOccurred())
+				// Check if the deletion is blocked by the finalizer.
+				err = ctrlClient.Get(context.Background(), types.NamespacedName{
+					Namespace: backup.Namespace,
+					Name:      backup.Name,
+				}, backup)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(controllerutil.ContainsFinalizer(backup, MantleBackupFinalizerName)).To(BeTrue())
+			}
+		}
+
+		mbr := NewMantleBackupReconciler(ctrlClient,
+			ctrlClient.Scheme(), "test", RolePrimary, nil)
+
+		ret, err := mbr.prepareForDataSynchronization(context.Background(),
+			backup, grpcClient)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ret.isIncremental).To(Equal(isIncremental))
+		Expect(ret.isSecondaryMantleBackupReadyToUse).To(Equal(isSecondaryMantleBackupReadyToUse))
+		if isIncremental {
+			Expect(ret.diffFrom).NotTo(BeNil())
+			Expect(ret.diffFrom.GetName()).To(Equal(diffFrom.GetName()))
+		} else {
+			Expect(ret.diffFrom).To(BeNil())
+		}
+	}
+
+	DescribeTable("MantleBackup without annotations", doTest,
+		Entry("No synced MantleBackup exists",
+			testMantleBackup,
+			[]*mantlev1.MantleBackup{},
+			[]*mantlev1.MantleBackup{
+				newMantleBackup(testName, testNamespace, nil, secondaryLabels, false,
+					5, metav1.ConditionFalse, metav1.ConditionUnknown),
+			}, false, false, nil),
+		Entry("Synced but not reflected to the condition",
+			testMantleBackup,
+			[]*mantlev1.MantleBackup{},
+			[]*mantlev1.MantleBackup{
+				newMantleBackup(testName, testNamespace, nil, secondaryLabels, false,
+					5, metav1.ConditionTrue, metav1.ConditionUnknown),
+			}, false, true, nil),
+		Entry("Synced MantleBackup exists but deletionTimestamp is set on both clusters",
+			testMantleBackup,
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("testSnap3", testNamespace, nil, primaryLabels, true,
+					3, metav1.ConditionTrue, metav1.ConditionTrue),
+			},
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("testSnap3", testNamespace, nil, secondaryLabels, true,
+					3, metav1.ConditionTrue, metav1.ConditionUnknown),
+				newMantleBackup(testName, testNamespace, nil, secondaryLabels, false,
+					5, metav1.ConditionFalse, metav1.ConditionUnknown),
+			}, false, false, nil),
+		Entry("Synced MantleBackup exists but deletionTimestamp is set on the primary cluster",
+			testMantleBackup,
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("testSnap3", testNamespace, nil, primaryLabels, true,
+					3, metav1.ConditionTrue, metav1.ConditionTrue),
+			},
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("testSnap3", testNamespace, nil, secondaryLabels, false,
+					3, metav1.ConditionTrue, metav1.ConditionUnknown),
+				newMantleBackup(testName, testNamespace, nil, secondaryLabels, false,
+					5, metav1.ConditionFalse, metav1.ConditionUnknown),
+			}, false, false, nil),
+		Entry("Synced MantleBackup exists but deletionTimestamp is set on the secondary cluster",
+			testMantleBackup,
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("testSnap3", testNamespace, nil, primaryLabels, false,
+					3, metav1.ConditionTrue, metav1.ConditionTrue),
+			},
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("testSnap3", testNamespace, nil, secondaryLabels, true,
+					3, metav1.ConditionTrue, metav1.ConditionUnknown),
+				newMantleBackup(testName, testNamespace, nil, secondaryLabels, false,
+					5, metav1.ConditionFalse, metav1.ConditionUnknown),
+			}, false, false, nil),
+		Entry("The candidate for the diff origin MantleBackup does not exist on the primary cluster",
+			testMantleBackup,
+			[]*mantlev1.MantleBackup{},
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("testSnap3", testNamespace, nil, secondaryLabels, false,
+					3, metav1.ConditionTrue, metav1.ConditionUnknown),
+				newMantleBackup(testName, testNamespace, nil, secondaryLabels, false,
+					5, metav1.ConditionFalse, metav1.ConditionUnknown),
+			}, false, false, nil),
+		Entry("The candidate for the diff origin MantleBackup does not exist on the secondary cluster",
+			testMantleBackup,
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("testSnap3", testNamespace, nil, primaryLabels, false,
+					3, metav1.ConditionTrue, metav1.ConditionTrue),
+			},
+			[]*mantlev1.MantleBackup{
+				newMantleBackup(testName, testNamespace, nil, secondaryLabels, false,
+					5, metav1.ConditionFalse, metav1.ConditionUnknown),
+			}, false, false, nil),
+		Entry("Incremental backup",
+			testMantleBackup,
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("testSnap1", testNamespace, nil, primaryLabels, false,
+					1, metav1.ConditionTrue, metav1.ConditionTrue),
+				newMantleBackup("testSnap3", testNamespace, nil, primaryLabels, false,
+					3, metav1.ConditionTrue, metav1.ConditionTrue),
+			},
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("testSnap1", testNamespace, nil, secondaryLabels, false,
+					1, metav1.ConditionTrue, metav1.ConditionUnknown),
+				newMantleBackup("testSnap3", testNamespace, nil, secondaryLabels, false,
+					3, metav1.ConditionTrue, metav1.ConditionUnknown),
+				newMantleBackup(testName, testNamespace, nil, secondaryLabels, false,
+					5, metav1.ConditionFalse, metav1.ConditionUnknown),
+			}, true, false, newMantleBackup("testSnap3", testNamespace, nil, primaryLabels,
+				false, 3, metav1.ConditionTrue, metav1.ConditionTrue),
+		),
+		Entry("Incremental backup but skips the MantleBackup which only exists on the primary cluster",
+			testMantleBackup,
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("testSnap1", testNamespace, nil, primaryLabels, false,
+					1, metav1.ConditionTrue, metav1.ConditionTrue),
+				newMantleBackup("testSnap3", testNamespace, nil, primaryLabels, false,
+					3, metav1.ConditionTrue, metav1.ConditionTrue),
+			},
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("testSnap1", testNamespace, nil, secondaryLabels, false,
+					1, metav1.ConditionTrue, metav1.ConditionUnknown),
+				newMantleBackup(testName, testNamespace, nil, secondaryLabels, false,
+					5, metav1.ConditionFalse, metav1.ConditionUnknown),
+			}, true, false, newMantleBackup("testSnap1", testNamespace, nil, primaryLabels,
+				false, 1, metav1.ConditionTrue, metav1.ConditionTrue),
+		),
+	)
+
+	syncModeFullAnnotation := map[string]string{
+		annotSyncMode: syncModeFull,
+	}
+	syncModeIncAnnotation := map[string]string{
+		annotSyncMode: syncModeIncremental,
+		annotDiffFrom: "testSnap3",
+	}
+	DescribeTable("MantleBackup with annotations", doTest,
+		Entry(`Skip search because the MantleBackup already has the "sync-mode: full" annotation.`,
+			newMantleBackup(testName, testNamespace, syncModeFullAnnotation, primaryLabels,
+				false, 5, metav1.ConditionTrue, metav1.ConditionFalse),
+			[]*mantlev1.MantleBackup{},
+			[]*mantlev1.MantleBackup{
+				newMantleBackup(testName, testNamespace, syncModeFullAnnotation, secondaryLabels,
+					false, 5, metav1.ConditionFalse, metav1.ConditionUnknown),
+			}, false, false, nil),
+		Entry(`Skip search because the MantleBackup already has the "sync-mode: incremental" annotation.`,
+			newMantleBackup(testName, testNamespace, syncModeIncAnnotation, primaryLabels,
+				false, 5, metav1.ConditionTrue, metav1.ConditionFalse),
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("testSnap1", testNamespace, nil, primaryLabels, false,
+					1, metav1.ConditionTrue, metav1.ConditionTrue),
+				newMantleBackup("testSnap3", testNamespace, nil, primaryLabels, false,
+					3, metav1.ConditionTrue, metav1.ConditionTrue),
+			},
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("testSnap1", testNamespace, nil, secondaryLabels, false,
+					1, metav1.ConditionTrue, metav1.ConditionUnknown),
+				newMantleBackup("testSnap3", testNamespace, nil, secondaryLabels, false,
+					3, metav1.ConditionTrue, metav1.ConditionUnknown),
+				newMantleBackup(testName, testNamespace, syncModeIncAnnotation, secondaryLabels,
+					false, 5, metav1.ConditionFalse, metav1.ConditionUnknown),
+			}, true, false, newMantleBackup("testSnap3", testNamespace, nil, primaryLabels,
+				false, 3, metav1.ConditionTrue, metav1.ConditionTrue),
+		),
 	)
 })
