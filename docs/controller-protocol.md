@@ -8,6 +8,8 @@
     - [CreateOrUpdateMantleBackupResponse](#proto-CreateOrUpdateMantleBackupResponse)
     - [CreateOrUpdatePVCRequest](#proto-CreateOrUpdatePVCRequest)
     - [CreateOrUpdatePVCResponse](#proto-CreateOrUpdatePVCResponse)
+    - [ListMantleBackupRequest](#proto-ListMantleBackupRequest)
+    - [ListMantleBackupResponse](#proto-ListMantleBackupResponse)
   
     - [MantleService](#proto-MantleService)
   
@@ -78,6 +80,37 @@ CreateOrUpdatePVCResponse is a response message for CreateOrUpdatePVC RPC.
 
 
 
+
+<a name="proto-ListMantleBackupRequest"></a>
+
+### ListMantleBackupRequest
+ListMantleBackupRequest is a request message for ListMantleBackup RPC.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| pvcUID | [string](#string) |  |  |
+| namespace | [string](#string) |  |  |
+
+
+
+
+
+
+<a name="proto-ListMantleBackupResponse"></a>
+
+### ListMantleBackupResponse
+ListMantleBackupResponse is a response message for ListMantleBackup RPC.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| mantleBackupList | [bytes](#bytes) |  |  |
+
+
+
+
+
  
 
  
@@ -94,6 +127,7 @@ CreateOrUpdatePVCResponse is a response message for CreateOrUpdatePVC RPC.
 | ----------- | ------------ | ------------- | ------------|
 | CreateOrUpdatePVC | [CreateOrUpdatePVCRequest](#proto-CreateOrUpdatePVCRequest) | [CreateOrUpdatePVCResponse](#proto-CreateOrUpdatePVCResponse) |  |
 | CreateOrUpdateMantleBackup | [CreateOrUpdateMantleBackupRequest](#proto-CreateOrUpdateMantleBackupRequest) | [CreateOrUpdateMantleBackupResponse](#proto-CreateOrUpdateMantleBackupResponse) |  |
+| ListMantleBackup | [ListMantleBackupRequest](#proto-ListMantleBackupRequest) | [ListMantleBackupResponse](#proto-ListMantleBackupResponse) |  |
 
  
 
