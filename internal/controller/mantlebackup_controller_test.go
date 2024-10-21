@@ -319,16 +319,21 @@ var _ = Describe("MantleBackup controller", func() {
 	})
 
 	Context("when the role is `primary`", func() {
+		var mockCtrl *gomock.Controller
+		var grpcClient *proto.MockMantleServiceClient
 		BeforeEach(func() {
 			mgrUtil = testutil.NewManagerUtil(context.Background(), cfg, scheme.Scheme)
 
+			var t reporter
+			mockCtrl = gomock.NewController(t)
+			grpcClient = proto.NewMockMantleServiceClient(mockCtrl)
 			reconciler = NewMantleBackupReconciler(
 				mgrUtil.GetManager().GetClient(),
 				mgrUtil.GetManager().GetScheme(),
 				resMgr.ClusterID,
 				RolePrimary,
 				&PrimarySettings{
-					Client: &mockGRPCClient{},
+					Client: grpcClient,
 				},
 			)
 			reconciler.ceph = testutil.NewFakeRBD()
@@ -342,8 +347,50 @@ var _ = Describe("MantleBackup controller", func() {
 
 			ns = resMgr.CreateNamespace()
 		})
+		AfterEach(func() {
+			if mockCtrl != nil {
+				mockCtrl.Finish()
+			}
+		})
 
 		It("should be synced to remote", func(ctx SpecContext) {
+			grpcClient.EXPECT().CreateOrUpdatePVC(gomock.Any(), gomock.Any()).
+				MinTimes(1).Return(
+				&proto.CreateOrUpdatePVCResponse{
+					Uid: "a7c9d5e2-4b8f-4e2a-9d3f-1b6a7c8e9f2b",
+				}, nil)
+			var targetBackup mantlev1.MantleBackup
+			grpcClient.EXPECT().CreateOrUpdateMantleBackup(gomock.Any(), gomock.Any()).
+				MinTimes(1).
+				DoAndReturn(
+					func(
+						ctx context.Context,
+						req *proto.CreateOrUpdateMantleBackupRequest,
+						opts ...grpc.CallOption,
+					) (*proto.CreateOrUpdateMantleBackupResponse, error) {
+						err := json.Unmarshal([]byte(req.GetMantleBackup()), &targetBackup)
+						if err != nil {
+							panic(err)
+						}
+						return &proto.CreateOrUpdateMantleBackupResponse{}, nil
+					})
+			grpcClient.EXPECT().ListMantleBackup(gomock.Any(), gomock.Any()).
+				MinTimes(1).
+				DoAndReturn(
+					func(
+						ctx context.Context,
+						req *proto.ListMantleBackupRequest,
+						opts ...grpc.CallOption,
+					) (*proto.ListMantleBackupResponse, error) {
+						data, err := json.Marshal([]mantlev1.MantleBackup{targetBackup})
+						if err != nil {
+							panic(err)
+						}
+						return &proto.ListMantleBackupResponse{
+							MantleBackupList: data,
+						}, nil
+					})
+
 			pv, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -387,118 +434,19 @@ var _ = Describe("MantleBackup controller", func() {
 	})
 })
 
-type mockGRPCClient struct {
-	backup mantlev1.MantleBackup
-}
-
-var _ proto.MantleServiceClient = (*mockGRPCClient)(nil)
-
-func (m *mockGRPCClient) CreateOrUpdatePVC(
-	ctx context.Context,
-	req *proto.CreateOrUpdatePVCRequest,
-	opts ...grpc.CallOption,
-) (*proto.CreateOrUpdatePVCResponse, error) {
-	return &proto.CreateOrUpdatePVCResponse{}, nil
-}
-
-func (m *mockGRPCClient) CreateOrUpdateMantleBackup(
-	ctx context.Context,
-	req *proto.CreateOrUpdateMantleBackupRequest,
-	opts ...grpc.CallOption,
-) (*proto.CreateOrUpdateMantleBackupResponse, error) {
-	err := json.Unmarshal([]byte(req.MantleBackup), &m.backup)
-	if err != nil {
-		return nil, err
-	}
-	return &proto.CreateOrUpdateMantleBackupResponse{}, nil
-}
-
-func (m *mockGRPCClient) ListMantleBackup(
-	ctx context.Context,
-	req *proto.ListMantleBackupRequest,
-	opts ...grpc.CallOption,
-) (*proto.ListMantleBackupResponse, error) {
-	backups := []mantlev1.MantleBackup{m.backup}
-	data, err := json.Marshal(backups)
-	if err != nil {
-		return nil, err
-	}
-	return &proto.ListMantleBackupResponse{
-		MantleBackupList: data,
-	}, nil
-}
-
-func int2Ptr(i int) *int {
-	return &i
-}
-
 var _ = Describe("searchDiffOriginMantleBackup", func() {
-	testMantleBackup := mantlev1.MantleBackup{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "test0",
-		},
-		Status: mantlev1.MantleBackupStatus{
-			SnapID: int2Ptr(5),
-		},
-	}
+	testMantleBackup := newMantleBackup("test0", "test-ns", nil, nil, false,
+		5, metav1.ConditionTrue, metav1.ConditionFalse)
 
 	basePrimaryBackups := []mantlev1.MantleBackup{
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "test1",
-			},
-			Status: mantlev1.MantleBackupStatus{
-				Conditions: []metav1.Condition{
-					{
-						Type:   mantlev1.BackupConditionReadyToUse,
-						Status: metav1.ConditionTrue,
-					},
-				},
-				SnapID: int2Ptr(1),
-			},
-		},
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "test2",
-			},
-			Status: mantlev1.MantleBackupStatus{
-				Conditions: []metav1.Condition{
-					{
-						Type:   mantlev1.BackupConditionReadyToUse,
-						Status: metav1.ConditionTrue,
-					},
-				},
-				SnapID: int2Ptr(6),
-			},
-		},
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "test3",
-			},
-			Status: mantlev1.MantleBackupStatus{
-				Conditions: []metav1.Condition{
-					{
-						Type:   mantlev1.BackupConditionReadyToUse,
-						Status: metav1.ConditionTrue,
-					},
-				},
-				SnapID: int2Ptr(3),
-			},
-		},
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "test4",
-			},
-			Status: mantlev1.MantleBackupStatus{
-				Conditions: []metav1.Condition{
-					{
-						Type:   mantlev1.BackupConditionReadyToUse,
-						Status: metav1.ConditionTrue,
-					},
-				},
-				SnapID: int2Ptr(4),
-			},
-		},
+		*newMantleBackup("test1", "test-ns", nil, nil, false,
+			1, metav1.ConditionTrue, metav1.ConditionTrue),
+		*newMantleBackup("test2", "test-ns", nil, nil, false,
+			6, metav1.ConditionTrue, metav1.ConditionFalse),
+		*newMantleBackup("test3", "test-ns", nil, nil, false,
+			3, metav1.ConditionTrue, metav1.ConditionTrue),
+		*newMantleBackup("test4", "test-ns", nil, nil, false,
+			4, metav1.ConditionTrue, metav1.ConditionTrue),
 	}
 	// Note that slices.Clone() does the shallow copy.
 	// ref. https://pkg.go.dev/slices#Clone
@@ -537,16 +485,16 @@ var _ = Describe("searchDiffOriginMantleBackup", func() {
 			}
 		},
 		Entry("should return nil when no MantleBackup found on the secondary cluster",
-			&testMantleBackup, basePrimaryBackups, make(map[string]*mantlev1.MantleBackup),
+			testMantleBackup, basePrimaryBackups, make(map[string]*mantlev1.MantleBackup),
 			false, ""),
 		Entry("should find the correct MantleBackup",
-			&testMantleBackup, basePrimaryBackups, testSecondaryMantleBackups,
+			testMantleBackup, basePrimaryBackups, testSecondaryMantleBackups,
 			true, "test3"),
 		Entry("should skip the not-ready MantleBackup",
-			&testMantleBackup, primaryBackupsWithConditionFalse, testSecondaryMantleBackups,
+			testMantleBackup, primaryBackupsWithConditionFalse, testSecondaryMantleBackups,
 			true, "test1"),
 		Entry("should skip the MantleBackup with the deletion timestamp",
-			&testMantleBackup, primaryBackupsWithDeletionTimestamp, testSecondaryMantleBackups,
+			testMantleBackup, primaryBackupsWithDeletionTimestamp, testSecondaryMantleBackups,
 			true, "test1"),
 	)
 })
