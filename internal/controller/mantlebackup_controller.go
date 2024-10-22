@@ -334,7 +334,7 @@ func (r *MantleBackupReconciler) ReconcileAsStandalone(ctx context.Context, back
 	}
 
 	if !backup.ObjectMeta.DeletionTimestamp.IsZero() {
-		return r.finalize(ctx, backup, target, isErrTargetPVCNotFound(getSnapshotTargetErr))
+		return r.finalizeStandalone(ctx, backup, target, isErrTargetPVCNotFound(getSnapshotTargetErr))
 	}
 
 	if getSnapshotTargetErr != nil {
@@ -379,8 +379,46 @@ func (r *MantleBackupReconciler) ReconcileAsPrimary(ctx context.Context, backup 
 	return r.replicate(ctx, backup)
 }
 
-func (r *MantleBackupReconciler) ReconcileAsSecondary(_ context.Context, _ *mantlev1.MantleBackup) (ctrl.Result, error) {
-	return ctrl.Result{}, nil
+func (r *MantleBackupReconciler) ReconcileAsSecondary(ctx context.Context, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	if !isCreatedWhenMantleControllerWasSecondary(backup) {
+		logger.Info(
+			"skipping to reconcile the MantleBackup created by a different mantle-controller to prevent accidental data loss",
+		)
+		return ctrl.Result{}, nil
+	}
+
+	target, result, getSnapshotTargetErr := r.getSnapshotTarget(ctx, backup)
+	switch {
+	case getSnapshotTargetErr == errSkipProcessing:
+		return ctrl.Result{}, nil
+	case isErrTargetPVCNotFound(getSnapshotTargetErr):
+		// deletion logic may run.
+	case getSnapshotTargetErr == nil:
+	default:
+		return ctrl.Result{}, getSnapshotTargetErr
+	}
+	if result.Requeue {
+		return result, nil
+	}
+
+	if !backup.ObjectMeta.DeletionTimestamp.IsZero() {
+		return r.finalizeSecondary(ctx, backup, target, isErrTargetPVCNotFound(getSnapshotTargetErr))
+	}
+
+	if getSnapshotTargetErr != nil {
+		return ctrl.Result{}, getSnapshotTargetErr
+	}
+
+	if !meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse) {
+		result, err := r.startImport(ctx, backup, target)
+		if err != nil || !result.IsZero() {
+			return result, err
+		}
+	}
+
+	return r.secondaryCleanup(ctx, backup)
 }
 
 func scheduleExpire(_ context.Context, evt event.GenericEvent, q workqueue.RateLimitingInterface) {
@@ -589,7 +627,7 @@ func isCreatedWhenMantleControllerWasSecondary(backup *mantlev1.MantleBackup) bo
 	return ok
 }
 
-func (r *MantleBackupReconciler) finalize(
+func (r *MantleBackupReconciler) finalizeStandalone(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
 	target *snapshotTarget,
@@ -600,7 +638,45 @@ func (r *MantleBackupReconciler) finalize(
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	// primaryClean() is called in finalizeStandalone() to delete resources for
+	// exported and uploaded snapshots in both standalone and primary Mantle.
 	result, err := r.primaryCleanup(ctx, backup)
+	if err != nil || result != (ctrl.Result{}) {
+		return result, err
+	}
+
+	if !controllerutil.ContainsFinalizer(backup, MantleBackupFinalizerName) {
+		return ctrl.Result{}, nil
+	}
+
+	if !targetPVCNotFound {
+		err := r.removeRBDSnapshot(ctx, target.poolName, target.imageName, backup.Name)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	controllerutil.RemoveFinalizer(backup, MantleBackupFinalizerName)
+	if err := r.Update(ctx, backup); err != nil {
+		logger.Error(err, "failed to remove finalizer", "finalizer", MantleBackupFinalizerName)
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func (r *MantleBackupReconciler) finalizeSecondary(
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
+	target *snapshotTarget,
+	targetPVCNotFound bool,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	if _, ok := backup.GetAnnotations()[annotDiffTo]; ok {
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	result, err := r.secondaryCleanup(ctx, backup)
 	if err != nil || result != (ctrl.Result{}) {
 		return result, err
 	}
@@ -780,6 +856,107 @@ func (r *MantleBackupReconciler) export(
 	return ctrl.Result{}, nil
 }
 
+func (r *MantleBackupReconciler) startImport(
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
+	target *snapshotTarget,
+) (ctrl.Result, error) { //nolint:unparam
+	if result, err := r.isExportDataAlreadyUploaded(ctx, backup); err != nil || !result.IsZero() {
+		return result, err
+	}
+
+	// Requeue if the PV is smaller than the PVC. (This may be the case if pvc-autoresizer is used.)
+	if isPVSmallerThanPVC(target.pv, target.pvc) {
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	if err := r.updateStatusManifests(ctx, backup, target.pv, target.pvc); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if result, err := r.reconcileDiscardJob(ctx, backup, target); err != nil || !result.IsZero() {
+		return result, err
+	}
+
+	if result, err := r.reconcileImportJob(ctx, backup, target); err != nil || !result.IsZero() {
+		return result, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func (r *MantleBackupReconciler) isExportDataAlreadyUploaded(
+	_ context.Context,
+	_ *mantlev1.MantleBackup,
+) (ctrl.Result, error) { //nolint:unparam
+	return ctrl.Result{}, nil
+}
+
+func isPVSmallerThanPVC(
+	pv *corev1.PersistentVolume,
+	pvc *corev1.PersistentVolumeClaim,
+) bool {
+	return pv.Spec.Capacity.Storage().Cmp(*pvc.Spec.Resources.Requests.Storage()) == -1
+}
+
+func (r *MantleBackupReconciler) updateStatusManifests(
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
+	pv *corev1.PersistentVolume,
+	pvc *corev1.PersistentVolumeClaim,
+) error {
+	if backup.Status.PVManifest != "" || backup.Status.PVCManifest != "" {
+		return nil
+	}
+	return updateStatus(ctx, r.Client, backup, func() error {
+		pvJSON, err := json.Marshal(*pv)
+		if err != nil {
+			return err
+		}
+		backup.Status.PVManifest = string(pvJSON)
+
+		pvcJSON, err := json.Marshal(*pvc)
+		if err != nil {
+			return err
+		}
+		backup.Status.PVCManifest = string(pvcJSON)
+
+		return nil
+	})
+}
+
+func (r *MantleBackupReconciler) reconcileDiscardJob(
+	_ context.Context,
+	backup *mantlev1.MantleBackup,
+	_ *snapshotTarget,
+) (ctrl.Result, error) { //nolint:unparam
+	if backup.GetAnnotations()[annotSyncMode] != syncModeFull {
+		return ctrl.Result{}, nil
+	}
+
+	// FIXME: implement here later
+
+	return ctrl.Result{}, nil
+}
+
+func (r *MantleBackupReconciler) reconcileImportJob(
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
+	_ *snapshotTarget,
+) (ctrl.Result, error) { //nolint:unparam
+	// FIXME: implement here later
+
+	if err := r.updateStatusCondition(ctx, backup, metav1.Condition{
+		Type:   mantlev1.BackupConditionReadyToUse,
+		Status: metav1.ConditionTrue,
+		Reason: mantlev1.BackupReasonNone,
+	}); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
 func (r *MantleBackupReconciler) primaryCleanup(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
@@ -797,5 +974,12 @@ func (r *MantleBackupReconciler) primaryCleanup(
 		return ctrl.Result{}, err
 	}
 
+	return ctrl.Result{}, nil
+}
+
+func (r *MantleBackupReconciler) secondaryCleanup(
+	_ context.Context,
+	_ *mantlev1.MantleBackup,
+) (ctrl.Result, error) { // nolint:unparam
 	return ctrl.Result{}, nil
 }

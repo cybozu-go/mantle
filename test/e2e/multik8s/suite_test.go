@@ -151,11 +151,8 @@ func replicationTestSuite() {
 				if secondaryMB.Status.SnapID != nil {
 					return errors.New(".Status.SapID is incorrectly populated")
 				}
-				if secondaryMB.Status.PVManifest != "" {
-					return errors.New(".Status.PVManifest is incorrectly populated")
-				}
-				if secondaryMB.Status.PVCManifest != "" {
-					return errors.New(".Status.PVCManifest is incorrectly populated")
+				if !meta.IsStatusConditionTrue(secondaryMB.Status.Conditions, "ReadyToUse") {
+					return errors.New("ReadyToUse of .Status.Conditions is not True")
 				}
 
 				return nil
