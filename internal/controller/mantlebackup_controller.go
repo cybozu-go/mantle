@@ -283,17 +283,9 @@ func (r *MantleBackupReconciler) expire(ctx context.Context, backup *mantlev1.Ma
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.16.3/pkg/reconcile
-//
-// Reconcile is the main component of mantle-controller, so let's admit that Reconcile can be complex by `nolint:gocyclo`
-//
-//nolint:gocyclo
 func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	var backup mantlev1.MantleBackup
-
-	if r.role == RoleSecondary {
-		return ctrl.Result{}, nil
-	}
 
 	err := r.Get(ctx, req.NamespacedName, &backup)
 	if aerrors.IsNotFound(err) {
@@ -305,14 +297,29 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
-	if isCreatedWhenMantleControllerWasSecondary(&backup) {
+	switch r.role {
+	case RoleStandalone:
+		return r.ReconcileAsStandalone(ctx, &backup)
+	case RolePrimary:
+		return r.ReconcileAsPrimary(ctx, &backup)
+	case RoleSecondary:
+		return r.ReconcileAsSecondary(ctx, &backup)
+	}
+
+	panic("unreachable")
+}
+
+func (r *MantleBackupReconciler) ReconcileAsStandalone(ctx context.Context, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	if isCreatedWhenMantleControllerWasSecondary(backup) {
 		logger.Info(
 			"skipping to reconcile the MantleBackup created by a remote mantle-controller to prevent accidental data loss",
 		)
 		return ctrl.Result{}, nil
 	}
 
-	target, result, getSnapshotTargetErr := r.getSnapshotTarget(ctx, &backup)
+	target, result, getSnapshotTargetErr := r.getSnapshotTarget(ctx, backup)
 	switch {
 	case getSnapshotTargetErr == errSkipProcessing:
 		return ctrl.Result{}, nil
@@ -327,32 +334,32 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	if !backup.ObjectMeta.DeletionTimestamp.IsZero() {
-		return r.finalize(ctx, &backup, target, isErrTargetPVCNotFound(getSnapshotTargetErr))
+		return r.finalize(ctx, backup, target, isErrTargetPVCNotFound(getSnapshotTargetErr))
 	}
 
 	if getSnapshotTargetErr != nil {
 		return ctrl.Result{}, getSnapshotTargetErr
 	}
 
-	if !controllerutil.ContainsFinalizer(&backup, MantleBackupFinalizerName) {
-		controllerutil.AddFinalizer(&backup, MantleBackupFinalizerName)
-		err = r.Update(ctx, &backup)
-		if err != nil {
+	if !controllerutil.ContainsFinalizer(backup, MantleBackupFinalizerName) {
+		controllerutil.AddFinalizer(backup, MantleBackupFinalizerName)
+
+		if err := r.Update(ctx, backup); err != nil {
 			logger.Error(err, "failed to add finalizer", "finalizer", MantleBackupFinalizerName)
 			return ctrl.Result{}, err
 		}
-		err := r.updateStatusCondition(ctx, &backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionFalse, Reason: mantlev1.BackupReasonNone})
+		err := r.updateStatusCondition(ctx, backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionFalse, Reason: mantlev1.BackupReasonNone})
 		if err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	if err := r.expire(ctx, &backup); err != nil {
+	if err := r.expire(ctx, backup); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	if err := r.provisionRBDSnapshot(ctx, &backup, target); err != nil {
+	if err := r.provisionRBDSnapshot(ctx, backup, target); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -361,10 +368,18 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
-	if r.role == RolePrimary {
-		return r.replicate(ctx, &backup)
-	}
+	return ctrl.Result{}, nil
+}
 
+func (r *MantleBackupReconciler) ReconcileAsPrimary(ctx context.Context, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
+	result, err := r.ReconcileAsStandalone(ctx, backup)
+	if err != nil || !result.IsZero() {
+		return result, err
+	}
+	return r.replicate(ctx, backup)
+}
+
+func (r *MantleBackupReconciler) ReconcileAsSecondary(_ context.Context, _ *mantlev1.MantleBackup) (ctrl.Result, error) {
 	return ctrl.Result{}, nil
 }
 
