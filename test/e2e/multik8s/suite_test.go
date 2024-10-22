@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
+	corev1 "k8s.io/api/core/v1"
 )
 
 func TestMtest(t *testing.T) {
@@ -105,9 +106,15 @@ func replicationTestSuite() {
 					pvc.Annotations["mantle.cybozu.io/remote-uid"] != string(primaryPVC.GetUID()) {
 					return errors.New("invalid remote-uid annotation")
 				}
+				primaryPVC.Spec.VolumeName = ""
+				pvc.Spec.VolumeName = ""
 				if !reflect.DeepEqual(primaryPVC.Spec, pvc.Spec) {
 					return errors.New("spec not equal")
 				}
+				if pvc.Status.Phase != corev1.ClaimBound {
+					return errors.New("pvc not bound")
+				}
+
 				return nil
 			}).Should(Succeed())
 

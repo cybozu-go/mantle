@@ -508,6 +508,7 @@ func (r *MantleBackupReconciler) replicateManifests(
 		annotRemoteUID: string(pvc.GetUID()),
 	})
 	pvcSent.Spec = pvc.Spec
+	pvcSent.Spec.VolumeName = "" // The VolumeName should be blank.
 	pvcSentJson, err := json.Marshal(pvcSent)
 	if err != nil {
 		return ctrl.Result{}, err
