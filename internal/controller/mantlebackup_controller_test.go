@@ -359,7 +359,7 @@ var _ = Describe("MantleBackup controller", func() {
 				&proto.CreateOrUpdatePVCResponse{
 					Uid: "a7c9d5e2-4b8f-4e2a-9d3f-1b6a7c8e9f2b",
 				}, nil)
-			var targetBackup mantlev1.MantleBackup
+			targetBackups := []*mantlev1.MantleBackup{}
 			grpcClient.EXPECT().CreateOrUpdateMantleBackup(gomock.Any(), gomock.Any()).
 				MinTimes(1).
 				DoAndReturn(
@@ -368,10 +368,12 @@ var _ = Describe("MantleBackup controller", func() {
 						req *proto.CreateOrUpdateMantleBackupRequest,
 						opts ...grpc.CallOption,
 					) (*proto.CreateOrUpdateMantleBackupResponse, error) {
+						var targetBackup mantlev1.MantleBackup
 						err := json.Unmarshal(req.GetMantleBackup(), &targetBackup)
 						if err != nil {
 							panic(err)
 						}
+						targetBackups = append(targetBackups, &targetBackup)
 						return &proto.CreateOrUpdateMantleBackupResponse{}, nil
 					})
 			grpcClient.EXPECT().ListMantleBackup(gomock.Any(), gomock.Any()).
@@ -382,7 +384,7 @@ var _ = Describe("MantleBackup controller", func() {
 						req *proto.ListMantleBackupRequest,
 						opts ...grpc.CallOption,
 					) (*proto.ListMantleBackupResponse, error) {
-						data, err := json.Marshal([]mantlev1.MantleBackup{targetBackup})
+						data, err := json.Marshal(targetBackups)
 						if err != nil {
 							panic(err)
 						}
@@ -422,11 +424,34 @@ var _ = Describe("MantleBackup controller", func() {
 			snapID := backup.Status.SnapID
 			Expect(snapID).To(Equal(&snaps[0].Id))
 
-			// TODO: Currently, there is no way to check if the annotations are set correctly.
-			// After implementing export() function, the annotations check should be added
-			// for various conditions.
+			// Make sure export() correctly annotates the MantleBackup resource.
+			syncMode, ok := backup.GetAnnotations()[annotSyncMode]
+			Expect(ok).To(BeTrue())
+			Expect(syncMode).To(Equal(syncModeFull))
+
+			// Make the all existing MantleBackups in the (mocked) secondary Mantle
+			// ReadyToUse=True.
+			for _, backup := range targetBackups {
+				meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
+					Type:   mantlev1.BackupConditionReadyToUse,
+					Status: metav1.ConditionTrue,
+					Reason: mantlev1.BackupReasonNone,
+				})
+			}
+
+			// Create another MantleBackup (backup2) to make sure it should become a incremental backup.
+			backup2, err := resMgr.CreateUniqueBackupFor(ctx, pvc)
+			Expect(err).NotTo(HaveOccurred())
+			waitForHavingFinalizer(ctx, backup2)
+			resMgr.WaitForBackupReady(ctx, backup2)
+			resMgr.WaitForBackupSyncedToRemote(ctx, backup2)
+			syncMode2, ok := backup2.GetAnnotations()[annotSyncMode]
+			Expect(ok).To(BeTrue())
+			Expect(syncMode2).To(Equal(syncModeIncremental))
 
 			err = k8sClient.Delete(ctx, backup)
+			Expect(err).NotTo(HaveOccurred())
+			err = k8sClient.Delete(ctx, backup2)
 			Expect(err).NotTo(HaveOccurred())
 
 			testutil.CheckDeletedEventually[mantlev1.MantleBackup](ctx, k8sClient, backup.Name, backup.Namespace)

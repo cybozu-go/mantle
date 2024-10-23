@@ -464,13 +464,10 @@ func (r *MantleBackupReconciler) replicate(
 		return ctrl.Result{}, err
 	}
 
-	// FIXME: Delete this code after implementing export().
-	prepareResult.isSecondaryMantleBackupReadyToUse = true
-
 	if prepareResult.isSecondaryMantleBackupReadyToUse {
 		return r.primaryCleanup(ctx, backup)
 	}
-	return r.export(ctx, backup, r.primarySettings.Client, prepareResult)
+	return r.export(ctx, backup, prepareResult)
 }
 
 func (r *MantleBackupReconciler) replicateManifests(
@@ -848,15 +845,54 @@ func searchForDiffOriginMantleBackup(
 }
 
 func (r *MantleBackupReconciler) export(
-	_ context.Context,
-	_ *mantlev1.MantleBackup,
-	_ proto.MantleServiceClient,
+	ctx context.Context,
+	targetBackup *mantlev1.MantleBackup,
 	prepareResult *dataSyncPrepareResult,
-) (ctrl.Result, error) { //nolint:unparam
-	if prepareResult.isIncremental {
-		return ctrl.Result{}, fmt.Errorf("incremental backup is not implemented")
+) (ctrl.Result, error) {
+	sourceBackup := prepareResult.diffFrom
+	sourceBackupName := ""
+	if sourceBackup != nil {
+		sourceBackupName = sourceBackup.GetName()
 	}
-	return ctrl.Result{}, nil
+
+	if err := r.annotateExportTargetMantleBackup(ctx, targetBackup, prepareResult.isIncremental, sourceBackupName); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Update the status of the MantleBackup.
+	// FIXME: this is inserted only for tests and should be removed once export() is implemented correctly.
+	if err := r.updateStatusCondition(ctx, targetBackup, metav1.Condition{
+		Type:   mantlev1.BackupConditionSyncedToRemote,
+		Status: metav1.ConditionTrue,
+		Reason: mantlev1.BackupReasonNone,
+	}); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{Requeue: true}, nil
+}
+
+func (r *MantleBackupReconciler) annotateExportTargetMantleBackup(
+	ctx context.Context,
+	target *mantlev1.MantleBackup,
+	incremental bool,
+	sourceName string,
+) error {
+	_, err := ctrl.CreateOrUpdate(ctx, r.Client, target, func() error {
+		annot := target.GetAnnotations()
+		if annot == nil {
+			annot = map[string]string{}
+		}
+		if incremental {
+			annot[annotSyncMode] = syncModeIncremental
+			annot[annotDiffFrom] = sourceName
+		} else {
+			annot[annotSyncMode] = syncModeFull
+		}
+		target.SetAnnotations(annot)
+		return nil
+	})
+	return err
 }
 
 func (r *MantleBackupReconciler) startImport(
