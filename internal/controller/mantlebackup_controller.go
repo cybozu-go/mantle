@@ -411,6 +411,10 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 		return ctrl.Result{}, getSnapshotTargetErr
 	}
 
+	if err := r.expire(ctx, backup); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	if !meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse) {
 		result, err := r.startImport(ctx, backup, target)
 		if err != nil || !result.IsZero() {
