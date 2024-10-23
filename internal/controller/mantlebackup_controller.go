@@ -299,17 +299,17 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	switch r.role {
 	case RoleStandalone:
-		return r.ReconcileAsStandalone(ctx, &backup)
+		return r.reconcileAsStandalone(ctx, &backup)
 	case RolePrimary:
-		return r.ReconcileAsPrimary(ctx, &backup)
+		return r.reconcileAsPrimary(ctx, &backup)
 	case RoleSecondary:
-		return r.ReconcileAsSecondary(ctx, &backup)
+		return r.reconcileAsSecondary(ctx, &backup)
 	}
 
 	panic("unreachable")
 }
 
-func (r *MantleBackupReconciler) ReconcileAsStandalone(ctx context.Context, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
+func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	if isCreatedWhenMantleControllerWasSecondary(backup) {
@@ -371,15 +371,15 @@ func (r *MantleBackupReconciler) ReconcileAsStandalone(ctx context.Context, back
 	return ctrl.Result{}, nil
 }
 
-func (r *MantleBackupReconciler) ReconcileAsPrimary(ctx context.Context, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
-	result, err := r.ReconcileAsStandalone(ctx, backup)
+func (r *MantleBackupReconciler) reconcileAsPrimary(ctx context.Context, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
+	result, err := r.reconcileAsStandalone(ctx, backup)
 	if err != nil || !result.IsZero() {
 		return result, err
 	}
 	return r.replicate(ctx, backup)
 }
 
-func (r *MantleBackupReconciler) ReconcileAsSecondary(ctx context.Context, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
+func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	if !isCreatedWhenMantleControllerWasSecondary(backup) {
