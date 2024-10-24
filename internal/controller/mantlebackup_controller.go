@@ -643,15 +643,15 @@ func (r *MantleBackupReconciler) finalizeStandalone(
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	if !controllerutil.ContainsFinalizer(backup, MantleBackupFinalizerName) {
+		return ctrl.Result{}, nil
+	}
+
 	// primaryClean() is called in finalizeStandalone() to delete resources for
 	// exported and uploaded snapshots in both standalone and primary Mantle.
 	result, err := r.primaryCleanup(ctx, backup)
 	if err != nil || result != (ctrl.Result{}) {
 		return result, err
-	}
-
-	if !controllerutil.ContainsFinalizer(backup, MantleBackupFinalizerName) {
-		return ctrl.Result{}, nil
 	}
 
 	if !targetPVCNotFound {
@@ -681,13 +681,13 @@ func (r *MantleBackupReconciler) finalizeSecondary(
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	if !controllerutil.ContainsFinalizer(backup, MantleBackupFinalizerName) {
+		return ctrl.Result{}, nil
+	}
+
 	result, err := r.secondaryCleanup(ctx, backup)
 	if err != nil || result != (ctrl.Result{}) {
 		return result, err
-	}
-
-	if !controllerutil.ContainsFinalizer(backup, MantleBackupFinalizerName) {
-		return ctrl.Result{}, nil
 	}
 
 	if !targetPVCNotFound {
