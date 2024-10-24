@@ -22,6 +22,7 @@ const (
 	MantleService_CreateOrUpdatePVC_FullMethodName          = "/proto.MantleService/CreateOrUpdatePVC"
 	MantleService_CreateOrUpdateMantleBackup_FullMethodName = "/proto.MantleService/CreateOrUpdateMantleBackup"
 	MantleService_ListMantleBackup_FullMethodName           = "/proto.MantleService/ListMantleBackup"
+	MantleService_SetSynchronizing_FullMethodName           = "/proto.MantleService/SetSynchronizing"
 )
 
 // MantleServiceClient is the client API for MantleService service.
@@ -31,6 +32,7 @@ type MantleServiceClient interface {
 	CreateOrUpdatePVC(ctx context.Context, in *CreateOrUpdatePVCRequest, opts ...grpc.CallOption) (*CreateOrUpdatePVCResponse, error)
 	CreateOrUpdateMantleBackup(ctx context.Context, in *CreateOrUpdateMantleBackupRequest, opts ...grpc.CallOption) (*CreateOrUpdateMantleBackupResponse, error)
 	ListMantleBackup(ctx context.Context, in *ListMantleBackupRequest, opts ...grpc.CallOption) (*ListMantleBackupResponse, error)
+	SetSynchronizing(ctx context.Context, in *SetSynchronizingRequest, opts ...grpc.CallOption) (*SetSynchronizingResponse, error)
 }
 
 type mantleServiceClient struct {
@@ -71,6 +73,16 @@ func (c *mantleServiceClient) ListMantleBackup(ctx context.Context, in *ListMant
 	return out, nil
 }
 
+func (c *mantleServiceClient) SetSynchronizing(ctx context.Context, in *SetSynchronizingRequest, opts ...grpc.CallOption) (*SetSynchronizingResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetSynchronizingResponse)
+	err := c.cc.Invoke(ctx, MantleService_SetSynchronizing_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MantleServiceServer is the server API for MantleService service.
 // All implementations must embed UnimplementedMantleServiceServer
 // for forward compatibility.
@@ -78,6 +90,7 @@ type MantleServiceServer interface {
 	CreateOrUpdatePVC(context.Context, *CreateOrUpdatePVCRequest) (*CreateOrUpdatePVCResponse, error)
 	CreateOrUpdateMantleBackup(context.Context, *CreateOrUpdateMantleBackupRequest) (*CreateOrUpdateMantleBackupResponse, error)
 	ListMantleBackup(context.Context, *ListMantleBackupRequest) (*ListMantleBackupResponse, error)
+	SetSynchronizing(context.Context, *SetSynchronizingRequest) (*SetSynchronizingResponse, error)
 	mustEmbedUnimplementedMantleServiceServer()
 }
 
@@ -96,6 +109,9 @@ func (UnimplementedMantleServiceServer) CreateOrUpdateMantleBackup(context.Conte
 }
 func (UnimplementedMantleServiceServer) ListMantleBackup(context.Context, *ListMantleBackupRequest) (*ListMantleBackupResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListMantleBackup not implemented")
+}
+func (UnimplementedMantleServiceServer) SetSynchronizing(context.Context, *SetSynchronizingRequest) (*SetSynchronizingResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetSynchronizing not implemented")
 }
 func (UnimplementedMantleServiceServer) mustEmbedUnimplementedMantleServiceServer() {}
 func (UnimplementedMantleServiceServer) testEmbeddedByValue()                       {}
@@ -172,6 +188,24 @@ func _MantleService_ListMantleBackup_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MantleService_SetSynchronizing_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetSynchronizingRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MantleServiceServer).SetSynchronizing(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MantleService_SetSynchronizing_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MantleServiceServer).SetSynchronizing(ctx, req.(*SetSynchronizingRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // MantleService_ServiceDesc is the grpc.ServiceDesc for MantleService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -190,6 +224,10 @@ var MantleService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListMantleBackup",
 			Handler:    _MantleService_ListMantleBackup_Handler,
+		},
+		{
+			MethodName: "SetSynchronizing",
+			Handler:    _MantleService_SetSynchronizing_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -35,8 +35,20 @@ message ListMantleBackupResponse {
     bytes mantleBackupList = 1;
 }
 
+// SetSynchronizingRequest is a request message for SetSynchronize RPC.
+message SetSynchronizingRequest {
+    string name = 1;
+    string namespace = 2;
+    optional string diffFrom = 3;
+}
+
+// SetSynchronizingResponse is a response message for SetSynchronize RPC.
+message SetSynchronizingResponse {
+}
+
 service MantleService {
     rpc CreateOrUpdatePVC(CreateOrUpdatePVCRequest) returns (CreateOrUpdatePVCResponse);
     rpc CreateOrUpdateMantleBackup(CreateOrUpdateMantleBackupRequest) returns (CreateOrUpdateMantleBackupResponse);
     rpc ListMantleBackup(ListMantleBackupRequest) returns (ListMantleBackupResponse);
+    rpc SetSynchronizing(SetSynchronizingRequest) returns (SetSynchronizingResponse);
 }

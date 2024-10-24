@@ -465,6 +465,14 @@ func (m *mockGRPCClient) ListMantleBackup(
 	}, nil
 }
 
+func (m *mockGRPCClient) SetSynchronizing(
+	ctx context.Context,
+	req *proto.SetSynchronizingRequest,
+	opts ...grpc.CallOption,
+) (*proto.SetSynchronizingResponse, error) {
+	return &proto.SetSynchronizingResponse{}, nil
+}
+
 func int2Ptr(i int) *int {
 	return &i
 }
