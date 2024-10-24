@@ -859,6 +859,12 @@ func (r *MantleBackupReconciler) export(
 		return ctrl.Result{}, err
 	}
 
+	if prepareResult.isIncremental {
+		if err := r.annotateExportSourceMantleBackup(ctx, sourceBackup, targetBackup); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
 	// Update the status of the MantleBackup.
 	// FIXME: this is inserted only for tests and should be removed once export() is implemented correctly.
 	if err := r.updateStatusCondition(ctx, targetBackup, metav1.Condition{
@@ -890,6 +896,23 @@ func (r *MantleBackupReconciler) annotateExportTargetMantleBackup(
 			annot[annotSyncMode] = syncModeFull
 		}
 		target.SetAnnotations(annot)
+		return nil
+	})
+	return err
+}
+
+func (r *MantleBackupReconciler) annotateExportSourceMantleBackup(
+	ctx context.Context,
+	source *mantlev1.MantleBackup,
+	target *mantlev1.MantleBackup,
+) error {
+	_, err := ctrl.CreateOrUpdate(ctx, r.Client, source, func() error {
+		annot := source.GetAnnotations()
+		if annot == nil {
+			annot = map[string]string{}
+		}
+		annot[annotDiffTo] = target.GetName()
+		source.SetAnnotations(annot)
 		return nil
 	})
 	return err

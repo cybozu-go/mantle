@@ -21,6 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/kube-openapi/pkg/validation/strfmt"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -448,6 +449,19 @@ var _ = Describe("MantleBackup controller", func() {
 			syncMode2, ok := backup2.GetAnnotations()[annotSyncMode]
 			Expect(ok).To(BeTrue())
 			Expect(syncMode2).To(Equal(syncModeIncremental))
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup)
+			Expect(err).NotTo(HaveOccurred())
+			diffTo, ok := backup.GetAnnotations()[annotDiffTo]
+			Expect(ok).To(BeTrue())
+			Expect(diffTo).To(Equal(backup2.GetName()))
+
+			// remove diffTo annotation of backup here to allow it to be deleted.
+			// FIXME: this process is for testing purposes only and should be removed in the near future.
+			_, err = ctrl.CreateOrUpdate(ctx, k8sClient, backup, func() error {
+				delete(backup.Annotations, annotDiffTo)
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
 
 			err = k8sClient.Delete(ctx, backup)
 			Expect(err).NotTo(HaveOccurred())
