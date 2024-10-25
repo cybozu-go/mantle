@@ -10,6 +10,8 @@
     - [CreateOrUpdatePVCResponse](#proto-CreateOrUpdatePVCResponse)
     - [ListMantleBackupRequest](#proto-ListMantleBackupRequest)
     - [ListMantleBackupResponse](#proto-ListMantleBackupResponse)
+    - [SetSynchronizingRequest](#proto-SetSynchronizingRequest)
+    - [SetSynchronizingResponse](#proto-SetSynchronizingResponse)
   
     - [MantleService](#proto-MantleService)
   
@@ -111,6 +113,33 @@ ListMantleBackupResponse is a response message for ListMantleBackup RPC.
 
 
 
+
+<a name="proto-SetSynchronizingRequest"></a>
+
+### SetSynchronizingRequest
+SetSynchronizingRequest is a request message for SetSynchronize RPC.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  |  |
+| namespace | [string](#string) |  |  |
+| diffFrom | [string](#string) | optional |  |
+
+
+
+
+
+
+<a name="proto-SetSynchronizingResponse"></a>
+
+### SetSynchronizingResponse
+SetSynchronizingResponse is a response message for SetSynchronize RPC.
+
+
+
+
+
  
 
  
@@ -128,6 +157,7 @@ ListMantleBackupResponse is a response message for ListMantleBackup RPC.
 | CreateOrUpdatePVC | [CreateOrUpdatePVCRequest](#proto-CreateOrUpdatePVCRequest) | [CreateOrUpdatePVCResponse](#proto-CreateOrUpdatePVCResponse) |  |
 | CreateOrUpdateMantleBackup | [CreateOrUpdateMantleBackupRequest](#proto-CreateOrUpdateMantleBackupRequest) | [CreateOrUpdateMantleBackupResponse](#proto-CreateOrUpdateMantleBackupResponse) |  |
 | ListMantleBackup | [ListMantleBackupRequest](#proto-ListMantleBackupRequest) | [ListMantleBackupResponse](#proto-ListMantleBackupResponse) |  |
+| SetSynchronizing | [SetSynchronizingRequest](#proto-SetSynchronizingRequest) | [SetSynchronizingResponse](#proto-SetSynchronizingResponse) |  |
 
  
 

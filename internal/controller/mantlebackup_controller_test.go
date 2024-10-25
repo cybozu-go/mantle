@@ -393,6 +393,16 @@ var _ = Describe("MantleBackup controller", func() {
 							MantleBackupList: data,
 						}, nil
 					})
+			grpcClient.EXPECT().SetSynchronizing(gomock.Any(), gomock.Any()).
+				MinTimes(1).
+				DoAndReturn(
+					func(
+						ctx context.Context,
+						req *proto.SetSynchronizingRequest,
+						opts ...grpc.CallOption,
+					) (*proto.SetSynchronizingResponse, error) {
+						return &proto.SetSynchronizingResponse{}, nil
+					})
 
 			pv, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 			Expect(err).NotTo(HaveOccurred())

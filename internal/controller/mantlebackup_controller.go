@@ -850,12 +850,15 @@ func (r *MantleBackupReconciler) export(
 	prepareResult *dataSyncPrepareResult,
 ) (ctrl.Result, error) {
 	sourceBackup := prepareResult.diffFrom
-	sourceBackupName := ""
+	var sourceBackupName *string
 	if sourceBackup != nil {
-		sourceBackupName = sourceBackup.GetName()
+		s := sourceBackup.GetName()
+		sourceBackupName = &s
 	}
 
-	if err := r.annotateExportTargetMantleBackup(ctx, targetBackup, prepareResult.isIncremental, sourceBackupName); err != nil {
+	if err := r.annotateExportTargetMantleBackup(
+		ctx, targetBackup, prepareResult.isIncremental, sourceBackupName,
+	); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -863,6 +866,17 @@ func (r *MantleBackupReconciler) export(
 		if err := r.annotateExportSourceMantleBackup(ctx, sourceBackup, targetBackup); err != nil {
 			return ctrl.Result{}, err
 		}
+	}
+
+	if _, err := r.primarySettings.Client.SetSynchronizing(
+		ctx,
+		&proto.SetSynchronizingRequest{
+			Name:      targetBackup.GetName(),
+			Namespace: targetBackup.GetNamespace(),
+			DiffFrom:  sourceBackupName,
+		},
+	); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	// Update the status of the MantleBackup.
@@ -882,7 +896,7 @@ func (r *MantleBackupReconciler) annotateExportTargetMantleBackup(
 	ctx context.Context,
 	target *mantlev1.MantleBackup,
 	incremental bool,
-	sourceName string,
+	sourceName *string,
 ) error {
 	_, err := ctrl.CreateOrUpdate(ctx, r.Client, target, func() error {
 		annot := target.GetAnnotations()
@@ -891,7 +905,7 @@ func (r *MantleBackupReconciler) annotateExportTargetMantleBackup(
 		}
 		if incremental {
 			annot[annotSyncMode] = syncModeIncremental
-			annot[annotDiffFrom] = sourceName
+			annot[annotDiffFrom] = *sourceName
 		} else {
 			annot[annotSyncMode] = syncModeFull
 		}

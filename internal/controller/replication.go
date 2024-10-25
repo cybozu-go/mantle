@@ -3,12 +3,14 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/pkg/controller/proto"
 	"google.golang.org/grpc"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -203,4 +205,88 @@ func (s *SecondaryServer) ListMantleBackup(
 		return nil, err
 	}
 	return &proto.ListMantleBackupResponse{MantleBackupList: data}, nil
+}
+
+func (s *SecondaryServer) SetSynchronizing(
+	ctx context.Context,
+	req *proto.SetSynchronizingRequest,
+) (*proto.SetSynchronizingResponse, error) {
+	target := mantlev1.MantleBackup{}
+	if err := s.client.Get(
+		ctx,
+		types.NamespacedName{Name: req.Name, Namespace: req.Namespace},
+		&target,
+	); err != nil {
+		return nil, err
+	}
+
+	if meta.IsStatusConditionTrue(target.Status.Conditions, mantlev1.BackupConditionReadyToUse) {
+		return nil, errors.New("ReadyToUse is true")
+	}
+
+	// make sure sync-mode is correct.
+	if syncMode, ok := target.GetAnnotations()[annotSyncMode]; ok {
+		if syncMode == syncModeFull && req.DiffFrom != nil {
+			return nil, fmt.Errorf("annotated sync-mode is full but req.DiffFrom is not nil: %s", *req.DiffFrom)
+		}
+		if syncMode == syncModeIncremental && req.DiffFrom == nil {
+			return nil, fmt.Errorf("annotated sync-mode is incremental but req.DiffFrom is nil")
+		}
+	}
+
+	// make sure diff-from is correct.
+	if diffFrom, ok := target.GetAnnotations()[annotDiffFrom]; ok {
+		if req.DiffFrom == nil {
+			return nil, errors.New("annotated diff-from is not nil but req.DiffFrom is nil")
+		}
+		if *req.DiffFrom != diffFrom {
+			return nil, fmt.Errorf("annotated diff-from is not equal to req.DiffFrom: %s: %s", diffFrom, *req.DiffFrom)
+		}
+	}
+
+	if req.DiffFrom != nil {
+		source := mantlev1.MantleBackup{}
+		if err := s.client.Get(
+			ctx,
+			types.NamespacedName{Name: *req.DiffFrom, Namespace: req.Namespace},
+			&source,
+		); err != nil {
+			return nil, err
+		}
+
+		if diffTo, ok := source.GetAnnotations()[annotDiffTo]; ok && diffTo != req.Name {
+			return nil, errors.New("diffTo is invalid")
+		}
+
+		if _, err := ctrl.CreateOrUpdate(ctx, s.client, &source, func() error {
+			annot := source.GetAnnotations()
+			if annot == nil {
+				annot = map[string]string{}
+			}
+			annot[annotDiffTo] = req.Name
+			source.SetAnnotations(annot)
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+	}
+
+	if _, err := ctrl.CreateOrUpdate(ctx, s.client, &target, func() error {
+		annot := target.GetAnnotations()
+		if annot == nil {
+			annot = map[string]string{}
+		}
+		if req.DiffFrom == nil {
+			annot[annotSyncMode] = syncModeFull
+		} else {
+			annot[annotSyncMode] = syncModeIncremental
+			annot[annotDiffFrom] = *req.DiffFrom
+		}
+		target.SetAnnotations(annot)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	return &proto.SetSynchronizingResponse{}, nil
 }
