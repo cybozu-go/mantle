@@ -813,7 +813,6 @@ func (r *MantleBackupReconciler) prepareForDataSynchronization(
 func convertToMap(mantleBackups []mantlev1.MantleBackup) map[string]*mantlev1.MantleBackup {
 	m := make(map[string]*mantlev1.MantleBackup)
 	for _, mantleBackup := range mantleBackups {
-		mantleBackup := mantleBackup
 		m[mantleBackup.GetName()] = &mantleBackup
 	}
 	return m
@@ -826,7 +825,6 @@ func searchForDiffOriginMantleBackup(
 ) *mantlev1.MantleBackup {
 	var diffOrigin *mantlev1.MantleBackup
 	for _, primaryBackup := range primaryBackups {
-		primaryBackup := primaryBackup
 		secondaryBackup, ok := secondaryBackupMap[primaryBackup.Name]
 		if !ok {
 			continue

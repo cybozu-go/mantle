@@ -15,7 +15,7 @@ PROTOC_VERSION := 28.3
 # https://github.com/rook/rook/releases
 ROOK_CHART_VERSION := v1.15.4
 # https://github.com/golangci/golangci-lint/releases
-GOLANGCI_LINT_VERSION := v1.54.2
+GOLANGCI_LINT_VERSION := v1.61.0
 
 # Tools versions which are defined in go.mod
 SELF_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
