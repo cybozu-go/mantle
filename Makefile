@@ -83,6 +83,7 @@ vet: ## Run go vet against code.
 .PHONY: mock
 mock: mockgen
 	$(MOCKGEN) -source=internal/ceph/command.go -destination=internal/ceph/command_mock.go -package=ceph
+	$(MOCKGEN) -source=pkg/controller/proto/controller_grpc.pb.go -destination=pkg/controller/proto/controller_grpc.pb_mock.go -package=proto
 
 .PHONY: test
 test: manifests generate fmt vet envtest mock ## Run tests.
