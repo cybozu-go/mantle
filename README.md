@@ -17,7 +17,7 @@ To use mantle on your real kubernetes cluster, read following sections.
   - Kubernetes cluster: v1.27.10+
   - Rook: v1.13.1+
 - build
-  - go: v1.21.0+
+  - go: v1.22.0+
   - docker: 20.10+
   - kubectl:  v1.27.10+
   - kubebuilder: 3.14.0+ 
