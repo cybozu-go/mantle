@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/kube-openapi/pkg/validation/strfmt"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 )
@@ -316,6 +317,8 @@ var _ = Describe("MantleBackup controller", func() {
 	})
 
 	Context("when the role is `primary`", func() {
+		var client mockGRPCClient
+
 		BeforeEach(func() {
 			mgrUtil = testutil.NewManagerUtil(context.Background(), cfg, scheme.Scheme)
 
@@ -325,7 +328,7 @@ var _ = Describe("MantleBackup controller", func() {
 				resMgr.ClusterID,
 				RolePrimary,
 				&PrimarySettings{
-					Client: &mockGRPCClient{},
+					Client: &client,
 				},
 			)
 			reconciler.ceph = testutil.NewFakeRBD()
@@ -372,11 +375,47 @@ var _ = Describe("MantleBackup controller", func() {
 			snapID := backup.Status.SnapID
 			Expect(snapID).To(Equal(&snaps[0].Id))
 
-			// TODO: Currently, there is no way to check if the annotations are set correctly.
-			// After implementing export() function, the annotations check should be added
-			// for various conditions.
+			// Make sure export() correctly annotates the MantleBackup resource.
+			syncMode, ok := backup.GetAnnotations()[annotSyncMode]
+			Expect(ok).To(BeTrue())
+			Expect(syncMode).To(Equal(syncModeFull))
+
+			// Make the all existing MantleBackups in the (mocked) secondary Mantle
+			// ReadyToUse=True.
+			for _, backup := range client.backups {
+				meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
+					Type:   mantlev1.BackupConditionReadyToUse,
+					Status: metav1.ConditionTrue,
+					Reason: mantlev1.BackupReasonNone,
+				})
+			}
+
+			// Create another MantleBackup (backup2) to make sure it should become a incremental backup.
+			backup2, err := resMgr.CreateUniqueBackupFor(ctx, pvc)
+			Expect(err).NotTo(HaveOccurred())
+			waitForHavingFinalizer(ctx, backup2)
+			resMgr.WaitForBackupReady(ctx, backup2)
+			resMgr.WaitForBackupSyncedToRemote(ctx, backup2)
+			syncMode2, ok := backup2.GetAnnotations()[annotSyncMode]
+			Expect(ok).To(BeTrue())
+			Expect(syncMode2).To(Equal(syncModeIncremental))
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup)
+			Expect(err).NotTo(HaveOccurred())
+			diffTo, ok := backup.GetAnnotations()[annotDiffTo]
+			Expect(ok).To(BeTrue())
+			Expect(diffTo).To(Equal(backup2.GetName()))
+
+			// remove diffTo annotation of backup here to allow it to be deleted.
+			// FIXME: this process is for testing purposes only and should be removed in the near future.
+			_, err = ctrl.CreateOrUpdate(ctx, k8sClient, backup, func() error {
+				delete(backup.Annotations, annotDiffTo)
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
 
 			err = k8sClient.Delete(ctx, backup)
+			Expect(err).NotTo(HaveOccurred())
+			err = k8sClient.Delete(ctx, backup2)
 			Expect(err).NotTo(HaveOccurred())
 
 			testutil.CheckDeletedEventually[mantlev1.MantleBackup](ctx, k8sClient, backup.Name, backup.Namespace)
@@ -385,7 +424,7 @@ var _ = Describe("MantleBackup controller", func() {
 })
 
 type mockGRPCClient struct {
-	backup mantlev1.MantleBackup
+	backups []*mantlev1.MantleBackup
 }
 
 var _ proto.MantleServiceClient = (*mockGRPCClient)(nil)
@@ -403,10 +442,12 @@ func (m *mockGRPCClient) CreateOrUpdateMantleBackup(
 	req *proto.CreateOrUpdateMantleBackupRequest,
 	opts ...grpc.CallOption,
 ) (*proto.CreateOrUpdateMantleBackupResponse, error) {
-	err := json.Unmarshal([]byte(req.MantleBackup), &m.backup)
+	var backup mantlev1.MantleBackup
+	err := json.Unmarshal([]byte(req.MantleBackup), &backup)
 	if err != nil {
 		return nil, err
 	}
+	m.backups = append(m.backups, &backup)
 	return &proto.CreateOrUpdateMantleBackupResponse{}, nil
 }
 
@@ -415,14 +456,21 @@ func (m *mockGRPCClient) ListMantleBackup(
 	req *proto.ListMantleBackupRequest,
 	opts ...grpc.CallOption,
 ) (*proto.ListMantleBackupResponse, error) {
-	backups := []mantlev1.MantleBackup{m.backup}
-	data, err := json.Marshal(backups)
+	data, err := json.Marshal(m.backups)
 	if err != nil {
 		return nil, err
 	}
 	return &proto.ListMantleBackupResponse{
 		MantleBackupList: data,
 	}, nil
+}
+
+func (m *mockGRPCClient) SetSynchronizing(
+	ctx context.Context,
+	req *proto.SetSynchronizingRequest,
+	opts ...grpc.CallOption,
+) (*proto.SetSynchronizingResponse, error) {
+	return &proto.SetSynchronizingResponse{}, nil
 }
 
 func int2Ptr(i int) *int {

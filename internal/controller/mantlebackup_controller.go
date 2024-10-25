@@ -464,13 +464,10 @@ func (r *MantleBackupReconciler) replicate(
 		return ctrl.Result{}, err
 	}
 
-	// FIXME: Delete this code after implementing export().
-	prepareResult.isSecondaryMantleBackupReadyToUse = true
-
 	if prepareResult.isSecondaryMantleBackupReadyToUse {
 		return r.primaryCleanup(ctx, backup)
 	}
-	return r.export(ctx, backup, r.primarySettings.Client, prepareResult)
+	return r.export(ctx, backup, prepareResult)
 }
 
 func (r *MantleBackupReconciler) replicateManifests(
@@ -850,15 +847,114 @@ func searchForDiffOriginMantleBackup(
 }
 
 func (r *MantleBackupReconciler) export(
-	_ context.Context,
-	_ *mantlev1.MantleBackup,
-	_ proto.MantleServiceClient,
+	ctx context.Context,
+	targetBackup *mantlev1.MantleBackup,
 	prepareResult *dataSyncPrepareResult,
-) (ctrl.Result, error) { //nolint:unparam
-	if prepareResult.isIncremental {
-		return ctrl.Result{}, fmt.Errorf("incremental backup is not implemented")
+) (ctrl.Result, error) {
+	sourceBackup := prepareResult.diffFrom
+	var sourceBackupName *string
+	if sourceBackup != nil {
+		s := sourceBackup.GetName()
+		sourceBackupName = &s
 	}
-	return ctrl.Result{}, nil
+
+	if err := r.annotateExportTargetMantleBackup(
+		ctx, targetBackup, prepareResult.isIncremental, sourceBackupName,
+	); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if prepareResult.isIncremental {
+		if err := r.annotateExportSourceMantleBackup(ctx, sourceBackup, targetBackup); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	if _, err := r.primarySettings.Client.SetSynchronizing(
+		ctx,
+		&proto.SetSynchronizingRequest{
+			Name:      targetBackup.GetName(),
+			Namespace: targetBackup.GetNamespace(),
+			DiffFrom:  sourceBackupName,
+		},
+	); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Update the status of the MantleBackup.
+	// FIXME: this is inserted only for tests and should be removed once export() is implemented correctly.
+	if err := r.updateStatusCondition(ctx, targetBackup, metav1.Condition{
+		Type:   mantlev1.BackupConditionSyncedToRemote,
+		Status: metav1.ConditionTrue,
+		Reason: mantlev1.BackupReasonNone,
+	}); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	//	if r.maxExportJob != 0 {
+	//		result, err := r.checkNumOfExportJobs()
+	//		if err != nil || !result.IsZero() {
+	//			return result, err
+	//		}
+	//	}
+	//
+	//	if err := r.createExportDataPVCIfNotExists(); err != nil {
+	//		return ctrl.Result{}, err
+	//	}
+	//
+	//	if err := r.createExportJobIfNotExists(); err != nil {
+	//		return ctrl.Result{}, err
+	//	}
+	//
+	//	if result, err := r.checkExportJobStatus(); err != nil || !result.IsZero() {
+	//		return result, err
+	//	}
+	//
+	//	if err := r.createExportDataUploadJobIfNotExists(); err != nil {
+	//		return ctrl.Result{}, err
+	//	}
+
+	return ctrl.Result{Requeue: true}, nil
+}
+
+func (r *MantleBackupReconciler) annotateExportTargetMantleBackup(
+	ctx context.Context,
+	target *mantlev1.MantleBackup,
+	incremental bool,
+	sourceName *string,
+) error {
+	_, err := ctrl.CreateOrUpdate(ctx, r.Client, target, func() error {
+		annot := target.GetAnnotations()
+		if annot == nil {
+			annot = map[string]string{}
+		}
+		if incremental {
+			annot[annotSyncMode] = syncModeIncremental
+			annot[annotDiffFrom] = *sourceName
+		} else {
+			annot[annotSyncMode] = syncModeFull
+		}
+		target.SetAnnotations(annot)
+		return nil
+	})
+	return err
+}
+
+func (r *MantleBackupReconciler) annotateExportSourceMantleBackup(
+	ctx context.Context,
+	source *mantlev1.MantleBackup,
+	target *mantlev1.MantleBackup,
+) error {
+	_, err := ctrl.CreateOrUpdate(ctx, r.Client, source, func() error {
+		annot := source.GetAnnotations()
+		if annot == nil {
+			annot = map[string]string{}
+		}
+		annot[annotDiffTo] = target.GetName()
+		source.SetAnnotations(annot)
+		return nil
+	})
+	return err
 }
 
 func (r *MantleBackupReconciler) startImport(

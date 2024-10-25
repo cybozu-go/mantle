@@ -204,3 +204,47 @@ func (s *SecondaryServer) ListMantleBackup(
 	}
 	return &proto.ListMantleBackupResponse{MantleBackupList: data}, nil
 }
+
+func (s *SecondaryServer) SetSynchronizing(
+	ctx context.Context,
+	req *proto.SetSynchronizingRequest,
+) (*proto.SetSynchronizingResponse, error) {
+	if req.DiffFrom != nil {
+		source := mantlev1.MantleBackup{}
+		source.SetName(*req.DiffFrom)
+		source.SetNamespace(req.Namespace)
+		if _, err := ctrl.CreateOrUpdate(ctx, s.client, &source, func() error {
+			annot := source.GetAnnotations()
+			if annot == nil {
+				annot = map[string]string{}
+			}
+			annot[annotDiffTo] = req.Name
+			source.SetAnnotations(annot)
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+	}
+
+	target := mantlev1.MantleBackup{}
+	target.SetName(req.Name)
+	target.SetNamespace(req.Namespace)
+	if _, err := ctrl.CreateOrUpdate(ctx, s.client, &target, func() error {
+		annot := target.GetAnnotations()
+		if annot == nil {
+			annot = map[string]string{}
+		}
+		if req.DiffFrom == nil {
+			annot[annotSyncMode] = syncModeFull
+		} else {
+			annot[annotSyncMode] = syncModeIncremental
+			annot[annotDiffFrom] = *req.DiffFrom
+		}
+		target.SetAnnotations(annot)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	return &proto.SetSynchronizingResponse{}, nil
+}
