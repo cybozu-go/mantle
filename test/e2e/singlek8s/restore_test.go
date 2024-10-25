@@ -52,7 +52,7 @@ func restoreTestSuite() {
 
 func (test *restoreTest) setupEnv() {
 	It("describing the test environment", func() {
-		fmt.Fprintf(GinkgoWriter, "%+v\n", *test)
+		_, _ = fmt.Fprintf(GinkgoWriter, "%+v\n", *test)
 	})
 
 	It("creating common resources", func() {

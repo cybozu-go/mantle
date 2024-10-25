@@ -1,39 +1,21 @@
-# https://github.com/docker/buildx/releases
-BUILDX_VERSION := 0.12.1
-# https://github.com/cert-manager/cert-manager/releases
-CERT_MANAGER_VERSION := v1.13.3
-# https://github.com/helm/chart-testing/releases
-CHART_TESTING_VERSION := 3.10.1
-# https://github.com/containernetworking/plugins/releases
-CNI_PLUGINS_VERSION := v1.4.0
-# https://github.com/GoogleContainerTools/container-structure-test/releases
-CONTAINER_STRUCTURE_TEST_VERSION := 1.16.0
 # https://github.com/kubernetes-sigs/controller-tools/releases
-CONTROLLER_TOOLS_VERSION := v0.14.0
-# https://github.com/Mirantis/cri-dockerd/releases
-CRI_DOCKERD_VERSION := v0.3.9
-# https://github.com/kubernetes-sigs/cri-tools/releases
-CRICTL_VERSION := v1.29.0
-# https://github.com/norwoodj/helm-docs/releases
-HELM_DOCS_VERSION := 1.12.0
+CONTROLLER_TOOLS_VERSION := v0.16.4
 # https://github.com/helm/helm/releases
-HELM_VERSION := 3.14.0
-# kind node image version is related to kind version.
-# if you change kind version, also change kind node image version.
-# https://github.com/kubernetes-sigs/kind/releases
-KIND_VERSION := v0.20.0
+HELM_VERSION := 3.16.2
 # It is set by CI using the environment variable, use conditional assignment.
-KUBERNETES_VERSION := 1.27.10
+KUBERNETES_VERSION := 1.29.8
 # https://github.com/kubernetes-sigs/kustomize/releases
-KUSTOMIZE_VERSION := v5.2.1
+KUSTOMIZE_VERSION := v5.5.0
 # https://github.com/kubernetes/minikube/releases
-MINIKUBE_VERSION := v1.32.0
+MINIKUBE_VERSION := v1.34.0
 # https://github.com/uber-go/mock/releases
-MOCKGEN_VERSION := v0.4.0
+MOCKGEN_VERSION := v0.5.0
 # https://github.com/protocolbuffers/protobuf/releases
-PROTOC_VERSION := 25.2
+PROTOC_VERSION := 28.3
 # https://github.com/rook/rook/releases
-ROOK_CHART_VERSION := v1.13.8
+ROOK_CHART_VERSION := v1.15.4
+# https://github.com/golangci/golangci-lint/releases
+GOLANGCI_LINT_VERSION := v1.61.0
 
 # Tools versions which are defined in go.mod
 SELF_DIR := $(dir $(lastword $(MAKEFILE_LIST)))

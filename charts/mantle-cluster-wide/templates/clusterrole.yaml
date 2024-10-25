@@ -7,18 +7,17 @@ rules:
   - apiGroups:
       - ""
     resources:
-      - persistentvolumeclaims
+      - configmaps
+      - pods
+      - secrets
     verbs:
-      - create
-      - delete
       - get
       - list
-      - patch
-      - update
       - watch
   - apiGroups:
       - ""
     resources:
+      - persistentvolumeclaims
       - persistentvolumes
     verbs:
       - create
@@ -41,92 +40,10 @@ rules:
       - update
       - watch
   - apiGroups:
-      - ""
-    resources:
-      - configmaps
-    verbs:
-      - get
-      - list
-      - watch
-  - apiGroups:
-      - ""
-    resources:
-      - pods
-    verbs:
-      - get
-      - list
-      - watch
-  - apiGroups:
-      - ""
-    resources:
-      - secrets
-    verbs:
-      - get
-      - list
-      - watch
-  - apiGroups:
       - mantle.cybozu.io
     resources:
       - mantlebackupconfigs
-    verbs:
-      - create
-      - delete
-      - get
-      - list
-      - patch
-      - update
-      - watch
-  - apiGroups:
-      - mantle.cybozu.io
-    resources:
-      - mantlebackupconfigs/finalizers
-    verbs:
-      - update
-  - apiGroups:
-      - mantle.cybozu.io
-    resources:
-      - mantlebackupconfigs/status
-    verbs:
-      - get
-      - patch
-      - update
-  - apiGroups:
-      - mantle.cybozu.io
-    resources:
       - mantlebackups
-    verbs:
-      - create
-      - delete
-      - get
-      - list
-      - patch
-      - update
-      - watch
-  - apiGroups:
-      - mantle.cybozu.io
-    resources:
-      - mantlebackups/finalizers
-    verbs:
-      - update
-  - apiGroups:
-      - mantle.cybozu.io
-    resources:
-      - mantlebackups/status
-    verbs:
-      - get
-      - patch
-      - update
-  - apiGroups:
-      - mantle.cybozu.io
-    resources:
-      - mantlerbackup
-    verbs:
-      - get
-      - list
-      - watch
-  - apiGroups:
-      - mantle.cybozu.io
-    resources:
       - mantlerestores
     verbs:
       - create
@@ -139,17 +56,29 @@ rules:
   - apiGroups:
       - mantle.cybozu.io
     resources:
+      - mantlebackupconfigs/finalizers
+      - mantlebackups/finalizers
       - mantlerestores/finalizers
     verbs:
       - update
   - apiGroups:
       - mantle.cybozu.io
     resources:
+      - mantlebackupconfigs/status
+      - mantlebackups/status
       - mantlerestores/status
     verbs:
       - get
       - patch
       - update
+  - apiGroups:
+      - mantle.cybozu.io
+    resources:
+      - mantlerbackup
+    verbs:
+      - get
+      - list
+      - watch
   - apiGroups:
       - storage.k8s.io
     resources:

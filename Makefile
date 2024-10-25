@@ -90,7 +90,6 @@ test: manifests generate fmt vet envtest mock ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_KUBERNETES_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./... -coverprofile cover.out -p 1 -v
 
 GOLANGCI_LINT = $(shell pwd)/bin/golangci-lint
-GOLANGCI_LINT_VERSION ?= v1.54.2
 golangci-lint:
 	@[ -f $(GOLANGCI_LINT) ] || { \
 	set -e ;\

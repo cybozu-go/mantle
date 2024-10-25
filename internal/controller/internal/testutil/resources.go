@@ -119,7 +119,7 @@ func (r *ResourceManager) createPVAndPVC(ctx context.Context, ns, pvName, pvcNam
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes:      accessModes,
 			StorageClassName: &r.StorageClassName,
-			Resources: corev1.ResourceRequirements{
+			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{
 					corev1.ResourceStorage: size,
 				},

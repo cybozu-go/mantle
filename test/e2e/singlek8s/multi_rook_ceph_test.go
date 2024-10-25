@@ -40,7 +40,7 @@ func multiRookCephTestSuite() {
 
 func (test *multiRookCephTest) setupEnv() {
 	It("setting up the test environment", func() {
-		fmt.Fprintf(GinkgoWriter, "%+v\n", *test)
+		_, _ = fmt.Fprintf(GinkgoWriter, "%+v\n", *test)
 	})
 
 	It("creating common resources", func() {
@@ -59,7 +59,6 @@ func (test *multiRookCephTest) setupEnv() {
 
 func (test *multiRookCephTest) teardownEnv() {
 	for _, ns := range []string{test.tenantNamespace1, test.tenantNamespace2} {
-		ns := ns
 		It("delete resources in the namespace: "+ns, func() {
 			err := deleteNamespacedResource(ns, "mantlerestore")
 			Expect(err).NotTo(HaveOccurred())

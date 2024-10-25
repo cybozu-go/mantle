@@ -56,7 +56,7 @@ func backupTestSuite() {
 
 func (test *backupTest) setupEnv() {
 	It("setting up the test environment", func() {
-		fmt.Fprintf(GinkgoWriter, "%+v\n", *test)
+		_, _ = fmt.Fprintf(GinkgoWriter, "%+v\n", *test)
 	})
 
 	It("creating common resources", func() {
