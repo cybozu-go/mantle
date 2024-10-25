@@ -17,7 +17,6 @@ type MantleBackupSpec struct {
 	PVC string `json:"pvc,omitempty"`
 
 	// 'namespace' specifies backup target Namespace
-	// +kubebuilder:validation:Required
 	Namespace string `json:"namespace,omitempty"`
 
 	// NOTE: we CANNOT use metav1.Duration for Expire due to an unresolved k8s bug.
