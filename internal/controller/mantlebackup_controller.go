@@ -10,6 +10,7 @@ import (
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/ceph"
 	"github.com/cybozu-go/mantle/pkg/controller/proto"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	aerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -879,6 +880,10 @@ func (r *MantleBackupReconciler) export(
 		return ctrl.Result{}, err
 	}
 
+	if result, err := r.checkIfNewJobCanBeCreated(ctx); err != nil || !result.IsZero() {
+		return result, err
+	}
+
 	// Update the status of the MantleBackup.
 	// FIXME: this is inserted only for tests and should be removed once export() is implemented correctly.
 	if err := r.updateStatusCondition(ctx, targetBackup, metav1.Condition{
@@ -930,6 +935,29 @@ func (r *MantleBackupReconciler) annotateExportSourceMantleBackup(
 		return nil
 	})
 	return err
+}
+
+func (r *MantleBackupReconciler) checkIfNewJobCanBeCreated(ctx context.Context) (ctrl.Result, error) {
+	if r.primarySettings.MaxExportJobs == 0 {
+		return ctrl.Result{}, nil
+	}
+
+	var jobs batchv1.JobList
+	if err := r.Client.List(ctx, &jobs, &client.ListOptions{
+		Namespace: r.managedCephClusterID,
+		LabelSelector: labels.SelectorFromSet(map[string]string{
+			"app.kubernetes.io/name":      "mantle",
+			"app.kubernetes.io/component": "export-job",
+		}),
+	}); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if len(jobs.Items) >= r.primarySettings.MaxExportJobs {
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	return ctrl.Result{}, nil
 }
 
 func (r *MantleBackupReconciler) startImport(

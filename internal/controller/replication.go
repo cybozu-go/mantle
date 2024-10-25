@@ -27,6 +27,7 @@ type PrimarySettings struct {
 	ServiceEndpoint string
 	Conn            *grpc.ClientConn
 	Client          proto.MantleServiceClient
+	MaxExportJobs   int
 }
 
 type SecondaryServer struct {

@@ -49,6 +49,7 @@ var (
 	overwriteMBCSchedule  string
 	role                  string
 	mantleServiceEndpoint string
+	maxExportJobs         int
 
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
@@ -73,6 +74,8 @@ func init() {
 			"(i) If --role is 'standalone', this option is ignored. (ii) If --role is 'primary', this option is required "+
 			"and is interpreted as the address that the primary mantle should connect to. (iii) If --role is 'secondary', "+
 			"this option is required and is interpreted as the address that the secondary mantle should listen to.")
+	flags.IntVar(&maxExportJobs, "max-export-jobs", 8,
+		"The maximum number of export jobs that can run simultaneously. If you set this to 0, there is no limit.")
 
 	goflags := flag.NewFlagSet("goflags", flag.ExitOnError)
 	zapOpts.Development = true
@@ -177,6 +180,7 @@ func setupPrimary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup) 
 		ServiceEndpoint: mantleServiceEndpoint,
 		Conn:            conn,
 		Client:          proto.NewMantleServiceClient(conn),
+		MaxExportJobs:   maxExportJobs,
 	}
 
 	return setupReconcilers(mgr, primarySettings)
