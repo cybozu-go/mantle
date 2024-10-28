@@ -496,6 +496,8 @@ var _ = Describe("MantleBackup controller", func() {
 			waitForHavingFinalizer(ctx, backup2)
 			resMgr.WaitForBackupReady(ctx, backup2)
 			resMgr.WaitForBackupSyncedToRemote(ctx, backup2)
+
+			// Make sure backup2 is an incremental backup.
 			syncMode2, ok := backup2.GetAnnotations()[annotSyncMode]
 			Expect(ok).To(BeTrue())
 			Expect(syncMode2).To(Equal(syncModeIncremental))

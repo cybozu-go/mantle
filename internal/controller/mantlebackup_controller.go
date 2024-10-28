@@ -905,6 +905,10 @@ func (r *MantleBackupReconciler) export(
 		return ctrl.Result{}, err
 	}
 
+	if result, err := r.checkIfExportJobIsCompleted(ctx, targetBackup); err != nil || !result.IsZero() {
+		return result, err
+	}
+
 	return ctrl.Result{Requeue: true}, nil
 }
 
@@ -1007,6 +1011,10 @@ func (r *MantleBackupReconciler) createOrUpdateExportDataPVC(ctx context.Context
 	return err
 }
 
+func makeExportJobName(target *mantlev1.MantleBackup) string {
+	return fmt.Sprintf("mantle-export-%s", target.GetUID())
+}
+
 func (r *MantleBackupReconciler) createOrUpdateExportJob(ctx context.Context, target *mantlev1.MantleBackup, sourceBackupNamePtr *string) error {
 	sourceBackupName := ""
 	if sourceBackupNamePtr != nil {
@@ -1019,7 +1027,7 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(ctx context.Context, ta
 	}
 
 	var job batchv1.Job
-	job.SetName(fmt.Sprintf("mantle-export-%s", target.GetUID()))
+	job.SetName(makeExportJobName(target))
 	job.SetNamespace(r.managedCephClusterID)
 	if _, err := ctrl.CreateOrUpdate(ctx, r.Client, &job, func() error {
 		labels := job.GetLabels()
@@ -1224,6 +1232,34 @@ fi`,
 	}
 
 	return nil
+}
+
+func (r *MantleBackupReconciler) checkIfExportJobIsCompleted(
+	ctx context.Context,
+	target *mantlev1.MantleBackup,
+) (ctrl.Result, error) {
+	var job batchv1.Job
+	if err := r.Client.Get(
+		ctx,
+		types.NamespacedName{
+			Name:      makeExportJobName(target),
+			Namespace: r.managedCephClusterID,
+		},
+		&job,
+	); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Check if the export Job is completed or not. Note that we can't use
+	// meta.IsConditionTrue here, because job.Status.Conditions has
+	// []JobCondition type.
+	for _, cond := range job.Status.Conditions {
+		if cond.Type == batchv1.JobComplete && cond.Status == corev1.ConditionTrue {
+			return ctrl.Result{}, nil
+		}
+	}
+
+	return ctrl.Result{Requeue: true}, nil
 }
 
 func (r *MantleBackupReconciler) startImport(
