@@ -83,6 +83,7 @@ vet: ## Run go vet against code.
 .PHONY: mock
 mock: mockgen
 	$(MOCKGEN) -source=internal/ceph/command.go -destination=internal/ceph/command_mock.go -package=ceph
+	$(MOCKGEN) -source=pkg/controller/proto/controller_grpc.pb.go -destination=pkg/controller/proto/controller_grpc.pb_mock.go -package=proto
 
 .PHONY: test
 test: manifests generate fmt vet envtest mock ## Run tests.
@@ -98,7 +99,7 @@ golangci-lint:
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter & yamllint
-	$(GOLANGCI_LINT) run
+	$(GOLANGCI_LINT) run --timeout 3m
 
 .PHONY: lint-fix
 lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
