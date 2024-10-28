@@ -116,12 +116,19 @@ func setupReconcilers(mgr manager.Manager, primarySettings *controller.PrimarySe
 		return errors.New("POD_NAMESPACE is empty")
 	}
 
+	podImage := os.Getenv("POD_IMAGE")
+	if podImage == "" {
+		setupLog.Error(errors.New("POD_IMAGE must not be empty"), "POD_IMAGE must not be empty")
+		return errors.New("POD_IMAGE is empty")
+	}
+
 	backupReconciler := controller.NewMantleBackupReconciler(
 		mgr.GetClient(),
 		mgr.GetScheme(),
 		managedCephClusterID,
 		role,
 		primarySettings,
+		podImage,
 	)
 	if err := backupReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MantleBackup")

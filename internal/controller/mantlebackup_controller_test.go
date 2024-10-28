@@ -15,6 +15,7 @@ import (
 	. "github.com/onsi/gomega"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -111,6 +112,7 @@ var _ = Describe("MantleBackup controller", func() {
 				resMgr.ClusterID,
 				RoleStandalone,
 				nil,
+				"dummy image",
 			)
 			reconciler.ceph = testutil.NewFakeRBD()
 			err := reconciler.SetupWithManager(mgrUtil.GetManager())
@@ -337,6 +339,7 @@ var _ = Describe("MantleBackup controller", func() {
 					Client:                 grpcClient,
 					ExportDataStorageClass: resMgr.StorageClassName,
 				},
+				"dummy image",
 			)
 			reconciler.ceph = testutil.NewFakeRBD()
 			err := reconciler.SetupWithManager(mgrUtil.GetManager())
@@ -457,6 +460,25 @@ var _ = Describe("MantleBackup controller", func() {
 			Expect(pvcExport.Spec.AccessModes[0]).To(Equal(corev1.ReadWriteOnce))
 			Expect(*pvcExport.Spec.StorageClassName).To(Equal(resMgr.StorageClassName))
 			Expect(pvcExport.Spec.Resources.Requests.Storage().String()).To(Equal("2Gi"))
+
+			// Make sure export() creates a Job to export data.
+			var jobExport batchv1.Job
+			err = k8sClient.Get(
+				ctx,
+				types.NamespacedName{
+					Name:      fmt.Sprintf("mantle-export-%s", backup.GetUID()),
+					Namespace: resMgr.ClusterID,
+				},
+				&jobExport,
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(jobExport.GetLabels()["app.kubernetes.io/name"]).To(Equal("mantle"))
+			Expect(jobExport.GetLabels()["app.kubernetes.io/component"]).To(Equal("export-job"))
+			Expect(*jobExport.Spec.BackoffLimit).To(Equal(int32(65535)))
+			Expect(*jobExport.Spec.Template.Spec.SecurityContext.FSGroup).To(Equal(int64(10000)))
+			Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsUser).To(Equal(int64(10000)))
+			Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsGroup).To(Equal(int64(10000)))
+			Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsNonRoot).To(Equal(true))
 
 			// Make the all existing MantleBackups in the (mocked) secondary Mantle
 			// ReadyToUse=True.
@@ -678,7 +700,7 @@ var _ = Describe("prepareForDataSynchronization", func() {
 		}
 
 		mbr := NewMantleBackupReconciler(ctrlClient,
-			ctrlClient.Scheme(), "test", RolePrimary, nil)
+			ctrlClient.Scheme(), "test", RolePrimary, nil, "dummy image")
 
 		ret, err := mbr.prepareForDataSynchronization(context.Background(),
 			backup, grpcClient)

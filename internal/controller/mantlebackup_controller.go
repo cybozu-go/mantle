@@ -54,10 +54,11 @@ type MantleBackupReconciler struct {
 	role                 string
 	primarySettings      *PrimarySettings // This should be non-nil if and only if role equals 'primary'.
 	expireQueueCh        chan event.GenericEvent
+	podImage             string
 }
 
 // NewMantleBackupReconciler returns NodeReconciler.
-func NewMantleBackupReconciler(client client.Client, scheme *runtime.Scheme, managedCephClusterID, role string, primarySettings *PrimarySettings) *MantleBackupReconciler {
+func NewMantleBackupReconciler(client client.Client, scheme *runtime.Scheme, managedCephClusterID, role string, primarySettings *PrimarySettings, podImage string) *MantleBackupReconciler {
 	return &MantleBackupReconciler{
 		Client:               client,
 		Scheme:               scheme,
@@ -66,6 +67,7 @@ func NewMantleBackupReconciler(client client.Client, scheme *runtime.Scheme, man
 		role:                 role,
 		primarySettings:      primarySettings,
 		expireQueueCh:        make(chan event.GenericEvent),
+		podImage:             podImage,
 	}
 }
 
@@ -889,6 +891,10 @@ func (r *MantleBackupReconciler) export(
 		return ctrl.Result{}, err
 	}
 
+	if err := r.createOrUpdateExportJob(ctx, targetBackup, sourceBackupName); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	// Update the status of the MantleBackup.
 	// FIXME: this is inserted only for tests and should be removed once export() is implemented correctly.
 	if err := r.updateStatusCondition(ctx, targetBackup, metav1.Condition{
@@ -999,6 +1005,225 @@ func (r *MantleBackupReconciler) createOrUpdateExportDataPVC(ctx context.Context
 	})
 
 	return err
+}
+
+func (r *MantleBackupReconciler) createOrUpdateExportJob(ctx context.Context, target *mantlev1.MantleBackup, sourceBackupNamePtr *string) error {
+	sourceBackupName := ""
+	if sourceBackupNamePtr != nil {
+		sourceBackupName = *sourceBackupNamePtr
+	}
+
+	var pv corev1.PersistentVolume
+	if err := json.Unmarshal([]byte(target.Status.PVManifest), &pv); err != nil {
+		return err
+	}
+
+	var job batchv1.Job
+	job.SetName(fmt.Sprintf("mantle-export-%s", target.GetUID()))
+	job.SetNamespace(r.managedCephClusterID)
+	if _, err := ctrl.CreateOrUpdate(ctx, r.Client, &job, func() error {
+		labels := job.GetLabels()
+		if labels == nil {
+			labels = map[string]string{}
+		}
+		labels["app.kubernetes.io/name"] = "mantle"
+		labels["app.kubernetes.io/component"] = "export-job"
+		job.SetLabels(labels)
+
+		var backoffLimit int32 = 65535
+		job.Spec.BackoffLimit = &backoffLimit
+
+		var fsGroup int64 = 10000
+		var runAsGroup int64 = 10000
+		runAsNonRoot := true
+		var runAsUser int64 = 10000
+		job.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
+			FSGroup:      &fsGroup,
+			RunAsGroup:   &runAsGroup,
+			RunAsNonRoot: &runAsNonRoot,
+			RunAsUser:    &runAsUser,
+		}
+
+		job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
+
+		job.Spec.Template.Spec.Containers = []corev1.Container{
+			{
+				Name: "export",
+				Command: []string{
+					"/bin/bash",
+					"-c",
+					`
+# This shell script is forked from:
+#
+#     https://github.com/rook/rook/blob/fb02f500be4e0b80478366e973abf4e6870693a9/images/ceph/toolbox.sh
+#
+# It is distributed under Apache-2.0 license:
+#
+#     Copyright 2016 The Rook Authors. All rights reserved.
+#
+#     Licensed under the Apache License, Version 2.0 (the "License");
+#     you may not use this file except in compliance with the License.
+#     You may obtain a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+#     Unless required by applicable law or agreed to in writing, software
+#     distributed under the License is distributed on an "AS IS" BASIS,
+#     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#     See the License for the specific language governing permissions and
+#     limitations under the License.
+
+set -e
+set -o pipefail
+
+CEPH_CONFIG="/etc/ceph/ceph.conf"
+MON_CONFIG="/etc/rook/mon-endpoints"
+KEYRING_FILE="/etc/ceph/keyring"
+# create a ceph config file in its default location so ceph/rados tools can be used
+# without specifying any arguments
+write_endpoints() {
+  endpoints=$(cat ${MON_CONFIG})
+  # filter out the mon names
+  # external cluster can have numbers or hyphens in mon names, handling them in regex
+  # shellcheck disable=SC2001
+  mon_endpoints=$(echo "${endpoints}"| sed 's/[a-z0-9_-]\+=//g')
+  DATE=$(date)
+  echo "$DATE writing mon endpoints to ${CEPH_CONFIG}: ${endpoints}"
+    cat <<EOF > ${CEPH_CONFIG}
+[global]
+mon_host = ${mon_endpoints}
+[client.admin]
+keyring = ${KEYRING_FILE}
+EOF
+}
+# read the secret from an env var (for backward compatibility), or from the secret file
+ceph_secret=${ROOK_CEPH_SECRET}
+if [[ "$ceph_secret" == "" ]]; then
+  ceph_secret=$(cat /var/lib/rook-ceph-mon/secret.keyring)
+fi
+# create the keyring file
+cat <<EOF > ${KEYRING_FILE}
+[${ROOK_CEPH_USERNAME}]
+key = ${ceph_secret}
+EOF
+# write the initial config file
+write_endpoints
+
+# export diff
+rm -f /mantle/export.bin
+if [ -z "${FROM_SNAP_NAME}" ]; then
+    rbd export-diff -p ${POOL_NAME} ${SRC_IMAGE_NAME}@${SRC_SNAP_NAME} /mantle/export.bin
+else
+    rbd export-diff -p ${POOL_NAME} --from-snap ${FROM_SNAP_NAME} ${SRC_IMAGE_NAME}@${SRC_SNAP_NAME} /mantle/export.bin
+fi`,
+				},
+				Env: []corev1.EnvVar{
+					{
+						Name: "ROOK_CEPH_USERNAME",
+						ValueFrom: &corev1.EnvVarSource{
+							SecretKeyRef: &corev1.SecretKeySelector{
+								Key: "ceph-username",
+								LocalObjectReference: corev1.LocalObjectReference{
+									Name: "rook-ceph-mon",
+								},
+							},
+						},
+					},
+					{
+						Name:  "POOL_NAME",
+						Value: pv.Spec.CSI.VolumeAttributes["pool"],
+					},
+					{
+						Name:  "SRC_IMAGE_NAME",
+						Value: pv.Spec.CSI.VolumeAttributes["imageName"],
+					},
+					{
+						Name:  "FROM_SNAP_NAME",
+						Value: sourceBackupName,
+					},
+					{
+						Name:  "SRC_SNAP_NAME",
+						Value: target.GetName(),
+					},
+				},
+				Image:           r.podImage,
+				ImagePullPolicy: corev1.PullIfNotPresent,
+				TTY:             true,
+				VolumeMounts: []corev1.VolumeMount{
+					{
+						MountPath: "/etc/ceph",
+						Name:      "ceph-config",
+					},
+					{
+						MountPath: "/etc/rook",
+						Name:      "mon-endpoint-volume",
+					},
+					{
+						MountPath: "/var/lib/rook-ceph-mon",
+						Name:      "ceph-admin-secret",
+						ReadOnly:  true,
+					},
+					{
+						MountPath: "/mantle",
+						Name:      "volume-to-store",
+					},
+				},
+			},
+		}
+
+		fals := false
+		job.Spec.Template.Spec.Volumes = []corev1.Volume{
+			{
+				Name: "volume-to-store",
+				VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: fmt.Sprintf("mantle-export-%s-%s", target.GetNamespace(), target.GetName()),
+					},
+				},
+			},
+			{
+				Name: "ceph-admin-secret",
+				VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{
+						SecretName: "rook-ceph-mon",
+						Optional:   &fals,
+						Items: []corev1.KeyToPath{{
+							Key:  "ceph-secret",
+							Path: "secret.keyring",
+						}},
+					},
+				},
+			},
+			{
+				Name: "mon-endpoint-volume",
+				VolumeSource: corev1.VolumeSource{
+					ConfigMap: &corev1.ConfigMapVolumeSource{
+						Items: []corev1.KeyToPath{
+							{
+								Key:  "data",
+								Path: "mon-endpoints",
+							},
+						},
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: "rook-ceph-mon-endpoints",
+						},
+					},
+				},
+			},
+			{
+				Name: "ceph-config",
+				VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{},
+				},
+			},
+		}
+
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (r *MantleBackupReconciler) startImport(
