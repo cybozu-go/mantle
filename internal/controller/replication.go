@@ -24,10 +24,11 @@ const (
 )
 
 type PrimarySettings struct {
-	ServiceEndpoint string
-	Conn            *grpc.ClientConn
-	Client          proto.MantleServiceClient
-	MaxExportJobs   int
+	ServiceEndpoint        string
+	Conn                   *grpc.ClientConn
+	Client                 proto.MantleServiceClient
+	MaxExportJobs          int
+	ExportDataStorageClass string
 }
 
 type SecondaryServer struct {

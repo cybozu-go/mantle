@@ -29,13 +29,26 @@ type ResourceManager struct {
 	PoolName         string
 }
 
-func NewResourceManager(client client.Client) *ResourceManager {
+func NewResourceManager(client client.Client) (*ResourceManager, error) {
+	clusterID := util.GetUniqueName("ceph-")
+
+	// Create a namespace of the same name as cluster ID
+	ns := corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: clusterID,
+		},
+	}
+	err := client.Create(context.Background(), &ns)
+	if err != nil {
+		return nil, err
+	}
+
 	return &ResourceManager{
 		client:           client,
 		StorageClassName: util.GetUniqueName("sc-"),
-		ClusterID:        util.GetUniqueName("ceph-"),
+		ClusterID:        clusterID,
 		PoolName:         util.GetUniqueName("pool-"),
-	}
+	}, nil
 }
 
 // EnvTest cannot delete namespace. So, we have to use another new namespace.

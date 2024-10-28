@@ -334,7 +334,8 @@ var _ = Describe("MantleBackup controller", func() {
 				resMgr.ClusterID,
 				RolePrimary,
 				&PrimarySettings{
-					Client: grpcClient,
+					Client:                 grpcClient,
+					ExportDataStorageClass: resMgr.StorageClassName,
 				},
 			)
 			reconciler.ceph = testutil.NewFakeRBD()
@@ -439,6 +440,23 @@ var _ = Describe("MantleBackup controller", func() {
 			syncMode, ok := backup.GetAnnotations()[annotSyncMode]
 			Expect(ok).To(BeTrue())
 			Expect(syncMode).To(Equal(syncModeFull))
+
+			// Make sure export() creates a PVC for exported data
+			var pvcExport corev1.PersistentVolumeClaim
+			err = k8sClient.Get(
+				ctx,
+				types.NamespacedName{
+					Name:      fmt.Sprintf("mantle-export-%s", backup.GetUID()),
+					Namespace: resMgr.ClusterID,
+				},
+				&pvcExport,
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pvcExport.GetLabels()["app.kubernetes.io/name"]).To(Equal("mantle"))
+			Expect(pvcExport.GetLabels()["app.kubernetes.io/component"]).To(Equal("export-data"))
+			Expect(pvcExport.Spec.AccessModes[0]).To(Equal(corev1.ReadWriteOnce))
+			Expect(*pvcExport.Spec.StorageClassName).To(Equal(resMgr.StorageClassName))
+			Expect(pvcExport.Spec.Resources.Requests.Storage().String()).To(Equal("2Gi"))
 
 			// Make the all existing MantleBackups in the (mocked) secondary Mantle
 			// ReadyToUse=True.

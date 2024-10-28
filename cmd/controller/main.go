@@ -42,14 +42,15 @@ var ControllerCmd = &cobra.Command{
 }
 
 var (
-	metricsAddr           string
-	enableLeaderElection  bool
-	probeAddr             string
-	zapOpts               zap.Options
-	overwriteMBCSchedule  string
-	role                  string
-	mantleServiceEndpoint string
-	maxExportJobs         int
+	metricsAddr            string
+	enableLeaderElection   bool
+	probeAddr              string
+	zapOpts                zap.Options
+	overwriteMBCSchedule   string
+	role                   string
+	mantleServiceEndpoint  string
+	maxExportJobs          int
+	exportDataStorageClass string
 
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
@@ -76,6 +77,8 @@ func init() {
 			"this option is required and is interpreted as the address that the secondary mantle should listen to.")
 	flags.IntVar(&maxExportJobs, "max-export-jobs", 8,
 		"The maximum number of export jobs that can run simultaneously. If you set this to 0, there is no limit.")
+	flags.StringVar(&exportDataStorageClass, "export-data-storage-class", "",
+		"The storage class of PVCs used to store exported data temporarily.")
 
 	goflags := flag.NewFlagSet("goflags", flag.ExitOnError)
 	zapOpts.Development = true
@@ -177,10 +180,11 @@ func setupPrimary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup) 
 	}()
 
 	primarySettings := &controller.PrimarySettings{
-		ServiceEndpoint: mantleServiceEndpoint,
-		Conn:            conn,
-		Client:          proto.NewMantleServiceClient(conn),
-		MaxExportJobs:   maxExportJobs,
+		ServiceEndpoint:        mantleServiceEndpoint,
+		Conn:                   conn,
+		Client:                 proto.NewMantleServiceClient(conn),
+		MaxExportJobs:          maxExportJobs,
+		ExportDataStorageClass: exportDataStorageClass,
 	}
 
 	return setupReconcilers(mgr, primarySettings)

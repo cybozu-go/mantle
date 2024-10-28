@@ -14,6 +14,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	aerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -884,6 +885,10 @@ func (r *MantleBackupReconciler) export(
 		return result, err
 	}
 
+	if err := r.createOrUpdateExportDataPVC(ctx, targetBackup); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	// Update the status of the MantleBackup.
 	// FIXME: this is inserted only for tests and should be removed once export() is implemented correctly.
 	if err := r.updateStatusCondition(ctx, targetBackup, metav1.Condition{
@@ -958,6 +963,42 @@ func (r *MantleBackupReconciler) checkIfNewJobCanBeCreated(ctx context.Context) 
 	}
 
 	return ctrl.Result{}, nil
+}
+
+func (r *MantleBackupReconciler) createOrUpdateExportDataPVC(ctx context.Context, target *mantlev1.MantleBackup) error {
+	var targetPVC corev1.PersistentVolumeClaim
+	if err := json.Unmarshal([]byte(target.Status.PVCManifest), &targetPVC); err != nil {
+		return err
+	}
+
+	pvcSize := targetPVC.Spec.Resources.Requests[corev1.ResourceStorage].DeepCopy()
+	// We assume that any diff data will not exceed twice the size of the target PVC.
+	pvcSize.Mul(2)
+
+	var pvc corev1.PersistentVolumeClaim
+	pvc.SetName(fmt.Sprintf("mantle-export-%s", target.GetUID()))
+	pvc.SetNamespace(r.managedCephClusterID)
+	_, err := ctrl.CreateOrUpdate(ctx, r.Client, &pvc, func() error {
+		labels := pvc.GetLabels()
+		if labels == nil {
+			labels = make(map[string]string)
+		}
+		labels["app.kubernetes.io/name"] = "mantle"
+		labels["app.kubernetes.io/component"] = "export-data"
+		pvc.SetLabels(labels)
+
+		if pvc.Spec.Resources.Requests == nil {
+			pvc.Spec.Resources.Requests = map[corev1.ResourceName]resource.Quantity{}
+		}
+		pvc.Spec.Resources.Requests[corev1.ResourceStorage] = pvcSize
+
+		pvc.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
+		pvc.Spec.StorageClassName = &r.primarySettings.ExportDataStorageClass
+
+		return nil
+	})
+
+	return err
 }
 
 func (r *MantleBackupReconciler) startImport(
