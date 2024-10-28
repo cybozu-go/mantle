@@ -523,7 +523,7 @@ func (r *MantleBackupReconciler) replicateManifests(
 	resp, err := client.CreateOrUpdatePVC(
 		ctx,
 		&proto.CreateOrUpdatePVCRequest{
-			Pvc: string(pvcSentJson),
+			Pvc: pvcSentJson,
 		},
 	)
 	if err != nil {
@@ -553,7 +553,7 @@ func (r *MantleBackupReconciler) replicateManifests(
 	if _, err := client.CreateOrUpdateMantleBackup(
 		ctx,
 		&proto.CreateOrUpdateMantleBackupRequest{
-			MantleBackup: string(backupSentJson),
+			MantleBackup: backupSentJson,
 		},
 	); err != nil {
 		return ctrl.Result{}, err
