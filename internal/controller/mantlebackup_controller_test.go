@@ -368,7 +368,7 @@ var _ = Describe("MantleBackup controller", func() {
 						req *proto.CreateOrUpdateMantleBackupRequest,
 						opts ...grpc.CallOption,
 					) (*proto.CreateOrUpdateMantleBackupResponse, error) {
-						err := json.Unmarshal([]byte(req.GetMantleBackup()), &targetBackup)
+						err := json.Unmarshal(req.GetMantleBackup(), &targetBackup)
 						if err != nil {
 							panic(err)
 						}

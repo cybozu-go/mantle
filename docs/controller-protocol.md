@@ -32,7 +32,7 @@ CreateOrUpdateMantleBackupRequest is a request message for CreateOrUpdateMantleB
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| mantleBackup | [string](#string) |  |  |
+| mantleBackup | [bytes](#bytes) |  |  |
 
 
 
@@ -59,7 +59,7 @@ CreateOrUpdatePVCRequest is a request message for CreateOrUpdatePVC RPC.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| pvc | [string](#string) |  |  |
+| pvc | [bytes](#bytes) |  |  |
 
 
 

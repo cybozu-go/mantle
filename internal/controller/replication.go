@@ -45,7 +45,7 @@ func (s *SecondaryServer) CreateOrUpdatePVC(
 ) (*proto.CreateOrUpdatePVCResponse, error) {
 	// Unmarshal the request
 	var pvcReceived corev1.PersistentVolumeClaim
-	if err := json.Unmarshal([]byte(req.Pvc), &pvcReceived); err != nil {
+	if err := json.Unmarshal(req.Pvc, &pvcReceived); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal the requested PVC: %w", err)
 	}
 
@@ -104,7 +104,7 @@ func (s *SecondaryServer) CreateOrUpdateMantleBackup(
 	req *proto.CreateOrUpdateMantleBackupRequest,
 ) (*proto.CreateOrUpdateMantleBackupResponse, error) {
 	var backupReceived mantlev1.MantleBackup
-	if err := json.Unmarshal([]byte(req.MantleBackup), &backupReceived); err != nil {
+	if err := json.Unmarshal(req.MantleBackup, &backupReceived); err != nil {
 		return nil, err
 	}
 
