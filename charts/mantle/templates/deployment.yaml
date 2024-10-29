@@ -67,6 +67,12 @@ spec:
             {{- with .Values.controller.overwriteMBCSchedule }}
             - --overwrite-mbc-schedule={{ . }}
             {{- end }}
+            {{- with .Values.controller.objectStorageBucketName }}
+            - --object-storage-bucket-name={{ . }}
+            {{- end }}
+            {{- with .Values.controller.objectStorageEndpoint}}
+            - --object-storage-endpoint={{ . }}
+            {{- end }}
           env:
             - name: POD_NAME
               valueFrom:

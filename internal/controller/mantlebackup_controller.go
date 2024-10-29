@@ -45,29 +45,49 @@ const (
 	syncModeIncremental = "incremental"
 )
 
+type ObjectStorageSettings struct {
+	CACertConfigMap *string
+	CACertKey       *string
+	BucketName      string
+	Endpoint        string
+}
+
 // MantleBackupReconciler reconciles a MantleBackup object
 type MantleBackupReconciler struct {
 	client.Client
-	Scheme               *runtime.Scheme
-	ceph                 ceph.CephCmd
-	managedCephClusterID string
-	role                 string
-	primarySettings      *PrimarySettings // This should be non-nil if and only if role equals 'primary'.
-	expireQueueCh        chan event.GenericEvent
-	podImage             string
+	Scheme                *runtime.Scheme
+	ceph                  ceph.CephCmd
+	managedCephClusterID  string
+	role                  string
+	primarySettings       *PrimarySettings // This should be non-nil if and only if role equals 'primary'.
+	expireQueueCh         chan event.GenericEvent
+	podImage              string
+	envSecret             string
+	objectStorageSettings *ObjectStorageSettings // This should be non-nil if and only if role equals 'primary' or 'secondary'.
 }
 
 // NewMantleBackupReconciler returns NodeReconciler.
-func NewMantleBackupReconciler(client client.Client, scheme *runtime.Scheme, managedCephClusterID, role string, primarySettings *PrimarySettings, podImage string) *MantleBackupReconciler {
+func NewMantleBackupReconciler(
+	client client.Client,
+	scheme *runtime.Scheme,
+	managedCephClusterID,
+	role string,
+	primarySettings *PrimarySettings,
+	podImage string,
+	envSecret string,
+	objectStorageSettings *ObjectStorageSettings,
+) *MantleBackupReconciler {
 	return &MantleBackupReconciler{
-		Client:               client,
-		Scheme:               scheme,
-		ceph:                 ceph.NewCephCmd(),
-		managedCephClusterID: managedCephClusterID,
-		role:                 role,
-		primarySettings:      primarySettings,
-		expireQueueCh:        make(chan event.GenericEvent),
-		podImage:             podImage,
+		Client:                client,
+		Scheme:                scheme,
+		ceph:                  ceph.NewCephCmd(),
+		managedCephClusterID:  managedCephClusterID,
+		role:                  role,
+		primarySettings:       primarySettings,
+		expireQueueCh:         make(chan event.GenericEvent),
+		podImage:              podImage,
+		envSecret:             envSecret,
+		objectStorageSettings: objectStorageSettings,
 	}
 }
 
@@ -896,7 +916,7 @@ func (r *MantleBackupReconciler) export(
 	}
 
 	// Update the status of the MantleBackup.
-	// FIXME: this is inserted only for tests and should be removed once export() is implemented correctly.
+	// FIXME: this is inserted only for tests and must be removed after implementing the feature to access the object storage.
 	if err := r.updateStatusCondition(ctx, targetBackup, metav1.Condition{
 		Type:   mantlev1.BackupConditionSyncedToRemote,
 		Status: metav1.ConditionTrue,
@@ -907,6 +927,10 @@ func (r *MantleBackupReconciler) export(
 
 	if result, err := r.checkIfExportJobIsCompleted(ctx, targetBackup); err != nil || !result.IsZero() {
 		return result, err
+	}
+
+	if err := r.createOrUpdateExportDataUploadJob(ctx, targetBackup); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{Requeue: true}, nil
@@ -1013,6 +1037,14 @@ func (r *MantleBackupReconciler) createOrUpdateExportDataPVC(ctx context.Context
 
 func makeExportJobName(target *mantlev1.MantleBackup) string {
 	return fmt.Sprintf("mantle-export-%s", target.GetUID())
+}
+
+func makeUploadJobName(target *mantlev1.MantleBackup) string {
+	return fmt.Sprintf("mantle-upload-%s", target.GetUID())
+}
+
+func makeExportPVCName(target *mantlev1.MantleBackup) string {
+	return fmt.Sprintf("mantle-export-%s-%s", target.GetNamespace(), target.GetName())
 }
 
 func (r *MantleBackupReconciler) createOrUpdateExportJob(ctx context.Context, target *mantlev1.MantleBackup, sourceBackupNamePtr *string) error {
@@ -1185,7 +1217,7 @@ fi`,
 				Name: "volume-to-store",
 				VolumeSource: corev1.VolumeSource{
 					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-						ClaimName: fmt.Sprintf("mantle-export-%s-%s", target.GetNamespace(), target.GetName()),
+						ClaimName: makeExportPVCName(target),
 					},
 				},
 			},
@@ -1260,6 +1292,133 @@ func (r *MantleBackupReconciler) checkIfExportJobIsCompleted(
 	}
 
 	return ctrl.Result{Requeue: true}, nil
+}
+
+func (r *MantleBackupReconciler) createOrUpdateExportDataUploadJob(ctx context.Context, target *mantlev1.MantleBackup) error {
+	var job batchv1.Job
+	job.SetName(makeUploadJobName(target))
+	job.SetNamespace(r.managedCephClusterID)
+	if _, err := ctrl.CreateOrUpdate(ctx, r.Client, &job, func() error {
+		labels := job.GetLabels()
+		if labels == nil {
+			labels = map[string]string{}
+		}
+		labels["app.kubernetes.io/name"] = "mantle"
+		labels["app.kubernetes.io/component"] = "upload-job"
+		job.SetLabels(labels)
+
+		var backoffLimit int32 = 65535
+		job.Spec.BackoffLimit = &backoffLimit
+
+		var fsGroup int64 = 10000
+		var runAsGroup int64 = 10000
+		runAsNonRoot := true
+		var runAsUser int64 = 10000
+		job.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
+			FSGroup:      &fsGroup,
+			RunAsGroup:   &runAsGroup,
+			RunAsNonRoot: &runAsNonRoot,
+			RunAsUser:    &runAsUser,
+		}
+
+		job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
+
+		job.Spec.Template.Spec.Containers = []corev1.Container{
+			{
+				Name: "upload",
+				Command: []string{
+					"/bin/bash",
+					"-c",
+					`
+set -e
+
+if [ "${CERT_FILE}" = "" ]; then
+  s5cmd --endpoint-url ${OBJECT_STORAGE_ENDPOINT} cp /mantle/export.bin "s3://${BUCKET_NAME}/${OBJ_NAME}"
+else
+  s5cmd --endpoint-url ${OBJECT_STORAGE_ENDPOINT} --credentials-file ${CERT_FILE} cp /mantle/export.bin "s3://${BUCKET_NAME}/${OBJ_NAME}"
+end`,
+				},
+				Env: []corev1.EnvVar{
+					{
+						Name:  "OBJ_NAME",
+						Value: fmt.Sprintf("%s-%s.bin", target.GetName(), target.GetUID()),
+					},
+					{
+						Name:  "BUCKET_NAME",
+						Value: r.objectStorageSettings.BucketName,
+					},
+					{
+						Name:  "OBJECT_STORAGE_ENDPOINT",
+						Value: r.objectStorageSettings.Endpoint,
+					},
+				},
+				EnvFrom: []corev1.EnvFromSource{
+					{
+						SecretRef: &corev1.SecretEnvSource{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: r.envSecret,
+							},
+						},
+					},
+				},
+				Image:           r.podImage,
+				ImagePullPolicy: corev1.PullIfNotPresent,
+				VolumeMounts: []corev1.VolumeMount{
+					{
+						MountPath: "/mantle",
+						Name:      "volume-to-store",
+					},
+				},
+			},
+		}
+
+		job.Spec.Template.Spec.Volumes = []corev1.Volume{
+			{
+				Name: "volume-to-store",
+				VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: makeExportPVCName(target),
+					},
+				},
+			},
+		}
+
+		if r.objectStorageSettings.CACertConfigMap != nil {
+			container := job.Spec.Template.Spec.Containers[0]
+			container.Env = append(
+				container.Env,
+				corev1.EnvVar{
+					Name:  "CERT_FILE",
+					Value: fmt.Sprintf("/mantle_ca_cert/%s", *r.objectStorageSettings.CACertKey),
+				},
+			)
+			container.VolumeMounts = append(
+				container.VolumeMounts,
+				corev1.VolumeMount{
+					MountPath: "/mantle_ca_cert",
+					Name:      "ca-cert",
+				},
+			)
+			job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes,
+				corev1.Volume{
+					Name: "ca-cert",
+					VolumeSource: corev1.VolumeSource{
+						ConfigMap: &corev1.ConfigMapVolumeSource{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: *r.objectStorageSettings.CACertConfigMap,
+							},
+						},
+					},
+				},
+			)
+		}
+
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (r *MantleBackupReconciler) startImport(

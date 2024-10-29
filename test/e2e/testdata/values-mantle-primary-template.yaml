@@ -1,3 +1,5 @@
 controller:
   role: primary
   mantleServiceEndpoint: {ENDPOINT}
+  objectStorageBucketName: dummy
+  objectStorageEndpoint: dummy

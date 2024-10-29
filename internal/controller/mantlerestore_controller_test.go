@@ -55,6 +55,8 @@ func (test *mantleRestoreControllerUnitTest) setupEnv() {
 			RoleStandalone,
 			nil,
 			"dummy image",
+			"",
+			nil,
 		)
 		backupReconciler.ceph = testutil.NewFakeRBD()
 		err := backupReconciler.SetupWithManager(test.mgrUtil.GetManager())

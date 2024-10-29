@@ -113,6 +113,8 @@ var _ = Describe("MantleBackup controller", func() {
 				RoleStandalone,
 				nil,
 				"dummy image",
+				"",
+				nil,
 			)
 			reconciler.ceph = testutil.NewFakeRBD()
 			err := reconciler.SetupWithManager(mgrUtil.GetManager())
@@ -340,6 +342,13 @@ var _ = Describe("MantleBackup controller", func() {
 					ExportDataStorageClass: resMgr.StorageClassName,
 				},
 				"dummy image",
+				"dummy-secret-env",
+				&ObjectStorageSettings{
+					BucketName:      "",
+					Endpoint:        "",
+					CACertConfigMap: nil,
+					CACertKey:       nil,
+				},
 			)
 			reconciler.ceph = testutil.NewFakeRBD()
 			err := reconciler.SetupWithManager(mgrUtil.GetManager())
@@ -479,6 +488,31 @@ var _ = Describe("MantleBackup controller", func() {
 			Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsUser).To(Equal(int64(10000)))
 			Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsGroup).To(Equal(int64(10000)))
 			Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsNonRoot).To(Equal(true))
+
+			// Make the export Job completed to proceed the reconciliation for backup.
+			err = resMgr.ChangeJobCondition(ctx, &jobExport, batchv1.JobComplete, corev1.ConditionTrue)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Make sure the upload Job is created
+			Eventually(func(g Gomega, ctx context.Context) {
+				var jobUpload batchv1.Job
+				err = k8sClient.Get(
+					ctx,
+					types.NamespacedName{
+						Name:      fmt.Sprintf("mantle-upload-%s", backup.GetUID()),
+						Namespace: resMgr.ClusterID,
+					},
+					&jobUpload,
+				)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(jobUpload.GetLabels()["app.kubernetes.io/name"]).To(Equal("mantle"))
+				g.Expect(jobUpload.GetLabels()["app.kubernetes.io/component"]).To(Equal("upload-job"))
+				g.Expect(*jobUpload.Spec.BackoffLimit).To(Equal(int32(65535)))
+				g.Expect(*jobUpload.Spec.Template.Spec.SecurityContext.FSGroup).To(Equal(int64(10000)))
+				g.Expect(*jobUpload.Spec.Template.Spec.SecurityContext.RunAsUser).To(Equal(int64(10000)))
+				g.Expect(*jobUpload.Spec.Template.Spec.SecurityContext.RunAsGroup).To(Equal(int64(10000)))
+				g.Expect(*jobUpload.Spec.Template.Spec.SecurityContext.RunAsNonRoot).To(Equal(true))
+			}).WithContext(ctx).Should(Succeed())
 
 			// Make the all existing MantleBackups in the (mocked) secondary Mantle
 			// ReadyToUse=True.
@@ -702,7 +736,7 @@ var _ = Describe("prepareForDataSynchronization", func() {
 		}
 
 		mbr := NewMantleBackupReconciler(ctrlClient,
-			ctrlClient.Scheme(), "test", RolePrimary, nil, "dummy image")
+			ctrlClient.Scheme(), "test", RolePrimary, nil, "dummy image", "", nil)
 
 		ret, err := mbr.prepareForDataSynchronization(context.Background(),
 			backup, grpcClient)
