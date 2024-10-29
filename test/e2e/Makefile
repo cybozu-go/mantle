@@ -114,6 +114,7 @@ launch-minikube:
 			--cpus=2 \
 			--extra-config=kubeadm.node-name=$(NODE_NAME) \
 			--extra-config=kubelet.hostname-override=$(NODE_NAME) \
+                        --extra-config=kubelet.serialize-image-pulls=false \
 			--network mantle-test \
 			-p $(MINIKUBE_PROFILE) ; \
 	fi
