@@ -21,6 +21,7 @@ import (
 type MockMantleServiceClient struct {
 	ctrl     *gomock.Controller
 	recorder *MockMantleServiceClientMockRecorder
+	isgomock struct{}
 }
 
 // MockMantleServiceClientMockRecorder is the mock recorder for MockMantleServiceClient.
@@ -104,6 +105,7 @@ func (mr *MockMantleServiceClientMockRecorder) ListMantleBackup(ctx, in any, opt
 type MockMantleServiceServer struct {
 	ctrl     *gomock.Controller
 	recorder *MockMantleServiceServerMockRecorder
+	isgomock struct{}
 }
 
 // MockMantleServiceServerMockRecorder is the mock recorder for MockMantleServiceServer.
@@ -184,6 +186,7 @@ func (mr *MockMantleServiceServerMockRecorder) mustEmbedUnimplementedMantleServi
 type MockUnsafeMantleServiceServer struct {
 	ctrl     *gomock.Controller
 	recorder *MockUnsafeMantleServiceServerMockRecorder
+	isgomock struct{}
 }
 
 // MockUnsafeMantleServiceServerMockRecorder is the mock recorder for MockUnsafeMantleServiceServer.
