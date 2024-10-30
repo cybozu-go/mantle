@@ -105,6 +105,10 @@ lint: golangci-lint ## Run golangci-lint linter & yamllint
 lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 	$(GOLANGCI_LINT) run --fix
 
+.PHONY: check-uncommitted
+check-uncommitted: ## Check if latest generated artifacts are committed.
+	git diff --exit-code --name-only
+
 ##@ Build
 
 .PHONY: build
