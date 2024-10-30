@@ -69,7 +69,7 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 	cat config/rbac/role.yaml | yq '.metadata.name = "mantle-controller"' > charts/mantle-cluster-wide/templates/clusterrole.yaml
 
 .PHONY: generate
-generate: $(PROTOBUF_GEN) controller-gen ## Generate boilerplate code.
+generate: $(PROTOBUF_GEN) controller-gen manifests mock ## Generate boilerplate code.
 	$(CONTROLLER_GEN) object paths="./..."
 
 .PHONY: fmt
@@ -104,6 +104,10 @@ lint: golangci-lint ## Run golangci-lint linter & yamllint
 .PHONY: lint-fix
 lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 	$(GOLANGCI_LINT) run --fix
+
+.PHONY: check-uncommitted
+check-uncommitted: ## Check if latest generated artifacts are committed.
+	git diff --exit-code --name-only
 
 ##@ Build
 
