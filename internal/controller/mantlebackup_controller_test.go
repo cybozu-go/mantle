@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	aerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -498,6 +499,21 @@ var _ = Describe("MantleBackup controller", func() {
 				}
 			}
 			Expect(isFromSnapNameFound).To(BeTrue())
+
+			// Make sure an upload Jobs has not yet been created.
+			Consistently(ctx, func(g Gomega) error {
+				var jobUpload batchv1.Job
+				err = k8sClient.Get(
+					ctx,
+					types.NamespacedName{
+						Name:      fmt.Sprintf("mantle-upload-%s", backup.GetUID()),
+						Namespace: resMgr.ClusterID,
+					},
+					&jobUpload,
+				)
+				g.Expect(aerrors.IsNotFound(err)).To(BeTrue())
+				return nil
+			}, "1s").Should(Succeed())
 
 			// Make the export Job completed to proceed the reconciliation for backup.
 			err = resMgr.ChangeJobCondition(ctx, &jobExport, batchv1.JobComplete, corev1.ConditionTrue)
