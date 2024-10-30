@@ -489,6 +489,16 @@ var _ = Describe("MantleBackup controller", func() {
 			Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsGroup).To(Equal(int64(10000)))
 			Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsNonRoot).To(Equal(true))
 
+			// Make sure FROM_SNAP_NAME is empty because we're performing a full backup.
+			isFromSnapNameFound := false
+			for _, evar := range jobExport.Spec.Template.Spec.Containers[0].Env {
+				if evar.Name == "FROM_SNAP_NAME" {
+					Expect(evar.Value).To(Equal(""))
+					isFromSnapNameFound = true
+				}
+			}
+			Expect(isFromSnapNameFound).To(BeTrue())
+
 			// Make the export Job completed to proceed the reconciliation for backup.
 			err = resMgr.ChangeJobCondition(ctx, &jobExport, batchv1.JobComplete, corev1.ConditionTrue)
 			Expect(err).NotTo(HaveOccurred())
@@ -540,6 +550,28 @@ var _ = Describe("MantleBackup controller", func() {
 			diffTo, ok := backup.GetAnnotations()[annotDiffTo]
 			Expect(ok).To(BeTrue())
 			Expect(diffTo).To(Equal(backup2.GetName()))
+
+			// Make sure export() creates a Job to export data for backup2.
+			var jobExport2 batchv1.Job
+			err = k8sClient.Get(
+				ctx,
+				types.NamespacedName{
+					Name:      fmt.Sprintf("mantle-export-%s", backup2.GetUID()),
+					Namespace: resMgr.ClusterID,
+				},
+				&jobExport2,
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Make sure FROM_SNAP_NAME is filled correctly because we're performing an incremental backup.
+			isFromSnapNameFound = false
+			for _, evar := range jobExport2.Spec.Template.Spec.Containers[0].Env {
+				if evar.Name == "FROM_SNAP_NAME" {
+					Expect(evar.Value).To(Equal(backup.GetName()))
+					isFromSnapNameFound = true
+				}
+			}
+			Expect(isFromSnapNameFound).To(BeTrue())
 
 			// remove diffTo annotation of backup here to allow it to be deleted.
 			// FIXME: this process is for testing purposes only and should be removed in the near future.
