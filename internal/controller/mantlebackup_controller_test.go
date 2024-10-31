@@ -20,6 +20,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	aerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -1131,4 +1132,104 @@ var _ = Describe("SetSynchronizing", func() {
 		Entry("case 5", m2, &m0, m2, &m1, true),
 		Entry("case 6", m1, &m0, m2, &m0, true),
 	)
+})
+
+var _ = Describe("export", func() {
+	var mockCtrl *gomock.Controller
+	var grpcClient *proto.MockMantleServiceClient
+	var mbr *MantleBackupReconciler
+	var ns string
+
+	BeforeEach(func() {
+		var t reporter
+		mockCtrl = gomock.NewController(t)
+		grpcClient = proto.NewMockMantleServiceClient(mockCtrl)
+
+		mbr = NewMantleBackupReconciler(
+			k8sClient,
+			scheme.Scheme,
+			resMgr.ClusterID,
+			RolePrimary,
+			&PrimarySettings{
+				Client:                 grpcClient,
+				ExportDataStorageClass: resMgr.StorageClassName,
+			},
+			"dummy image",
+			"",
+			nil,
+		)
+
+		ns = resMgr.CreateNamespace()
+	})
+
+	AfterEach(func() {
+		if mockCtrl != nil {
+			mockCtrl.Finish()
+		}
+	})
+
+	It("should set correct annotations after export() is called", func(ctx SpecContext) {
+		pvc := corev1.PersistentVolumeClaim{
+			Spec: corev1.PersistentVolumeClaimSpec{
+				Resources: corev1.VolumeResourceRequirements{
+					Requests: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceStorage: resource.MustParse("1Gi"),
+					},
+				},
+			},
+		}
+		pvcManifest, err := json.Marshal(pvc)
+		Expect(err).NotTo(HaveOccurred())
+
+		pv := corev1.PersistentVolume{
+			Spec: corev1.PersistentVolumeSpec{
+				PersistentVolumeSource: corev1.PersistentVolumeSource{
+					CSI: &corev1.CSIPersistentVolumeSource{
+						VolumeAttributes: map[string]string{
+							"pool":      "dummy",
+							"imageName": "dummy",
+						},
+					},
+				},
+			},
+		}
+		pvManifest, err := json.Marshal(pv)
+		Expect(err).NotTo(HaveOccurred())
+
+		target := &mantlev1.MantleBackup{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "target",
+				Namespace: ns,
+			},
+			Spec: mantlev1.MantleBackupSpec{
+				PVC:    "dummy",
+				Expire: "1d",
+			},
+		}
+		err = k8sClient.Create(ctx, target)
+		Expect(err).NotTo(HaveOccurred())
+		err = updateStatus(ctx, k8sClient, target, func() error {
+			target.Status.PVManifest = string(pvManifest)
+			target.Status.PVCManifest = string(pvcManifest)
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		grpcClient.EXPECT().SetSynchronizing(gomock.Any(), gomock.Any()).
+			Times(1).Return(&proto.SetSynchronizingResponse{}, nil)
+
+		ret, err := mbr.export(ctx, target, &dataSyncPrepareResult{
+			isIncremental:                     false,
+			isSecondaryMantleBackupReadyToUse: false,
+			diffFrom:                          nil,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ret.Requeue).To(BeTrue())
+
+		err = k8sClient.Get(ctx,
+			types.NamespacedName{Name: target.GetName(), Namespace: target.GetNamespace()}, target)
+		Expect(err).NotTo(HaveOccurred())
+		_, ok := target.GetAnnotations()[annotDiffFrom]
+		Expect(ok).To(BeFalse())
+	})
 })
