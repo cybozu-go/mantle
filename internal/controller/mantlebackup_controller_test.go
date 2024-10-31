@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -940,5 +941,194 @@ var _ = Describe("prepareForDataSynchronization", func() {
 			}, true, false, newMantleBackup("testSnap3", testNamespace, nil, primaryLabels,
 				false, 3, metav1.ConditionTrue, metav1.ConditionTrue),
 		),
+	)
+})
+
+var _ = Describe("SetSynchronizing", func() {
+	doTestCallOnce := func(
+		target, source *mantlev1.MantleBackup,
+		shouldBeError bool,
+		check func(target, source *mantlev1.MantleBackup) error,
+	) {
+		var err error
+		targetName := "target-name"
+		target.SetName(targetName)
+		backupNamespace := "target-ns"
+		target.SetNamespace(backupNamespace)
+		sourceName := "source"
+
+		ctrlClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+
+		err = ctrlClient.Create(context.Background(), target)
+		Expect(err).NotTo(HaveOccurred())
+
+		var diffFrom *string
+		if source != nil {
+			source.SetName(sourceName)
+			source.SetNamespace(backupNamespace)
+			err = ctrlClient.Create(context.Background(), source)
+			Expect(err).NotTo(HaveOccurred())
+			diffFrom = &sourceName
+		}
+
+		secondaryServer := NewSecondaryServer(ctrlClient, ctrlClient)
+		_, err = secondaryServer.SetSynchronizing(context.Background(), &proto.SetSynchronizingRequest{
+			Name:      targetName,
+			Namespace: backupNamespace,
+			DiffFrom:  diffFrom,
+		})
+		if shouldBeError {
+			Expect(err).To(HaveOccurred())
+		} else {
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		err = ctrlClient.Get(
+			context.Background(),
+			types.NamespacedName{Name: targetName, Namespace: backupNamespace},
+			target,
+		)
+		Expect(err).NotTo(HaveOccurred())
+		if source != nil {
+			err = ctrlClient.Get(
+				context.Background(),
+				types.NamespacedName{Name: sourceName, Namespace: backupNamespace},
+				source,
+			)
+			Expect(err).NotTo(HaveOccurred())
+		}
+		err = check(target, source)
+		Expect(err).NotTo(HaveOccurred())
+	}
+	DescribeTable("call SetSynchronizing once", doTestCallOnce,
+		Entry(
+			"a full backup should succeed",
+			&mantlev1.MantleBackup{
+				Status: mantlev1.MantleBackupStatus{
+					Conditions: []metav1.Condition{
+						{
+							Type:   mantlev1.BackupConditionReadyToUse,
+							Status: metav1.ConditionFalse,
+						},
+					},
+				},
+			},
+			nil,
+			false,
+			func(target, source *mantlev1.MantleBackup) error {
+				syncMode, ok := target.GetAnnotations()[annotSyncMode]
+				if !ok || syncMode != syncModeFull {
+					return errors.New("syncMode is invalid")
+				}
+				if _, ok := target.GetAnnotations()[annotDiffFrom]; ok {
+					return errors.New("diffFrom should not exist")
+				}
+				return nil
+			},
+		),
+		Entry(
+			"an incremental backup should succeed",
+			&mantlev1.MantleBackup{
+				Status: mantlev1.MantleBackupStatus{
+					Conditions: []metav1.Condition{
+						{
+							Type:   mantlev1.BackupConditionReadyToUse,
+							Status: metav1.ConditionFalse,
+						},
+					},
+				},
+			},
+			&mantlev1.MantleBackup{},
+			false,
+			func(target, source *mantlev1.MantleBackup) error {
+				syncMode, ok := target.GetAnnotations()[annotSyncMode]
+				if !ok || syncMode != syncModeIncremental {
+					return errors.New("syncMode is invalid")
+				}
+				diffFrom, ok := target.GetAnnotations()[annotDiffFrom]
+				if !ok || diffFrom != source.GetName() {
+					return errors.New("diffFrom is invalid")
+				}
+				diffTo, ok := source.GetAnnotations()[annotDiffTo]
+				if !ok || diffTo != target.GetName() {
+					return errors.New("diffTo is invalid")
+				}
+				return nil
+			},
+		),
+		Entry(
+			"a backup should fail if target's ReadyToUse is True",
+			&mantlev1.MantleBackup{
+				Status: mantlev1.MantleBackupStatus{
+					Conditions: []metav1.Condition{
+						{
+							Type:   mantlev1.BackupConditionReadyToUse,
+							Status: metav1.ConditionTrue,
+						},
+					},
+				},
+			},
+			nil,
+			true,
+			func(_, _ *mantlev1.MantleBackup) error { return nil },
+		),
+	)
+
+	doTestCallTwice := func(
+		name1 string,
+		diffFrom1 *string,
+		name2 string,
+		diffFrom2 *string,
+		shouldBeError bool,
+	) {
+		var err error
+
+		ctrlClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+
+		for _, name := range []string{"M0", "M1", "M2"} {
+			err = ctrlClient.Create(context.Background(), &mantlev1.MantleBackup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: name,
+				},
+				Status: mantlev1.MantleBackupStatus{
+					Conditions: []metav1.Condition{
+						{
+							Type:   mantlev1.BackupConditionReadyToUse,
+							Status: metav1.ConditionFalse,
+						},
+					},
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		secondaryServer := NewSecondaryServer(ctrlClient, ctrlClient)
+		_, err = secondaryServer.SetSynchronizing(context.Background(), &proto.SetSynchronizingRequest{
+			Name:      name1,
+			Namespace: "",
+			DiffFrom:  diffFrom1,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = secondaryServer.SetSynchronizing(context.Background(), &proto.SetSynchronizingRequest{
+			Name:      name2,
+			Namespace: "",
+			DiffFrom:  diffFrom2,
+		})
+		if shouldBeError {
+			Expect(err).To(HaveOccurred())
+		} else {
+			Expect(err).NotTo(HaveOccurred())
+		}
+	}
+	m0 := "M0"
+	m1 := "M1"
+	m2 := "M2"
+	DescribeTable("call SetSynchronizing twice", doTestCallTwice,
+		Entry("case 1", m0, nil, m0, nil, false),
+		Entry("case 2", m1, &m0, m1, &m0, false),
+		Entry("case 3", m1, nil, m1, &m0, true),
+		Entry("case 4", m1, &m0, m1, nil, true),
+		Entry("case 5", m2, &m0, m2, &m1, true),
+		Entry("case 6", m1, &m0, m2, &m0, true),
 	)
 })
