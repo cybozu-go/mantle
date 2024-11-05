@@ -24,6 +24,7 @@ func TestMtest(t *testing.T) {
 
 	SetDefaultEventuallyPollingInterval(time.Second)
 	SetDefaultEventuallyTimeout(3 * time.Minute)
+	EnforceDefaultTimeoutsWhenUsingContexts()
 
 	RunSpecs(t, "rbd backup system test")
 }
