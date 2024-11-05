@@ -1014,7 +1014,7 @@ func (r *MantleBackupReconciler) createOrUpdateExportDataPVC(ctx context.Context
 	pvcSize.Mul(2)
 
 	var pvc corev1.PersistentVolumeClaim
-	pvc.SetName(fmt.Sprintf("mantle-export-%s", target.GetUID()))
+	pvc.SetName(makeExportPVCName(target))
 	pvc.SetNamespace(r.managedCephClusterID)
 	_, err := ctrl.CreateOrUpdate(ctx, r.Client, &pvc, func() error {
 		labels := pvc.GetLabels()
@@ -1048,7 +1048,7 @@ func makeUploadJobName(target *mantlev1.MantleBackup) string {
 }
 
 func makeExportPVCName(target *mantlev1.MantleBackup) string {
-	return fmt.Sprintf("mantle-export-%s-%s", target.GetNamespace(), target.GetName())
+	return fmt.Sprintf("mantle-export-%s", target.GetUID())
 }
 
 func (r *MantleBackupReconciler) createOrUpdateExportJob(ctx context.Context, target *mantlev1.MantleBackup, sourceBackupNamePtr *string) error {
