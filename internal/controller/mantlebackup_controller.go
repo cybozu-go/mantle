@@ -38,6 +38,7 @@ const (
 	labelAppNameValue             = "mantle"
 	labelComponentExportData      = "export-data"
 	labelComponentExportJob       = "export-job"
+	labelComponentUploadJob       = "upload-job"
 	annotRemoteUID                = "mantle.cybozu.io/remote-uid"
 	annotDiffFrom                 = "mantle.cybozu.io/diff-from"
 	annotDiffTo                   = "mantle.cybozu.io/diff-to"
@@ -1308,7 +1309,7 @@ func (r *MantleBackupReconciler) createOrUpdateExportDataUploadJob(ctx context.C
 			labels = map[string]string{}
 		}
 		labels["app.kubernetes.io/name"] = labelAppNameValue
-		labels["app.kubernetes.io/component"] = "upload-job"
+		labels["app.kubernetes.io/component"] = labelComponentUploadJob
 		job.SetLabels(labels)
 
 		var backoffLimit int32 = 65535
