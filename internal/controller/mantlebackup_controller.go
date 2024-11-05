@@ -36,6 +36,8 @@ const (
 	labelLocalBackupTargetPVCUID  = "mantle.cybozu.io/local-backup-target-pvc-uid"
 	labelRemoteBackupTargetPVCUID = "mantle.cybozu.io/remote-backup-target-pvc-uid"
 	labelAppNameValue             = "mantle"
+	labelComponentExportData      = "export-data"
+	labelComponentExportJob       = "export-job"
 	annotRemoteUID                = "mantle.cybozu.io/remote-uid"
 	annotDiffFrom                 = "mantle.cybozu.io/diff-from"
 	annotDiffTo                   = "mantle.cybozu.io/diff-to"
@@ -988,7 +990,7 @@ func (r *MantleBackupReconciler) checkIfNewJobCanBeCreated(ctx context.Context) 
 		Namespace: r.managedCephClusterID,
 		LabelSelector: labels.SelectorFromSet(map[string]string{
 			"app.kubernetes.io/name":      labelAppNameValue,
-			"app.kubernetes.io/component": "export-job",
+			"app.kubernetes.io/component": labelComponentExportJob,
 		}),
 	}); err != nil {
 		return ctrl.Result{}, err
@@ -1020,7 +1022,7 @@ func (r *MantleBackupReconciler) createOrUpdateExportDataPVC(ctx context.Context
 			labels = make(map[string]string)
 		}
 		labels["app.kubernetes.io/name"] = labelAppNameValue
-		labels["app.kubernetes.io/component"] = "export-data"
+		labels["app.kubernetes.io/component"] = labelComponentExportData
 		pvc.SetLabels(labels)
 
 		if pvc.Spec.Resources.Requests == nil {
@@ -1069,7 +1071,7 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(ctx context.Context, ta
 			labels = map[string]string{}
 		}
 		labels["app.kubernetes.io/name"] = labelAppNameValue
-		labels["app.kubernetes.io/component"] = "export-job"
+		labels["app.kubernetes.io/component"] = labelComponentExportJob
 		job.SetLabels(labels)
 
 		var backoffLimit int32 = 65535
