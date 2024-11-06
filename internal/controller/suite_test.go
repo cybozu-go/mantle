@@ -74,7 +74,8 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 	Expect(k8sClient).NotTo(BeNil())
 
 	By("Setup common resources")
-	resMgr = testutil.NewResourceManager(k8sClient)
+	resMgr, err = testutil.NewResourceManager(k8sClient)
+	Expect(err).NotTo(HaveOccurred())
 	err = resMgr.CreateStorageClass(ctx)
 	Expect(err).NotTo(HaveOccurred())
 })

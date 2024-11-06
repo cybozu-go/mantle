@@ -101,6 +101,26 @@ func (mr *MockMantleServiceClientMockRecorder) ListMantleBackup(ctx, in any, opt
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListMantleBackup", reflect.TypeOf((*MockMantleServiceClient)(nil).ListMantleBackup), varargs...)
 }
 
+// SetSynchronizing mocks base method.
+func (m *MockMantleServiceClient) SetSynchronizing(ctx context.Context, in *SetSynchronizingRequest, opts ...grpc.CallOption) (*SetSynchronizingResponse, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, in}
+	for _, a := range opts {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "SetSynchronizing", varargs...)
+	ret0, _ := ret[0].(*SetSynchronizingResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SetSynchronizing indicates an expected call of SetSynchronizing.
+func (mr *MockMantleServiceClientMockRecorder) SetSynchronizing(ctx, in any, opts ...any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, in}, opts...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetSynchronizing", reflect.TypeOf((*MockMantleServiceClient)(nil).SetSynchronizing), varargs...)
+}
+
 // MockMantleServiceServer is a mock of MantleServiceServer interface.
 type MockMantleServiceServer struct {
 	ctrl     *gomock.Controller
@@ -168,6 +188,21 @@ func (m *MockMantleServiceServer) ListMantleBackup(arg0 context.Context, arg1 *L
 func (mr *MockMantleServiceServerMockRecorder) ListMantleBackup(arg0, arg1 any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListMantleBackup", reflect.TypeOf((*MockMantleServiceServer)(nil).ListMantleBackup), arg0, arg1)
+}
+
+// SetSynchronizing mocks base method.
+func (m *MockMantleServiceServer) SetSynchronizing(arg0 context.Context, arg1 *SetSynchronizingRequest) (*SetSynchronizingResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetSynchronizing", arg0, arg1)
+	ret0, _ := ret[0].(*SetSynchronizingResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SetSynchronizing indicates an expected call of SetSynchronizing.
+func (mr *MockMantleServiceServerMockRecorder) SetSynchronizing(arg0, arg1 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetSynchronizing", reflect.TypeOf((*MockMantleServiceServer)(nil).SetSynchronizing), arg0, arg1)
 }
 
 // mustEmbedUnimplementedMantleServiceServer mocks base method.

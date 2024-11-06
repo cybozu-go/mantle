@@ -42,13 +42,20 @@ var ControllerCmd = &cobra.Command{
 }
 
 var (
-	metricsAddr           string
-	enableLeaderElection  bool
-	probeAddr             string
-	zapOpts               zap.Options
-	overwriteMBCSchedule  string
-	role                  string
-	mantleServiceEndpoint string
+	metricsAddr             string
+	enableLeaderElection    bool
+	probeAddr               string
+	zapOpts                 zap.Options
+	overwriteMBCSchedule    string
+	role                    string
+	mantleServiceEndpoint   string
+	maxExportJobs           int
+	exportDataStorageClass  string
+	envSecret               string
+	objectStorageBucketName string
+	objectStorageEndpoint   string
+	caCertConfigMapSrc      string
+	caCertKeySrc            string
 
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
@@ -73,6 +80,21 @@ func init() {
 			"(i) If --role is 'standalone', this option is ignored. (ii) If --role is 'primary', this option is required "+
 			"and is interpreted as the address that the primary mantle should connect to. (iii) If --role is 'secondary', "+
 			"this option is required and is interpreted as the address that the secondary mantle should listen to.")
+	flags.IntVar(&maxExportJobs, "max-export-jobs", 8,
+		"The maximum number of export jobs that can run simultaneously. If you set this to 0, there is no limit.")
+	flags.StringVar(&exportDataStorageClass, "export-data-storage-class", "",
+		"The storage class of PVCs used to store exported data temporarily.")
+	flags.StringVar(&envSecret, "env-secret", "",
+		"The name of the Secret resource that contains environment variables related to the controller and Jobs.")
+	flags.StringVar(&objectStorageBucketName, "object-storage-bucket-name", "",
+		"The bucket name of the object storage which should be used to store backups.")
+	flags.StringVar(&objectStorageEndpoint, "object-storage-endpoint", "",
+		"The endpoint URL to access the object storage.")
+	flags.StringVar(&caCertConfigMapSrc, "ca-cert-configmap", "",
+		"The name of the ConfigMap resource that contains the intermediate certificate used to access the object storage.")
+	flags.StringVar(&caCertKeySrc, "ca-cert-key", "ca.crt",
+		"The key of the ConfigMap specified by --ca-cert-config-map that contains the intermediate certificate. "+
+			"The default value is ca.crt. This option is just ignored if --ca-cert-configmap isn't specified.")
 
 	goflags := flag.NewFlagSet("goflags", flag.ExitOnError)
 	zapOpts.Development = true
@@ -90,12 +112,20 @@ func checkCommandlineArgs() error {
 	case controller.RoleStandalone:
 		// nothing to do
 	case controller.RolePrimary:
-		if mantleServiceEndpoint == "" {
-			return errors.New("--mantle-service-endpoint must be specified if --role is 'primary'")
-		}
+		fallthrough
 	case controller.RoleSecondary:
 		if mantleServiceEndpoint == "" {
-			return errors.New("--mantle-service-endpoint must be specified if --role is 'secondary'")
+			return errors.New("--mantle-service-endpoint must be specified if --role is 'primary' or 'secondary'")
+		}
+		if caCertConfigMapSrc != "" && caCertKeySrc == "" {
+			return errors.New("--ca-cert-key must be specified if --role is 'primary' or 'secondary', " +
+				"and --ca-cert-configmap is specified")
+		}
+		if objectStorageBucketName == "" {
+			return errors.New("--object-storage-bucket-name must be specified if --role is 'primary' or 'secondary'")
+		}
+		if objectStorageEndpoint == "" {
+			return errors.New("--object-storage-endpoint must be specified if --role is 'primary' or 'secondary'")
 		}
 	default:
 		return fmt.Errorf("role should be one of 'standalone', 'primary', or 'secondary': %s", role)
@@ -110,12 +140,31 @@ func setupReconcilers(mgr manager.Manager, primarySettings *controller.PrimarySe
 		return errors.New("POD_NAMESPACE is empty")
 	}
 
+	podImage := os.Getenv("POD_IMAGE")
+	if podImage == "" {
+		setupLog.Error(errors.New("POD_IMAGE must not be empty"), "POD_IMAGE must not be empty")
+		return errors.New("POD_IMAGE is empty")
+	}
+
+	var caCertConfigMap *string
+	if caCertConfigMapSrc != "" {
+		caCertConfigMap = &caCertConfigMapSrc
+	}
+
 	backupReconciler := controller.NewMantleBackupReconciler(
 		mgr.GetClient(),
 		mgr.GetScheme(),
 		managedCephClusterID,
 		role,
 		primarySettings,
+		podImage,
+		envSecret,
+		&controller.ObjectStorageSettings{
+			BucketName:      objectStorageBucketName,
+			Endpoint:        objectStorageEndpoint,
+			CACertConfigMap: caCertConfigMap,
+			CACertKey:       &caCertKeySrc,
+		},
 	)
 	if err := backupReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MantleBackup")
@@ -174,9 +223,11 @@ func setupPrimary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup) 
 	}()
 
 	primarySettings := &controller.PrimarySettings{
-		ServiceEndpoint: mantleServiceEndpoint,
-		Conn:            conn,
-		Client:          proto.NewMantleServiceClient(conn),
+		ServiceEndpoint:        mantleServiceEndpoint,
+		Conn:                   conn,
+		Client:                 proto.NewMantleServiceClient(conn),
+		MaxExportJobs:          maxExportJobs,
+		ExportDataStorageClass: exportDataStorageClass,
 	}
 
 	return setupReconcilers(mgr, primarySettings)

@@ -7,6 +7,7 @@ import (
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/test/util"
 	. "github.com/onsi/gomega"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -29,13 +30,26 @@ type ResourceManager struct {
 	PoolName         string
 }
 
-func NewResourceManager(client client.Client) *ResourceManager {
+func NewResourceManager(client client.Client) (*ResourceManager, error) {
+	clusterID := util.GetUniqueName("ceph-")
+
+	// Create a namespace of the same name as cluster ID
+	ns := corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: clusterID,
+		},
+	}
+	err := client.Create(context.Background(), &ns)
+	if err != nil {
+		return nil, err
+	}
+
 	return &ResourceManager{
 		client:           client,
 		StorageClassName: util.GetUniqueName("sc-"),
-		ClusterID:        util.GetUniqueName("ceph-"),
+		ClusterID:        clusterID,
 		PoolName:         util.GetUniqueName("pool-"),
-	}
+	}, nil
 }
 
 // EnvTest cannot delete namespace. So, we have to use another new namespace.
@@ -206,6 +220,27 @@ func (r *ResourceManager) WaitForBackupSyncedToRemote(ctx context.Context, backu
 
 		g.Expect(meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionSyncedToRemote)).Should(BeTrue())
 	}).WithContext(ctx).Should(Succeed())
+}
+
+func (r *ResourceManager) ChangeJobCondition(ctx context.Context, job *batchv1.Job, condType batchv1.JobConditionType, condStatus corev1.ConditionStatus) error {
+	if job.Status.Conditions == nil {
+		job.Status.Conditions = []batchv1.JobCondition{}
+	}
+	updated := false
+	for i := range job.Status.Conditions {
+		if job.Status.Conditions[i].Type == condType {
+			job.Status.Conditions[i].Status = condStatus
+			updated = true
+			break
+		}
+	}
+	if !updated {
+		job.Status.Conditions = append(job.Status.Conditions, batchv1.JobCondition{
+			Type:   batchv1.JobComplete,
+			Status: corev1.ConditionTrue,
+		})
+	}
+	return r.client.Status().Update(ctx, job)
 }
 
 // cf. https://go.googlesource.com/proposal/+/refs/heads/master/design/43651-type-parameters.md#pointer-method-example

@@ -67,6 +67,12 @@ spec:
             {{- with .Values.controller.overwriteMBCSchedule }}
             - --overwrite-mbc-schedule={{ . }}
             {{- end }}
+            {{- with .Values.controller.objectStorageBucketName }}
+            - --object-storage-bucket-name={{ . }}
+            {{- end }}
+            {{- with .Values.controller.objectStorageEndpoint}}
+            - --object-storage-endpoint={{ . }}
+            {{- end }}
           env:
             - name: POD_NAME
               valueFrom:
@@ -76,6 +82,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            - name: POD_IMAGE
+              value: {{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
           ports:
             {{- toYaml .Values.controller.ports | nindent 12 }}
         - command:

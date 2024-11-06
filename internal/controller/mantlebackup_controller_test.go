@@ -15,12 +15,14 @@ import (
 	. "github.com/onsi/gomega"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/kube-openapi/pkg/validation/strfmt"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -109,6 +111,9 @@ var _ = Describe("MantleBackup controller", func() {
 				mgrUtil.GetManager().GetScheme(),
 				resMgr.ClusterID,
 				RoleStandalone,
+				nil,
+				"dummy image",
+				"",
 				nil,
 			)
 			reconciler.ceph = testutil.NewFakeRBD()
@@ -333,7 +338,16 @@ var _ = Describe("MantleBackup controller", func() {
 				resMgr.ClusterID,
 				RolePrimary,
 				&PrimarySettings{
-					Client: grpcClient,
+					Client:                 grpcClient,
+					ExportDataStorageClass: resMgr.StorageClassName,
+				},
+				"dummy image",
+				"dummy-secret-env",
+				&ObjectStorageSettings{
+					BucketName:      "",
+					Endpoint:        "",
+					CACertConfigMap: nil,
+					CACertKey:       nil,
 				},
 			)
 			reconciler.ceph = testutil.NewFakeRBD()
@@ -359,7 +373,7 @@ var _ = Describe("MantleBackup controller", func() {
 				&proto.CreateOrUpdatePVCResponse{
 					Uid: "a7c9d5e2-4b8f-4e2a-9d3f-1b6a7c8e9f2b",
 				}, nil)
-			var targetBackup mantlev1.MantleBackup
+			targetBackups := []*mantlev1.MantleBackup{}
 			grpcClient.EXPECT().CreateOrUpdateMantleBackup(gomock.Any(), gomock.Any()).
 				MinTimes(1).
 				DoAndReturn(
@@ -368,10 +382,12 @@ var _ = Describe("MantleBackup controller", func() {
 						req *proto.CreateOrUpdateMantleBackupRequest,
 						opts ...grpc.CallOption,
 					) (*proto.CreateOrUpdateMantleBackupResponse, error) {
+						var targetBackup mantlev1.MantleBackup
 						err := json.Unmarshal(req.GetMantleBackup(), &targetBackup)
 						if err != nil {
 							panic(err)
 						}
+						targetBackups = append(targetBackups, &targetBackup)
 						return &proto.CreateOrUpdateMantleBackupResponse{}, nil
 					})
 			grpcClient.EXPECT().ListMantleBackup(gomock.Any(), gomock.Any()).
@@ -382,13 +398,23 @@ var _ = Describe("MantleBackup controller", func() {
 						req *proto.ListMantleBackupRequest,
 						opts ...grpc.CallOption,
 					) (*proto.ListMantleBackupResponse, error) {
-						data, err := json.Marshal([]mantlev1.MantleBackup{targetBackup})
+						data, err := json.Marshal(targetBackups)
 						if err != nil {
 							panic(err)
 						}
 						return &proto.ListMantleBackupResponse{
 							MantleBackupList: data,
 						}, nil
+					})
+			grpcClient.EXPECT().SetSynchronizing(gomock.Any(), gomock.Any()).
+				MinTimes(1).
+				DoAndReturn(
+					func(
+						ctx context.Context,
+						req *proto.SetSynchronizingRequest,
+						opts ...grpc.CallOption,
+					) (*proto.SetSynchronizingResponse, error) {
+						return &proto.SetSynchronizingResponse{}, nil
 					})
 
 			pv, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
@@ -422,11 +448,110 @@ var _ = Describe("MantleBackup controller", func() {
 			snapID := backup.Status.SnapID
 			Expect(snapID).To(Equal(&snaps[0].Id))
 
-			// TODO: Currently, there is no way to check if the annotations are set correctly.
-			// After implementing export() function, the annotations check should be added
-			// for various conditions.
+			// Make sure export() correctly annotates the MantleBackup resource.
+			syncMode, ok := backup.GetAnnotations()[annotSyncMode]
+			Expect(ok).To(BeTrue())
+			Expect(syncMode).To(Equal(syncModeFull))
+
+			// Make sure export() creates a PVC for exported data
+			var pvcExport corev1.PersistentVolumeClaim
+			err = k8sClient.Get(
+				ctx,
+				types.NamespacedName{
+					Name:      fmt.Sprintf("mantle-export-%s", backup.GetUID()),
+					Namespace: resMgr.ClusterID,
+				},
+				&pvcExport,
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pvcExport.GetLabels()["app.kubernetes.io/name"]).To(Equal("mantle"))
+			Expect(pvcExport.GetLabels()["app.kubernetes.io/component"]).To(Equal("export-data"))
+			Expect(pvcExport.Spec.AccessModes[0]).To(Equal(corev1.ReadWriteOnce))
+			Expect(*pvcExport.Spec.StorageClassName).To(Equal(resMgr.StorageClassName))
+			Expect(pvcExport.Spec.Resources.Requests.Storage().String()).To(Equal("2Gi"))
+
+			// Make sure export() creates a Job to export data.
+			var jobExport batchv1.Job
+			err = k8sClient.Get(
+				ctx,
+				types.NamespacedName{
+					Name:      fmt.Sprintf("mantle-export-%s", backup.GetUID()),
+					Namespace: resMgr.ClusterID,
+				},
+				&jobExport,
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(jobExport.GetLabels()["app.kubernetes.io/name"]).To(Equal("mantle"))
+			Expect(jobExport.GetLabels()["app.kubernetes.io/component"]).To(Equal("export-job"))
+			Expect(*jobExport.Spec.BackoffLimit).To(Equal(int32(65535)))
+			Expect(*jobExport.Spec.Template.Spec.SecurityContext.FSGroup).To(Equal(int64(10000)))
+			Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsUser).To(Equal(int64(10000)))
+			Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsGroup).To(Equal(int64(10000)))
+			Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsNonRoot).To(Equal(true))
+
+			// Make the export Job completed to proceed the reconciliation for backup.
+			err = resMgr.ChangeJobCondition(ctx, &jobExport, batchv1.JobComplete, corev1.ConditionTrue)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Make sure the upload Job is created
+			Eventually(func(g Gomega, ctx context.Context) {
+				var jobUpload batchv1.Job
+				err = k8sClient.Get(
+					ctx,
+					types.NamespacedName{
+						Name:      fmt.Sprintf("mantle-upload-%s", backup.GetUID()),
+						Namespace: resMgr.ClusterID,
+					},
+					&jobUpload,
+				)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(jobUpload.GetLabels()["app.kubernetes.io/name"]).To(Equal("mantle"))
+				g.Expect(jobUpload.GetLabels()["app.kubernetes.io/component"]).To(Equal("upload-job"))
+				g.Expect(*jobUpload.Spec.BackoffLimit).To(Equal(int32(65535)))
+				g.Expect(*jobUpload.Spec.Template.Spec.SecurityContext.FSGroup).To(Equal(int64(10000)))
+				g.Expect(*jobUpload.Spec.Template.Spec.SecurityContext.RunAsUser).To(Equal(int64(10000)))
+				g.Expect(*jobUpload.Spec.Template.Spec.SecurityContext.RunAsGroup).To(Equal(int64(10000)))
+				g.Expect(*jobUpload.Spec.Template.Spec.SecurityContext.RunAsNonRoot).To(Equal(true))
+			}).WithContext(ctx).Should(Succeed())
+
+			// Make the all existing MantleBackups in the (mocked) secondary Mantle
+			// ReadyToUse=True.
+			for _, backup := range targetBackups {
+				meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
+					Type:   mantlev1.BackupConditionReadyToUse,
+					Status: metav1.ConditionTrue,
+					Reason: mantlev1.BackupReasonNone,
+				})
+			}
+
+			// Create another MantleBackup (backup2) to make sure it should become a incremental backup.
+			backup2, err := resMgr.CreateUniqueBackupFor(ctx, pvc)
+			Expect(err).NotTo(HaveOccurred())
+			waitForHavingFinalizer(ctx, backup2)
+			resMgr.WaitForBackupReady(ctx, backup2)
+			resMgr.WaitForBackupSyncedToRemote(ctx, backup2)
+
+			// Make sure backup2 is an incremental backup.
+			syncMode2, ok := backup2.GetAnnotations()[annotSyncMode]
+			Expect(ok).To(BeTrue())
+			Expect(syncMode2).To(Equal(syncModeIncremental))
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup)
+			Expect(err).NotTo(HaveOccurred())
+			diffTo, ok := backup.GetAnnotations()[annotDiffTo]
+			Expect(ok).To(BeTrue())
+			Expect(diffTo).To(Equal(backup2.GetName()))
+
+			// remove diffTo annotation of backup here to allow it to be deleted.
+			// FIXME: this process is for testing purposes only and should be removed in the near future.
+			_, err = ctrl.CreateOrUpdate(ctx, k8sClient, backup, func() error {
+				delete(backup.Annotations, annotDiffTo)
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
 
 			err = k8sClient.Delete(ctx, backup)
+			Expect(err).NotTo(HaveOccurred())
+			err = k8sClient.Delete(ctx, backup2)
 			Expect(err).NotTo(HaveOccurred())
 
 			testutil.CheckDeletedEventually[mantlev1.MantleBackup](ctx, k8sClient, backup.Name, backup.Namespace)
@@ -611,7 +736,7 @@ var _ = Describe("prepareForDataSynchronization", func() {
 		}
 
 		mbr := NewMantleBackupReconciler(ctrlClient,
-			ctrlClient.Scheme(), "test", RolePrimary, nil)
+			ctrlClient.Scheme(), "test", RolePrimary, nil, "dummy image", "", nil)
 
 		ret, err := mbr.prepareForDataSynchronization(context.Background(),
 			backup, grpcClient)
