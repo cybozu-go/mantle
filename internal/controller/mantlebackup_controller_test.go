@@ -1196,6 +1196,7 @@ var _ = Describe("export", func() {
 		pvManifest, err := json.Marshal(pv)
 		Expect(err).NotTo(HaveOccurred())
 
+		// test a full backup
 		target := &mantlev1.MantleBackup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "target",
@@ -1231,5 +1232,50 @@ var _ = Describe("export", func() {
 		Expect(err).NotTo(HaveOccurred())
 		_, ok := target.GetAnnotations()[annotDiffFrom]
 		Expect(ok).To(BeFalse())
+
+		// test an incremental backup
+		target2 := &mantlev1.MantleBackup{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "target2",
+				Namespace: ns,
+			},
+			Spec: mantlev1.MantleBackupSpec{
+				PVC:    "dummy",
+				Expire: "1d",
+			},
+		}
+		err = k8sClient.Create(ctx, target2)
+		Expect(err).NotTo(HaveOccurred())
+		err = updateStatus(ctx, k8sClient, target2, func() error {
+			target2.Status.PVManifest = string(pvManifest)
+			target2.Status.PVCManifest = string(pvcManifest)
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		grpcClient.EXPECT().SetSynchronizing(gomock.Any(), gomock.Any()).
+			Times(1).Return(&proto.SetSynchronizingResponse{}, nil)
+
+		ret, err = mbr.export(ctx, target2, &dataSyncPrepareResult{
+			isIncremental:                     true,
+			isSecondaryMantleBackupReadyToUse: false,
+			diffFrom:                          target,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ret.Requeue).To(BeTrue())
+
+		err = k8sClient.Get(ctx,
+			types.NamespacedName{Name: target.GetName(), Namespace: target.GetNamespace()}, target)
+		Expect(err).NotTo(HaveOccurred())
+		diffTo, ok := target.GetAnnotations()[annotDiffTo]
+		Expect(ok).To(BeTrue())
+		Expect(diffTo).To(Equal(target2.GetName()))
+
+		err = k8sClient.Get(ctx,
+			types.NamespacedName{Name: target2.GetName(), Namespace: target2.GetNamespace()}, target2)
+		Expect(err).NotTo(HaveOccurred())
+		diffFrom, ok := target2.GetAnnotations()[annotDiffFrom]
+		Expect(ok).To(BeTrue())
+		Expect(diffFrom).To(Equal(target.GetName()))
 	})
 })
