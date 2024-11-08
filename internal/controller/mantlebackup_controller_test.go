@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -17,12 +18,16 @@ import (
 	"google.golang.org/grpc"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	aerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/kube-openapi/pkg/validation/strfmt"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -489,6 +494,31 @@ var _ = Describe("MantleBackup controller", func() {
 			Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsGroup).To(Equal(int64(10000)))
 			Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsNonRoot).To(Equal(true))
 
+			// Make sure FROM_SNAP_NAME is empty because we're performing a full backup.
+			isFromSnapNameFound := false
+			for _, evar := range jobExport.Spec.Template.Spec.Containers[0].Env {
+				if evar.Name == "FROM_SNAP_NAME" {
+					Expect(evar.Value).To(Equal(""))
+					isFromSnapNameFound = true
+				}
+			}
+			Expect(isFromSnapNameFound).To(BeTrue())
+
+			// Make sure an upload Jobs has not yet been created.
+			Consistently(ctx, func(g Gomega) error {
+				var jobUpload batchv1.Job
+				err = k8sClient.Get(
+					ctx,
+					types.NamespacedName{
+						Name:      fmt.Sprintf("mantle-upload-%s", backup.GetUID()),
+						Namespace: resMgr.ClusterID,
+					},
+					&jobUpload,
+				)
+				g.Expect(aerrors.IsNotFound(err)).To(BeTrue())
+				return nil
+			}, "1s").Should(Succeed())
+
 			// Make the export Job completed to proceed the reconciliation for backup.
 			err = resMgr.ChangeJobCondition(ctx, &jobExport, batchv1.JobComplete, corev1.ConditionTrue)
 			Expect(err).NotTo(HaveOccurred())
@@ -540,6 +570,28 @@ var _ = Describe("MantleBackup controller", func() {
 			diffTo, ok := backup.GetAnnotations()[annotDiffTo]
 			Expect(ok).To(BeTrue())
 			Expect(diffTo).To(Equal(backup2.GetName()))
+
+			// Make sure export() creates a Job to export data for backup2.
+			var jobExport2 batchv1.Job
+			err = k8sClient.Get(
+				ctx,
+				types.NamespacedName{
+					Name:      fmt.Sprintf("mantle-export-%s", backup2.GetUID()),
+					Namespace: resMgr.ClusterID,
+				},
+				&jobExport2,
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Make sure FROM_SNAP_NAME is filled correctly because we're performing an incremental backup.
+			isFromSnapNameFound = false
+			for _, evar := range jobExport2.Spec.Template.Spec.Containers[0].Env {
+				if evar.Name == "FROM_SNAP_NAME" {
+					Expect(evar.Value).To(Equal(backup.GetName()))
+					isFromSnapNameFound = true
+				}
+			}
+			Expect(isFromSnapNameFound).To(BeTrue())
 
 			// remove diffTo annotation of backup here to allow it to be deleted.
 			// FIXME: this process is for testing purposes only and should be removed in the near future.
@@ -893,4 +945,433 @@ var _ = Describe("prepareForDataSynchronization", func() {
 				false, 3, metav1.ConditionTrue, metav1.ConditionTrue),
 		),
 	)
+})
+
+var _ = Describe("SetSynchronizing", func() {
+	doTestCallOnce := func(
+		target, source *mantlev1.MantleBackup,
+		shouldBeError bool,
+		check func(target, source *mantlev1.MantleBackup) error,
+	) {
+		var err error
+		targetName := "target-name"
+		target.SetName(targetName)
+		backupNamespace := "target-ns"
+		target.SetNamespace(backupNamespace)
+		sourceName := "source"
+
+		ctrlClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+
+		err = ctrlClient.Create(context.Background(), target)
+		Expect(err).NotTo(HaveOccurred())
+
+		var diffFrom *string
+		if source != nil {
+			source.SetName(sourceName)
+			source.SetNamespace(backupNamespace)
+			err = ctrlClient.Create(context.Background(), source)
+			Expect(err).NotTo(HaveOccurred())
+			diffFrom = &sourceName
+		}
+
+		secondaryServer := NewSecondaryServer(ctrlClient, ctrlClient)
+		_, err = secondaryServer.SetSynchronizing(context.Background(), &proto.SetSynchronizingRequest{
+			Name:      targetName,
+			Namespace: backupNamespace,
+			DiffFrom:  diffFrom,
+		})
+		if shouldBeError {
+			Expect(err).To(HaveOccurred())
+		} else {
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		err = ctrlClient.Get(
+			context.Background(),
+			types.NamespacedName{Name: targetName, Namespace: backupNamespace},
+			target,
+		)
+		Expect(err).NotTo(HaveOccurred())
+		if source != nil {
+			err = ctrlClient.Get(
+				context.Background(),
+				types.NamespacedName{Name: sourceName, Namespace: backupNamespace},
+				source,
+			)
+			Expect(err).NotTo(HaveOccurred())
+		}
+		err = check(target, source)
+		Expect(err).NotTo(HaveOccurred())
+	}
+	DescribeTable("call SetSynchronizing once", doTestCallOnce,
+		Entry(
+			"a full backup should succeed",
+			&mantlev1.MantleBackup{
+				Status: mantlev1.MantleBackupStatus{
+					Conditions: []metav1.Condition{
+						{
+							Type:   mantlev1.BackupConditionReadyToUse,
+							Status: metav1.ConditionFalse,
+						},
+					},
+				},
+			},
+			nil,
+			false,
+			func(target, source *mantlev1.MantleBackup) error {
+				syncMode, ok := target.GetAnnotations()[annotSyncMode]
+				if !ok || syncMode != syncModeFull {
+					return errors.New("syncMode is invalid")
+				}
+				if _, ok := target.GetAnnotations()[annotDiffFrom]; ok {
+					return errors.New("diffFrom should not exist")
+				}
+				return nil
+			},
+		),
+		Entry(
+			"an incremental backup should succeed",
+			&mantlev1.MantleBackup{
+				Status: mantlev1.MantleBackupStatus{
+					Conditions: []metav1.Condition{
+						{
+							Type:   mantlev1.BackupConditionReadyToUse,
+							Status: metav1.ConditionFalse,
+						},
+					},
+				},
+			},
+			&mantlev1.MantleBackup{},
+			false,
+			func(target, source *mantlev1.MantleBackup) error {
+				syncMode, ok := target.GetAnnotations()[annotSyncMode]
+				if !ok || syncMode != syncModeIncremental {
+					return errors.New("syncMode is invalid")
+				}
+				diffFrom, ok := target.GetAnnotations()[annotDiffFrom]
+				if !ok || diffFrom != source.GetName() {
+					return errors.New("diffFrom is invalid")
+				}
+				diffTo, ok := source.GetAnnotations()[annotDiffTo]
+				if !ok || diffTo != target.GetName() {
+					return errors.New("diffTo is invalid")
+				}
+				return nil
+			},
+		),
+		Entry(
+			"a backup should fail if target's ReadyToUse is True",
+			&mantlev1.MantleBackup{
+				Status: mantlev1.MantleBackupStatus{
+					Conditions: []metav1.Condition{
+						{
+							Type:   mantlev1.BackupConditionReadyToUse,
+							Status: metav1.ConditionTrue,
+						},
+					},
+				},
+			},
+			nil,
+			true,
+			func(_, _ *mantlev1.MantleBackup) error { return nil },
+		),
+	)
+
+	doTestCallTwice := func(
+		name1 string,
+		diffFrom1 *string,
+		name2 string,
+		diffFrom2 *string,
+		shouldBeError bool,
+	) {
+		var err error
+
+		ctrlClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+
+		for _, name := range []string{"M0", "M1", "M2"} {
+			err = ctrlClient.Create(context.Background(), &mantlev1.MantleBackup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: name,
+				},
+				Status: mantlev1.MantleBackupStatus{
+					Conditions: []metav1.Condition{
+						{
+							Type:   mantlev1.BackupConditionReadyToUse,
+							Status: metav1.ConditionFalse,
+						},
+					},
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		secondaryServer := NewSecondaryServer(ctrlClient, ctrlClient)
+		_, err = secondaryServer.SetSynchronizing(context.Background(), &proto.SetSynchronizingRequest{
+			Name:      name1,
+			Namespace: "",
+			DiffFrom:  diffFrom1,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = secondaryServer.SetSynchronizing(context.Background(), &proto.SetSynchronizingRequest{
+			Name:      name2,
+			Namespace: "",
+			DiffFrom:  diffFrom2,
+		})
+		if shouldBeError {
+			Expect(err).To(HaveOccurred())
+		} else {
+			Expect(err).NotTo(HaveOccurred())
+		}
+	}
+	m0 := "M0"
+	m1 := "M1"
+	m2 := "M2"
+	DescribeTable("call SetSynchronizing twice", doTestCallTwice,
+		Entry("case 1", m0, nil, m0, nil, false),
+		Entry("case 2", m1, &m0, m1, &m0, false),
+		Entry("case 3", m1, nil, m1, &m0, true),
+		Entry("case 4", m1, &m0, m1, nil, true),
+		Entry("case 5", m2, &m0, m2, &m1, true),
+		Entry("case 6", m1, &m0, m2, &m0, true),
+	)
+})
+
+var _ = Describe("export", func() {
+	var mockCtrl *gomock.Controller
+	var grpcClient *proto.MockMantleServiceClient
+	var mbr *MantleBackupReconciler
+	var nsController, ns string
+	var dummyPVCManifest, dummyPVManifest []byte
+
+	BeforeEach(func() {
+		var t reporter
+		mockCtrl = gomock.NewController(t)
+		grpcClient = proto.NewMockMantleServiceClient(mockCtrl)
+
+		nsController = resMgr.CreateNamespace()
+
+		mbr = NewMantleBackupReconciler(
+			k8sClient,
+			scheme.Scheme,
+			nsController,
+			RolePrimary,
+			&PrimarySettings{
+				Client:                 grpcClient,
+				ExportDataStorageClass: resMgr.StorageClassName,
+				MaxExportJobs:          1,
+			},
+			"dummy image",
+			"",
+			nil,
+		)
+
+		ns = resMgr.CreateNamespace()
+
+		var err error
+
+		pvc := corev1.PersistentVolumeClaim{
+			Spec: corev1.PersistentVolumeClaimSpec{
+				Resources: corev1.VolumeResourceRequirements{
+					Requests: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceStorage: resource.MustParse("1Gi"),
+					},
+				},
+			},
+		}
+		dummyPVCManifest, err = json.Marshal(pvc)
+		Expect(err).NotTo(HaveOccurred())
+
+		pv := corev1.PersistentVolume{
+			Spec: corev1.PersistentVolumeSpec{
+				PersistentVolumeSource: corev1.PersistentVolumeSource{
+					CSI: &corev1.CSIPersistentVolumeSource{
+						VolumeAttributes: map[string]string{
+							"pool":      "dummy",
+							"imageName": "dummy",
+						},
+					},
+				},
+			},
+		}
+		dummyPVManifest, err = json.Marshal(pv)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	AfterEach(func() {
+		if mockCtrl != nil {
+			mockCtrl.Finish()
+		}
+	})
+
+	It("should set correct annotations after export() is called", func(ctx SpecContext) {
+		var err error
+
+		// test a full backup
+		target := &mantlev1.MantleBackup{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "target",
+				Namespace: ns,
+			},
+			Spec: mantlev1.MantleBackupSpec{
+				PVC:    "dummy",
+				Expire: "1d",
+			},
+		}
+		err = k8sClient.Create(ctx, target)
+		Expect(err).NotTo(HaveOccurred())
+		err = updateStatus(ctx, k8sClient, target, func() error {
+			target.Status.PVManifest = string(dummyPVManifest)
+			target.Status.PVCManifest = string(dummyPVCManifest)
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		grpcClient.EXPECT().SetSynchronizing(gomock.Any(), gomock.Any()).
+			Times(1).Return(&proto.SetSynchronizingResponse{}, nil)
+
+		ret, err := mbr.export(ctx, target, &dataSyncPrepareResult{
+			isIncremental:                     false,
+			isSecondaryMantleBackupReadyToUse: false,
+			diffFrom:                          nil,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ret.Requeue).To(BeTrue())
+
+		err = k8sClient.Get(ctx,
+			types.NamespacedName{Name: target.GetName(), Namespace: target.GetNamespace()}, target)
+		Expect(err).NotTo(HaveOccurred())
+		_, ok := target.GetAnnotations()[annotDiffFrom]
+		Expect(ok).To(BeFalse())
+
+		// test an incremental backup
+		target2 := &mantlev1.MantleBackup{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "target2",
+				Namespace: ns,
+			},
+			Spec: mantlev1.MantleBackupSpec{
+				PVC:    "dummy",
+				Expire: "1d",
+			},
+		}
+		err = k8sClient.Create(ctx, target2)
+		Expect(err).NotTo(HaveOccurred())
+		err = updateStatus(context.Background(), k8sClient, target2, func() error {
+			target2.Status.PVManifest = string(dummyPVManifest)
+			target2.Status.PVCManifest = string(dummyPVCManifest)
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		grpcClient.EXPECT().SetSynchronizing(gomock.Any(), gomock.Any()).
+			Times(1).Return(&proto.SetSynchronizingResponse{}, nil)
+
+		ret, err = mbr.export(ctx, target2, &dataSyncPrepareResult{
+			isIncremental:                     true,
+			isSecondaryMantleBackupReadyToUse: false,
+			diffFrom:                          target,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ret.Requeue).To(BeTrue())
+
+		err = k8sClient.Get(ctx,
+			types.NamespacedName{Name: target.GetName(), Namespace: target.GetNamespace()}, target)
+		Expect(err).NotTo(HaveOccurred())
+		diffTo, ok := target.GetAnnotations()[annotDiffTo]
+		Expect(ok).To(BeTrue())
+		Expect(diffTo).To(Equal(target2.GetName()))
+
+		err = k8sClient.Get(ctx,
+			types.NamespacedName{Name: target2.GetName(), Namespace: target2.GetNamespace()}, target2)
+		Expect(err).NotTo(HaveOccurred())
+		diffFrom, ok := target2.GetAnnotations()[annotDiffFrom]
+		Expect(ok).To(BeTrue())
+		Expect(diffFrom).To(Equal(target.GetName()))
+	})
+
+	It("should throttle export jobs correctly", func(ctx SpecContext) {
+		var err error
+
+		getNumOfExportJobs := func(ns string) (int, error) {
+			var jobs batchv1.JobList
+			err := k8sClient.List(ctx, &jobs, &client.ListOptions{
+				Namespace: ns,
+				LabelSelector: labels.SelectorFromSet(map[string]string{
+					"app.kubernetes.io/name":      labelAppNameValue,
+					"app.kubernetes.io/component": labelComponentExportJob,
+				}),
+			})
+			return len(jobs.Items), err
+		}
+
+		createAndExportMantleBackup := func(mbr *MantleBackupReconciler, name, ns string) {
+			target := &mantlev1.MantleBackup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: ns,
+				},
+				Spec: mantlev1.MantleBackupSpec{
+					PVC:    "dummy",
+					Expire: "1d",
+				},
+			}
+			err = k8sClient.Create(ctx, target)
+			Expect(err).NotTo(HaveOccurred())
+
+			err = updateStatus(ctx, k8sClient, target, func() error {
+				target.Status.PVManifest = string(dummyPVManifest)
+				target.Status.PVCManifest = string(dummyPVCManifest)
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			grpcClient.EXPECT().SetSynchronizing(gomock.Any(), gomock.Any()).
+				Times(1).Return(&proto.SetSynchronizingResponse{}, nil)
+
+			_, err = mbr.export(ctx, target, &dataSyncPrepareResult{
+				isIncremental:                     false,
+				isSecondaryMantleBackupReadyToUse: false,
+				diffFrom:                          nil,
+			})
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		// create 5 different MantleBackup resources and call export() for each of them
+		for i := 0; i < 5; i++ {
+			createAndExportMantleBackup(mbr, fmt.Sprintf("target1-%d", i), ns)
+		}
+
+		// make sure that only 1 Job is created
+		Consistently(ctx, func(g Gomega) error {
+			numJobs, err := getNumOfExportJobs(nsController)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(numJobs).To(Equal(1))
+			return nil
+		}, "1s").Should(Succeed())
+
+		// make sure that another mantle-controller existing in a different namespace can create an export Job.
+		nsController2 := resMgr.CreateNamespace()
+		mbr2 := NewMantleBackupReconciler(
+			k8sClient,
+			scheme.Scheme,
+			nsController2,
+			RolePrimary,
+			&PrimarySettings{
+				Client:                 grpcClient,
+				ExportDataStorageClass: resMgr.StorageClassName,
+				MaxExportJobs:          1,
+			},
+			"dummy image",
+			"",
+			nil,
+		)
+		ns2 := resMgr.CreateNamespace()
+		createAndExportMantleBackup(mbr2, "target2", ns2)
+		Eventually(ctx, func(g Gomega) error {
+			numJobs, err := getNumOfExportJobs(nsController2)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(numJobs).To(Equal(1))
+			return nil
+		}).Should(Succeed())
+	})
 })
