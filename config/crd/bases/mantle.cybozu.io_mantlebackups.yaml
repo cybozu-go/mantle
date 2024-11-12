@@ -53,9 +53,6 @@ spec:
                   rule: self <= duration('360h')
                 - message: spec.expire is immutable
                   rule: self == oldSelf
-              namespace:
-                description: '''namespace'' specifies backup target Namespace'
-                type: string
               pvc:
                 description: '''pvc'' specifies backup target PVC'
                 type: string
