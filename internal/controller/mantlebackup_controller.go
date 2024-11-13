@@ -1060,6 +1060,10 @@ func makeExportDataPVCName(target *mantlev1.MantleBackup) string {
 	return fmt.Sprintf("mantle-export-%s", target.GetUID())
 }
 
+func makeObjectNameOfExportedData(name, uid string) string {
+	return fmt.Sprintf("%s-%s.bin", name, uid)
+}
+
 func (r *MantleBackupReconciler) createOrUpdateExportJob(ctx context.Context, target *mantlev1.MantleBackup, sourceBackupNamePtr *string) error {
 	sourceBackupName := ""
 	if sourceBackupNamePtr != nil {
@@ -1272,7 +1276,7 @@ func (r *MantleBackupReconciler) createOrUpdateExportDataUploadJob(ctx context.C
 				Env: []corev1.EnvVar{
 					{
 						Name:  "OBJ_NAME",
-						Value: fmt.Sprintf("%s-%s.bin", target.GetName(), target.GetUID()),
+						Value: makeObjectNameOfExportedData(target.GetName(), string(target.GetUID())),
 					},
 					{
 						Name:  "BUCKET_NAME",
