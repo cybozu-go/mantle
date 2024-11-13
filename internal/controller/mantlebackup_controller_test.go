@@ -10,6 +10,7 @@ import (
 	"time"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
+	"github.com/cybozu-go/mantle/internal/controller/internal/objectstorage"
 	"github.com/cybozu-go/mantle/internal/controller/internal/testutil"
 	"github.com/cybozu-go/mantle/pkg/controller/proto"
 	. "github.com/onsi/ginkgo/v2"
@@ -356,6 +357,10 @@ var _ = Describe("MantleBackup controller", func() {
 				},
 			)
 			reconciler.ceph = testutil.NewFakeRBD()
+
+			mockObjectStorage := objectstorage.NewMockBucket(mockCtrl)
+			reconciler.objectStorageClient = mockObjectStorage
+
 			err := reconciler.SetupWithManager(mgrUtil.GetManager())
 			Expect(err).NotTo(HaveOccurred())
 
@@ -428,81 +433,82 @@ var _ = Describe("MantleBackup controller", func() {
 			backup, err := resMgr.CreateUniqueBackupFor(ctx, pvc)
 			Expect(err).NotTo(HaveOccurred())
 
-			waitForHavingFinalizer(ctx, backup)
-			resMgr.WaitForBackupReady(ctx, backup)
-			resMgr.WaitForBackupSyncedToRemote(ctx, backup)
-
-			pvcJS := backup.Status.PVCManifest
-			Expect(pvcJS).NotTo(BeEmpty())
-			pvcStored := corev1.PersistentVolumeClaim{}
-			err = json.Unmarshal([]byte(pvcJS), &pvcStored)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(pvcStored.Name).To(Equal(pvc.Name))
-			Expect(pvcStored.Namespace).To(Equal(pvc.Namespace))
-
-			pvJS := backup.Status.PVManifest
-			Expect(pvJS).NotTo(BeEmpty())
-			pvStored := corev1.PersistentVolume{}
-			err = json.Unmarshal([]byte(pvJS), &pvStored)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(pvStored.Name).To(Equal(pv.Name))
-
-			snaps, err := reconciler.ceph.RBDSnapLs(resMgr.PoolName, pv.Spec.CSI.VolumeAttributes["imageName"])
-			Expect(err).NotTo(HaveOccurred())
-			Expect(snaps).To(HaveLen(1))
-			snapID := backup.Status.SnapID
-			Expect(snapID).To(Equal(&snaps[0].Id))
-
-			// Make sure export() correctly annotates the MantleBackup resource.
-			syncMode, ok := backup.GetAnnotations()[annotSyncMode]
-			Expect(ok).To(BeTrue())
-			Expect(syncMode).To(Equal(syncModeFull))
-
-			// Make sure export() creates a PVC for exported data
-			var pvcExport corev1.PersistentVolumeClaim
-			err = k8sClient.Get(
-				ctx,
-				types.NamespacedName{
-					Name:      fmt.Sprintf("mantle-export-%s", backup.GetUID()),
-					Namespace: resMgr.ClusterID,
-				},
-				&pvcExport,
-			)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(pvcExport.GetLabels()["app.kubernetes.io/name"]).To(Equal("mantle"))
-			Expect(pvcExport.GetLabels()["app.kubernetes.io/component"]).To(Equal("export-data"))
-			Expect(pvcExport.Spec.AccessModes[0]).To(Equal(corev1.ReadWriteOnce))
-			Expect(*pvcExport.Spec.StorageClassName).To(Equal(resMgr.StorageClassName))
-			Expect(pvcExport.Spec.Resources.Requests.Storage().String()).To(Equal("2Gi"))
-
-			// Make sure export() creates a Job to export data.
 			var jobExport batchv1.Job
-			err = k8sClient.Get(
-				ctx,
-				types.NamespacedName{
-					Name:      fmt.Sprintf("mantle-export-%s", backup.GetUID()),
-					Namespace: resMgr.ClusterID,
-				},
-				&jobExport,
-			)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(jobExport.GetLabels()["app.kubernetes.io/name"]).To(Equal("mantle"))
-			Expect(jobExport.GetLabels()["app.kubernetes.io/component"]).To(Equal("export-job"))
-			Expect(*jobExport.Spec.BackoffLimit).To(Equal(int32(65535)))
-			Expect(*jobExport.Spec.Template.Spec.SecurityContext.FSGroup).To(Equal(int64(10000)))
-			Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsUser).To(Equal(int64(10000)))
-			Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsGroup).To(Equal(int64(10000)))
-			Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsNonRoot).To(Equal(true))
+			Eventually(func(g Gomega, ctx context.Context) {
+				err = k8sClient.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup)
+				g.Expect(err).NotTo(HaveOccurred())
 
-			// Make sure FROM_SNAP_NAME is empty because we're performing a full backup.
-			isFromSnapNameFound := false
-			for _, evar := range jobExport.Spec.Template.Spec.Containers[0].Env {
-				if evar.Name == "FROM_SNAP_NAME" {
-					Expect(evar.Value).To(Equal(""))
-					isFromSnapNameFound = true
+				pvcJS := backup.Status.PVCManifest
+				g.Expect(pvcJS).NotTo(BeEmpty())
+				pvcStored := corev1.PersistentVolumeClaim{}
+				err = json.Unmarshal([]byte(pvcJS), &pvcStored)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(pvcStored.Name).To(Equal(pvc.Name))
+				g.Expect(pvcStored.Namespace).To(Equal(pvc.Namespace))
+
+				pvJS := backup.Status.PVManifest
+				g.Expect(pvJS).NotTo(BeEmpty())
+				pvStored := corev1.PersistentVolume{}
+				err = json.Unmarshal([]byte(pvJS), &pvStored)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(pvStored.Name).To(Equal(pv.Name))
+
+				snaps, err := reconciler.ceph.RBDSnapLs(resMgr.PoolName, pv.Spec.CSI.VolumeAttributes["imageName"])
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(snaps).To(HaveLen(1))
+				snapID := backup.Status.SnapID
+				g.Expect(snapID).To(Equal(&snaps[0].Id))
+
+				// Make sure export() correctly annotates the MantleBackup resource.
+				syncMode, ok := backup.GetAnnotations()[annotSyncMode]
+				g.Expect(ok).To(BeTrue())
+				g.Expect(syncMode).To(Equal(syncModeFull))
+
+				// Make sure export() creates a PVC for exported data
+				var pvcExport corev1.PersistentVolumeClaim
+				err = k8sClient.Get(
+					ctx,
+					types.NamespacedName{
+						Name:      fmt.Sprintf("mantle-export-%s", backup.GetUID()),
+						Namespace: resMgr.ClusterID,
+					},
+					&pvcExport,
+				)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(pvcExport.GetLabels()["app.kubernetes.io/name"]).To(Equal("mantle"))
+				g.Expect(pvcExport.GetLabels()["app.kubernetes.io/component"]).To(Equal("export-data"))
+				g.Expect(pvcExport.Spec.AccessModes[0]).To(Equal(corev1.ReadWriteOnce))
+				g.Expect(*pvcExport.Spec.StorageClassName).To(Equal(resMgr.StorageClassName))
+				g.Expect(pvcExport.Spec.Resources.Requests.Storage().String()).To(Equal("2Gi"))
+
+				// Make sure export() creates a Job to export data.
+				err = k8sClient.Get(
+					ctx,
+					types.NamespacedName{
+						Name:      fmt.Sprintf("mantle-export-%s", backup.GetUID()),
+						Namespace: resMgr.ClusterID,
+					},
+					&jobExport,
+				)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(jobExport.GetLabels()["app.kubernetes.io/name"]).To(Equal("mantle"))
+				g.Expect(jobExport.GetLabels()["app.kubernetes.io/component"]).To(Equal("export-job"))
+				g.Expect(*jobExport.Spec.BackoffLimit).To(Equal(int32(65535)))
+				g.Expect(*jobExport.Spec.Template.Spec.SecurityContext.FSGroup).To(Equal(int64(10000)))
+				g.Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsUser).To(Equal(int64(10000)))
+				g.Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsGroup).To(Equal(int64(10000)))
+				g.Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsNonRoot).To(Equal(true))
+
+				// Make sure FROM_SNAP_NAME is empty because we're performing a full backup.
+				isFromSnapNameFound := false
+				for _, evar := range jobExport.Spec.Template.Spec.Containers[0].Env {
+					if evar.Name == "FROM_SNAP_NAME" {
+						g.Expect(evar.Value).To(Equal(""))
+						isFromSnapNameFound = true
+					}
 				}
-			}
-			Expect(isFromSnapNameFound).To(BeTrue())
+				g.Expect(isFromSnapNameFound).To(BeTrue())
+			}).WithContext(ctx).Should(Succeed())
 
 			// Make sure an upload Jobs has not yet been created.
 			Consistently(ctx, func(g Gomega) error {
@@ -544,6 +550,18 @@ var _ = Describe("MantleBackup controller", func() {
 				g.Expect(*jobUpload.Spec.Template.Spec.SecurityContext.RunAsNonRoot).To(Equal(true))
 			}).WithContext(ctx).Should(Succeed())
 
+			// Make the all existing MantleBackups in the primary Mantle
+			// SyncedToRemote=True.
+			err = updateStatus(ctx, k8sClient, backup, func() error {
+				meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
+					Type:   mantlev1.BackupConditionSyncedToRemote,
+					Status: metav1.ConditionTrue,
+					Reason: mantlev1.BackupReasonNone,
+				})
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+
 			// Make the all existing MantleBackups in the (mocked) secondary Mantle
 			// ReadyToUse=True.
 			for _, backup := range targetBackups {
@@ -557,41 +575,43 @@ var _ = Describe("MantleBackup controller", func() {
 			// Create another MantleBackup (backup2) to make sure it should become a incremental backup.
 			backup2, err := resMgr.CreateUniqueBackupFor(ctx, pvc)
 			Expect(err).NotTo(HaveOccurred())
-			waitForHavingFinalizer(ctx, backup2)
-			resMgr.WaitForBackupReady(ctx, backup2)
-			resMgr.WaitForBackupSyncedToRemote(ctx, backup2)
 
-			// Make sure backup2 is an incremental backup.
-			syncMode2, ok := backup2.GetAnnotations()[annotSyncMode]
-			Expect(ok).To(BeTrue())
-			Expect(syncMode2).To(Equal(syncModeIncremental))
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup)
-			Expect(err).NotTo(HaveOccurred())
-			diffTo, ok := backup.GetAnnotations()[annotDiffTo]
-			Expect(ok).To(BeTrue())
-			Expect(diffTo).To(Equal(backup2.GetName()))
+			Eventually(func(g Gomega, ctx context.Context) {
+				err = k8sClient.Get(ctx, types.NamespacedName{Name: backup2.GetName(), Namespace: backup2.GetNamespace()}, backup2)
+				g.Expect(err).NotTo(HaveOccurred())
 
-			// Make sure export() creates a Job to export data for backup2.
-			var jobExport2 batchv1.Job
-			err = k8sClient.Get(
-				ctx,
-				types.NamespacedName{
-					Name:      fmt.Sprintf("mantle-export-%s", backup2.GetUID()),
-					Namespace: resMgr.ClusterID,
-				},
-				&jobExport2,
-			)
-			Expect(err).NotTo(HaveOccurred())
+				// Make sure backup2 is an incremental backup.
+				syncMode2, ok := backup2.GetAnnotations()[annotSyncMode]
+				g.Expect(ok).To(BeTrue())
+				g.Expect(syncMode2).To(Equal(syncModeIncremental))
+				err = k8sClient.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup)
+				g.Expect(err).NotTo(HaveOccurred())
+				diffTo, ok := backup.GetAnnotations()[annotDiffTo]
+				g.Expect(ok).To(BeTrue())
+				g.Expect(diffTo).To(Equal(backup2.GetName()))
 
-			// Make sure FROM_SNAP_NAME is filled correctly because we're performing an incremental backup.
-			isFromSnapNameFound = false
-			for _, evar := range jobExport2.Spec.Template.Spec.Containers[0].Env {
-				if evar.Name == "FROM_SNAP_NAME" {
-					Expect(evar.Value).To(Equal(backup.GetName()))
-					isFromSnapNameFound = true
+				// Make sure export() creates a Job to export data for backup2.
+				var jobExport2 batchv1.Job
+				err = k8sClient.Get(
+					ctx,
+					types.NamespacedName{
+						Name:      fmt.Sprintf("mantle-export-%s", backup2.GetUID()),
+						Namespace: resMgr.ClusterID,
+					},
+					&jobExport2,
+				)
+				g.Expect(err).NotTo(HaveOccurred())
+
+				// Make sure FROM_SNAP_NAME is filled correctly because we're performing an incremental backup.
+				isFromSnapNameFound := false
+				for _, evar := range jobExport2.Spec.Template.Spec.Containers[0].Env {
+					if evar.Name == "FROM_SNAP_NAME" {
+						g.Expect(evar.Value).To(Equal(backup.GetName()))
+						isFromSnapNameFound = true
+					}
 				}
-			}
-			Expect(isFromSnapNameFound).To(BeTrue())
+				g.Expect(isFromSnapNameFound).To(BeTrue())
+			}).WithContext(ctx).Should(Succeed())
 
 			// remove diffTo annotation of backup here to allow it to be deleted.
 			// FIXME: this process is for testing purposes only and should be removed in the near future.
