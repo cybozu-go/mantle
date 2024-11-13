@@ -1769,19 +1769,68 @@ func (r *MantleBackupReconciler) createImportJob(
 
 func (r *MantleBackupReconciler) primaryCleanup(
 	ctx context.Context,
-	backup *mantlev1.MantleBackup,
-) (ctrl.Result, error) { // nolint:unparam
-	if !backup.DeletionTimestamp.IsZero() {
+	target *mantlev1.MantleBackup,
+) (ctrl.Result, error) {
+	diffFrom, ok := target.GetAnnotations()[annotDiffFrom]
+	if ok {
+		var source mantlev1.MantleBackup
+		if err := r.Client.Get(
+			ctx,
+			types.NamespacedName{Name: diffFrom, Namespace: target.GetNamespace()},
+			&source,
+		); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to get source MantleBackup: %w", err)
+		}
+		delete(source.GetAnnotations(), annotDiffTo)
+		if err := r.Client.Update(ctx, &source); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to update source MantleBackup: %w", err)
+		}
+	}
+
+	propagationPolicy := metav1.DeletePropagationBackground
+
+	var exportJob batchv1.Job
+	exportJob.SetName(makeExportJobName(target))
+	exportJob.SetNamespace(r.managedCephClusterID)
+	if err := r.Client.Delete(ctx, &exportJob, &client.DeleteOptions{
+		PropagationPolicy: &propagationPolicy,
+	}); err != nil && !aerrors.IsNotFound(err) {
+		return ctrl.Result{}, fmt.Errorf("failed to delete export Job: %w", err)
+	}
+
+	var uploadJob batchv1.Job
+	uploadJob.SetName(makeUploadJobName(target))
+	uploadJob.SetNamespace(r.managedCephClusterID)
+	if err := r.Client.Delete(ctx, &uploadJob, &client.DeleteOptions{
+		PropagationPolicy: &propagationPolicy,
+	}); err != nil && !aerrors.IsNotFound(err) {
+		return ctrl.Result{}, fmt.Errorf("failed to delete upload Job: %w", err)
+	}
+
+	var exportDataPVC corev1.PersistentVolumeClaim
+	exportDataPVC.SetName(makeExportDataPVCName(target))
+	exportDataPVC.SetNamespace(r.managedCephClusterID)
+	if err := r.Client.Delete(ctx, &exportDataPVC); err != nil && !aerrors.IsNotFound(err) {
+		return ctrl.Result{}, fmt.Errorf("failed to delete export data PVC: %w", err)
+	}
+
+	delete(target.GetAnnotations(), annotDiffFrom)
+	delete(target.GetAnnotations(), annotSyncMode)
+	if err := r.Client.Update(ctx, target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete annotations of diff-from and sync-mode: %w", err)
+	}
+
+	if !target.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, nil
 	}
 
 	// Update the status of the MantleBackup.
-	if err := r.updateStatusCondition(ctx, backup, metav1.Condition{
+	if err := r.updateStatusCondition(ctx, target, metav1.Condition{
 		Type:   mantlev1.BackupConditionSyncedToRemote,
 		Status: metav1.ConditionTrue,
 		Reason: mantlev1.BackupReasonNone,
 	}); err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("failed to update SyncedToRemote to True: %w", err)
 	}
 
 	return ctrl.Result{}, nil
