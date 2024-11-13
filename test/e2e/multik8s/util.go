@@ -84,8 +84,8 @@ func applyMantleBackupTemplate(clusterNo int, namespace, pvcName, backupName str
 	return nil
 }
 
-func applyPVCTemplate(clusterNo int, namespace, name, storageClassName string) error {
-	manifest := fmt.Sprintf(testPVCTemplate, name, storageClassName)
+func applyPVCTemplate(clusterNo int, namespace, name string) error {
+	manifest := fmt.Sprintf(testPVCTemplate, name)
 	_, _, err := kubectl(clusterNo, []byte(manifest), "apply", "-n", namespace, "-f", "-")
 	if err != nil {
 		return fmt.Errorf("kubectl apply pvc failed. err: %w", err)
@@ -101,10 +101,10 @@ func createNamespace(clusterNo int, name string) error {
 	return nil
 }
 
-func applyRBDPoolAndSCTemplate(clusterNo int, namespace, poolName, storageClassName string) error {
+func applyRBDPoolAndSCTemplate(clusterNo int, namespace string) error {
 	manifest := fmt.Sprintf(
-		testRBDPoolSCTemplate, poolName, namespace,
-		storageClassName, namespace, poolName, namespace, namespace, namespace)
+		testRBDPoolSCTemplate, namespace,
+		namespace, namespace, namespace, namespace)
 	_, _, err := kubectl(clusterNo, []byte(manifest), "apply", "-n", namespace, "-f", "-")
 	if err != nil {
 		return err

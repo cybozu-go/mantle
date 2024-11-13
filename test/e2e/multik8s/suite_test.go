@@ -55,8 +55,6 @@ func replicationTestSuite() {
 			namespace := util.GetUniqueName("ns-")
 			pvcName := util.GetUniqueName("pvc-")
 			backupName := util.GetUniqueName("mb-")
-			scName := util.GetUniqueName("sc-")
-			poolName := util.GetUniqueName("pool-")
 
 			By("setting up the environment")
 			Eventually(func() error {
@@ -66,13 +64,13 @@ func replicationTestSuite() {
 				return createNamespace(secondaryK8sCluster, namespace)
 			}).Should(Succeed())
 			Eventually(func() error {
-				return applyRBDPoolAndSCTemplate(primaryK8sCluster, cephClusterNamespace, poolName, scName)
+				return applyRBDPoolAndSCTemplate(primaryK8sCluster, cephClusterNamespace)
 			}).Should(Succeed())
 			Eventually(func() error {
-				return applyRBDPoolAndSCTemplate(secondaryK8sCluster, cephClusterNamespace, poolName, scName)
+				return applyRBDPoolAndSCTemplate(secondaryK8sCluster, cephClusterNamespace)
 			}).Should(Succeed())
 			Eventually(func() error {
-				return applyPVCTemplate(primaryK8sCluster, namespace, pvcName, scName)
+				return applyPVCTemplate(primaryK8sCluster, namespace, pvcName)
 			}).Should(Succeed())
 
 			By("creating a MantleBackup object")
