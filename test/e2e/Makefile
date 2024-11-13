@@ -200,6 +200,13 @@ install-ceph-object-store:
 install-ceph-object-store-secret:
 	$(KUBECTL) apply -f $(TMPDIR)/secret-export-data.json
 
+.PHONY: minikube-profile-primary
+minikube-profile-primary:
+	$(MINIKUBE) profile $(MINIKUBE_PROFILE_PRIMARY)
+.PHONY: minikube-profile-secondary
+minikube-profile-secondary:
+	$(MINIKUBE) profile $(MINIKUBE_PROFILE_SECONDARY)
+
 .PHONY: image-build
 image-build:
 	eval $$($(MINIKUBE) docker-env); \
