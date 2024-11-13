@@ -11,6 +11,7 @@ import (
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/ceph"
+	"github.com/cybozu-go/mantle/internal/controller/internal/objectstorage"
 	"github.com/cybozu-go/mantle/pkg/controller/proto"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -77,6 +78,7 @@ type MantleBackupReconciler struct {
 	podImage              string
 	envSecret             string
 	objectStorageSettings *ObjectStorageSettings // This should be non-nil if and only if role equals 'primary' or 'secondary'.
+	objectStorageClient   objectstorage.Bucket
 }
 
 // NewMantleBackupReconciler returns NodeReconciler.
@@ -1385,11 +1387,83 @@ func (r *MantleBackupReconciler) startImport(
 	return ctrl.Result{}, nil
 }
 
+func (r *MantleBackupReconciler) prepareObjectStorageClient(ctx context.Context) error {
+	if r.objectStorageClient != nil {
+		return nil
+	}
+
+	var caPEMCerts []byte
+
+	if r.objectStorageSettings.CACertConfigMap != nil {
+		var cm corev1.ConfigMap
+		if err := r.Client.Get(
+			ctx, types.NamespacedName{
+				Name:      *r.objectStorageSettings.CACertConfigMap,
+				Namespace: r.managedCephClusterID,
+			},
+			&cm,
+		); err != nil {
+			return err
+		}
+
+		caPEMCertsString, ok := cm.Data[*r.objectStorageSettings.CACertKey]
+		if !ok {
+			return fmt.Errorf("ca-cert-key not found in ConfigMap: %s", *r.objectStorageSettings.CACertConfigMap)
+		}
+		caPEMCerts = []byte(caPEMCertsString)
+	}
+
+	var envSecret corev1.Secret
+	if err := r.Client.Get(
+		ctx,
+		types.NamespacedName{Name: r.envSecret, Namespace: r.managedCephClusterID},
+		&envSecret,
+	); err != nil {
+		return err
+	}
+	accessKeyID, ok := envSecret.Data["AWS_ACCESS_KEY_ID"]
+	if !ok {
+		return errors.New("failed to find AWS_ACCESS_KEY_ID in env-secret")
+	}
+	secretAccessKey, ok := envSecret.Data["AWS_SECRET_ACCESS_KEY"]
+	if !ok {
+		return errors.New("failed to find AWS_SECRET_ACCESS_KEY in env-secret")
+	}
+
+	var err error
+	r.objectStorageClient, err = objectstorage.NewS3Bucket(
+		ctx,
+		r.objectStorageSettings.BucketName,
+		r.objectStorageSettings.Endpoint,
+		string(accessKeyID),
+		string(secretAccessKey),
+		caPEMCerts,
+	)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (r *MantleBackupReconciler) isExportDataAlreadyUploaded(
-	_ context.Context,
-	_ *mantlev1.MantleBackup,
-) (ctrl.Result, error) { //nolint:unparam
-	return ctrl.Result{}, nil
+	ctx context.Context,
+	target *mantlev1.MantleBackup,
+) (ctrl.Result, error) {
+	if err := r.prepareObjectStorageClient(ctx); err != nil {
+		return ctrl.Result{}, err
+	}
+	uploaded, err := r.objectStorageClient.Exists(
+		ctx,
+		makeObjectNameOfExportedData(target.GetName(), target.GetAnnotations()[annotRemoteUID]),
+	)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if uploaded {
+		return ctrl.Result{}, nil
+	}
+	return ctrl.Result{Requeue: true}, nil
 }
 
 func isPVSmallerThanPVC(
