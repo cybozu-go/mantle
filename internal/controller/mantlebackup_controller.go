@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	_ "embed"
@@ -42,6 +43,7 @@ const (
 	labelComponentExportData      = "export-data"
 	labelComponentExportJob       = "export-job"
 	labelComponentUploadJob       = "upload-job"
+	labelComponentImportJob       = "import-job"
 	annotRemoteUID                = "mantle.cybozu.io/remote-uid"
 	annotDiffFrom                 = "mantle.cybozu.io/diff-from"
 	annotDiffTo                   = "mantle.cybozu.io/diff-to"
@@ -57,6 +59,8 @@ var (
 	embedJobExportScript string
 	//go:embed script/job-upload.sh
 	embedJobUploadScript string
+	//go:embed script/job-import.sh
+	embedJobImportScript string
 )
 
 type ObjectStorageSettings struct {
@@ -1066,6 +1070,10 @@ func makeObjectNameOfExportedData(name, uid string) string {
 	return fmt.Sprintf("%s-%s.bin", name, uid)
 }
 
+func makeImportJobName(target *mantlev1.MantleBackup) string {
+	return fmt.Sprintf("mantle-import-%s", target.GetUID())
+}
+
 func (r *MantleBackupReconciler) createOrUpdateExportJob(ctx context.Context, target *mantlev1.MantleBackup, sourceBackupNamePtr *string) error {
 	sourceBackupName := ""
 	if sourceBackupNamePtr != nil {
@@ -1516,19 +1524,247 @@ func (r *MantleBackupReconciler) reconcileDiscardJob(
 func (r *MantleBackupReconciler) reconcileImportJob(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
-	_ *snapshotTarget,
-) (ctrl.Result, error) { //nolint:unparam
-	// FIXME: implement here later
+	snapshotTarget *snapshotTarget,
+) (ctrl.Result, error) {
+	var job batchv1.Job
+	if err := r.Client.Get(
+		ctx,
+		types.NamespacedName{
+			Name:      makeImportJobName(backup),
+			Namespace: r.managedCephClusterID,
+		},
+		&job,
+	); err != nil {
+		if !aerrors.IsNotFound(err) {
+			return ctrl.Result{}, err
+		}
+		if err := r.createImportJob(ctx, backup, snapshotTarget); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{Requeue: true}, nil
+	}
 
-	if err := r.updateStatusCondition(ctx, backup, metav1.Condition{
-		Type:   mantlev1.BackupConditionReadyToUse,
-		Status: metav1.ConditionTrue,
-		Reason: mantlev1.BackupReasonNone,
+	if !IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete) {
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	snapshot, err := ceph.FindRBDSnapshot(
+		r.ceph,
+		snapshotTarget.poolName,
+		snapshotTarget.imageName,
+		backup.GetName(),
+	)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if err := updateStatus(ctx, r.Client, backup, func() error {
+		backup.Status.SnapID = &snapshot.Id
+		meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
+			Type:   mantlev1.BackupConditionReadyToUse,
+			Status: metav1.ConditionTrue,
+			Reason: mantlev1.BackupReasonNone,
+		})
+		return nil
 	}); err != nil {
 		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{}, nil
+}
+
+func (r *MantleBackupReconciler) createImportJob(
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
+	snapshotTarget *snapshotTarget,
+) error {
+	var job batchv1.Job
+
+	job.SetName(makeImportJobName(backup))
+	job.SetNamespace(r.managedCephClusterID)
+
+	_, err := ctrl.CreateOrUpdate(ctx, r.Client, &job, func() error {
+		labels := job.GetLabels()
+		if labels == nil {
+			labels = map[string]string{}
+		}
+		labels["app.kubernetes.io/name"] = labelAppNameValue
+		labels["app.kubernetes.io/component"] = labelComponentImportJob
+		job.SetLabels(labels)
+
+		var backoffLimit int32 = 65535
+		job.Spec.BackoffLimit = &backoffLimit
+
+		var runAsGroup int64 = 10000
+		runAsNonRoot := true
+		var runAsUser int64 = 10000
+		job.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
+			RunAsGroup:   &runAsGroup,
+			RunAsNonRoot: &runAsNonRoot,
+			RunAsUser:    &runAsUser,
+		}
+
+		job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
+
+		sourceBackupName := backup.GetAnnotations()[annotDiffFrom]
+
+		container := corev1.Container{
+			Name:    "import",
+			Command: []string{"/bin/bash", "-c", embedJobImportScript},
+			Env: []corev1.EnvVar{
+				{
+					Name: "ROOK_CEPH_USERNAME",
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							Key: "ceph-username",
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: "rook-ceph-mon",
+							},
+						},
+					},
+				},
+				{
+					Name:  "POOL_NAME",
+					Value: snapshotTarget.pv.Spec.CSI.VolumeAttributes["pool"],
+				},
+				{
+					Name:  "DST_IMAGE_NAME",
+					Value: snapshotTarget.imageName,
+				},
+				{
+					Name:  "FROM_SNAP_NAME",
+					Value: sourceBackupName,
+				},
+				{
+					Name:  "OBJ_NAME",
+					Value: makeObjectNameOfExportedData(backup.GetName(), backup.GetAnnotations()[annotRemoteUID]),
+				},
+				{
+					Name:  "BUCKET_NAME",
+					Value: r.objectStorageSettings.BucketName,
+				},
+				{
+					Name:  "OBJECT_STORAGE_ENDPOINT",
+					Value: r.objectStorageSettings.Endpoint,
+				},
+				{
+					Name: "AWS_ACCESS_KEY_ID",
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: r.envSecret,
+							},
+							Key: "AWS_ACCESS_KEY_ID",
+						},
+					},
+				},
+				{
+					Name: "AWS_SECRET_ACCESS_KEY",
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: r.envSecret,
+							},
+							Key: "AWS_SECRET_ACCESS_KEY",
+						},
+					},
+				},
+			},
+			Image:           r.podImage,
+			ImagePullPolicy: corev1.PullIfNotPresent,
+			TTY:             true,
+			VolumeMounts: []corev1.VolumeMount{
+				{
+					MountPath: "/etc/ceph",
+					Name:      "ceph-config",
+				},
+				{
+					MountPath: "/etc/rook",
+					Name:      "mon-endpoint-volume",
+				},
+				{
+					MountPath: "/var/lib/rook-ceph-mon",
+					Name:      "ceph-admin-secret",
+					ReadOnly:  true,
+				},
+			},
+		}
+
+		if r.objectStorageSettings.CACertConfigMap != nil {
+			container.Env = append(
+				container.Env,
+				corev1.EnvVar{
+					Name:  "CERT_FILE",
+					Value: filepath.Join("/mantle_ca_cert", *r.objectStorageSettings.CACertKey),
+				},
+			)
+			container.VolumeMounts = append(
+				container.VolumeMounts,
+				corev1.VolumeMount{
+					MountPath: "/mantle_ca_cert",
+					Name:      "ca-cert",
+				},
+			)
+		}
+
+		job.Spec.Template.Spec.Containers = []corev1.Container{container}
+
+		fals := false
+		job.Spec.Template.Spec.Volumes = []corev1.Volume{
+			{
+				Name: "ceph-admin-secret",
+				VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{
+						SecretName: "rook-ceph-mon",
+						Optional:   &fals,
+						Items: []corev1.KeyToPath{{
+							Key:  "ceph-secret",
+							Path: "secret.keyring",
+						}},
+					},
+				},
+			},
+			{
+				Name: "mon-endpoint-volume",
+				VolumeSource: corev1.VolumeSource{
+					ConfigMap: &corev1.ConfigMapVolumeSource{
+						Items: []corev1.KeyToPath{
+							{
+								Key:  "data",
+								Path: "mon-endpoints",
+							},
+						},
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: "rook-ceph-mon-endpoints",
+						},
+					},
+				},
+			},
+			{
+				Name: "ceph-config",
+				VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{},
+				},
+			},
+		}
+
+		if r.objectStorageSettings.CACertConfigMap != nil {
+			job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, corev1.Volume{
+				Name: "ca-cert",
+				VolumeSource: corev1.VolumeSource{
+					ConfigMap: &corev1.ConfigMapVolumeSource{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: *r.objectStorageSettings.CACertConfigMap,
+						},
+					},
+				},
+			})
+		}
+
+		return nil
+	})
+
+	return err
 }
 
 func (r *MantleBackupReconciler) primaryCleanup(
