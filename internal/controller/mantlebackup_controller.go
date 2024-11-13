@@ -1228,13 +1228,9 @@ func (r *MantleBackupReconciler) checkIfExportJobIsCompleted(
 		return ctrl.Result{}, err
 	}
 
-	// Check if the export Job is completed or not. Note that we can't use
-	// meta.IsConditionTrue here, because job.Status.Conditions has
-	// []JobCondition type.
-	for _, cond := range job.Status.Conditions {
-		if cond.Type == batchv1.JobComplete && cond.Status == corev1.ConditionTrue {
-			return ctrl.Result{}, nil
-		}
+	// Check if the export Job is completed or not
+	if IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete) {
+		return ctrl.Result{}, nil
 	}
 
 	return ctrl.Result{Requeue: true}, nil
