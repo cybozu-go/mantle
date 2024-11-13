@@ -86,7 +86,11 @@ func (s *SecondaryServer) CreateOrUpdatePVC(
 
 		pvc.ObjectMeta.Annotations = pvcReceived.Annotations
 		pvc.ObjectMeta.Labels = pvcReceived.Labels
+
+		// We should NOT use pvcReceived.Spec.VolumeName. It's a PV name in the primary k8s server.
+		volumeName := pvc.Spec.VolumeName
 		pvc.Spec = pvcReceived.Spec
+		pvc.Spec.VolumeName = volumeName
 		return nil
 	}); err != nil {
 		return nil, fmt.Errorf("CreateOrUpdate failed: %w", err)
