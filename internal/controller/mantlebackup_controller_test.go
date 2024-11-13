@@ -1395,3 +1395,68 @@ var _ = Describe("export", func() {
 		}).Should(Succeed())
 	})
 })
+
+var _ = Describe("import", func() {
+	var mockCtrl *gomock.Controller
+	var mbr *MantleBackupReconciler
+	var nsController, ns string
+	var mockObjectStorage *objectstorage.MockBucket
+
+	BeforeEach(func() {
+		var t reporter
+		mockCtrl = gomock.NewController(t)
+		mockObjectStorage = objectstorage.NewMockBucket(mockCtrl)
+
+		nsController = resMgr.CreateNamespace()
+
+		mbr = NewMantleBackupReconciler(
+			k8sClient,
+			scheme.Scheme,
+			nsController,
+			RoleSecondary,
+			nil,
+			"dummy-image",
+			"dummy-env-secret",
+			&ObjectStorageSettings{},
+		)
+		mbr.objectStorageClient = mockObjectStorage
+		mbr.ceph = testutil.NewFakeRBD()
+
+		ns = resMgr.CreateNamespace()
+	})
+
+	AfterEach(func() {
+		if mockCtrl != nil {
+			mockCtrl.Finish()
+		}
+	})
+
+	DescribeTable("isExportDataAlreadyUploaded: inputs and outputs",
+		func(ctx SpecContext, gotExist, gotError, expectRequeue, expectError bool) {
+			mockObjectStorage.EXPECT().Exists(gomock.Any(), gomock.Eq("name-uid.bin")).DoAndReturn(
+				func(_ context.Context, _ string) (bool, error) {
+					if gotError {
+						return gotExist, errors.New("error")
+					}
+					return gotExist, nil
+				})
+			res, err := mbr.isExportDataAlreadyUploaded(ctx, &mantlev1.MantleBackup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "name",
+					Annotations: map[string]string{
+						annotRemoteUID: "uid",
+					},
+				},
+			})
+			if expectError {
+				Expect(err).To(HaveOccurred())
+			} else {
+				Expect(err).NotTo(HaveOccurred())
+			}
+			Expect(res.Requeue).To(Equal(expectRequeue))
+		},
+		Entry("exist", true, false, false, false),
+		Entry("not exist", false, false, true, false),
+		Entry("error", false, true, false, true),
+	)
+})
