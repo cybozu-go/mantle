@@ -61,6 +61,11 @@ test-multiple-k8s-clusters:
 	$(MAKE) install-rook-ceph-cluster1
 	$(MAKE) install-ceph-object-store
 	$(MAKE) install-mantle-cluster-wide
+	sed \
+		-e "s%{OBJECT_STORAGE_BUCKET_NAME}%$$(cat $(TMPDIR)/cm-export-data.json | jq -r .data.BUCKET_NAME)%" \
+		-e "s%{OBJECT_STORAGE_ENDPOINT}%http://$$(cat $(TMPDIR)/cm-export-data.json | jq -r .data.BUCKET_HOST)%" \
+		testdata/values-mantle-secondary-template.yaml \
+		> testdata/values-mantle-secondary.yaml
 	$(MAKE) install-mantle \
 		NAMESPACE=$(CEPH_CLUSTER1_NAMESPACE) \
 		HELM_RELEASE=mantle \
@@ -73,6 +78,8 @@ test-multiple-k8s-clusters:
 	$(MAKE) install-mantle-cluster-wide
 	sed \
 		-e "s%{ENDPOINT}%$$($(MINIKUBE) service list -p $(MINIKUBE_PROFILE_SECONDARY) -o json | jq -r '.[] | select(.Name == "mantle" and .Namespace == "rook-ceph") | .URLs | select(. | length > 0)[]' | head -1 | sed -r 's/^http:\/\///')%" \
+		-e "s%{OBJECT_STORAGE_BUCKET_NAME}%$$(cat $(TMPDIR)/cm-export-data.json | jq -r .data.BUCKET_NAME)%" \
+		-e "s%{OBJECT_STORAGE_ENDPOINT}%$$($(MINIKUBE) service list -p $(MINIKUBE_PROFILE_SECONDARY) -o json | jq -r '.[] | select(.Name == "rook-ceph-rgw-ceph-object-store-node-port" and .Namespace == "rook-ceph") | .URLs | select(. | length > 0)[]' | head -1)%" \
 		testdata/values-mantle-primary-template.yaml \
 		> testdata/values-mantle-primary.yaml
 	$(MAKE) install-mantle \

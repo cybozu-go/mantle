@@ -70,8 +70,20 @@ spec:
             {{- with .Values.controller.objectStorageBucketName }}
             - --object-storage-bucket-name={{ . }}
             {{- end }}
-            {{- with .Values.controller.objectStorageEndpoint}}
+            {{- with .Values.controller.objectStorageEndpoint }}
             - --object-storage-endpoint={{ . }}
+            {{- end }}
+            {{- with .Values.controller.envSecret }}
+            - --env-secret={{ . }}
+            {{- end }}
+            {{- with .Values.controller.caCertConfigMap }}
+            - --ca-cert-configmap={{ . }}
+            {{- end }}
+            {{- with .Values.controller.caCertKey }}
+            - --ca-cert-key={{ . }}
+            {{- end }}
+            {{- with .Values.controller.exportDataStorageClass }}
+            - --export-data-storage-class={{ . }}
             {{- end }}
           env:
             - name: POD_NAME
