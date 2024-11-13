@@ -1074,6 +1074,18 @@ func makeImportJobName(target *mantlev1.MantleBackup) string {
 	return fmt.Sprintf("mantle-import-%s", target.GetUID())
 }
 
+func makeDiscardJobName(target *mantlev1.MantleBackup) string {
+	return fmt.Sprintf("mantle-discard-%s", target.GetUID())
+}
+
+func makeDiscardPVCName(target *mantlev1.MantleBackup) string {
+	return fmt.Sprintf("mantle-discard-%s", target.GetUID())
+}
+
+func makeDiscardPVName(target *mantlev1.MantleBackup) string {
+	return fmt.Sprintf("mantle-discard-%s", target.GetUID())
+}
+
 func (r *MantleBackupReconciler) createOrUpdateExportJob(ctx context.Context, target *mantlev1.MantleBackup, sourceBackupNamePtr *string) error {
 	sourceBackupName := ""
 	if sourceBackupNamePtr != nil {
@@ -1837,8 +1849,71 @@ func (r *MantleBackupReconciler) primaryCleanup(
 }
 
 func (r *MantleBackupReconciler) secondaryCleanup(
-	_ context.Context,
-	_ *mantlev1.MantleBackup,
-) (ctrl.Result, error) { // nolint:unparam
+	ctx context.Context,
+	target *mantlev1.MantleBackup,
+) (ctrl.Result, error) {
+	diffFrom, ok := target.GetAnnotations()[annotDiffFrom]
+	if ok {
+		var source mantlev1.MantleBackup
+		if err := r.Client.Get(
+			ctx,
+			types.NamespacedName{Name: diffFrom, Namespace: target.GetNamespace()},
+			&source,
+		); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to get source MantleBackup: %w", err)
+		}
+		delete(source.GetAnnotations(), annotDiffTo)
+		if err := r.Client.Update(ctx, &source); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to update source MantleBackup: %w", err)
+		}
+	}
+
+	propagationPolicy := metav1.DeletePropagationBackground
+
+	var discardJob batchv1.Job
+	discardJob.SetName(makeDiscardJobName(target))
+	discardJob.SetNamespace(r.managedCephClusterID)
+	if err := r.Client.Delete(ctx, &discardJob, &client.DeleteOptions{
+		PropagationPolicy: &propagationPolicy,
+	}); err != nil && !aerrors.IsNotFound(err) {
+		return ctrl.Result{}, fmt.Errorf("failed to delete discard Job: %w", err)
+	}
+
+	var importJob batchv1.Job
+	importJob.SetName(makeImportJobName(target))
+	importJob.SetNamespace(r.managedCephClusterID)
+	if err := r.Client.Delete(ctx, &importJob, &client.DeleteOptions{
+		PropagationPolicy: &propagationPolicy,
+	}); err != nil && !aerrors.IsNotFound(err) {
+		return ctrl.Result{}, fmt.Errorf("failed to delete import Job: %w", err)
+	}
+
+	var discardPVC corev1.PersistentVolumeClaim
+	discardPVC.SetName(makeDiscardPVCName(target))
+	discardPVC.SetNamespace(r.managedCephClusterID)
+	if err := r.Client.Delete(ctx, &discardPVC); err != nil && !aerrors.IsNotFound(err) {
+		return ctrl.Result{}, fmt.Errorf("failed to delete discard PVC: %w", err)
+	}
+
+	var discardPV corev1.PersistentVolume
+	discardPV.SetName(makeDiscardPVName(target))
+	discardPV.SetNamespace(r.managedCephClusterID)
+	if err := r.Client.Delete(ctx, &discardPV); err != nil && !aerrors.IsNotFound(err) {
+		return ctrl.Result{}, fmt.Errorf("failed to delete discard PV: %w", err)
+	}
+
+	if err := r.objectStorageClient.Delete(
+		ctx,
+		makeObjectNameOfExportedData(target.GetName(), target.GetAnnotations()[annotRemoteUID]),
+	); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete exported data in the object storage: %w", err)
+	}
+
+	delete(target.GetAnnotations(), annotDiffFrom)
+	delete(target.GetAnnotations(), annotSyncMode)
+	if err := r.Client.Update(ctx, target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to update target MantleBackup: %w", err)
+	}
+
 	return ctrl.Result{}, nil
 }
