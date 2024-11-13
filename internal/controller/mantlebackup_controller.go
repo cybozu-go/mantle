@@ -1360,7 +1360,7 @@ func (r *MantleBackupReconciler) startImport(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
 	target *snapshotTarget,
-) (ctrl.Result, error) { //nolint:unparam
+) (ctrl.Result, error) {
 	if result, err := r.isExportDataAlreadyUploaded(ctx, backup); err != nil || !result.IsZero() {
 		return result, err
 	}
