@@ -401,11 +401,6 @@ func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, back
 		return ctrl.Result{}, err
 	}
 
-	// Skip replication if SyncedToRemote condition is true.
-	if meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionSyncedToRemote) {
-		return ctrl.Result{}, nil
-	}
-
 	return ctrl.Result{}, nil
 }
 
@@ -493,6 +488,11 @@ func (r *MantleBackupReconciler) replicate(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
 ) (ctrl.Result, error) {
+	// Skip replication if SyncedToRemote condition is true.
+	if meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionSyncedToRemote) {
+		return ctrl.Result{}, nil
+	}
+
 	result, err := r.replicateManifests(ctx, backup)
 	if err != nil || result != (ctrl.Result{}) {
 		return result, err
