@@ -24,6 +24,7 @@ LOOP_DEV := /dev/loop0
 LOOP_DEV2 := /dev/loop1
 MINIKUBE_PROFILE_PRIMARY=profile1
 MINIKUBE_PROFILE_SECONDARY=profile2
+TMPDIR := tmp
 
 export MINIKUBE_HOME
 
@@ -33,6 +34,7 @@ setup:
 	$(MAKE) $(KUBECTL)
 	$(MAKE) $(MINIKUBE)
 	$(MAKE) $(HELM)
+	mkdir -p $(TMPDIR)
 
 .PHONY: test
 test:
@@ -57,6 +59,7 @@ test-multiple-k8s-clusters:
 	$(MAKE) launch-minikube MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_SECONDARY)
 	$(MAKE) install-rook-ceph-operator
 	$(MAKE) install-rook-ceph-cluster1
+	$(MAKE) install-ceph-object-store
 	$(MAKE) install-mantle-cluster-wide
 	$(MAKE) install-mantle \
 		NAMESPACE=$(CEPH_CLUSTER1_NAMESPACE) \
@@ -66,9 +69,10 @@ test-multiple-k8s-clusters:
 	$(MAKE) launch-minikube MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_PRIMARY)
 	$(MAKE) install-rook-ceph-operator
 	$(MAKE) install-rook-ceph-cluster1
+	$(MAKE) install-ceph-object-store-secret
 	$(MAKE) install-mantle-cluster-wide
 	sed \
-		-e "s%{ENDPOINT}%$$($(MINIKUBE) service list -p $(MINIKUBE_PROFILE_SECONDARY) -o json | jq -r '.[].URLs | select(. | length > 0)[]' | head -1 | sed -r 's/^http:\/\///')%" \
+		-e "s%{ENDPOINT}%$$($(MINIKUBE) service list -p $(MINIKUBE_PROFILE_SECONDARY) -o json | jq -r '.[] | select(.Name == "mantle" and .Namespace == "rook-ceph") | .URLs | select(. | length > 0)[]' | head -1 | sed -r 's/^http:\/\///')%" \
 		testdata/values-mantle-primary-template.yaml \
 		> testdata/values-mantle-primary.yaml
 	$(MAKE) install-mantle \
@@ -176,6 +180,18 @@ install-rook-ceph-cluster2:
 		--set cephClusterSpec.dataDirHostPath=/var/lib/rook2 \
 		--wait rook-ceph-cluster2 rook-ceph-cluster
 	$(MAKE) wait-deploy-ready NS=$(CEPH_CLUSTER2_NAMESPACE) DEPLOY=rook-ceph-osd-0
+
+.PHONY: install-ceph-object-store
+install-ceph-object-store:
+	$(KUBECTL) apply -f testdata/objectstorage.yaml
+	until $(KUBECTL) get -n rook-ceph cm export-data &> /dev/null ; do sleep 3 ; done
+	$(KUBECTL) get -n rook-ceph configmap export-data -o json | jq -r '{ apiVersion: "v1", kind: "ConfigMap", metadata: { name: "export-data", namespace: "rook-ceph" }, data: .data }' > $(TMPDIR)/cm-export-data.json
+	until $(KUBECTL) get -n rook-ceph secret export-data &> /dev/null ; do sleep 3 ; done
+	$(KUBECTL) get -n rook-ceph secret export-data -o json | jq -r '{ apiVersion: "v1", kind: "Secret", metadata: { name: "export-data", namespace: "rook-ceph" }, type: "Opaque", data: .data }' > $(TMPDIR)/secret-export-data.json
+
+.PHONY: install-ceph-object-store-secret
+install-ceph-object-store-secret:
+	$(KUBECTL) apply -f $(TMPDIR)/secret-export-data.json
 
 .PHONY: image-build
 image-build:
