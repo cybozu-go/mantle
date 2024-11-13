@@ -934,16 +934,6 @@ func (r *MantleBackupReconciler) export(
 		return ctrl.Result{}, err
 	}
 
-	// Update the status of the MantleBackup.
-	// FIXME: this is inserted only for tests and must be removed after implementing the feature to access the object storage.
-	if err := r.updateStatusCondition(ctx, targetBackup, metav1.Condition{
-		Type:   mantlev1.BackupConditionSyncedToRemote,
-		Status: metav1.ConditionTrue,
-		Reason: mantlev1.BackupReasonNone,
-	}); err != nil {
-		return ctrl.Result{}, err
-	}
-
 	if result, err := r.checkIfExportJobIsCompleted(ctx, targetBackup); err != nil || !result.IsZero() {
 		return result, err
 	}
