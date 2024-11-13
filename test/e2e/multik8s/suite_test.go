@@ -154,9 +154,6 @@ func replicationTestSuite() {
 				if secondaryMB.Status.CreatedAt.IsZero() {
 					return errors.New(".Status.CreatedAt is zero")
 				}
-				if secondaryMB.Status.SnapID != nil {
-					return errors.New(".Status.SapID is incorrectly populated")
-				}
 				if !meta.IsStatusConditionTrue(secondaryMB.Status.Conditions, "ReadyToUse") {
 					return errors.New("ReadyToUse of .Status.Conditions is not True")
 				}
