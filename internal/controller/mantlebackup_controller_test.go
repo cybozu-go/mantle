@@ -10,6 +10,7 @@ import (
 	"time"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
+	"github.com/cybozu-go/mantle/internal/ceph"
 	"github.com/cybozu-go/mantle/internal/controller/internal/objectstorage"
 	"github.com/cybozu-go/mantle/internal/controller/internal/testutil"
 	"github.com/cybozu-go/mantle/pkg/controller/proto"
@@ -1433,4 +1434,65 @@ var _ = Describe("import", func() {
 		Entry("not exist", false, false, true, false),
 		Entry("error", false, true, false, true),
 	)
+
+	Context("reconcileImportJob", func() {
+		It("should work correctly", func(ctx SpecContext) {
+			backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
+			Expect(err).NotTo(HaveOccurred())
+
+			snapshotTarget := &snapshotTarget{
+				pvc: &corev1.PersistentVolumeClaim{},
+				pv: &corev1.PersistentVolume{
+					Spec: corev1.PersistentVolumeSpec{
+						PersistentVolumeSource: corev1.PersistentVolumeSource{
+							CSI: &corev1.CSIPersistentVolumeSource{
+								VolumeAttributes: map[string]string{
+									"pool": "",
+								},
+							},
+						},
+					},
+				},
+				imageName: "",
+				poolName:  "",
+			}
+
+			// The first call to reconcileImportJob should create an import Job
+			res, err := mbr.reconcileImportJob(ctx, backup, snapshotTarget)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.Requeue).To(BeTrue())
+
+			var importJob batchv1.Job
+			err = k8sClient.Get(ctx, types.NamespacedName{
+				Name:      makeImportJobName(backup),
+				Namespace: nsController,
+			}, &importJob)
+			Expect(err).NotTo(HaveOccurred())
+
+			// The successive calls should return ctrl.Result{Requeue: true} until the import Job is completed.
+			res, err = mbr.reconcileImportJob(ctx, backup, snapshotTarget)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.Requeue).To(BeTrue())
+
+			// Make the import Job completed.
+			err = resMgr.ChangeJobCondition(ctx, &importJob, batchv1.JobComplete, corev1.ConditionTrue)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Make dummy snapshot.
+			err = mbr.ceph.RBDSnapCreate("", "", backup.GetName())
+			Expect(err).NotTo(HaveOccurred())
+			dummySnapshot, err := ceph.FindRBDSnapshot(mbr.ceph, "", "", backup.GetName())
+			Expect(err).NotTo(HaveOccurred())
+
+			// The call should update the status of the MantleBackup resource.
+			res, err = mbr.reconcileImportJob(ctx, backup, snapshotTarget)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.IsZero()).To(BeTrue())
+
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse)).To(BeTrue())
+			Expect(*backup.Status.SnapID).To(Equal(dummySnapshot.Id))
+		})
+	})
 })
