@@ -1287,12 +1287,25 @@ func (r *MantleBackupReconciler) createOrUpdateExportDataUploadJob(ctx context.C
 						Name:  "OBJECT_STORAGE_ENDPOINT",
 						Value: r.objectStorageSettings.Endpoint,
 					},
-				},
-				EnvFrom: []corev1.EnvFromSource{
 					{
-						SecretRef: &corev1.SecretEnvSource{
-							LocalObjectReference: corev1.LocalObjectReference{
-								Name: r.envSecret,
+						Name: "AWS_ACCESS_KEY_ID",
+						ValueFrom: &corev1.EnvVarSource{
+							SecretKeyRef: &corev1.SecretKeySelector{
+								LocalObjectReference: corev1.LocalObjectReference{
+									Name: r.envSecret,
+								},
+								Key: "AWS_ACCESS_KEY_ID",
+							},
+						},
+					},
+					{
+						Name: "AWS_SECRET_ACCESS_KEY",
+						ValueFrom: &corev1.EnvVarSource{
+							SecretKeyRef: &corev1.SecretKeySelector{
+								LocalObjectReference: corev1.LocalObjectReference{
+									Name: r.envSecret,
+								},
+								Key: "AWS_SECRET_ACCESS_KEY",
 							},
 						},
 					},
