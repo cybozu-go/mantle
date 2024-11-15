@@ -1156,12 +1156,68 @@ var _ = Describe("SetSynchronizing", func() {
 	)
 })
 
+func createMantleBackupUsingDummyPVC(ctx context.Context, name, ns string) (*mantlev1.MantleBackup, error) {
+	pvc := corev1.PersistentVolumeClaim{
+		Spec: corev1.PersistentVolumeClaimSpec{
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceStorage: resource.MustParse("1Gi"),
+				},
+			},
+		},
+	}
+	dummyPVCManifest, err := json.Marshal(pvc)
+	if err != nil {
+		return nil, err
+	}
+
+	pv := corev1.PersistentVolume{
+		Spec: corev1.PersistentVolumeSpec{
+			PersistentVolumeSource: corev1.PersistentVolumeSource{
+				CSI: &corev1.CSIPersistentVolumeSource{
+					VolumeAttributes: map[string]string{
+						"pool":      "dummy",
+						"imageName": "dummy",
+					},
+				},
+			},
+		},
+	}
+	dummyPVManifest, err := json.Marshal(pv)
+	if err != nil {
+		return nil, err
+	}
+
+	target := &mantlev1.MantleBackup{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: ns,
+		},
+		Spec: mantlev1.MantleBackupSpec{
+			PVC:    "dummy",
+			Expire: "1d",
+		},
+	}
+	if err := k8sClient.Create(ctx, target); err != nil {
+		return nil, err
+	}
+
+	if err := updateStatus(ctx, k8sClient, target, func() error {
+		target.Status.PVManifest = string(dummyPVManifest)
+		target.Status.PVCManifest = string(dummyPVCManifest)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	return target, nil
+}
+
 var _ = Describe("export", func() {
 	var mockCtrl *gomock.Controller
 	var grpcClient *proto.MockMantleServiceClient
 	var mbr *MantleBackupReconciler
 	var nsController, ns string
-	var dummyPVCManifest, dummyPVManifest []byte
 
 	BeforeEach(func() {
 		var t reporter
@@ -1186,35 +1242,6 @@ var _ = Describe("export", func() {
 		)
 
 		ns = resMgr.CreateNamespace()
-
-		var err error
-
-		pvc := corev1.PersistentVolumeClaim{
-			Spec: corev1.PersistentVolumeClaimSpec{
-				Resources: corev1.VolumeResourceRequirements{
-					Requests: map[corev1.ResourceName]resource.Quantity{
-						corev1.ResourceStorage: resource.MustParse("1Gi"),
-					},
-				},
-			},
-		}
-		dummyPVCManifest, err = json.Marshal(pvc)
-		Expect(err).NotTo(HaveOccurred())
-
-		pv := corev1.PersistentVolume{
-			Spec: corev1.PersistentVolumeSpec{
-				PersistentVolumeSource: corev1.PersistentVolumeSource{
-					CSI: &corev1.CSIPersistentVolumeSource{
-						VolumeAttributes: map[string]string{
-							"pool":      "dummy",
-							"imageName": "dummy",
-						},
-					},
-				},
-			},
-		}
-		dummyPVManifest, err = json.Marshal(pv)
-		Expect(err).NotTo(HaveOccurred())
 	})
 
 	AfterEach(func() {
@@ -1224,26 +1251,8 @@ var _ = Describe("export", func() {
 	})
 
 	It("should set correct annotations after export() is called", func(ctx SpecContext) {
-		var err error
-
 		// test a full backup
-		target := &mantlev1.MantleBackup{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "target",
-				Namespace: ns,
-			},
-			Spec: mantlev1.MantleBackupSpec{
-				PVC:    "dummy",
-				Expire: "1d",
-			},
-		}
-		err = k8sClient.Create(ctx, target)
-		Expect(err).NotTo(HaveOccurred())
-		err = updateStatus(ctx, k8sClient, target, func() error {
-			target.Status.PVManifest = string(dummyPVManifest)
-			target.Status.PVCManifest = string(dummyPVCManifest)
-			return nil
-		})
+		target, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
 		Expect(err).NotTo(HaveOccurred())
 
 		grpcClient.EXPECT().SetSynchronizing(gomock.Any(), gomock.Any()).
@@ -1264,23 +1273,7 @@ var _ = Describe("export", func() {
 		Expect(ok).To(BeFalse())
 
 		// test an incremental backup
-		target2 := &mantlev1.MantleBackup{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "target2",
-				Namespace: ns,
-			},
-			Spec: mantlev1.MantleBackupSpec{
-				PVC:    "dummy",
-				Expire: "1d",
-			},
-		}
-		err = k8sClient.Create(ctx, target2)
-		Expect(err).NotTo(HaveOccurred())
-		err = updateStatus(context.Background(), k8sClient, target2, func() error {
-			target2.Status.PVManifest = string(dummyPVManifest)
-			target2.Status.PVCManifest = string(dummyPVCManifest)
-			return nil
-		})
+		target2, err := createMantleBackupUsingDummyPVC(ctx, "target2", ns)
 		Expect(err).NotTo(HaveOccurred())
 
 		grpcClient.EXPECT().SetSynchronizing(gomock.Any(), gomock.Any()).
@@ -1310,8 +1303,6 @@ var _ = Describe("export", func() {
 	})
 
 	It("should throttle export jobs correctly", func(ctx SpecContext) {
-		var err error
-
 		getNumOfExportJobs := func(ns string) (int, error) {
 			var jobs batchv1.JobList
 			err := k8sClient.List(ctx, &jobs, &client.ListOptions{
@@ -1325,24 +1316,7 @@ var _ = Describe("export", func() {
 		}
 
 		createAndExportMantleBackup := func(mbr *MantleBackupReconciler, name, ns string) {
-			target := &mantlev1.MantleBackup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      name,
-					Namespace: ns,
-				},
-				Spec: mantlev1.MantleBackupSpec{
-					PVC:    "dummy",
-					Expire: "1d",
-				},
-			}
-			err = k8sClient.Create(ctx, target)
-			Expect(err).NotTo(HaveOccurred())
-
-			err = updateStatus(ctx, k8sClient, target, func() error {
-				target.Status.PVManifest = string(dummyPVManifest)
-				target.Status.PVCManifest = string(dummyPVCManifest)
-				return nil
-			})
+			target, err := createMantleBackupUsingDummyPVC(ctx, name, ns)
 			Expect(err).NotTo(HaveOccurred())
 
 			grpcClient.EXPECT().SetSynchronizing(gomock.Any(), gomock.Any()).
