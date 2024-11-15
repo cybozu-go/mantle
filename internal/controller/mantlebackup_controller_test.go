@@ -1594,4 +1594,134 @@ var _ = Describe("import", func() {
 			Expect(meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionSyncedToRemote)).To(BeFalse())
 		})
 	})
+
+	Context("secondaryCleanup", func() {
+		It("should delete annotations, Jobs, PVs, PVCs, and exported data on the object storage", func(ctx SpecContext) {
+			// Create source MantleBackup
+			source, err := createMantleBackupUsingDummyPVC(ctx, "source", ns)
+			Expect(err).NotTo(HaveOccurred())
+			source.SetAnnotations(map[string]string{
+				annotDiffTo: "target",
+			})
+			err = k8sClient.Update(ctx, source)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Create target MantleBackup
+			backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
+			Expect(err).NotTo(HaveOccurred())
+			backup.SetAnnotations(map[string]string{
+				annotDiffFrom:  "source",
+				annotSyncMode:  syncModeIncremental,
+				annotRemoteUID: "uid",
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Create discard and import Jobs
+			for _, name := range []string{makeDiscardJobName(backup), makeImportJobName(backup)} {
+				var job batchv1.Job
+				job.SetName(name)
+				job.SetNamespace(nsController)
+				job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
+				job.Spec.Template.Spec.Containers = []corev1.Container{{Name: "dummy", Image: "dummy"}}
+				err = k8sClient.Create(ctx, &job)
+				Expect(err).NotTo(HaveOccurred())
+			}
+
+			// Create discard data PVC
+			var discardDataPVC corev1.PersistentVolumeClaim
+			discardDataPVC.SetName(makeDiscardPVCName(backup))
+			discardDataPVC.SetNamespace(nsController)
+			discardDataPVC.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
+			discardDataPVC.Spec.Resources.Requests = corev1.ResourceList(map[corev1.ResourceName]resource.Quantity{
+				"storage": resource.MustParse("1Gi"),
+			})
+			err = k8sClient.Create(ctx, &discardDataPVC)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Create discard data PV
+			var discardDataPV corev1.PersistentVolume
+			discardDataPV.SetName(makeDiscardPVName(backup))
+			discardDataPV.SetNamespace(nsController)
+			discardDataPV.Spec.HostPath = &corev1.HostPathVolumeSource{Path: "/dummy"}
+			discardDataPV.Spec.StorageClassName = "manual"
+			discardDataPV.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
+			discardDataPV.Spec.Capacity = corev1.ResourceList(map[corev1.ResourceName]resource.Quantity{
+				"storage": resource.MustParse("1Gi"),
+			})
+			err = k8sClient.Create(ctx, &discardDataPV)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Expect access to the mocked object storage
+			mockObjectStorage.EXPECT().Delete(gomock.Any(), gomock.Eq("target-uid.bin")).DoAndReturn(
+				func(_ context.Context, _ string) error {
+					return nil
+				},
+			)
+
+			// Perform secondaryCleanup
+			res, err := mbr.secondaryCleanup(ctx, backup)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.IsZero()).To(BeTrue())
+
+			// Check that sync-mode and diff-from annotations of the target MantleBackup are deleted
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup)
+			Expect(err).NotTo(HaveOccurred())
+			_, ok := backup.GetAnnotations()[annotDiffFrom]
+			Expect(ok).To(BeFalse())
+			_, ok = backup.GetAnnotations()[annotSyncMode]
+			Expect(ok).To(BeFalse())
+
+			// Check that diff-to annotation of the source MantleBackup are deleted
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: source.GetName(), Namespace: source.GetNamespace()}, source)
+			Expect(err).NotTo(HaveOccurred())
+			_, ok = source.GetAnnotations()[annotDiffTo]
+			Expect(ok).To(BeFalse())
+
+			// Check that the Jobs are deleted
+			for _, name := range []string{makeDiscardJobName(backup), makeImportJobName(backup)} {
+				var job batchv1.Job
+				err = k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: nsController}, &job)
+				Expect(err).To(HaveOccurred())
+				Expect(aerrors.IsNotFound(err)).To(BeTrue())
+			}
+
+			// Check that PVC has deletionTimestamp
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: makeDiscardPVCName(backup), Namespace: nsController}, &discardDataPVC)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(discardDataPVC.GetDeletionTimestamp().IsZero()).To(BeFalse())
+
+			// Check that PV has deletionTimestamp
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: makeDiscardPVName(backup), Namespace: nsController}, &discardDataPV)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(discardDataPV.GetDeletionTimestamp().IsZero()).To(BeFalse())
+		})
+
+		It("should work correctly if deletionTimestamp is set", func(ctx SpecContext) {
+			backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
+			Expect(err).NotTo(HaveOccurred())
+			backup.SetAnnotations(map[string]string{
+				annotRemoteUID: "uid",
+			})
+			err = k8sClient.Update(ctx, backup)
+			Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Delete(ctx, backup)
+			Expect(err).NotTo(HaveOccurred())
+
+			// fetch the latest resourceVersion
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Expect access to the object storage
+			mockObjectStorage.EXPECT().Delete(gomock.Any(), gomock.Eq("target-uid.bin")).DoAndReturn(
+				func(_ context.Context, _ string) error {
+					return nil
+				},
+			)
+
+			res, err := mbr.secondaryCleanup(ctx, backup)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.IsZero()).To(BeTrue())
+		})
+	})
 })
