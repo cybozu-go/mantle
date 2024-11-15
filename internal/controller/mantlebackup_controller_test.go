@@ -1199,6 +1199,7 @@ func createMantleBackupUsingDummyPVC(ctx context.Context, name, ns string) (*man
 			Expire: "1d",
 		},
 	}
+	controllerutil.AddFinalizer(target, MantleBackupFinalizerName)
 	if err := k8sClient.Create(ctx, target); err != nil {
 		return nil, err
 	}
@@ -1493,6 +1494,104 @@ var _ = Describe("import", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse)).To(BeTrue())
 			Expect(*backup.Status.SnapID).To(Equal(dummySnapshot.Id))
+		})
+	})
+
+	Context("primaryCleanup", func() {
+		It("should delete annotations, Jobs, and PVCs, and update SyncedToRemote", func(ctx SpecContext) {
+			// Create source MantleBackup
+			source, err := createMantleBackupUsingDummyPVC(ctx, "source", ns)
+			Expect(err).NotTo(HaveOccurred())
+			source.SetAnnotations(map[string]string{
+				annotDiffTo: "target",
+			})
+			err = k8sClient.Update(ctx, source)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Create target MantleBackup
+			backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
+			Expect(err).NotTo(HaveOccurred())
+			backup.SetAnnotations(map[string]string{
+				annotDiffFrom: "source",
+				annotSyncMode: syncModeIncremental,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Create export and upload Jobs
+			for _, name := range []string{makeExportJobName(backup), makeUploadJobName(backup)} {
+				var job batchv1.Job
+				job.SetName(name)
+				job.SetNamespace(nsController)
+				job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
+				job.Spec.Template.Spec.Containers = []corev1.Container{{Name: "dummy", Image: "dummy"}}
+				err = k8sClient.Create(ctx, &job)
+				Expect(err).NotTo(HaveOccurred())
+			}
+
+			// Create export data PVC
+			var exportDataPVC corev1.PersistentVolumeClaim
+			exportDataPVC.SetName(makeExportDataPVCName(backup))
+			exportDataPVC.SetNamespace(nsController)
+			exportDataPVC.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
+			exportDataPVC.Spec.Resources.Requests = corev1.ResourceList(map[corev1.ResourceName]resource.Quantity{
+				"storage": resource.MustParse("1Gi"),
+			})
+			err = k8sClient.Create(ctx, &exportDataPVC)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Perform primaryCleanup
+			res, err := mbr.primaryCleanup(ctx, backup)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.IsZero()).To(BeTrue())
+
+			// Check that sync-mode and diff-from annotations of the target MantleBackup are deleted
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup)
+			Expect(err).NotTo(HaveOccurred())
+			_, ok := backup.GetAnnotations()[annotDiffFrom]
+			Expect(ok).To(BeFalse())
+			_, ok = backup.GetAnnotations()[annotSyncMode]
+			Expect(ok).To(BeFalse())
+
+			// Check that diff-to annotation of the source MantleBackup are deleted
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: source.GetName(), Namespace: source.GetNamespace()}, source)
+			Expect(err).NotTo(HaveOccurred())
+			_, ok = source.GetAnnotations()[annotDiffTo]
+			Expect(ok).To(BeFalse())
+
+			// Check that SyncedToRemote is set True
+			Expect(meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionSyncedToRemote)).To(BeTrue())
+
+			// Check that the Jobs are deleted
+			for _, name := range []string{makeExportJobName(backup), makeUploadJobName(backup)} {
+				var job batchv1.Job
+				err = k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: nsController}, &job)
+				Expect(err).To(HaveOccurred())
+				Expect(aerrors.IsNotFound(err)).To(BeTrue())
+			}
+
+			// Check that PVC has deletionTimestamp
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: makeExportDataPVCName(backup), Namespace: nsController}, &exportDataPVC)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(exportDataPVC.GetDeletionTimestamp().IsZero()).To(BeFalse())
+		})
+
+		It("should work correctly if deletionTimestamp is set", func(ctx SpecContext) {
+			backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
+			Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Delete(ctx, backup)
+			Expect(err).NotTo(HaveOccurred())
+
+			// fetch the latest resourceVersion
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup)
+			Expect(err).NotTo(HaveOccurred())
+
+			res, err := mbr.primaryCleanup(ctx, backup)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.IsZero()).To(BeTrue())
+
+			// SyncedToRemote should NOT be true.
+			Expect(meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionSyncedToRemote)).To(BeFalse())
 		})
 	})
 })
