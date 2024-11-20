@@ -26,6 +26,8 @@ var (
 	testRBDPoolSCTemplate string
 	//go:embed testdata/mantlebackup-template.yaml
 	testMantleBackupTemplate string
+	//go:embed testdata/mantlerestore-template.yaml
+	testMantleRestoreTemplate string
 
 	kubectlPrefixPrimary   = os.Getenv("KUBECTL_PRIMARY")
 	kubectlPrefixSecondary = os.Getenv("KUBECTL_SECONDARY")
@@ -84,6 +86,15 @@ func applyMantleBackupTemplate(clusterNo int, namespace, pvcName, backupName str
 	return nil
 }
 
+func applyMantleRestoreTemplate(clusterNo int, namespace, restoreName, backupName string) error {
+	manifest := fmt.Sprintf(testMantleRestoreTemplate, restoreName, restoreName, namespace, backupName)
+	_, _, err := kubectl(clusterNo, []byte(manifest), "apply", "-f", "-")
+	if err != nil {
+		return fmt.Errorf("kubectl apply mantlerestore failed. err: %w", err)
+	}
+	return nil
+}
+
 func applyPVCTemplate(clusterNo int, namespace, name string) error {
 	manifest := fmt.Sprintf(testPVCTemplate, name)
 	_, _, err := kubectl(clusterNo, []byte(manifest), "apply", "-n", namespace, "-f", "-")
@@ -132,4 +143,8 @@ func getMB(clusterNo int, namespace, name string) (*mantlev1.MantleBackup, error
 
 func getPVC(clusterNo int, namespace, name string) (*corev1.PersistentVolumeClaim, error) {
 	return getObject[corev1.PersistentVolumeClaim](clusterNo, "pvc", namespace, name)
+}
+
+func getMR(clusterNo int, namespace, name string) (*mantlev1.MantleRestore, error) {
+	return getObject[mantlev1.MantleRestore](clusterNo, "mantlerestore", namespace, name)
 }
