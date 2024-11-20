@@ -384,7 +384,7 @@ var _ = Describe("MantleBackup controller", func() {
 				&proto.CreateOrUpdatePVCResponse{
 					Uid: "a7c9d5e2-4b8f-4e2a-9d3f-1b6a7c8e9f2b",
 				}, nil)
-			targetBackups := []*mantlev1.MantleBackup{}
+			secondaryBackups := []*mantlev1.MantleBackup{}
 			grpcClient.EXPECT().CreateOrUpdateMantleBackup(gomock.Any(), gomock.Any()).
 				MinTimes(1).
 				DoAndReturn(
@@ -393,12 +393,12 @@ var _ = Describe("MantleBackup controller", func() {
 						req *proto.CreateOrUpdateMantleBackupRequest,
 						opts ...grpc.CallOption,
 					) (*proto.CreateOrUpdateMantleBackupResponse, error) {
-						var targetBackup mantlev1.MantleBackup
-						err := json.Unmarshal(req.GetMantleBackup(), &targetBackup)
+						var secondaryBackup mantlev1.MantleBackup
+						err := json.Unmarshal(req.GetMantleBackup(), &secondaryBackup)
 						if err != nil {
 							panic(err)
 						}
-						targetBackups = append(targetBackups, &targetBackup)
+						secondaryBackups = append(secondaryBackups, &secondaryBackup)
 						return &proto.CreateOrUpdateMantleBackupResponse{}, nil
 					})
 			grpcClient.EXPECT().ListMantleBackup(gomock.Any(), gomock.Any()).
@@ -409,7 +409,7 @@ var _ = Describe("MantleBackup controller", func() {
 						req *proto.ListMantleBackupRequest,
 						opts ...grpc.CallOption,
 					) (*proto.ListMantleBackupResponse, error) {
-						data, err := json.Marshal(targetBackups)
+						data, err := json.Marshal(secondaryBackups)
 						if err != nil {
 							panic(err)
 						}
@@ -565,7 +565,7 @@ var _ = Describe("MantleBackup controller", func() {
 
 			// Make the all existing MantleBackups in the (mocked) secondary Mantle
 			// ReadyToUse=True.
-			for _, backup := range targetBackups {
+			for _, backup := range secondaryBackups {
 				meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
 					Type:   mantlev1.BackupConditionReadyToUse,
 					Status: metav1.ConditionTrue,
