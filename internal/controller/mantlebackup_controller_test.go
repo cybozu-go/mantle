@@ -470,14 +470,14 @@ var _ = Describe("MantleBackup controller", func() {
 				err = k8sClient.Get(
 					ctx,
 					types.NamespacedName{
-						Name:      fmt.Sprintf("mantle-export-%s", backup.GetUID()),
+						Name:      makeExportDataPVCName(backup),
 						Namespace: resMgr.ClusterID,
 					},
 					&pvcExport,
 				)
 				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(pvcExport.GetLabels()["app.kubernetes.io/name"]).To(Equal("mantle"))
-				g.Expect(pvcExport.GetLabels()["app.kubernetes.io/component"]).To(Equal("export-data"))
+				g.Expect(pvcExport.GetLabels()["app.kubernetes.io/name"]).To(Equal(labelAppNameValue))
+				g.Expect(pvcExport.GetLabels()["app.kubernetes.io/component"]).To(Equal(labelComponentExportData))
 				g.Expect(pvcExport.Spec.AccessModes[0]).To(Equal(corev1.ReadWriteOnce))
 				g.Expect(*pvcExport.Spec.StorageClassName).To(Equal(resMgr.StorageClassName))
 				g.Expect(pvcExport.Spec.Resources.Requests.Storage().String()).To(Equal("2Gi"))
@@ -486,14 +486,14 @@ var _ = Describe("MantleBackup controller", func() {
 				err = k8sClient.Get(
 					ctx,
 					types.NamespacedName{
-						Name:      fmt.Sprintf("mantle-export-%s", backup.GetUID()),
+						Name:      makeExportJobName(backup),
 						Namespace: resMgr.ClusterID,
 					},
 					&jobExport,
 				)
 				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(jobExport.GetLabels()["app.kubernetes.io/name"]).To(Equal("mantle"))
-				g.Expect(jobExport.GetLabels()["app.kubernetes.io/component"]).To(Equal("export-job"))
+				g.Expect(jobExport.GetLabels()["app.kubernetes.io/name"]).To(Equal(labelAppNameValue))
+				g.Expect(jobExport.GetLabels()["app.kubernetes.io/component"]).To(Equal(labelComponentExportJob))
 				g.Expect(*jobExport.Spec.BackoffLimit).To(Equal(int32(65535)))
 				g.Expect(*jobExport.Spec.Template.Spec.SecurityContext.FSGroup).To(Equal(int64(10000)))
 				g.Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsUser).To(Equal(int64(10000)))
