@@ -1553,7 +1553,7 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 		if !aerrors.IsNotFound(err) {
 			return ctrl.Result{}, err
 		}
-		if err := r.createImportJob(ctx, backup, snapshotTarget); err != nil {
+		if err := r.createOrImportJob(ctx, backup, snapshotTarget); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{Requeue: true}, nil
@@ -1588,7 +1588,7 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 	return ctrl.Result{}, nil
 }
 
-func (r *MantleBackupReconciler) createImportJob(
+func (r *MantleBackupReconciler) createOrImportJob(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
 	snapshotTarget *snapshotTarget,
