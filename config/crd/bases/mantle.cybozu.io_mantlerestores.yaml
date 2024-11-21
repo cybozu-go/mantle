@@ -11,6 +11,8 @@ spec:
     kind: MantleRestore
     listKind: MantleRestoreList
     plural: mantlerestores
+    shortNames:
+    - mr
     singular: mantlerestore
   scope: Namespaced
   versions:

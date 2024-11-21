@@ -41,6 +41,7 @@ const (
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=mr
 
 // MantleRestore is the Schema for the mantlerestores API
 type MantleRestore struct {
