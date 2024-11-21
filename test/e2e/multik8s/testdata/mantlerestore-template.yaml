@@ -1,0 +1,13 @@
+apiVersion: mantle.cybozu.io/v1
+kind: MantleRestore
+metadata:
+  labels:
+    app.kubernetes.io/name: mantlerestore
+    app.kubernetes.io/instance: %s
+    app.kubernetes.io/part-of: mantle
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: mantle
+  name: %s
+  namespace: %s
+spec:
+  backup: %s

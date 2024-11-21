@@ -55,6 +55,7 @@ func replicationTestSuite() {
 			namespace := util.GetUniqueName("ns-")
 			pvcName := util.GetUniqueName("pvc-")
 			backupName := util.GetUniqueName("mb-")
+			restoreName := util.GetUniqueName("mr-")
 
 			By("setting up the environment")
 			Eventually(func() error {
@@ -158,6 +159,23 @@ func replicationTestSuite() {
 					return errors.New("ReadyToUse of .Status.Conditions is not True")
 				}
 
+				return nil
+			}).Should(Succeed())
+
+			By("creating MantleRestore on the secondary k8s cluster by using the MantleBackup replicated above")
+			Eventually(func() error {
+				return applyMantleRestoreTemplate(secondaryK8sCluster, namespace, restoreName, backupName)
+			}).Should(Succeed())
+
+			By("checking MantleRestore can be ready to use")
+			Eventually(func() error {
+				mr, err := getMR(secondaryK8sCluster, namespace, restoreName)
+				if err != nil {
+					return err
+				}
+				if !meta.IsStatusConditionTrue(mr.Status.Conditions, "ReadyToUse") {
+					return errors.New("ReadyToUse of .Status.Conditions is not True")
+				}
 				return nil
 			}).Should(Succeed())
 		})

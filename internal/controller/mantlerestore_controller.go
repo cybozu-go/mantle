@@ -62,10 +62,6 @@ func NewMantleRestoreReconciler(
 func (r *MantleRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	if r.role == RoleSecondary {
-		return ctrl.Result{}, nil
-	}
-
 	var restore mantlev1.MantleRestore
 	err := r.client.Get(ctx, req.NamespacedName, &restore)
 	if errors.IsNotFound(err) {
