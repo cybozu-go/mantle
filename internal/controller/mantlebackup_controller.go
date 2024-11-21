@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	_ "embed"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/ceph"
+	"github.com/cybozu-go/mantle/internal/controller/internal/objectstorage"
 	"github.com/cybozu-go/mantle/pkg/controller/proto"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -41,6 +43,7 @@ const (
 	labelComponentExportData      = "export-data"
 	labelComponentExportJob       = "export-job"
 	labelComponentUploadJob       = "upload-job"
+	labelComponentImportJob       = "import-job"
 	annotRemoteUID                = "mantle.cybozu.io/remote-uid"
 	annotDiffFrom                 = "mantle.cybozu.io/diff-from"
 	annotDiffTo                   = "mantle.cybozu.io/diff-to"
@@ -56,6 +59,8 @@ var (
 	embedJobExportScript string
 	//go:embed script/job-upload.sh
 	embedJobUploadScript string
+	//go:embed script/job-import.sh
+	embedJobImportScript string
 )
 
 type ObjectStorageSettings struct {
@@ -77,6 +82,7 @@ type MantleBackupReconciler struct {
 	podImage              string
 	envSecret             string
 	objectStorageSettings *ObjectStorageSettings // This should be non-nil if and only if role equals 'primary' or 'secondary'.
+	objectStorageClient   objectstorage.Bucket
 }
 
 // NewMantleBackupReconciler returns NodeReconciler.
@@ -401,11 +407,6 @@ func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, back
 		return ctrl.Result{}, err
 	}
 
-	// Skip replication if SyncedToRemote condition is true.
-	if meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionSyncedToRemote) {
-		return ctrl.Result{}, nil
-	}
-
 	return ctrl.Result{}, nil
 }
 
@@ -493,6 +494,11 @@ func (r *MantleBackupReconciler) replicate(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
 ) (ctrl.Result, error) {
+	// Skip replication if SyncedToRemote condition is true.
+	if meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionSyncedToRemote) {
+		return ctrl.Result{}, nil
+	}
+
 	result, err := r.replicateManifests(ctx, backup)
 	if err != nil || result != (ctrl.Result{}) {
 		return result, err
@@ -547,7 +553,6 @@ func (r *MantleBackupReconciler) replicateManifests(
 		annotRemoteUID: string(pvc.GetUID()),
 	})
 	pvcSent.Spec = pvc.Spec
-	pvcSent.Spec.VolumeName = "" // The VolumeName should be blank.
 	pvcSentJson, err := json.Marshal(pvcSent)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -929,16 +934,6 @@ func (r *MantleBackupReconciler) export(
 		return ctrl.Result{}, err
 	}
 
-	// Update the status of the MantleBackup.
-	// FIXME: this is inserted only for tests and must be removed after implementing the feature to access the object storage.
-	if err := r.updateStatusCondition(ctx, targetBackup, metav1.Condition{
-		Type:   mantlev1.BackupConditionSyncedToRemote,
-		Status: metav1.ConditionTrue,
-		Reason: mantlev1.BackupReasonNone,
-	}); err != nil {
-		return ctrl.Result{}, err
-	}
-
 	if result, err := r.checkIfExportJobIsCompleted(ctx, targetBackup); err != nil || !result.IsZero() {
 		return result, err
 	}
@@ -1059,6 +1054,26 @@ func makeUploadJobName(target *mantlev1.MantleBackup) string {
 
 func makeExportDataPVCName(target *mantlev1.MantleBackup) string {
 	return fmt.Sprintf("mantle-export-%s", target.GetUID())
+}
+
+func makeObjectNameOfExportedData(name, uid string) string {
+	return fmt.Sprintf("%s-%s.bin", name, uid)
+}
+
+func makeImportJobName(target *mantlev1.MantleBackup) string {
+	return fmt.Sprintf("mantle-import-%s", target.GetUID())
+}
+
+func makeDiscardJobName(target *mantlev1.MantleBackup) string {
+	return fmt.Sprintf("mantle-discard-%s", target.GetUID())
+}
+
+func makeDiscardPVCName(target *mantlev1.MantleBackup) string {
+	return fmt.Sprintf("mantle-discard-%s", target.GetUID())
+}
+
+func makeDiscardPVName(target *mantlev1.MantleBackup) string {
+	return fmt.Sprintf("mantle-discard-%s", target.GetUID())
 }
 
 func (r *MantleBackupReconciler) createOrUpdateExportJob(ctx context.Context, target *mantlev1.MantleBackup, sourceBackupNamePtr *string) error {
@@ -1229,13 +1244,9 @@ func (r *MantleBackupReconciler) checkIfExportJobIsCompleted(
 		return ctrl.Result{}, err
 	}
 
-	// Check if the export Job is completed or not. Note that we can't use
-	// meta.IsConditionTrue here, because job.Status.Conditions has
-	// []JobCondition type.
-	for _, cond := range job.Status.Conditions {
-		if cond.Type == batchv1.JobComplete && cond.Status == corev1.ConditionTrue {
-			return ctrl.Result{}, nil
-		}
+	// Check if the export Job is completed or not
+	if IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete) {
+		return ctrl.Result{}, nil
 	}
 
 	return ctrl.Result{Requeue: true}, nil
@@ -1277,7 +1288,7 @@ func (r *MantleBackupReconciler) createOrUpdateExportDataUploadJob(ctx context.C
 				Env: []corev1.EnvVar{
 					{
 						Name:  "OBJ_NAME",
-						Value: fmt.Sprintf("%s-%s.bin", target.GetName(), target.GetUID()),
+						Value: makeObjectNameOfExportedData(target.GetName(), string(target.GetUID())),
 					},
 					{
 						Name:  "BUCKET_NAME",
@@ -1374,7 +1385,7 @@ func (r *MantleBackupReconciler) startImport(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
 	target *snapshotTarget,
-) (ctrl.Result, error) { //nolint:unparam
+) (ctrl.Result, error) {
 	if result, err := r.isExportDataAlreadyUploaded(ctx, backup); err != nil || !result.IsZero() {
 		return result, err
 	}
@@ -1399,11 +1410,83 @@ func (r *MantleBackupReconciler) startImport(
 	return ctrl.Result{}, nil
 }
 
+func (r *MantleBackupReconciler) prepareObjectStorageClient(ctx context.Context) error {
+	if r.objectStorageClient != nil {
+		return nil
+	}
+
+	var caPEMCerts []byte
+
+	if r.objectStorageSettings.CACertConfigMap != nil {
+		var cm corev1.ConfigMap
+		if err := r.Client.Get(
+			ctx, types.NamespacedName{
+				Name:      *r.objectStorageSettings.CACertConfigMap,
+				Namespace: r.managedCephClusterID,
+			},
+			&cm,
+		); err != nil {
+			return err
+		}
+
+		caPEMCertsString, ok := cm.Data[*r.objectStorageSettings.CACertKey]
+		if !ok {
+			return fmt.Errorf("ca-cert-key not found in ConfigMap: %s", *r.objectStorageSettings.CACertConfigMap)
+		}
+		caPEMCerts = []byte(caPEMCertsString)
+	}
+
+	var envSecret corev1.Secret
+	if err := r.Client.Get(
+		ctx,
+		types.NamespacedName{Name: r.envSecret, Namespace: r.managedCephClusterID},
+		&envSecret,
+	); err != nil {
+		return err
+	}
+	accessKeyID, ok := envSecret.Data["AWS_ACCESS_KEY_ID"]
+	if !ok {
+		return errors.New("failed to find AWS_ACCESS_KEY_ID in env-secret")
+	}
+	secretAccessKey, ok := envSecret.Data["AWS_SECRET_ACCESS_KEY"]
+	if !ok {
+		return errors.New("failed to find AWS_SECRET_ACCESS_KEY in env-secret")
+	}
+
+	var err error
+	r.objectStorageClient, err = objectstorage.NewS3Bucket(
+		ctx,
+		r.objectStorageSettings.BucketName,
+		r.objectStorageSettings.Endpoint,
+		string(accessKeyID),
+		string(secretAccessKey),
+		caPEMCerts,
+	)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (r *MantleBackupReconciler) isExportDataAlreadyUploaded(
-	_ context.Context,
-	_ *mantlev1.MantleBackup,
-) (ctrl.Result, error) { //nolint:unparam
-	return ctrl.Result{}, nil
+	ctx context.Context,
+	target *mantlev1.MantleBackup,
+) (ctrl.Result, error) {
+	if err := r.prepareObjectStorageClient(ctx); err != nil {
+		return ctrl.Result{}, err
+	}
+	uploaded, err := r.objectStorageClient.Exists(
+		ctx,
+		makeObjectNameOfExportedData(target.GetName(), target.GetAnnotations()[annotRemoteUID]),
+	)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if uploaded {
+		return ctrl.Result{}, nil
+	}
+	return ctrl.Result{Requeue: true}, nil
 }
 
 func isPVSmallerThanPVC(
@@ -1456,14 +1539,48 @@ func (r *MantleBackupReconciler) reconcileDiscardJob(
 func (r *MantleBackupReconciler) reconcileImportJob(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
-	_ *snapshotTarget,
-) (ctrl.Result, error) { //nolint:unparam
-	// FIXME: implement here later
+	snapshotTarget *snapshotTarget,
+) (ctrl.Result, error) {
+	var job batchv1.Job
+	if err := r.Client.Get(
+		ctx,
+		types.NamespacedName{
+			Name:      makeImportJobName(backup),
+			Namespace: r.managedCephClusterID,
+		},
+		&job,
+	); err != nil {
+		if !aerrors.IsNotFound(err) {
+			return ctrl.Result{}, err
+		}
+		if err := r.createImportJob(ctx, backup, snapshotTarget); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{Requeue: true}, nil
+	}
 
-	if err := r.updateStatusCondition(ctx, backup, metav1.Condition{
-		Type:   mantlev1.BackupConditionReadyToUse,
-		Status: metav1.ConditionTrue,
-		Reason: mantlev1.BackupReasonNone,
+	if !IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete) {
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	snapshot, err := ceph.FindRBDSnapshot(
+		r.ceph,
+		snapshotTarget.poolName,
+		snapshotTarget.imageName,
+		backup.GetName(),
+	)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if err := updateStatus(ctx, r.Client, backup, func() error {
+		backup.Status.SnapID = &snapshot.Id
+		meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
+			Type:   mantlev1.BackupConditionReadyToUse,
+			Status: metav1.ConditionTrue,
+			Reason: mantlev1.BackupReasonNone,
+		})
+		return nil
 	}); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -1471,29 +1588,335 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 	return ctrl.Result{}, nil
 }
 
-func (r *MantleBackupReconciler) primaryCleanup(
+func (r *MantleBackupReconciler) createImportJob(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
-) (ctrl.Result, error) { // nolint:unparam
-	if !backup.DeletionTimestamp.IsZero() {
+	snapshotTarget *snapshotTarget,
+) error {
+	var job batchv1.Job
+
+	job.SetName(makeImportJobName(backup))
+	job.SetNamespace(r.managedCephClusterID)
+
+	_, err := ctrl.CreateOrUpdate(ctx, r.Client, &job, func() error {
+		labels := job.GetLabels()
+		if labels == nil {
+			labels = map[string]string{}
+		}
+		labels["app.kubernetes.io/name"] = labelAppNameValue
+		labels["app.kubernetes.io/component"] = labelComponentImportJob
+		job.SetLabels(labels)
+
+		var backoffLimit int32 = 65535
+		job.Spec.BackoffLimit = &backoffLimit
+
+		var runAsGroup int64 = 10000
+		runAsNonRoot := true
+		var runAsUser int64 = 10000
+		job.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
+			RunAsGroup:   &runAsGroup,
+			RunAsNonRoot: &runAsNonRoot,
+			RunAsUser:    &runAsUser,
+		}
+
+		job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
+
+		sourceBackupName := backup.GetAnnotations()[annotDiffFrom]
+
+		container := corev1.Container{
+			Name:    "import",
+			Command: []string{"/bin/bash", "-c", embedJobImportScript},
+			Env: []corev1.EnvVar{
+				{
+					Name: "ROOK_CEPH_USERNAME",
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							Key: "ceph-username",
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: "rook-ceph-mon",
+							},
+						},
+					},
+				},
+				{
+					Name:  "POOL_NAME",
+					Value: snapshotTarget.pv.Spec.CSI.VolumeAttributes["pool"],
+				},
+				{
+					Name:  "DST_IMAGE_NAME",
+					Value: snapshotTarget.imageName,
+				},
+				{
+					Name:  "FROM_SNAP_NAME",
+					Value: sourceBackupName,
+				},
+				{
+					Name:  "OBJ_NAME",
+					Value: makeObjectNameOfExportedData(backup.GetName(), backup.GetAnnotations()[annotRemoteUID]),
+				},
+				{
+					Name:  "BUCKET_NAME",
+					Value: r.objectStorageSettings.BucketName,
+				},
+				{
+					Name:  "OBJECT_STORAGE_ENDPOINT",
+					Value: r.objectStorageSettings.Endpoint,
+				},
+				{
+					Name: "AWS_ACCESS_KEY_ID",
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: r.envSecret,
+							},
+							Key: "AWS_ACCESS_KEY_ID",
+						},
+					},
+				},
+				{
+					Name: "AWS_SECRET_ACCESS_KEY",
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: r.envSecret,
+							},
+							Key: "AWS_SECRET_ACCESS_KEY",
+						},
+					},
+				},
+			},
+			Image:           r.podImage,
+			ImagePullPolicy: corev1.PullIfNotPresent,
+			TTY:             true,
+			VolumeMounts: []corev1.VolumeMount{
+				{
+					MountPath: "/etc/ceph",
+					Name:      "ceph-config",
+				},
+				{
+					MountPath: "/etc/rook",
+					Name:      "mon-endpoint-volume",
+				},
+				{
+					MountPath: "/var/lib/rook-ceph-mon",
+					Name:      "ceph-admin-secret",
+					ReadOnly:  true,
+				},
+			},
+		}
+
+		if r.objectStorageSettings.CACertConfigMap != nil {
+			container.Env = append(
+				container.Env,
+				corev1.EnvVar{
+					Name:  "CERT_FILE",
+					Value: filepath.Join("/mantle_ca_cert", *r.objectStorageSettings.CACertKey),
+				},
+			)
+			container.VolumeMounts = append(
+				container.VolumeMounts,
+				corev1.VolumeMount{
+					MountPath: "/mantle_ca_cert",
+					Name:      "ca-cert",
+				},
+			)
+		}
+
+		job.Spec.Template.Spec.Containers = []corev1.Container{container}
+
+		fals := false
+		job.Spec.Template.Spec.Volumes = []corev1.Volume{
+			{
+				Name: "ceph-admin-secret",
+				VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{
+						SecretName: "rook-ceph-mon",
+						Optional:   &fals,
+						Items: []corev1.KeyToPath{{
+							Key:  "ceph-secret",
+							Path: "secret.keyring",
+						}},
+					},
+				},
+			},
+			{
+				Name: "mon-endpoint-volume",
+				VolumeSource: corev1.VolumeSource{
+					ConfigMap: &corev1.ConfigMapVolumeSource{
+						Items: []corev1.KeyToPath{
+							{
+								Key:  "data",
+								Path: "mon-endpoints",
+							},
+						},
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: "rook-ceph-mon-endpoints",
+						},
+					},
+				},
+			},
+			{
+				Name: "ceph-config",
+				VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{},
+				},
+			},
+		}
+
+		if r.objectStorageSettings.CACertConfigMap != nil {
+			job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, corev1.Volume{
+				Name: "ca-cert",
+				VolumeSource: corev1.VolumeSource{
+					ConfigMap: &corev1.ConfigMapVolumeSource{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: *r.objectStorageSettings.CACertConfigMap,
+						},
+					},
+				},
+			})
+		}
+
+		return nil
+	})
+
+	return err
+}
+
+func (r *MantleBackupReconciler) primaryCleanup(
+	ctx context.Context,
+	target *mantlev1.MantleBackup,
+) (ctrl.Result, error) {
+	diffFrom, ok := target.GetAnnotations()[annotDiffFrom]
+	if ok {
+		var source mantlev1.MantleBackup
+		if err := r.Client.Get(
+			ctx,
+			types.NamespacedName{Name: diffFrom, Namespace: target.GetNamespace()},
+			&source,
+		); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to get source MantleBackup: %w", err)
+		}
+		delete(source.GetAnnotations(), annotDiffTo)
+		if err := r.Client.Update(ctx, &source); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to update source MantleBackup: %w", err)
+		}
+	}
+
+	propagationPolicy := metav1.DeletePropagationBackground
+
+	var exportJob batchv1.Job
+	exportJob.SetName(makeExportJobName(target))
+	exportJob.SetNamespace(r.managedCephClusterID)
+	if err := r.Client.Delete(ctx, &exportJob, &client.DeleteOptions{
+		PropagationPolicy: &propagationPolicy,
+	}); err != nil && !aerrors.IsNotFound(err) {
+		return ctrl.Result{}, fmt.Errorf("failed to delete export Job: %w", err)
+	}
+
+	var uploadJob batchv1.Job
+	uploadJob.SetName(makeUploadJobName(target))
+	uploadJob.SetNamespace(r.managedCephClusterID)
+	if err := r.Client.Delete(ctx, &uploadJob, &client.DeleteOptions{
+		PropagationPolicy: &propagationPolicy,
+	}); err != nil && !aerrors.IsNotFound(err) {
+		return ctrl.Result{}, fmt.Errorf("failed to delete upload Job: %w", err)
+	}
+
+	var exportDataPVC corev1.PersistentVolumeClaim
+	exportDataPVC.SetName(makeExportDataPVCName(target))
+	exportDataPVC.SetNamespace(r.managedCephClusterID)
+	if err := r.Client.Delete(ctx, &exportDataPVC); err != nil && !aerrors.IsNotFound(err) {
+		return ctrl.Result{}, fmt.Errorf("failed to delete export data PVC: %w", err)
+	}
+
+	delete(target.GetAnnotations(), annotDiffFrom)
+	delete(target.GetAnnotations(), annotSyncMode)
+	if err := r.Client.Update(ctx, target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete annotations of diff-from and sync-mode: %w", err)
+	}
+
+	if !target.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, nil
 	}
 
 	// Update the status of the MantleBackup.
-	if err := r.updateStatusCondition(ctx, backup, metav1.Condition{
+	if err := r.updateStatusCondition(ctx, target, metav1.Condition{
 		Type:   mantlev1.BackupConditionSyncedToRemote,
 		Status: metav1.ConditionTrue,
 		Reason: mantlev1.BackupReasonNone,
 	}); err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("failed to update SyncedToRemote to True: %w", err)
 	}
 
 	return ctrl.Result{}, nil
 }
 
 func (r *MantleBackupReconciler) secondaryCleanup(
-	_ context.Context,
-	_ *mantlev1.MantleBackup,
-) (ctrl.Result, error) { // nolint:unparam
+	ctx context.Context,
+	target *mantlev1.MantleBackup,
+) (ctrl.Result, error) {
+	diffFrom, ok := target.GetAnnotations()[annotDiffFrom]
+	if ok {
+		var source mantlev1.MantleBackup
+		if err := r.Client.Get(
+			ctx,
+			types.NamespacedName{Name: diffFrom, Namespace: target.GetNamespace()},
+			&source,
+		); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to get source MantleBackup: %w", err)
+		}
+		delete(source.GetAnnotations(), annotDiffTo)
+		if err := r.Client.Update(ctx, &source); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to update source MantleBackup: %w", err)
+		}
+	}
+
+	propagationPolicy := metav1.DeletePropagationBackground
+
+	var discardJob batchv1.Job
+	discardJob.SetName(makeDiscardJobName(target))
+	discardJob.SetNamespace(r.managedCephClusterID)
+	if err := r.Client.Delete(ctx, &discardJob, &client.DeleteOptions{
+		PropagationPolicy: &propagationPolicy,
+	}); err != nil && !aerrors.IsNotFound(err) {
+		return ctrl.Result{}, fmt.Errorf("failed to delete discard Job: %w", err)
+	}
+
+	var importJob batchv1.Job
+	importJob.SetName(makeImportJobName(target))
+	importJob.SetNamespace(r.managedCephClusterID)
+	if err := r.Client.Delete(ctx, &importJob, &client.DeleteOptions{
+		PropagationPolicy: &propagationPolicy,
+	}); err != nil && !aerrors.IsNotFound(err) {
+		return ctrl.Result{}, fmt.Errorf("failed to delete import Job: %w", err)
+	}
+
+	var discardPVC corev1.PersistentVolumeClaim
+	discardPVC.SetName(makeDiscardPVCName(target))
+	discardPVC.SetNamespace(r.managedCephClusterID)
+	if err := r.Client.Delete(ctx, &discardPVC); err != nil && !aerrors.IsNotFound(err) {
+		return ctrl.Result{}, fmt.Errorf("failed to delete discard PVC: %w", err)
+	}
+
+	var discardPV corev1.PersistentVolume
+	discardPV.SetName(makeDiscardPVName(target))
+	discardPV.SetNamespace(r.managedCephClusterID)
+	if err := r.Client.Delete(ctx, &discardPV); err != nil && !aerrors.IsNotFound(err) {
+		return ctrl.Result{}, fmt.Errorf("failed to delete discard PV: %w", err)
+	}
+
+	if err := r.objectStorageClient.Delete(
+		ctx,
+		makeObjectNameOfExportedData(target.GetName(), target.GetAnnotations()[annotRemoteUID]),
+	); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete exported data in the object storage: %w", err)
+	}
+
+	delete(target.GetAnnotations(), annotDiffFrom)
+	delete(target.GetAnnotations(), annotSyncMode)
+	if err := r.Client.Update(ctx, target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to update target MantleBackup: %w", err)
+	}
+
 	return ctrl.Result{}, nil
 }

@@ -1,5 +1,5 @@
 # Build the manager binary
-FROM golang:1.22 as builder
+FROM golang:1.22 AS builder
 
 WORKDIR /workspace
 # Copy the Go Modules manifests
@@ -24,9 +24,17 @@ COPY pkg/ pkg/
 # TODO: RUN CGO_ENABLED=0 go build -a -o manager cmd/main.go
 RUN CGO_ENABLED=0 go build -o manager main.go
 
+# Build s5cmd
+FROM golang:1.22 AS s5cmd-builder
+WORKDIR /workspace
+## https://github.com/peak/s5cmd/releases
+## use v2.2.2
+RUN go install github.com/peak/s5cmd/v2@48f7e59e2d02954e218d2ddb947566d57e495fd8
+
 FROM quay.io/cybozu/ceph:18.2.1.1
 WORKDIR /
 COPY --from=builder /workspace/manager .
+COPY --from=s5cmd-builder /go/bin/s5cmd /usr/bin/s5cmd
 USER 65532:65532
 
 ENTRYPOINT ["/manager"]

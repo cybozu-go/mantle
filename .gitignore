@@ -27,4 +27,5 @@ Dockerfile.cross
 
 test/e2e/testdata/persistentvolumes.yaml
 test/e2e/testdata/values-mantle-primary.yaml
+test/e2e/testdata/values-mantle-secondary.yaml
 include/

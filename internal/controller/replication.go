@@ -86,7 +86,11 @@ func (s *SecondaryServer) CreateOrUpdatePVC(
 
 		pvc.ObjectMeta.Annotations = pvcReceived.Annotations
 		pvc.ObjectMeta.Labels = pvcReceived.Labels
+
+		// We should NOT use pvcReceived.Spec.VolumeName. It's a PV name in the primary k8s server.
+		volumeName := pvc.Spec.VolumeName
 		pvc.Spec = pvcReceived.Spec
+		pvc.Spec.VolumeName = volumeName
 		return nil
 	}); err != nil {
 		return nil, fmt.Errorf("CreateOrUpdate failed: %w", err)
@@ -181,10 +185,10 @@ func (s *SecondaryServer) CreateOrUpdateMantleBackup(
 
 	// Update the status here because ctrl.CreateOrUpdate doesn't change the status.
 	if err := updateStatus(ctx, s.client, &backup, func() error {
-		backup.Status = backupReceived.Status
+		backup.Status.CreatedAt = backupReceived.Status.CreatedAt
 		return nil
 	}); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("updateStatus failed: %w", err)
 	}
 
 	return &proto.CreateOrUpdateMantleBackupResponse{}, nil

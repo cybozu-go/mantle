@@ -3,8 +3,9 @@ controller:
   mantleServiceEndpoint: ":58080"
   ports:
     - containerPort: 58080
-  objectStorageBucketName: dummy
-  objectStorageEndpoint: dummy
+  objectStorageBucketName: {OBJECT_STORAGE_BUCKET_NAME}
+  objectStorageEndpoint: {OBJECT_STORAGE_ENDPOINT}
+  envSecret: export-data
 
 secondaryService:
   type: NodePort

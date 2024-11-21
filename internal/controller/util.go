@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -49,4 +50,16 @@ func updateStatus(ctx context.Context, client client.Client, obj client.Object, 
 		return err
 	}
 	return nil
+}
+
+// IsJobConditionTrue returns true when the conditionType is present and set to
+// `metav1.ConditionTrue`.  Otherwise, it returns false.  Note that we can't use
+// meta.IsStatusConditionTrue because it doesn't accept []JobCondition.
+func IsJobConditionTrue(conditions []batchv1.JobCondition, conditionType batchv1.JobConditionType) bool {
+	for _, cond := range conditions {
+		if cond.Type == conditionType && cond.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
 }

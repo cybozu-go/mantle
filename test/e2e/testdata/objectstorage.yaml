@@ -1,0 +1,58 @@
+---
+apiVersion: ceph.rook.io/v1
+kind: CephObjectStore
+metadata:
+  name: ceph-object-store
+  namespace: rook-ceph
+spec:
+  dataPool:
+    failureDomain: host
+    replicated:
+      size: 1
+  gateway:
+    instances: 1
+    port: 80
+  metadataPool:
+    failureDomain: host
+    replicated:
+      size: 1
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ceph-bucket
+parameters:
+  objectStoreName: ceph-object-store
+  objectStoreNamespace: rook-ceph
+provisioner: rook-ceph.ceph.rook.io/bucket
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+---
+apiVersion: objectbucket.io/v1alpha1
+kind: ObjectBucketClaim
+metadata:
+  name: export-data
+  namespace: rook-ceph
+spec:
+  generateBucketName: export-data
+  storageClassName: ceph-bucket
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rook-ceph-rgw-ceph-object-store-node-port
+  namespace: rook-ceph
+spec:
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 8080
+    nodePort: 30080
+  selector:
+    app: rook-ceph-rgw
+    ceph_daemon_id: ceph-object-store
+    rgw: ceph-object-store
+    rook_cluster: rook-ceph
+    rook_object_store: ceph-object-store
+  type: NodePort
