@@ -44,6 +44,7 @@ const (
 	labelComponentExportJob       = "export-job"
 	labelComponentUploadJob       = "upload-job"
 	labelComponentImportJob       = "import-job"
+	labelComponentDiscardJob      = "discard-job"
 	labelComponentDiscardVolume   = "discard-volume"
 	annotRemoteUID                = "mantle.cybozu.io/remote-uid"
 	annotDiffFrom                 = "mantle.cybozu.io/diff-from"
@@ -1540,6 +1541,10 @@ func (r *MantleBackupReconciler) reconcileDiscardJob(
 		return ctrl.Result{}, err
 	}
 
+	if err := r.createOrUpdateDiscardJob(ctx, backup); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	return ctrl.Result{}, nil
 }
 
@@ -1614,6 +1619,71 @@ func (r *MantleBackupReconciler) createOrUpdateDiscardPVC(
 
 		volumeMode := corev1.PersistentVolumeBlock
 		pvc.Spec.VolumeMode = &volumeMode
+
+		return nil
+	})
+	return err
+}
+
+func (r *MantleBackupReconciler) createOrUpdateDiscardJob(
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
+) error {
+	var job batchv1.Job
+	job.SetName(makeDiscardJobName(backup))
+	job.SetNamespace(r.managedCephClusterID)
+	_, err := ctrl.CreateOrUpdate(ctx, r.Client, &job, func() error {
+		labels := job.GetLabels()
+		if labels == nil {
+			labels = map[string]string{}
+		}
+		labels["app.kubernetes.io/name"] = labelAppNameValue
+		labels["app.kubernetes.io/component"] = labelComponentDiscardJob
+		job.SetLabels(labels)
+
+		var backoffLimit int32 = 65535
+		job.Spec.BackoffLimit = &backoffLimit
+
+		job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
+
+		tru := true
+		var zero int64 = 0
+		job.Spec.Template.Spec.Containers = []corev1.Container{
+			{
+				Name:  "discard",
+				Image: r.podImage,
+				Command: []string{
+					"/bin/bash",
+					"-c",
+					`
+set -e
+blkdiscard /dev/discard-rbd
+`,
+				},
+				SecurityContext: &corev1.SecurityContext{
+					Privileged: &tru,
+					RunAsGroup: &zero,
+					RunAsUser:  &zero,
+				},
+				VolumeDevices: []corev1.VolumeDevice{
+					{
+						Name:       "discard-rbd",
+						DevicePath: "/dev/discard-rbd",
+					},
+				},
+			},
+		}
+
+		job.Spec.Template.Spec.Volumes = []corev1.Volume{
+			{
+				Name: "discard-rbd",
+				VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: makeDiscardPVCName(backup),
+					},
+				},
+			},
+		}
 
 		return nil
 	})
