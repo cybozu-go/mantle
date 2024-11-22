@@ -1545,7 +1545,14 @@ func (r *MantleBackupReconciler) reconcileDiscardJob(
 		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{}, nil
+	completed, err := r.hasDiscardJobCompleted(ctx, backup)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if completed {
+		return ctrl.Result{}, nil
+	}
+	return ctrl.Result{Requeue: true}, nil
 }
 
 func (r *MantleBackupReconciler) createOrUpdateDiscardPV(
@@ -1688,6 +1695,25 @@ blkdiscard /dev/discard-rbd
 		return nil
 	})
 	return err
+}
+
+func (r *MantleBackupReconciler) hasDiscardJobCompleted(ctx context.Context, backup *mantlev1.MantleBackup) (bool, error) {
+	var job batchv1.Job
+	if err := r.Client.Get(
+		ctx,
+		types.NamespacedName{Name: makeDiscardJobName(backup), Namespace: r.managedCephClusterID},
+		&job,
+	); err != nil {
+		if aerrors.IsNotFound(err) {
+			return false, nil // The cache must be stale. Let's just requeue.
+		}
+		return false, err
+	}
+
+	if IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete) {
+		return true, nil
+	}
+	return false, nil
 }
 
 func (r *MantleBackupReconciler) reconcileImportJob(
