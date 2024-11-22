@@ -1715,4 +1715,171 @@ var _ = Describe("import", func() {
 			Expect(res.IsZero()).To(BeTrue())
 		})
 	})
+
+	Context("reconcileDiscardJob", func() {
+		It("should NOT create anything in an incremental backup", func(ctx SpecContext) {
+			backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
+			Expect(err).NotTo(HaveOccurred())
+			backup.SetAnnotations(map[string]string{
+				annotDiffFrom:  "source",
+				annotSyncMode:  syncModeIncremental,
+				annotRemoteUID: "uid",
+			})
+			err = k8sClient.Update(ctx, backup)
+			Expect(err).NotTo(HaveOccurred())
+
+			result, err := mbr.reconcileDiscardJob(ctx, backup, &snapshotTarget{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeFalse())
+
+			var pv corev1.PersistentVolume
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: makeDiscardPVName(backup), Namespace: nsController}, &pv)
+			Expect(err).To(HaveOccurred())
+			Expect(aerrors.IsNotFound(err)).To(BeTrue())
+
+			var pvc corev1.PersistentVolume
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: makeDiscardPVCName(backup), Namespace: nsController}, &pvc)
+			Expect(err).To(HaveOccurred())
+			Expect(aerrors.IsNotFound(err)).To(BeTrue())
+
+			var job batchv1.Job
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: makeDiscardJobName(backup), Namespace: nsController}, &job)
+			Expect(err).To(HaveOccurred())
+			Expect(aerrors.IsNotFound(err)).To(BeTrue())
+		})
+
+		It("should create a PV, PVC, and Job, requeue, and complete in a full backup", func(ctx SpecContext) {
+			backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
+			Expect(err).NotTo(HaveOccurred())
+			backup.SetAnnotations(map[string]string{
+				annotSyncMode: syncModeFull,
+			})
+			err = k8sClient.Update(ctx, backup)
+			Expect(err).NotTo(HaveOccurred())
+
+			pvCapacity := corev1.ResourceList{
+				corev1.ResourceStorage: resource.MustParse("1Gi"),
+			}
+			pvDriver := "test-pv-driver"
+			pvControllerExpandSecretRef := corev1.SecretReference{
+				Name:      "test-pv-cesr-name",
+				Namespace: "test-pv-cesr-ns",
+			}
+			pvNodeStageSecretRef := corev1.SecretReference{
+				Name:      "test-pv-nssr-name",
+				Namespace: "test-pv-nssr-ns",
+			}
+			pvClusterID := "test-pv-cluster-id"
+			pvImageFeatures := "test-pv-image-features"
+			pvImageFormat := "test-pv-image-format"
+			pvPool := "test-pv-pool"
+			pvImageName := "test-pv-image-name"
+			pvcResources := corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: resource.MustParse("1Gi"),
+				},
+			}
+			snapshotTarget := &snapshotTarget{
+				pvc: &corev1.PersistentVolumeClaim{
+					Spec: corev1.PersistentVolumeClaimSpec{
+						Resources: pvcResources,
+					},
+				},
+				pv: &corev1.PersistentVolume{
+					Spec: corev1.PersistentVolumeSpec{
+						Capacity: pvCapacity,
+						PersistentVolumeSource: corev1.PersistentVolumeSource{
+							CSI: &corev1.CSIPersistentVolumeSource{
+								Driver:                    pvDriver,
+								ControllerExpandSecretRef: &pvControllerExpandSecretRef,
+								NodeStageSecretRef:        &pvNodeStageSecretRef,
+								VolumeAttributes: map[string]string{
+									"clusterID":     pvClusterID,
+									"imageFeatures": pvImageFeatures,
+									"imageFormat":   pvImageFormat,
+									"pool":          pvPool,
+									"imageName":     pvImageName,
+								},
+							},
+						},
+					},
+				},
+				imageName: pvImageName,
+				poolName:  "poolName",
+			}
+
+			// The first call to reconcileDiscardJob should create a PV, PVC, and Job, and requeue.
+			result, err := mbr.reconcileDiscardJob(ctx, backup, snapshotTarget)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeTrue())
+
+			var pv corev1.PersistentVolume
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: makeDiscardPVName(backup), Namespace: nsController}, &pv)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pv.GetLabels()["app.kubernetes.io/name"]).To(Equal(labelAppNameValue))
+			Expect(pv.GetLabels()["app.kubernetes.io/component"]).To(Equal(labelComponentDiscardVolume))
+			Expect(len(pv.Spec.AccessModes)).To(Equal(1))
+			Expect(pv.Spec.AccessModes[0]).To(Equal(corev1.ReadWriteOnce))
+			Expect(pv.Spec.Capacity).To(Equal(pvCapacity))
+			Expect(pv.Spec.CSI.Driver).To(Equal(pvDriver))
+			Expect(*pv.Spec.CSI.ControllerExpandSecretRef).To(Equal(pvControllerExpandSecretRef))
+			Expect(*pv.Spec.CSI.NodeStageSecretRef).To(Equal(pvNodeStageSecretRef))
+			Expect(pv.Spec.CSI.VolumeAttributes["clusterID"]).To(Equal(pvClusterID))
+			Expect(pv.Spec.CSI.VolumeAttributes["imageFeatures"]).To(Equal(pvImageFeatures))
+			Expect(pv.Spec.CSI.VolumeAttributes["imageFormat"]).To(Equal(pvImageFormat))
+			Expect(pv.Spec.CSI.VolumeAttributes["pool"]).To(Equal(pvPool))
+			Expect(pv.Spec.CSI.VolumeAttributes["staticVolume"]).To(Equal("true"))
+			Expect(pv.Spec.CSI.VolumeHandle).To(Equal(pvImageName))
+			Expect(pv.Spec.PersistentVolumeReclaimPolicy).To(Equal(corev1.PersistentVolumeReclaimRetain))
+			Expect(*pv.Spec.VolumeMode).To(Equal(corev1.PersistentVolumeBlock))
+			Expect(pv.Spec.StorageClassName).To(Equal(""))
+
+			var pvc corev1.PersistentVolumeClaim
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: makeDiscardPVName(backup), Namespace: nsController}, &pvc)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pvc.GetLabels()["app.kubernetes.io/name"]).To(Equal(labelAppNameValue))
+			Expect(pvc.GetLabels()["app.kubernetes.io/component"]).To(Equal(labelComponentDiscardVolume))
+			Expect(*pvc.Spec.StorageClassName).To(Equal(""))
+			Expect(len(pvc.Spec.AccessModes)).To(Equal(1))
+			Expect(pvc.Spec.AccessModes[0]).To(Equal(corev1.ReadWriteOnce))
+			Expect(pvc.Spec.Resources).To(Equal(pvcResources))
+			Expect(*pvc.Spec.VolumeMode).To(Equal(corev1.PersistentVolumeBlock))
+			Expect(pvc.Spec.VolumeName).To(Equal(makeDiscardPVName(backup)))
+
+			var job batchv1.Job
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: makeDiscardJobName(backup), Namespace: nsController}, &job)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(job.GetLabels()["app.kubernetes.io/name"]).To(Equal(labelAppNameValue))
+			Expect(job.GetLabels()["app.kubernetes.io/component"]).To(Equal(labelComponentDiscardJob))
+			Expect(*job.Spec.BackoffLimit).To(Equal(int32(65535)))
+			Expect(len(job.Spec.Template.Spec.Containers)).To(Equal(1))
+			Expect(job.Spec.Template.Spec.Containers[0].Name).To(Equal("discard"))
+			Expect(*job.Spec.Template.Spec.Containers[0].SecurityContext.Privileged).To(BeTrue())
+			Expect(*job.Spec.Template.Spec.Containers[0].SecurityContext.RunAsGroup).To(Equal(int64(0)))
+			Expect(*job.Spec.Template.Spec.Containers[0].SecurityContext.RunAsUser).To(Equal(int64(0)))
+			Expect(job.Spec.Template.Spec.Containers[0].Image).To(Equal(mbr.podImage))
+			Expect(len(job.Spec.Template.Spec.Containers[0].VolumeDevices)).To(Equal(1))
+			Expect(job.Spec.Template.Spec.Containers[0].VolumeDevices[0].Name).To(Equal("discard-rbd"))
+			Expect(job.Spec.Template.Spec.Containers[0].VolumeDevices[0].DevicePath).To(Equal("/dev/discard-rbd"))
+			Expect(job.Spec.Template.Spec.RestartPolicy).To(Equal(corev1.RestartPolicyOnFailure))
+			Expect(len(job.Spec.Template.Spec.Volumes)).To(Equal(1))
+			Expect(job.Spec.Template.Spec.Volumes[0]).To(Equal(corev1.Volume{
+				Name: "discard-rbd",
+				VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: makeDiscardPVCName(backup),
+					},
+				},
+			}))
+
+			// Make the Job completed
+			err = resMgr.ChangeJobCondition(ctx, &job, batchv1.JobComplete, corev1.ConditionTrue)
+			Expect(err).NotTo(HaveOccurred())
+
+			// A call to reconcileDiscardJob should NOT requeue after the Job completed
+			result, err = mbr.reconcileDiscardJob(ctx, backup, snapshotTarget)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeFalse())
+		})
+	})
 })
