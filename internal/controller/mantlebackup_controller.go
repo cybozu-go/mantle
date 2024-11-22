@@ -1536,6 +1536,10 @@ func (r *MantleBackupReconciler) reconcileDiscardJob(
 		return ctrl.Result{}, err
 	}
 
+	if err := r.createOrUpdateDiscardPVC(ctx, backup, snapshotTarget.pvc); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	return ctrl.Result{}, nil
 }
 
@@ -1579,6 +1583,37 @@ func (r *MantleBackupReconciler) createOrUpdateDiscardPV(
 		pv.Spec.CSI.VolumeAttributes["imageFormat"] = targetPV.Spec.CSI.VolumeAttributes["imageFormat"]
 		pv.Spec.CSI.VolumeAttributes["pool"] = targetPV.Spec.CSI.VolumeAttributes["pool"]
 		pv.Spec.CSI.VolumeAttributes["staticVolume"] = "true"
+
+		return nil
+	})
+	return err
+}
+
+func (r *MantleBackupReconciler) createOrUpdateDiscardPVC(
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
+	targetPVC *corev1.PersistentVolumeClaim,
+) error {
+	var pvc corev1.PersistentVolumeClaim
+	pvc.SetName(makeDiscardPVCName(backup))
+	pvc.SetNamespace(r.managedCephClusterID)
+	_, err := ctrl.CreateOrUpdate(ctx, r.Client, &pvc, func() error {
+		labels := pvc.GetLabels()
+		if labels == nil {
+			labels = map[string]string{}
+		}
+		labels["app.kubernetes.io/name"] = labelAppNameValue
+		labels["app.kubernetes.io/component"] = labelComponentDiscardVolume
+		pvc.SetLabels(labels)
+
+		storageClassName := ""
+		pvc.Spec.StorageClassName = &storageClassName
+		pvc.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
+		pvc.Spec.Resources = targetPVC.Spec.Resources
+		pvc.Spec.VolumeName = makeDiscardPVName(backup)
+
+		volumeMode := corev1.PersistentVolumeBlock
+		pvc.Spec.VolumeMode = &volumeMode
 
 		return nil
 	})
