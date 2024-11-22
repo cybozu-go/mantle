@@ -168,7 +168,6 @@ spec:
           runAsGroup: 2016
           runAsNonRoot: true
           runAsUser: 2016
-        tty: true
         volumeMounts:
         - mountPath: /etc/ceph
           name: ceph-config
