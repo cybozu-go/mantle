@@ -44,6 +44,7 @@ const (
 	labelComponentExportJob       = "export-job"
 	labelComponentUploadJob       = "upload-job"
 	labelComponentImportJob       = "import-job"
+	labelComponentDiscardVolume   = "discard-volume"
 	annotRemoteUID                = "mantle.cybozu.io/remote-uid"
 	annotDiffFrom                 = "mantle.cybozu.io/diff-from"
 	annotDiffTo                   = "mantle.cybozu.io/diff-to"
@@ -1523,17 +1524,65 @@ func (r *MantleBackupReconciler) updateStatusManifests(
 }
 
 func (r *MantleBackupReconciler) reconcileDiscardJob(
-	_ context.Context,
+	ctx context.Context,
 	backup *mantlev1.MantleBackup,
-	_ *snapshotTarget,
-) (ctrl.Result, error) { //nolint:unparam
+	snapshotTarget *snapshotTarget,
+) (ctrl.Result, error) {
 	if backup.GetAnnotations()[annotSyncMode] != syncModeFull {
 		return ctrl.Result{}, nil
 	}
 
-	// FIXME: implement here later
+	if err := r.createOrUpdateDiscardPV(ctx, backup, snapshotTarget.pv); err != nil {
+		return ctrl.Result{}, err
+	}
 
 	return ctrl.Result{}, nil
+}
+
+func (r *MantleBackupReconciler) createOrUpdateDiscardPV(
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
+	targetPV *corev1.PersistentVolume,
+) error {
+	var pv corev1.PersistentVolume
+	pv.SetName(makeDiscardPVName(backup))
+	_, err := ctrl.CreateOrUpdate(ctx, r.Client, &pv, func() error {
+		labels := pv.GetLabels()
+		if labels == nil {
+			labels = map[string]string{}
+		}
+		labels["app.kubernetes.io/name"] = labelAppNameValue
+		labels["app.kubernetes.io/component"] = labelComponentDiscardVolume
+		pv.SetLabels(labels)
+
+		pv.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
+		pv.Spec.Capacity = targetPV.Spec.Capacity
+		pv.Spec.PersistentVolumeReclaimPolicy = corev1.PersistentVolumeReclaimRetain
+		pv.Spec.StorageClassName = ""
+
+		volumeMode := corev1.PersistentVolumeBlock
+		pv.Spec.VolumeMode = &volumeMode
+
+		if pv.Spec.CSI == nil {
+			pv.Spec.CSI = &corev1.CSIPersistentVolumeSource{}
+		}
+		pv.Spec.CSI.Driver = targetPV.Spec.CSI.Driver
+		pv.Spec.CSI.ControllerExpandSecretRef = targetPV.Spec.CSI.ControllerExpandSecretRef
+		pv.Spec.CSI.NodeStageSecretRef = targetPV.Spec.CSI.NodeStageSecretRef
+		pv.Spec.CSI.VolumeHandle = targetPV.Spec.CSI.VolumeAttributes["imageName"]
+
+		if pv.Spec.CSI.VolumeAttributes == nil {
+			pv.Spec.CSI.VolumeAttributes = map[string]string{}
+		}
+		pv.Spec.CSI.VolumeAttributes["clusterID"] = targetPV.Spec.CSI.VolumeAttributes["clusterID"]
+		pv.Spec.CSI.VolumeAttributes["imageFeatures"] = targetPV.Spec.CSI.VolumeAttributes["imageFeatures"]
+		pv.Spec.CSI.VolumeAttributes["imageFormat"] = targetPV.Spec.CSI.VolumeAttributes["imageFormat"]
+		pv.Spec.CSI.VolumeAttributes["pool"] = targetPV.Spec.CSI.VolumeAttributes["pool"]
+		pv.Spec.CSI.VolumeAttributes["staticVolume"] = "true"
+
+		return nil
+	})
+	return err
 }
 
 func (r *MantleBackupReconciler) reconcileImportJob(
