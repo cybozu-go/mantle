@@ -1150,7 +1150,6 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(ctx context.Context, ta
 				},
 				Image:           r.podImage,
 				ImagePullPolicy: corev1.PullIfNotPresent,
-				TTY:             true,
 				VolumeMounts: []corev1.VolumeMount{
 					{
 						MountPath: "/etc/ceph",
@@ -1687,7 +1686,6 @@ func (r *MantleBackupReconciler) createImportJob(
 			},
 			Image:           r.podImage,
 			ImagePullPolicy: corev1.PullIfNotPresent,
-			TTY:             true,
 			VolumeMounts: []corev1.VolumeMount{
 				{
 					MountPath: "/etc/ceph",
