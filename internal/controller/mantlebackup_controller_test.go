@@ -1506,6 +1506,7 @@ var _ = Describe("import", func() {
 				annotDiffFrom: "source",
 				annotSyncMode: syncModeIncremental,
 			})
+			err = k8sClient.Update(ctx, backup)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Create export and upload Jobs
@@ -1605,6 +1606,7 @@ var _ = Describe("import", func() {
 				annotSyncMode:  syncModeIncremental,
 				annotRemoteUID: "uid",
 			})
+			err = k8sClient.Update(ctx, backup)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Create discard and import Jobs
