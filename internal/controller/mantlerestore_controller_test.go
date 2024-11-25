@@ -211,7 +211,7 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPVC() {
 	})
 
 	It("should create a correct PVC", func(ctx SpecContext) {
-		err := test.reconciler.createRestoringPVC(ctx, restore, test.backup)
+		err := test.reconciler.createOrUpdateRestoringPVC(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &pvc1)
@@ -227,7 +227,7 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPVC() {
 	})
 
 	It("should skip creating a PVC if it already exists", func(ctx SpecContext) {
-		err := test.reconciler.createRestoringPVC(ctx, restore, test.backup)
+		err := test.reconciler.createOrUpdateRestoringPVC(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
 		By("PVC should not be updated")
@@ -246,7 +246,7 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPVC() {
 		restoreDifferent := restore.DeepCopy()
 		restoreDifferent.UID = types.UID(util.GetUniqueName("uid-"))
 
-		err := test.reconciler.createRestoringPVC(ctx, restoreDifferent, test.backup)
+		err := test.reconciler.createOrUpdateRestoringPVC(ctx, restoreDifferent, test.backup)
 		Expect(err).To(HaveOccurred())
 
 		By("PVC should not be updated")
@@ -272,7 +272,7 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPVC() {
 	It("should delete the PVC", func(ctx SpecContext) {
 		var pvc corev1.PersistentVolumeClaim
 
-		err := test.reconciler.createRestoringPVC(ctx, restore, test.backup)
+		err := test.reconciler.createOrUpdateRestoringPVC(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
 		// remove pvc-protection finalizer from PVC to allow deletion
@@ -300,7 +300,7 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPVC() {
 		restoreDifferent := restore.DeepCopy()
 		restoreDifferent.UID = types.UID(util.GetUniqueName("uid-"))
 
-		err := test.reconciler.createRestoringPVC(ctx, restore, test.backup)
+		err := test.reconciler.createOrUpdateRestoringPVC(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
 		// remove pvc-protection finalizer from PVC to allow deletion
@@ -319,7 +319,7 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPVC() {
 	})
 
 	It("should return an error, if the PVC having finalizer", func(ctx SpecContext) {
-		err := test.reconciler.createRestoringPVC(ctx, restore, test.backup)
+		err := test.reconciler.createOrUpdateRestoringPVC(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
 		err = test.reconciler.deleteRestoringPVC(ctx, restore)

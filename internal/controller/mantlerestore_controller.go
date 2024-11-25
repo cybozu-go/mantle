@@ -166,7 +166,7 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, restore *mantlev1
 	}
 
 	// create a restore PVC with the restore PV
-	if err := r.createRestoringPVC(ctx, restore, &backup); err != nil {
+	if err := r.createOrUpdateRestoringPVC(ctx, restore, &backup); err != nil {
 		logger.Error(err, "failed to create PVC")
 		return ctrl.Result{}, err
 	}
@@ -277,45 +277,37 @@ func (r *MantleRestoreReconciler) createOrUpdateRestoringPV(ctx context.Context,
 	return err
 }
 
-func (r *MantleRestoreReconciler) createRestoringPVC(ctx context.Context, restore *mantlev1.MantleRestore, backup *mantlev1.MantleBackup) error {
+func (r *MantleRestoreReconciler) createOrUpdateRestoringPVC(ctx context.Context, restore *mantlev1.MantleRestore, backup *mantlev1.MantleBackup) error {
 	pvcName := restore.Name
 	pvcNamespace := restore.Namespace
 	restoredBy := string(restore.UID)
 
-	// check if the PVC already exists
-	existingPVC := corev1.PersistentVolumeClaim{}
-	if err := r.client.Get(ctx, client.ObjectKey{Name: pvcName, Namespace: pvcNamespace}, &existingPVC); err != nil {
-		if !errors.IsNotFound(err) {
-			return fmt.Errorf("failed to get existing PVC: %v", err)
+	var pvc corev1.PersistentVolumeClaim
+	pvc.SetName(pvcName)
+	pvc.SetNamespace(pvcNamespace)
+	_, err := ctrl.CreateOrUpdate(ctx, r.client, &pvc, func() error {
+		if pvc.Annotations == nil {
+			pvc.Annotations = map[string]string{}
+		}
+		if annot, ok := pvc.Annotations[PVCAnnotationRestoredBy]; ok && annot != restoredBy {
+			return fmt.Errorf("the existing PVC is having different MantleRestore UID: %s, %s",
+				pvcName, pvc.Annotations[PVCAnnotationRestoredBy])
+		}
+		pvc.Annotations[PVCAnnotationRestoredBy] = restoredBy
+
+		// get the source PVC from the backup
+		srcPVC := corev1.PersistentVolumeClaim{}
+		if err := json.Unmarshal([]byte(backup.Status.PVCManifest), &srcPVC); err != nil {
+			return fmt.Errorf("failed to unmarshal PVC manifest: %w", err)
 		}
 
-	} else if existingPVC.Annotations[PVCAnnotationRestoredBy] != restoredBy {
-		return fmt.Errorf("existing PVC is having different MantleRestore UID: %s, %s", pvcName, existingPVC.Annotations[PVCAnnotationRestoredBy])
-	} else {
-		// PVC already exists and restored by the same MantleRestore
+		pvc.Spec = *srcPVC.Spec.DeepCopy()
+		pvc.Spec.VolumeName = r.restoringPVName(restore)
+
 		return nil
-	}
+	})
 
-	// get the source PVC from the backup
-	srcPVC := corev1.PersistentVolumeClaim{}
-	err := json.Unmarshal([]byte(backup.Status.PVCManifest), &srcPVC)
-	if err != nil {
-		return fmt.Errorf("failed to unmarshal PVC manifest: %v", err)
-	}
-
-	newPVC := corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      pvcName,
-			Namespace: pvcNamespace,
-			Annotations: map[string]string{
-				PVCAnnotationRestoredBy: restoredBy,
-			},
-		},
-		Spec: *srcPVC.Spec.DeepCopy(),
-	}
-	newPVC.Spec.VolumeName = r.restoringPVName(restore)
-
-	return r.client.Create(ctx, &newPVC)
+	return err
 }
 
 func (r *MantleRestoreReconciler) cleanup(ctx context.Context, restore *mantlev1.MantleRestore) (ctrl.Result, error) {
