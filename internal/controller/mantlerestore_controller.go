@@ -160,7 +160,7 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, restore *mantlev1
 	}
 
 	// create a restore PV with the clone image
-	if err := r.createRestoringPV(ctx, restore, &backup); err != nil {
+	if err := r.createOrUpdateRestoringPV(ctx, restore, &backup); err != nil {
 		logger.Error(err, "failed to create PV")
 		return ctrl.Result{}, err
 	}
@@ -238,52 +238,43 @@ func (r *MantleRestoreReconciler) cloneImageFromBackup(ctx context.Context, rest
 	return r.ceph.RBDClone(restore.Status.Pool, bkImage, backup.Name, r.restoringRBDImageName(restore), features)
 }
 
-func (r *MantleRestoreReconciler) createRestoringPV(ctx context.Context, restore *mantlev1.MantleRestore, backup *mantlev1.MantleBackup) error {
+func (r *MantleRestoreReconciler) createOrUpdateRestoringPV(ctx context.Context, restore *mantlev1.MantleRestore, backup *mantlev1.MantleBackup) error {
 	pvName := r.restoringPVName(restore)
 	restoredBy := string(restore.UID)
 
-	// check if the PV already exists
-	existingPV := corev1.PersistentVolume{}
-	if err := r.client.Get(ctx, client.ObjectKey{Name: pvName}, &existingPV); err != nil {
-		if !errors.IsNotFound(err) {
-			return fmt.Errorf("failed to get existing PV: %v", err)
+	var pv corev1.PersistentVolume
+	pv.SetName(pvName)
+	_, err := ctrl.CreateOrUpdate(ctx, r.client, &pv, func() error {
+		if pv.Annotations == nil {
+			pv.Annotations = map[string]string{}
+		}
+		if annot, ok := pv.Annotations[PVAnnotationRestoredBy]; ok && annot != restoredBy {
+			return fmt.Errorf("the existing PV is having different MantleRestore UID: %s, %s",
+				pvName, pv.Annotations[PVAnnotationRestoredBy])
+		}
+		pv.Annotations[PVAnnotationRestoredBy] = restoredBy
+
+		// get the source PV from the backup
+		srcPV := corev1.PersistentVolume{}
+		if err := json.Unmarshal([]byte(backup.Status.PVManifest), &srcPV); err != nil {
+			return fmt.Errorf("failed to unmarshal PV manifest: %w", err)
 		}
 
-	} else if existingPV.Annotations[PVAnnotationRestoredBy] != restoredBy {
-		return fmt.Errorf("existing PV is having different MantleRestore UID: %s, %s", pvName, existingPV.Annotations[PVAnnotationRestoredBy])
-	} else {
-		// PV already exists and restored by the same MantleRestore
+		pv.Spec = *srcPV.Spec.DeepCopy()
+		pv.Spec.ClaimRef = nil
+		pv.Spec.CSI.VolumeAttributes = map[string]string{
+			"clusterID":     srcPV.Spec.CSI.VolumeAttributes["clusterID"],
+			"pool":          srcPV.Spec.CSI.VolumeAttributes["pool"],
+			"staticVolume":  "true",
+			"imageFeatures": srcPV.Spec.CSI.VolumeAttributes["imageFeatures"] + ",deep-flatten",
+		}
+		pv.Spec.CSI.VolumeHandle = r.restoringRBDImageName(restore)
+		pv.Spec.PersistentVolumeReclaimPolicy = corev1.PersistentVolumeReclaimRetain
+
 		return nil
-	}
+	})
 
-	// get the source PV from the backup
-	srcPV := corev1.PersistentVolume{}
-	err := json.Unmarshal([]byte(backup.Status.PVManifest), &srcPV)
-	if err != nil {
-		return fmt.Errorf("failed to unmarshal PV manifest: %v", err)
-	}
-
-	// create a new restoring PV corresponding to a restoring RBD image
-	newPV := corev1.PersistentVolume{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: pvName,
-			Annotations: map[string]string{
-				PVAnnotationRestoredBy: restoredBy,
-			},
-		},
-		Spec: *srcPV.Spec.DeepCopy(),
-	}
-	newPV.Spec.ClaimRef = nil
-	newPV.Spec.CSI.VolumeAttributes = map[string]string{
-		"clusterID":     srcPV.Spec.CSI.VolumeAttributes["clusterID"],
-		"pool":          srcPV.Spec.CSI.VolumeAttributes["pool"],
-		"staticVolume":  "true",
-		"imageFeatures": srcPV.Spec.CSI.VolumeAttributes["imageFeatures"] + ",deep-flatten",
-	}
-	newPV.Spec.CSI.VolumeHandle = r.restoringRBDImageName(restore)
-	newPV.Spec.PersistentVolumeReclaimPolicy = corev1.PersistentVolumeReclaimRetain
-
-	return r.client.Create(ctx, &newPV)
+	return err
 }
 
 func (r *MantleRestoreReconciler) createRestoringPVC(ctx context.Context, restore *mantlev1.MantleRestore, backup *mantlev1.MantleBackup) error {

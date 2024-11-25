@@ -143,7 +143,7 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPV() {
 	})
 
 	It("should create a correct PV", func(ctx SpecContext) {
-		err := test.reconciler.createRestoringPV(ctx, restore, test.backup)
+		err := test.reconciler.createOrUpdateRestoringPV(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: fmt.Sprintf("mr-%s-%s", test.tenantNamespace, restore.Name)}, &pv1)
@@ -167,7 +167,7 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPV() {
 	})
 
 	It("should skip creating a PV if it already exists", func(ctx SpecContext) {
-		err := test.reconciler.createRestoringPV(ctx, restore, test.backup)
+		err := test.reconciler.createOrUpdateRestoringPV(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
 		By("PV should not be updated")
@@ -186,7 +186,7 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPV() {
 		restoreDifferent := restore.DeepCopy()
 		restoreDifferent.UID = types.UID(util.GetUniqueName("uid-"))
 
-		err := test.reconciler.createRestoringPV(ctx, restoreDifferent, test.backup)
+		err := test.reconciler.createOrUpdateRestoringPV(ctx, restoreDifferent, test.backup)
 		Expect(err).To(HaveOccurred())
 
 		By("PV should not be updated")
@@ -337,7 +337,7 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPV() {
 	It("should delete the PV", func(ctx SpecContext) {
 		var pv corev1.PersistentVolume
 
-		err := test.reconciler.createRestoringPV(ctx, restore, test.backup)
+		err := test.reconciler.createOrUpdateRestoringPV(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
 		// remove pv-protection finalizer from PV to allow deletion
@@ -365,7 +365,7 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPV() {
 		restoreDifferent := restore.DeepCopy()
 		restoreDifferent.UID = types.UID(util.GetUniqueName("uid-"))
 
-		err := test.reconciler.createRestoringPV(ctx, restore, test.backup)
+		err := test.reconciler.createOrUpdateRestoringPV(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
 		// remove pv-protection finalizer from PV to allow deletion
@@ -384,7 +384,7 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPV() {
 	})
 
 	It("should return an error, if the PV having finalizer", func(ctx SpecContext) {
-		err := test.reconciler.createRestoringPV(ctx, restore, test.backup)
+		err := test.reconciler.createOrUpdateRestoringPV(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
 		err = test.reconciler.deleteRestoringPV(ctx, restore)
