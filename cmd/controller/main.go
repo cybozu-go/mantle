@@ -192,6 +192,16 @@ func setupReconcilers(mgr manager.Manager, primarySettings *controller.PrimarySe
 		setupLog.Error(err, "unable to create controller", "controller", "MantleBackupConfig")
 		return err
 	}
+
+	if err := controller.NewPersistentVolumeReconciler(
+		mgr.GetClient(),
+		mgr.GetScheme(),
+		managedCephClusterID,
+	).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "PersistentVolumeReconciler")
+		return err
+	}
+
 	//+kubebuilder:scaffold:builder
 
 	return nil

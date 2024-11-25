@@ -28,6 +28,20 @@ rules:
   - update
   - watch
 - apiGroups:
+  - ""
+  resources:
+  - persistentvolumes/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumes/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
   - batch
   resources:
   - cronjobs

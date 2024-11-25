@@ -555,18 +555,17 @@ func (test *restoreTest) testCloneImageFromBackup() {
 
 func (test *restoreTest) testRemoveImage() {
 	cloneImageName := fmt.Sprintf("mantle-%s-%s", test.tenantNamespace, test.mantleRestoreName1)
-	reconciler := controller.NewMantleRestoreReconcilerE2E(cephCluster1Namespace, cephCluster1Namespace)
-	restore := &mantlev1.MantleRestore{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      test.mantleRestoreName1,
-			Namespace: test.tenantNamespace,
-		},
-		Spec: mantlev1.MantleRestoreSpec{
-			Backup: test.mantleBackupName1,
-		},
-		Status: mantlev1.MantleRestoreStatus{
-			ClusterID: cephCluster1Namespace,
-			Pool:      test.poolName,
+	pvReconciler := controller.NewPersistentVolumeReconcilerE2E(cephCluster1Namespace)
+	pv := &corev1.PersistentVolume{
+		Spec: corev1.PersistentVolumeSpec{
+			PersistentVolumeSource: corev1.PersistentVolumeSource{
+				CSI: &corev1.CSIPersistentVolumeSource{
+					VolumeHandle: cloneImageName,
+					VolumeAttributes: map[string]string{
+						"pool": test.poolName,
+					},
+				},
+			},
 		},
 	}
 
@@ -575,7 +574,7 @@ func (test *restoreTest) testRemoveImage() {
 			_, err := getRBDInfo(cephCluster1Namespace, test.poolName, cloneImageName)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = reconciler.RemoveRBDImage(ctx, restore)
+			err = pvReconciler.RemoveRBDImage(ctx, pv)
 			Expect(err).NotTo(HaveOccurred())
 
 			// should get an error since the image is removed
@@ -584,7 +583,7 @@ func (test *restoreTest) testRemoveImage() {
 		})
 
 		It("should skip removing the image if it does not exist", func(ctx SpecContext) {
-			err := reconciler.RemoveRBDImage(ctx, restore)
+			err := pvReconciler.RemoveRBDImage(ctx, pv)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})

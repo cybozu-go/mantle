@@ -340,12 +340,6 @@ func (r *MantleRestoreReconciler) cleanup(ctx context.Context, restore *mantlev1
 		return ctrl.Result{}, err
 	}
 
-	// delete the clone image
-	if err := r.removeRBDImage(ctx, restore); err != nil {
-		logger.Error(err, "failed to remove image")
-		return ctrl.Result{}, err
-	}
-
 	// remove the finalizer
 	controllerutil.RemoveFinalizer(restore, MantleRestoreFinalizerName)
 	err = r.client.Update(ctx, restore)
@@ -417,23 +411,6 @@ func (r *MantleRestoreReconciler) deleteRestoringPV(ctx context.Context, restore
 	} else {
 		return fmt.Errorf("PV still exists: %s", pv.Name)
 	}
-}
-
-func (r *MantleRestoreReconciler) removeRBDImage(ctx context.Context, restore *mantlev1.MantleRestore) error {
-	logger := log.FromContext(ctx)
-	image := r.restoringRBDImageName(restore)
-	pool := restore.Status.Pool
-	logger.Info("removing image", "pool", pool, "image", image)
-	images, err := r.ceph.RBDLs(pool)
-	if err != nil {
-		return fmt.Errorf("failed to list RBD images: %v", err)
-	}
-
-	if !slices.Contains(images, image) {
-		return nil
-	}
-
-	return r.ceph.RBDRm(pool, image)
 }
 
 // SetupWithManager sets up the controller with the Manager.

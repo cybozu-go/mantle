@@ -25,7 +25,3 @@ func NewMantleRestoreReconcilerE2E(managedCephClusterID, toolsNamespace string) 
 func (r *MantleRestoreReconcilerE2E) CloneImageFromBackup(ctx context.Context, restore *mantlev1.MantleRestore, backup *mantlev1.MantleBackup) error {
 	return r.cloneImageFromBackup(ctx, restore, backup)
 }
-
-func (r *MantleRestoreReconcilerE2E) RemoveRBDImage(ctx context.Context, restore *mantlev1.MantleRestore) error {
-	return r.removeRBDImage(ctx, restore)
-}
