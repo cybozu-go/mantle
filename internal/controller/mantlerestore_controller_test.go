@@ -66,7 +66,6 @@ func (test *mantleRestoreControllerUnitTest) setupEnv() {
 		// just allocate the reconciler, and does not start it.
 		test.reconciler = NewMantleRestoreReconciler(
 			test.mgrUtil.GetManager().GetClient(),
-			test.mgrUtil.GetManager().GetAPIReader(),
 			test.mgrUtil.GetManager().GetScheme(),
 			resMgr.ClusterID,
 			RoleStandalone,

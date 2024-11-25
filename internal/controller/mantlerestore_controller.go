@@ -22,7 +22,6 @@ import (
 // MantleRestoreReconciler reconciles a MantleRestore object
 type MantleRestoreReconciler struct {
 	client               client.Client
-	reader               client.Reader
 	Scheme               *runtime.Scheme
 	managedCephClusterID string
 	ceph                 ceph.CephCmd
@@ -44,14 +43,12 @@ const (
 
 func NewMantleRestoreReconciler(
 	client client.Client,
-	reader client.Reader,
 	scheme *runtime.Scheme,
 	managedCephClusterID,
 	role string,
 ) *MantleRestoreReconciler {
 	return &MantleRestoreReconciler{
 		client:               client,
-		reader:               reader,
 		Scheme:               scheme,
 		managedCephClusterID: managedCephClusterID,
 		ceph:                 ceph.NewCephCmd(),
@@ -376,7 +373,7 @@ func (r *MantleRestoreReconciler) deleteRestoringPVC(ctx context.Context, restor
 	pvcName := restore.Name
 	pvcNamespace := restore.Namespace
 	pvc := corev1.PersistentVolumeClaim{}
-	if err := r.reader.Get(ctx, client.ObjectKey{Name: pvcName, Namespace: pvcNamespace}, &pvc); err != nil {
+	if err := r.client.Get(ctx, client.ObjectKey{Name: pvcName, Namespace: pvcNamespace}, &pvc); err != nil {
 		if errors.IsNotFound(err) {
 			return nil
 		}
@@ -391,7 +388,7 @@ func (r *MantleRestoreReconciler) deleteRestoringPVC(ctx context.Context, restor
 		return fmt.Errorf("failed to delete PVC: %v", err)
 	}
 
-	if err := r.reader.Get(ctx, client.ObjectKey{Name: pvcName, Namespace: pvcNamespace}, &pvc); err != nil {
+	if err := r.client.Get(ctx, client.ObjectKey{Name: pvcName, Namespace: pvcNamespace}, &pvc); err != nil {
 		if errors.IsNotFound(err) {
 			return nil
 		}
@@ -406,7 +403,7 @@ func (r *MantleRestoreReconciler) deleteRestoringPVC(ctx context.Context, restor
 // Note: it must use reader rather than client to check PVC existence to avoid oversighting a PV not in the cache.
 func (r *MantleRestoreReconciler) deleteRestoringPV(ctx context.Context, restore *mantlev1.MantleRestore) error {
 	pv := corev1.PersistentVolume{}
-	if err := r.reader.Get(ctx, client.ObjectKey{Name: r.restoringPVName(restore)}, &pv); err != nil {
+	if err := r.client.Get(ctx, client.ObjectKey{Name: r.restoringPVName(restore)}, &pv); err != nil {
 		if errors.IsNotFound(err) {
 			return nil
 		}
@@ -421,7 +418,7 @@ func (r *MantleRestoreReconciler) deleteRestoringPV(ctx context.Context, restore
 		return fmt.Errorf("failed to delete PV: %v", err)
 	}
 
-	if err := r.reader.Get(ctx, client.ObjectKey{Name: r.restoringPVName(restore)}, &pv); err != nil {
+	if err := r.client.Get(ctx, client.ObjectKey{Name: r.restoringPVName(restore)}, &pv); err != nil {
 		if errors.IsNotFound(err) {
 			return nil
 		}
