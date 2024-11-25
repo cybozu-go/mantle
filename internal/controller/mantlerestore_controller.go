@@ -352,8 +352,6 @@ func (r *MantleRestoreReconciler) cleanup(ctx context.Context, restore *mantlev1
 }
 
 // deleteRestoringPVC deletes the restoring PVC.
-// To delete RBD image, it returns an error if it still exists to ensure no one uses the PVC.
-// Note: it must use reader rather than client to check PVC existence to avoid oversighting a PVC not in the cache.
 func (r *MantleRestoreReconciler) deleteRestoringPVC(ctx context.Context, restore *mantlev1.MantleRestore) error {
 	pvcName := restore.Name
 	pvcNamespace := restore.Namespace
@@ -373,19 +371,10 @@ func (r *MantleRestoreReconciler) deleteRestoringPVC(ctx context.Context, restor
 		return fmt.Errorf("failed to delete PVC: %v", err)
 	}
 
-	if err := r.client.Get(ctx, client.ObjectKey{Name: pvcName, Namespace: pvcNamespace}, &pvc); err != nil {
-		if errors.IsNotFound(err) {
-			return nil
-		}
-		return fmt.Errorf("failed to get PVC: %v", err)
-	} else {
-		return fmt.Errorf("PVC still exists: %s", pvcName)
-	}
+	return nil
 }
 
 // deleteRestoringPV deletes the restoring PV.
-// To delete RBD image, it returns an error if it still exists to ensure no one uses the PV.
-// Note: it must use reader rather than client to check PVC existence to avoid oversighting a PV not in the cache.
 func (r *MantleRestoreReconciler) deleteRestoringPV(ctx context.Context, restore *mantlev1.MantleRestore) error {
 	pv := corev1.PersistentVolume{}
 	if err := r.client.Get(ctx, client.ObjectKey{Name: r.restoringPVName(restore)}, &pv); err != nil {
@@ -403,14 +392,7 @@ func (r *MantleRestoreReconciler) deleteRestoringPV(ctx context.Context, restore
 		return fmt.Errorf("failed to delete PV: %v", err)
 	}
 
-	if err := r.client.Get(ctx, client.ObjectKey{Name: r.restoringPVName(restore)}, &pv); err != nil {
-		if errors.IsNotFound(err) {
-			return nil
-		}
-		return fmt.Errorf("failed to get PV: %v", err)
-	} else {
-		return fmt.Errorf("PV still exists: %s", pv.Name)
-	}
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
