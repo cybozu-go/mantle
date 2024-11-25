@@ -44,6 +44,8 @@ const (
 	labelComponentExportJob       = "export-job"
 	labelComponentUploadJob       = "upload-job"
 	labelComponentImportJob       = "import-job"
+	labelComponentDiscardJob      = "discard-job"
+	labelComponentDiscardVolume   = "discard-volume"
 	annotRemoteUID                = "mantle.cybozu.io/remote-uid"
 	annotDiffFrom                 = "mantle.cybozu.io/diff-from"
 	annotDiffTo                   = "mantle.cybozu.io/diff-to"
@@ -1522,17 +1524,195 @@ func (r *MantleBackupReconciler) updateStatusManifests(
 }
 
 func (r *MantleBackupReconciler) reconcileDiscardJob(
-	_ context.Context,
+	ctx context.Context,
 	backup *mantlev1.MantleBackup,
-	_ *snapshotTarget,
-) (ctrl.Result, error) { //nolint:unparam
+	snapshotTarget *snapshotTarget,
+) (ctrl.Result, error) {
 	if backup.GetAnnotations()[annotSyncMode] != syncModeFull {
 		return ctrl.Result{}, nil
 	}
 
-	// FIXME: implement here later
+	if err := r.createOrUpdateDiscardPV(ctx, backup, snapshotTarget.pv); err != nil {
+		return ctrl.Result{}, err
+	}
 
-	return ctrl.Result{}, nil
+	if err := r.createOrUpdateDiscardPVC(ctx, backup, snapshotTarget.pvc); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if err := r.createOrUpdateDiscardJob(ctx, backup); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	completed, err := r.hasDiscardJobCompleted(ctx, backup)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if completed {
+		return ctrl.Result{}, nil
+	}
+	return ctrl.Result{Requeue: true}, nil
+}
+
+func (r *MantleBackupReconciler) createOrUpdateDiscardPV(
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
+	targetPV *corev1.PersistentVolume,
+) error {
+	var pv corev1.PersistentVolume
+	pv.SetName(makeDiscardPVName(backup))
+	_, err := ctrl.CreateOrUpdate(ctx, r.Client, &pv, func() error {
+		labels := pv.GetLabels()
+		if labels == nil {
+			labels = map[string]string{}
+		}
+		labels["app.kubernetes.io/name"] = labelAppNameValue
+		labels["app.kubernetes.io/component"] = labelComponentDiscardVolume
+		pv.SetLabels(labels)
+
+		pv.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
+		pv.Spec.Capacity = targetPV.Spec.Capacity
+		pv.Spec.PersistentVolumeReclaimPolicy = corev1.PersistentVolumeReclaimRetain
+		pv.Spec.StorageClassName = ""
+
+		volumeMode := corev1.PersistentVolumeBlock
+		pv.Spec.VolumeMode = &volumeMode
+
+		if pv.Spec.CSI == nil {
+			pv.Spec.CSI = &corev1.CSIPersistentVolumeSource{}
+		}
+		pv.Spec.CSI.Driver = targetPV.Spec.CSI.Driver
+		pv.Spec.CSI.ControllerExpandSecretRef = targetPV.Spec.CSI.ControllerExpandSecretRef
+		pv.Spec.CSI.NodeStageSecretRef = targetPV.Spec.CSI.NodeStageSecretRef
+		pv.Spec.CSI.VolumeHandle = targetPV.Spec.CSI.VolumeAttributes["imageName"]
+
+		if pv.Spec.CSI.VolumeAttributes == nil {
+			pv.Spec.CSI.VolumeAttributes = map[string]string{}
+		}
+		pv.Spec.CSI.VolumeAttributes["clusterID"] = targetPV.Spec.CSI.VolumeAttributes["clusterID"]
+		pv.Spec.CSI.VolumeAttributes["imageFeatures"] = targetPV.Spec.CSI.VolumeAttributes["imageFeatures"]
+		pv.Spec.CSI.VolumeAttributes["imageFormat"] = targetPV.Spec.CSI.VolumeAttributes["imageFormat"]
+		pv.Spec.CSI.VolumeAttributes["pool"] = targetPV.Spec.CSI.VolumeAttributes["pool"]
+		pv.Spec.CSI.VolumeAttributes["staticVolume"] = "true"
+
+		return nil
+	})
+	return err
+}
+
+func (r *MantleBackupReconciler) createOrUpdateDiscardPVC(
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
+	targetPVC *corev1.PersistentVolumeClaim,
+) error {
+	var pvc corev1.PersistentVolumeClaim
+	pvc.SetName(makeDiscardPVCName(backup))
+	pvc.SetNamespace(r.managedCephClusterID)
+	_, err := ctrl.CreateOrUpdate(ctx, r.Client, &pvc, func() error {
+		labels := pvc.GetLabels()
+		if labels == nil {
+			labels = map[string]string{}
+		}
+		labels["app.kubernetes.io/name"] = labelAppNameValue
+		labels["app.kubernetes.io/component"] = labelComponentDiscardVolume
+		pvc.SetLabels(labels)
+
+		storageClassName := ""
+		pvc.Spec.StorageClassName = &storageClassName
+		pvc.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
+		pvc.Spec.Resources = targetPVC.Spec.Resources
+		pvc.Spec.VolumeName = makeDiscardPVName(backup)
+
+		volumeMode := corev1.PersistentVolumeBlock
+		pvc.Spec.VolumeMode = &volumeMode
+
+		return nil
+	})
+	return err
+}
+
+func (r *MantleBackupReconciler) createOrUpdateDiscardJob(
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
+) error {
+	var job batchv1.Job
+	job.SetName(makeDiscardJobName(backup))
+	job.SetNamespace(r.managedCephClusterID)
+	_, err := ctrl.CreateOrUpdate(ctx, r.Client, &job, func() error {
+		labels := job.GetLabels()
+		if labels == nil {
+			labels = map[string]string{}
+		}
+		labels["app.kubernetes.io/name"] = labelAppNameValue
+		labels["app.kubernetes.io/component"] = labelComponentDiscardJob
+		job.SetLabels(labels)
+
+		var backoffLimit int32 = 65535
+		job.Spec.BackoffLimit = &backoffLimit
+
+		job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
+
+		tru := true
+		var zero int64 = 0
+		job.Spec.Template.Spec.Containers = []corev1.Container{
+			{
+				Name:  "discard",
+				Image: r.podImage,
+				Command: []string{
+					"/bin/bash",
+					"-c",
+					`
+set -e
+blkdiscard /dev/discard-rbd
+`,
+				},
+				SecurityContext: &corev1.SecurityContext{
+					Privileged: &tru,
+					RunAsGroup: &zero,
+					RunAsUser:  &zero,
+				},
+				VolumeDevices: []corev1.VolumeDevice{
+					{
+						Name:       "discard-rbd",
+						DevicePath: "/dev/discard-rbd",
+					},
+				},
+			},
+		}
+
+		job.Spec.Template.Spec.Volumes = []corev1.Volume{
+			{
+				Name: "discard-rbd",
+				VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: makeDiscardPVCName(backup),
+					},
+				},
+			},
+		}
+
+		return nil
+	})
+	return err
+}
+
+func (r *MantleBackupReconciler) hasDiscardJobCompleted(ctx context.Context, backup *mantlev1.MantleBackup) (bool, error) {
+	var job batchv1.Job
+	if err := r.Client.Get(
+		ctx,
+		types.NamespacedName{Name: makeDiscardJobName(backup), Namespace: r.managedCephClusterID},
+		&job,
+	); err != nil {
+		if aerrors.IsNotFound(err) {
+			return false, nil // The cache must be stale. Let's just requeue.
+		}
+		return false, err
+	}
+
+	if IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete) {
+		return true, nil
+	}
+	return false, nil
 }
 
 func (r *MantleBackupReconciler) reconcileImportJob(
