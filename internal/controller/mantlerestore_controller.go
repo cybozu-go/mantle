@@ -30,6 +30,7 @@ type MantleRestoreReconciler struct {
 
 const (
 	MantleRestoreFinalizerName = "mantlerestore.mantle.cybozu.io/finalizer"
+	RestoringPVFinalizerName   = "mantle.cybozu.io/restoring-pv-finalizer"
 	PVAnnotationRestoredBy     = "mantle.cybozu.io/restored-by"
 	PVCAnnotationRestoredBy    = "mantle.cybozu.io/restored-by"
 )
@@ -40,6 +41,7 @@ const (
 // +kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlerestores/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=persistentvolumes/finalizers,verbs=update
 
 func NewMantleRestoreReconciler(
 	client client.Client,
@@ -245,6 +247,10 @@ func (r *MantleRestoreReconciler) createOrUpdateRestoringPV(ctx context.Context,
 	var pv corev1.PersistentVolume
 	pv.SetName(pvName)
 	_, err := ctrl.CreateOrUpdate(ctx, r.client, &pv, func() error {
+		if !pv.GetDeletionTimestamp().IsZero() {
+			return fmt.Errorf("the restoring PV already began to be deleted: %s", pvName)
+		}
+
 		if pv.Annotations == nil {
 			pv.Annotations = map[string]string{}
 		}
@@ -259,6 +265,8 @@ func (r *MantleRestoreReconciler) createOrUpdateRestoringPV(ctx context.Context,
 		if err := json.Unmarshal([]byte(backup.Status.PVManifest), &srcPV); err != nil {
 			return fmt.Errorf("failed to unmarshal PV manifest: %w", err)
 		}
+
+		controllerutil.AddFinalizer(&pv, RestoringPVFinalizerName)
 
 		pv.Spec = *srcPV.Spec.DeepCopy()
 		pv.Spec.ClaimRef = nil
