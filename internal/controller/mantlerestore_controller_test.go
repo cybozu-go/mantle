@@ -275,14 +275,14 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPVC() {
 		err := test.reconciler.createOrUpdateRestoringPVC(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
-		// remove pvc-protection finalizer from PVC to allow deletion
+		err = test.reconciler.deleteRestoringPVC(ctx, restore)
+		Expect(err).NotTo(HaveOccurred())
+
+		// remove finalizers from PVC to allow deletion
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &pvc)
 		Expect(err).NotTo(HaveOccurred())
 		pvc.Finalizers = nil
 		err = k8sClient.Update(ctx, &pvc)
-		Expect(err).NotTo(HaveOccurred())
-
-		err = test.reconciler.deleteRestoringPVC(ctx, restore)
 		Expect(err).NotTo(HaveOccurred())
 
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &pvc)
@@ -303,27 +303,19 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPVC() {
 		err := test.reconciler.createOrUpdateRestoringPVC(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
-		// remove pvc-protection finalizer from PVC to allow deletion
+		err = test.reconciler.deleteRestoringPVC(ctx, restoreDifferent)
+		Expect(err).To(HaveOccurred())
+
+		// remove finalizers from PVC to allow deletion
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &pvc)
 		Expect(err).NotTo(HaveOccurred())
 		pvc.Finalizers = nil
 		err = k8sClient.Update(ctx, &pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = test.reconciler.deleteRestoringPVC(ctx, restoreDifferent)
-		Expect(err).To(HaveOccurred())
-
 		// cleanup
 		err = test.reconciler.deleteRestoringPVC(ctx, restore)
 		Expect(err).NotTo(HaveOccurred())
-	})
-
-	It("should return an error, if the PVC having finalizer", func(ctx SpecContext) {
-		err := test.reconciler.createOrUpdateRestoringPVC(ctx, restore, test.backup)
-		Expect(err).NotTo(HaveOccurred())
-
-		err = test.reconciler.deleteRestoringPVC(ctx, restore)
-		Expect(err).To(HaveOccurred())
 	})
 }
 
@@ -340,14 +332,14 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPV() {
 		err := test.reconciler.createOrUpdateRestoringPV(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
-		// remove pv-protection finalizer from PV to allow deletion
+		err = test.reconciler.deleteRestoringPV(ctx, restore)
+		Expect(err).NotTo(HaveOccurred())
+
+		// remove finalizers from PV to allow deletion
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: test.reconciler.restoringPVName(restore)}, &pv)
 		Expect(err).NotTo(HaveOccurred())
 		pv.Finalizers = nil
 		err = k8sClient.Update(ctx, &pv)
-		Expect(err).NotTo(HaveOccurred())
-
-		err = test.reconciler.deleteRestoringPV(ctx, restore)
 		Expect(err).NotTo(HaveOccurred())
 
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: test.reconciler.restoringPVName(restore)}, &pv)
@@ -368,27 +360,19 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPV() {
 		err := test.reconciler.createOrUpdateRestoringPV(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
-		// remove pv-protection finalizer from PV to allow deletion
+		err = test.reconciler.deleteRestoringPV(ctx, restoreDifferent)
+		Expect(err).To(HaveOccurred())
+
+		// remove finalizers from PV to allow deletion
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: test.reconciler.restoringPVName(restore)}, &pv)
 		Expect(err).NotTo(HaveOccurred())
 		pv.Finalizers = nil
 		err = k8sClient.Update(ctx, &pv)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = test.reconciler.deleteRestoringPV(ctx, restoreDifferent)
-		Expect(err).To(HaveOccurred())
-
 		// cleanup
 		err = test.reconciler.deleteRestoringPV(ctx, restore)
 		Expect(err).NotTo(HaveOccurred())
-	})
-
-	It("should return an error, if the PV having finalizer", func(ctx SpecContext) {
-		err := test.reconciler.createOrUpdateRestoringPV(ctx, restore, test.backup)
-		Expect(err).NotTo(HaveOccurred())
-
-		err = test.reconciler.deleteRestoringPV(ctx, restore)
-		Expect(err).To(HaveOccurred())
 	})
 }
 
