@@ -253,21 +253,23 @@ func (test *restoreTest) testCleanup() {
 		_, _, err = kubectl("delete", "mantlerestore", "-n", test.tenantNamespace, test.mantleRestoreName1)
 		Expect(err).NotTo(HaveOccurred())
 
-		By("checking if the PVC is deleted")
-		_, _, err = kubectl("get", "pvc", "-n", test.tenantNamespace, test.mantleRestoreName1)
-		Expect(err).To(HaveOccurred())
-
-		By("checking if the PV is deleted")
-		_, _, err = kubectl("get", "pv", fmt.Sprintf("mr-%s-%s", test.tenantNamespace, test.mantleRestoreName1))
-		Expect(err).To(HaveOccurred())
-
-		By("checking if the clone image is deleted")
-		_, err = getRBDInfo(cephCluster1Namespace, test.poolName, imageName)
-		Expect(err).To(HaveOccurred())
-
 		By("checking if the MantleRestore is deleted")
 		_, _, err = kubectl("get", "mantlerestore", "-n", test.tenantNamespace, test.mantleRestoreName1)
 		Expect(err).To(HaveOccurred())
+
+		Eventually(func(g Gomega) {
+			By("checking if the PVC is deleted")
+			_, _, err = kubectl("get", "pvc", "-n", test.tenantNamespace, test.mantleRestoreName1)
+			g.Expect(err).To(HaveOccurred())
+
+			By("checking if the PV is deleted")
+			_, _, err = kubectl("get", "pv", fmt.Sprintf("mr-%s-%s", test.tenantNamespace, test.mantleRestoreName1))
+			g.Expect(err).To(HaveOccurred())
+
+			By("checking if the clone image is deleted")
+			_, err = getRBDInfo(cephCluster1Namespace, test.poolName, imageName)
+			g.Expect(err).To(HaveOccurred())
+		}).Should(Succeed())
 	})
 
 	It("should wait while the PV/PVC is in used", func() {
@@ -432,8 +434,10 @@ func (test *restoreTest) testRestoreWithMultipleBackups() {
 		Expect(err).NotTo(HaveOccurred())
 
 		By("checking the second restore is deleted")
-		_, err = getRBDInfo(cephCluster1Namespace, test.poolName, imageName2)
-		Expect(err).To(HaveOccurred())
+		Eventually(func(g Gomega) {
+			_, err = getRBDInfo(cephCluster1Namespace, test.poolName, imageName2)
+			g.Expect(err).To(HaveOccurred())
+		}).Should(Succeed())
 
 		By("checking the first restore PV/PVC and image should still exist")
 		_, _, err = kubectl("get", "pv", fmt.Sprintf("mr-%s-%s", test.tenantNamespace, test.mantleRestoreName1))

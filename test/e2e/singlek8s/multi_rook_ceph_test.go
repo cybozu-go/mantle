@@ -181,14 +181,16 @@ func (test *multiRookCephTest) testMain() {
 	})
 
 	It("check the rbd images in the both clusters", func() {
-		imageAndSnaps1, err := getImageAndSnapNames(cephCluster1Namespace, test.poolName)
-		Expect(err).NotTo(HaveOccurred())
-		// after delete backup and restore, only the source image should be left
-		Expect(imageAndSnaps1).To(ConsistOf(srcImageName1))
+		Eventually(func(g Gomega) {
+			imageAndSnaps1, err := getImageAndSnapNames(cephCluster1Namespace, test.poolName)
+			g.Expect(err).NotTo(HaveOccurred())
+			// after delete backup and restore, only the source image should be left
+			g.Expect(imageAndSnaps1).To(ConsistOf(srcImageName1))
 
-		imageAndSnaps2, err := getImageAndSnapNames(cephCluster2Namespace, test.poolName)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(imageAndSnaps2).To(ConsistOf(append(expectImageAndSnaps1, expectImageAndSnaps2...)))
+			imageAndSnaps2, err := getImageAndSnapNames(cephCluster2Namespace, test.poolName)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(imageAndSnaps2).To(ConsistOf(append(expectImageAndSnaps1, expectImageAndSnaps2...)))
+		}).Should(Succeed())
 	})
 
 	It("delete the resources in the tenant namespace 2", func() {
@@ -196,13 +198,15 @@ func (test *multiRookCephTest) testMain() {
 	})
 
 	It("check the rbd images in the both clusters", func() {
-		imageAndSnaps1, err := getImageAndSnapNames(cephCluster1Namespace, test.poolName)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(imageAndSnaps1).To(ConsistOf(srcImageName1))
+		Eventually(func(g Gomega) {
+			imageAndSnaps1, err := getImageAndSnapNames(cephCluster1Namespace, test.poolName)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(imageAndSnaps1).To(ConsistOf(srcImageName1))
 
-		imageAndSnaps2, err := getImageAndSnapNames(cephCluster2Namespace, test.poolName)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(imageAndSnaps2).To(ConsistOf(append(expectImageAndSnaps1, srcImageName2)))
+			imageAndSnaps2, err := getImageAndSnapNames(cephCluster2Namespace, test.poolName)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(imageAndSnaps2).To(ConsistOf(append(expectImageAndSnaps1, srcImageName2)))
+		}).Should(Succeed())
 	})
 
 	It("check there is no change in the dummy rbd image", func() {
