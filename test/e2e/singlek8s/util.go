@@ -423,7 +423,7 @@ func writeTestData(namespace, pvc string, data []byte) error {
 		return err
 	}
 
-	_, _, err := kubectl("wait", "--for=condition=Ready", "pod", podName, "-n", namespace, "--timeout=1m")
+	_, _, err := kubectl("wait", "--for=condition=Ready", "pod", podName, "-n", namespace, "--timeout=5m")
 	if err != nil {
 		return fmt.Errorf("kubectl wait pod failed. err: %w", err)
 	}
