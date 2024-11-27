@@ -272,10 +272,11 @@ func (test *restoreTest) testCleanup() {
 		}).Should(Succeed())
 	})
 
-	It("should wait while the PV/PVC is in used", func() {
+	It("should NOT delete an RBD image while its corresponding PV and PVC are in use", func() {
 		test.cleanup()
 		imageName := fmt.Sprintf("mantle-%s-%s", test.tenantNamespace, test.mantleRestoreName1)
 		podName := util.GetUniqueName("pod-")
+		pvName := fmt.Sprintf("mr-%s-%s", test.tenantNamespace, test.mantleRestoreName1)
 
 		err := applyPVCTemplate(test.tenantNamespace, test.pvcName, test.storageClassName)
 		Expect(err).NotTo(HaveOccurred())
@@ -294,18 +295,19 @@ func (test *restoreTest) testCleanup() {
 		_, _, err = kubectl("wait", "--for=condition=Ready", "pod", podName, "-n", test.tenantNamespace, "--timeout=1m")
 		Expect(err).NotTo(HaveOccurred())
 
-		By("deleting the MantleRestore background")
-		go func() {
-			_, _, err = kubectl("delete", "mantlerestore", "-n", test.tenantNamespace, test.mantleRestoreName1)
-			Expect(err).NotTo(HaveOccurred())
-		}()
-
-		By("checking the resources are exist while the PVC is in used")
-		Consistently(func() error {
+		By("deleting the MantleRestore")
+		_, _, err = kubectl("delete", "mantlerestore", "-n", test.tenantNamespace, test.mantleRestoreName1)
+		Expect(err).NotTo(HaveOccurred())
+		By("checking the MantleRestore is deleted")
+		Eventually(func(g Gomega) {
 			_, _, err = kubectl("get", "mantlerestore", "-n", test.tenantNamespace, test.mantleRestoreName1)
-			if err != nil {
-				return err
-			}
+			g.Expect(err).To(HaveOccurred())
+		}).Should(Succeed())
+
+		By("checking the PV and RBD image exists while the PVC is in use")
+		Consistently(func(g Gomega) error {
+			_, _, err := kubectl("get", "pv", pvName)
+			g.Expect(err).NotTo(HaveOccurred())
 
 			_, err = getRBDInfo(cephCluster1Namespace, test.poolName, imageName)
 			return err
@@ -315,66 +317,14 @@ func (test *restoreTest) testCleanup() {
 		_, _, err = kubectl("delete", "pod", "-n", test.tenantNamespace, podName)
 		Expect(err).NotTo(HaveOccurred())
 
-		By("checking the resources are deleted after the PVC is released")
-		Eventually(func() error {
-			_, _, err = kubectl("get", "mantlerestore", "-n", test.tenantNamespace, test.mantleRestoreName1)
-			return err
-		}).Should(HaveOccurred())
-	})
-
-	It("should fail to delete the MantleRestore if failed to remove rbd image", func() {
-		imageName := fmt.Sprintf("mantle-%s-%s", test.tenantNamespace, test.mantleRestoreName1)
-
-		test.cleanup()
-
-		err := applyPVCTemplate(test.tenantNamespace, test.pvcName, test.storageClassName)
-		Expect(err).NotTo(HaveOccurred())
-		err = applyMantleBackupTemplate(test.tenantNamespace, test.pvcName, test.mantleBackupName1)
-		Expect(err).NotTo(HaveOccurred())
-		err = applyMantleRestoreTemplate(test.tenantNamespace, test.mantleRestoreName1, test.mantleBackupName1)
-		Expect(err).NotTo(HaveOccurred())
-
-		Eventually(func() bool {
-			return isMantleRestoreReady(test.tenantNamespace, test.mantleRestoreName1)
-		}).Should(BeTrue())
-
-		// wait for the reconcile to finish
-		time.Sleep(10 * time.Second)
-
-		By("edit the pool name to a non-exist pool")
-		_, _, err = kubectl("patch", "mantlerestore", "-n", test.tenantNamespace, test.mantleRestoreName1,
-			"--subresource", "status", "--type", "json",
-			"-p", `[{"op": "replace", "path": "/status/pool", "value": "non-exist-pool"}]`)
-		Expect(err).NotTo(HaveOccurred())
-
-		By("deleting the first MantleRestore")
-		go func() {
-			_, _, err = kubectl("delete", "mantlerestore", "-n", test.tenantNamespace, test.mantleRestoreName1)
-			Expect(err).NotTo(HaveOccurred())
-		}()
-
-		By("checking the MantleRestore is not deleted")
-		Consistently(func() error {
-			_, _, err = kubectl("get", "mantlerestore", "-n", test.tenantNamespace, test.mantleRestoreName1)
-			if err != nil {
-				return err
-			}
+		By("checking the PV and RBD image is deleted")
+		Eventually(func(g Gomega) {
+			_, _, err := kubectl("get", "pv", pvName)
+			g.Expect(err).To(HaveOccurred())
 
 			_, err = getRBDInfo(cephCluster1Namespace, test.poolName, imageName)
-			return err
-		}, 30*time.Second).ShouldNot(HaveOccurred())
-
-		By("revert pool name to original")
-		_, _, err = kubectl("patch", "mantlerestore", "-n", test.tenantNamespace, test.mantleRestoreName1,
-			"--subresource", "status", "--type", "json", "-p",
-			fmt.Sprintf(`[{"op": "replace", "path": "/status/pool", "value": "%s"}]`, test.poolName))
-		Expect(err).NotTo(HaveOccurred())
-
-		By("checking the MantleRestore is deleted")
-		Eventually(func() error {
-			_, _, err = kubectl("get", "mantlerestore", "-n", test.tenantNamespace, test.mantleRestoreName1)
-			return err
-		}).Should(HaveOccurred())
+			g.Expect(err).To(HaveOccurred())
+		}).Should(Succeed())
 	})
 }
 
