@@ -29,10 +29,14 @@ type MantleRestoreReconciler struct {
 }
 
 const (
-	MantleRestoreFinalizerName = "mantlerestore.mantle.cybozu.io/finalizer"
-	RestoringPVFinalizerName   = "mantle.cybozu.io/restoring-pv-finalizer"
-	PVAnnotationRestoredBy     = "mantle.cybozu.io/restored-by"
-	PVCAnnotationRestoredBy    = "mantle.cybozu.io/restored-by"
+	MantleRestoreFinalizerName      = "mantlerestore.mantle.cybozu.io/finalizer"
+	RestoringPVFinalizerName        = "mantle.cybozu.io/restoring-pv-finalizer"
+	PVAnnotationRestoredBy          = "mantle.cybozu.io/restored-by"
+	PVAnnotationRestoredByName      = "mantle.cybozu.io/restored-by-name"
+	PVAnnotationRestoredByNamespace = "mantle.cybozu.io/restored-by-namespace"
+	PVCAnnotationRestoredBy         = "mantle.cybozu.io/restored-by"
+	labelRestoringPVKey             = "mantle.cybozu.io/restoring-pv"
+	labelRestoringPVValue           = "true"
 )
 
 // +kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlerbackup,verbs=get;list;watch
@@ -259,6 +263,8 @@ func (r *MantleRestoreReconciler) createOrUpdateRestoringPV(ctx context.Context,
 				pvName, pv.Annotations[PVAnnotationRestoredBy])
 		}
 		pv.Annotations[PVAnnotationRestoredBy] = restoredBy
+		pv.Annotations[PVAnnotationRestoredByName] = restore.GetName()
+		pv.Annotations[PVAnnotationRestoredByNamespace] = restore.GetNamespace()
 
 		// get the source PV from the backup
 		srcPV := corev1.PersistentVolume{}
@@ -267,6 +273,11 @@ func (r *MantleRestoreReconciler) createOrUpdateRestoringPV(ctx context.Context,
 		}
 
 		controllerutil.AddFinalizer(&pv, RestoringPVFinalizerName)
+
+		if pv.Labels == nil {
+			pv.Labels = map[string]string{}
+		}
+		pv.Labels[labelRestoringPVKey] = labelRestoringPVValue
 
 		pv.Spec = *srcPV.Spec.DeepCopy()
 		pv.Spec.ClaimRef = nil
@@ -383,6 +394,9 @@ func (r *MantleRestoreReconciler) deleteRestoringPV(ctx context.Context, restore
 	pv := corev1.PersistentVolume{}
 	if err := r.client.Get(ctx, client.ObjectKey{Name: r.restoringPVName(restore)}, &pv); err != nil {
 		if errors.IsNotFound(err) {
+			// NOTE: Since the cache of the client may be stale, we may look
+			// over some PVs that should be removed here.  Such PVs will be
+			// removed by GarbageCollectorRunner.
 			return nil
 		}
 		return fmt.Errorf("failed to get PV: %v", err)

@@ -56,6 +56,7 @@ var (
 	objectStorageEndpoint   string
 	caCertConfigMapSrc      string
 	caCertKeySrc            string
+	gcInterval              string
 
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
@@ -95,6 +96,8 @@ func init() {
 	flags.StringVar(&caCertKeySrc, "ca-cert-key", "ca.crt",
 		"The key of the ConfigMap specified by --ca-cert-config-map that contains the intermediate certificate. "+
 			"The default value is ca.crt. This option is just ignored if --ca-cert-configmap isn't specified.")
+	flags.StringVar(&gcInterval, "gc-interval", "1h",
+		"The time period between each garbage collection for orphaned resources.")
 
 	goflags := flag.NewFlagSet("goflags", flag.ExitOnError)
 	zapOpts.Development = true
@@ -151,6 +154,17 @@ func setupReconcilers(mgr manager.Manager, primarySettings *controller.PrimarySe
 		caCertConfigMap = &caCertConfigMapSrc
 	}
 
+	parsedGCInterval, err := time.ParseDuration(gcInterval)
+	if err != nil {
+		setupLog.Error(err, "faield to parse gc interval", "gcInterval", gcInterval)
+		return err
+	}
+	if parsedGCInterval < 1*time.Second {
+		err := fmt.Errorf("the specified gc interval is too short: %s", parsedGCInterval.String())
+		setupLog.Error(err, "failed to validate gc interval", "gcInterval", gcInterval)
+		return err
+	}
+
 	backupReconciler := controller.NewMantleBackupReconciler(
 		mgr.GetClient(),
 		mgr.GetScheme(),
@@ -203,6 +217,13 @@ func setupReconcilers(mgr manager.Manager, primarySettings *controller.PrimarySe
 	}
 
 	//+kubebuilder:scaffold:builder
+
+	if err := mgr.Add(
+		controller.NewGarbageCollectorRunner(mgr.GetClient(), parsedGCInterval, managedCephClusterID),
+	); err != nil {
+		setupLog.Error(err, "unable to create runner", "runner", "GarbageCollectorRunner")
+		return err
+	}
 
 	return nil
 }
