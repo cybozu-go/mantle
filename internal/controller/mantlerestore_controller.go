@@ -312,6 +312,10 @@ func (r *MantleRestoreReconciler) createOrUpdateRestoringPVC(ctx context.Context
 		pvc.Spec = *srcPVC.Spec.DeepCopy()
 		pvc.Spec.VolumeName = r.restoringPVName(restore)
 
+		if err := controllerutil.SetControllerReference(restore, &pvc, r.Scheme); err != nil {
+			return fmt.Errorf("failed to set controller reference: %w", err)
+		}
+
 		return nil
 	})
 

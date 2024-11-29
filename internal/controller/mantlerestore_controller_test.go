@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 type mantleRestoreControllerUnitTest struct {
@@ -224,6 +225,10 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPVC() {
 		Expect(pvc1.Spec.StorageClassName).To(Equal(test.srcPVC.Spec.StorageClassName))
 		Expect(pvc1.Spec.VolumeMode).To(Equal(test.srcPVC.Spec.VolumeMode))
 		Expect(pvc1.Spec.VolumeName).To(Equal(fmt.Sprintf("mr-%s-%s", test.tenantNamespace, restore.Name)))
+		Expect(controllerutil.HasControllerReference(&pvc1)).To(BeTrue())
+		Expect(*pvc1.GetObjectMeta().GetOwnerReferences()[0].Controller).To(BeTrue())
+		Expect(pvc1.GetObjectMeta().GetOwnerReferences()[0].Kind).To(Equal("MantleRestore"))
+		Expect(pvc1.GetObjectMeta().GetOwnerReferences()[0].UID).To(Equal(restore.GetUID()))
 	})
 
 	It("should skip creating a PVC if it already exists", func(ctx SpecContext) {
