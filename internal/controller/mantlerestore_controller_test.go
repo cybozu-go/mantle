@@ -290,9 +290,11 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPVC() {
 		err = k8sClient.Update(ctx, &pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = k8sClient.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &pvc)
-		Expect(err).To(HaveOccurred())
-		Expect(errors.IsNotFound(err)).To(BeTrue())
+		Eventually(ctx, func(g Gomega) {
+			err = k8sClient.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &pvc)
+			g.Expect(err).To(HaveOccurred())
+			g.Expect(errors.IsNotFound(err)).To(BeTrue())
+		}).Should(Succeed())
 	})
 
 	It("should skip deleting the PVC if it does not exist", func(ctx SpecContext) {
