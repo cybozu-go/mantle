@@ -1391,6 +1391,11 @@ func (r *MantleBackupReconciler) startImport(
 	backup *mantlev1.MantleBackup,
 	target *snapshotTarget,
 ) (ctrl.Result, error) {
+	if !r.doesMantleBackupHaveSyncModeAnnot(backup) {
+		// SetSynchronizingg is not called yet or the cache is stale.
+		return ctrl.Result{Requeue: true}, nil
+	}
+
 	if result, err := r.isExportDataAlreadyUploaded(ctx, backup); err != nil || !result.IsZero() {
 		return result, err
 	}
@@ -1413,6 +1418,12 @@ func (r *MantleBackupReconciler) startImport(
 	}
 
 	return ctrl.Result{}, nil
+}
+
+func (r *MantleBackupReconciler) doesMantleBackupHaveSyncModeAnnot(backup *mantlev1.MantleBackup) bool {
+	annots := backup.GetAnnotations()
+	syncMode, ok := annots[annotSyncMode]
+	return ok && (syncMode == syncModeFull || syncMode == syncModeIncremental)
 }
 
 func (r *MantleBackupReconciler) prepareObjectStorageClient(ctx context.Context) error {
