@@ -1689,6 +1689,7 @@ blkdiscard /dev/discard-rbd
 						DevicePath: "/dev/discard-rbd",
 					},
 				},
+				ImagePullPolicy: corev1.PullIfNotPresent,
 			},
 		}
 
