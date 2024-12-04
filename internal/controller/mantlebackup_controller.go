@@ -423,6 +423,10 @@ func (r *MantleBackupReconciler) reconcileAsPrimary(ctx context.Context, backup 
 func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
+	if err := r.prepareObjectStorageClient(ctx); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	if !isCreatedWhenMantleControllerWasSecondary(backup) {
 		logger.Info(
 			"skipping to reconcile the MantleBackup created by a different mantle-controller to prevent accidental data loss",
@@ -1474,9 +1478,6 @@ func (r *MantleBackupReconciler) isExportDataAlreadyUploaded(
 	ctx context.Context,
 	target *mantlev1.MantleBackup,
 ) (ctrl.Result, error) {
-	if err := r.prepareObjectStorageClient(ctx); err != nil {
-		return ctrl.Result{}, err
-	}
 	uploaded, err := r.objectStorageClient.Exists(
 		ctx,
 		makeObjectNameOfExportedData(target.GetName(), target.GetAnnotations()[annotRemoteUID]),

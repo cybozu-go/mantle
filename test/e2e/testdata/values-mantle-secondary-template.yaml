@@ -6,6 +6,7 @@ controller:
   objectStorageBucketName: {OBJECT_STORAGE_BUCKET_NAME}
   objectStorageEndpoint: {OBJECT_STORAGE_ENDPOINT}
   envSecret: export-data
+  gcInterval: 1s
 
 secondaryService:
   type: NodePort

@@ -85,6 +85,9 @@ spec:
             {{- with .Values.controller.exportDataStorageClass }}
             - --export-data-storage-class={{ . }}
             {{- end }}
+            {{- with .Values.controller.gcInterval }}
+            - --gc-interval={{ . }}
+            {{- end }}
           env:
             - name: POD_NAME
               valueFrom:

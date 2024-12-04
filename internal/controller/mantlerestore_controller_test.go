@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 type mantleRestoreControllerUnitTest struct {
@@ -66,7 +67,6 @@ func (test *mantleRestoreControllerUnitTest) setupEnv() {
 		// just allocate the reconciler, and does not start it.
 		test.reconciler = NewMantleRestoreReconciler(
 			test.mgrUtil.GetManager().GetClient(),
-			test.mgrUtil.GetManager().GetAPIReader(),
 			test.mgrUtil.GetManager().GetScheme(),
 			resMgr.ClusterID,
 			RoleStandalone,
@@ -144,7 +144,7 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPV() {
 	})
 
 	It("should create a correct PV", func(ctx SpecContext) {
-		err := test.reconciler.createRestoringPV(ctx, restore, test.backup)
+		err := test.reconciler.createOrUpdateRestoringPV(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: fmt.Sprintf("mr-%s-%s", test.tenantNamespace, restore.Name)}, &pv1)
@@ -168,7 +168,7 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPV() {
 	})
 
 	It("should skip creating a PV if it already exists", func(ctx SpecContext) {
-		err := test.reconciler.createRestoringPV(ctx, restore, test.backup)
+		err := test.reconciler.createOrUpdateRestoringPV(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
 		By("PV should not be updated")
@@ -187,7 +187,7 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPV() {
 		restoreDifferent := restore.DeepCopy()
 		restoreDifferent.UID = types.UID(util.GetUniqueName("uid-"))
 
-		err := test.reconciler.createRestoringPV(ctx, restoreDifferent, test.backup)
+		err := test.reconciler.createOrUpdateRestoringPV(ctx, restoreDifferent, test.backup)
 		Expect(err).To(HaveOccurred())
 
 		By("PV should not be updated")
@@ -212,7 +212,7 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPVC() {
 	})
 
 	It("should create a correct PVC", func(ctx SpecContext) {
-		err := test.reconciler.createRestoringPVC(ctx, restore, test.backup)
+		err := test.reconciler.createOrUpdateRestoringPVC(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &pvc1)
@@ -225,10 +225,14 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPVC() {
 		Expect(pvc1.Spec.StorageClassName).To(Equal(test.srcPVC.Spec.StorageClassName))
 		Expect(pvc1.Spec.VolumeMode).To(Equal(test.srcPVC.Spec.VolumeMode))
 		Expect(pvc1.Spec.VolumeName).To(Equal(fmt.Sprintf("mr-%s-%s", test.tenantNamespace, restore.Name)))
+		Expect(controllerutil.HasControllerReference(&pvc1)).To(BeTrue())
+		Expect(*pvc1.GetObjectMeta().GetOwnerReferences()[0].Controller).To(BeTrue())
+		Expect(pvc1.GetObjectMeta().GetOwnerReferences()[0].Kind).To(Equal("MantleRestore"))
+		Expect(pvc1.GetObjectMeta().GetOwnerReferences()[0].UID).To(Equal(restore.GetUID()))
 	})
 
 	It("should skip creating a PVC if it already exists", func(ctx SpecContext) {
-		err := test.reconciler.createRestoringPVC(ctx, restore, test.backup)
+		err := test.reconciler.createOrUpdateRestoringPVC(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
 		By("PVC should not be updated")
@@ -247,7 +251,7 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPVC() {
 		restoreDifferent := restore.DeepCopy()
 		restoreDifferent.UID = types.UID(util.GetUniqueName("uid-"))
 
-		err := test.reconciler.createRestoringPVC(ctx, restoreDifferent, test.backup)
+		err := test.reconciler.createOrUpdateRestoringPVC(ctx, restoreDifferent, test.backup)
 		Expect(err).To(HaveOccurred())
 
 		By("PVC should not be updated")
@@ -273,22 +277,24 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPVC() {
 	It("should delete the PVC", func(ctx SpecContext) {
 		var pvc corev1.PersistentVolumeClaim
 
-		err := test.reconciler.createRestoringPVC(ctx, restore, test.backup)
+		err := test.reconciler.createOrUpdateRestoringPVC(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
-		// remove pvc-protection finalizer from PVC to allow deletion
+		err = test.reconciler.deleteRestoringPVC(ctx, restore)
+		Expect(err).NotTo(HaveOccurred())
+
+		// remove finalizers from PVC to allow deletion
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &pvc)
 		Expect(err).NotTo(HaveOccurred())
 		pvc.Finalizers = nil
 		err = k8sClient.Update(ctx, &pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = test.reconciler.deleteRestoringPVC(ctx, restore)
-		Expect(err).NotTo(HaveOccurred())
-
-		err = k8sClient.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &pvc)
-		Expect(err).To(HaveOccurred())
-		Expect(errors.IsNotFound(err)).To(BeTrue())
+		Eventually(ctx, func(g Gomega) {
+			err = k8sClient.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &pvc)
+			g.Expect(err).To(HaveOccurred())
+			g.Expect(errors.IsNotFound(err)).To(BeTrue())
+		}).Should(Succeed())
 	})
 
 	It("should skip deleting the PVC if it does not exist", func(ctx SpecContext) {
@@ -301,30 +307,22 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPVC() {
 		restoreDifferent := restore.DeepCopy()
 		restoreDifferent.UID = types.UID(util.GetUniqueName("uid-"))
 
-		err := test.reconciler.createRestoringPVC(ctx, restore, test.backup)
+		err := test.reconciler.createOrUpdateRestoringPVC(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
-		// remove pvc-protection finalizer from PVC to allow deletion
+		err = test.reconciler.deleteRestoringPVC(ctx, restoreDifferent)
+		Expect(err).To(HaveOccurred())
+
+		// remove finalizers from PVC to allow deletion
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &pvc)
 		Expect(err).NotTo(HaveOccurred())
 		pvc.Finalizers = nil
 		err = k8sClient.Update(ctx, &pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = test.reconciler.deleteRestoringPVC(ctx, restoreDifferent)
-		Expect(err).To(HaveOccurred())
-
 		// cleanup
 		err = test.reconciler.deleteRestoringPVC(ctx, restore)
 		Expect(err).NotTo(HaveOccurred())
-	})
-
-	It("should return an error, if the PVC having finalizer", func(ctx SpecContext) {
-		err := test.reconciler.createRestoringPVC(ctx, restore, test.backup)
-		Expect(err).NotTo(HaveOccurred())
-
-		err = test.reconciler.deleteRestoringPVC(ctx, restore)
-		Expect(err).To(HaveOccurred())
 	})
 }
 
@@ -338,17 +336,17 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPV() {
 	It("should delete the PV", func(ctx SpecContext) {
 		var pv corev1.PersistentVolume
 
-		err := test.reconciler.createRestoringPV(ctx, restore, test.backup)
+		err := test.reconciler.createOrUpdateRestoringPV(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
-		// remove pv-protection finalizer from PV to allow deletion
+		err = test.reconciler.deleteRestoringPV(ctx, restore)
+		Expect(err).NotTo(HaveOccurred())
+
+		// remove finalizers from PV to allow deletion
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: test.reconciler.restoringPVName(restore)}, &pv)
 		Expect(err).NotTo(HaveOccurred())
 		pv.Finalizers = nil
 		err = k8sClient.Update(ctx, &pv)
-		Expect(err).NotTo(HaveOccurred())
-
-		err = test.reconciler.deleteRestoringPV(ctx, restore)
 		Expect(err).NotTo(HaveOccurred())
 
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: test.reconciler.restoringPVName(restore)}, &pv)
@@ -366,30 +364,22 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPV() {
 		restoreDifferent := restore.DeepCopy()
 		restoreDifferent.UID = types.UID(util.GetUniqueName("uid-"))
 
-		err := test.reconciler.createRestoringPV(ctx, restore, test.backup)
+		err := test.reconciler.createOrUpdateRestoringPV(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
-		// remove pv-protection finalizer from PV to allow deletion
+		err = test.reconciler.deleteRestoringPV(ctx, restoreDifferent)
+		Expect(err).To(HaveOccurred())
+
+		// remove finalizers from PV to allow deletion
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: test.reconciler.restoringPVName(restore)}, &pv)
 		Expect(err).NotTo(HaveOccurred())
 		pv.Finalizers = nil
 		err = k8sClient.Update(ctx, &pv)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = test.reconciler.deleteRestoringPV(ctx, restoreDifferent)
-		Expect(err).To(HaveOccurred())
-
 		// cleanup
 		err = test.reconciler.deleteRestoringPV(ctx, restore)
 		Expect(err).NotTo(HaveOccurred())
-	})
-
-	It("should return an error, if the PV having finalizer", func(ctx SpecContext) {
-		err := test.reconciler.createRestoringPV(ctx, restore, test.backup)
-		Expect(err).NotTo(HaveOccurred())
-
-		err = test.reconciler.deleteRestoringPV(ctx, restore)
-		Expect(err).To(HaveOccurred())
 	})
 }
 

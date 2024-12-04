@@ -22,7 +22,6 @@ import (
 // MantleRestoreReconciler reconciles a MantleRestore object
 type MantleRestoreReconciler struct {
 	client               client.Client
-	reader               client.Reader
 	Scheme               *runtime.Scheme
 	managedCephClusterID string
 	ceph                 ceph.CephCmd
@@ -30,9 +29,14 @@ type MantleRestoreReconciler struct {
 }
 
 const (
-	MantleRestoreFinalizerName = "mantlerestore.mantle.cybozu.io/finalizer"
-	PVAnnotationRestoredBy     = "mantle.cybozu.io/restored-by"
-	PVCAnnotationRestoredBy    = "mantle.cybozu.io/restored-by"
+	MantleRestoreFinalizerName      = "mantlerestore.mantle.cybozu.io/finalizer"
+	RestoringPVFinalizerName        = "mantle.cybozu.io/restoring-pv-finalizer"
+	PVAnnotationRestoredBy          = "mantle.cybozu.io/restored-by"
+	PVAnnotationRestoredByName      = "mantle.cybozu.io/restored-by-name"
+	PVAnnotationRestoredByNamespace = "mantle.cybozu.io/restored-by-namespace"
+	PVCAnnotationRestoredBy         = "mantle.cybozu.io/restored-by"
+	labelRestoringPVKey             = "mantle.cybozu.io/restoring-pv"
+	labelRestoringPVValue           = "true"
 )
 
 // +kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlerbackup,verbs=get;list;watch
@@ -41,17 +45,16 @@ const (
 // +kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlerestores/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=persistentvolumes/finalizers,verbs=update
 
 func NewMantleRestoreReconciler(
 	client client.Client,
-	reader client.Reader,
 	scheme *runtime.Scheme,
 	managedCephClusterID,
 	role string,
 ) *MantleRestoreReconciler {
 	return &MantleRestoreReconciler{
 		client:               client,
-		reader:               reader,
 		Scheme:               scheme,
 		managedCephClusterID: managedCephClusterID,
 		ceph:                 ceph.NewCephCmd(),
@@ -163,13 +166,13 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, restore *mantlev1
 	}
 
 	// create a restore PV with the clone image
-	if err := r.createRestoringPV(ctx, restore, &backup); err != nil {
+	if err := r.createOrUpdateRestoringPV(ctx, restore, &backup); err != nil {
 		logger.Error(err, "failed to create PV")
 		return ctrl.Result{}, err
 	}
 
 	// create a restore PVC with the restore PV
-	if err := r.createRestoringPVC(ctx, restore, &backup); err != nil {
+	if err := r.createOrUpdateRestoringPVC(ctx, restore, &backup); err != nil {
 		logger.Error(err, "failed to create PVC")
 		return ctrl.Result{}, err
 	}
@@ -241,93 +244,93 @@ func (r *MantleRestoreReconciler) cloneImageFromBackup(ctx context.Context, rest
 	return r.ceph.RBDClone(restore.Status.Pool, bkImage, backup.Name, r.restoringRBDImageName(restore), features)
 }
 
-func (r *MantleRestoreReconciler) createRestoringPV(ctx context.Context, restore *mantlev1.MantleRestore, backup *mantlev1.MantleBackup) error {
+func (r *MantleRestoreReconciler) createOrUpdateRestoringPV(ctx context.Context, restore *mantlev1.MantleRestore, backup *mantlev1.MantleBackup) error {
 	pvName := r.restoringPVName(restore)
 	restoredBy := string(restore.UID)
 
-	// check if the PV already exists
-	existingPV := corev1.PersistentVolume{}
-	if err := r.client.Get(ctx, client.ObjectKey{Name: pvName}, &existingPV); err != nil {
-		if !errors.IsNotFound(err) {
-			return fmt.Errorf("failed to get existing PV: %v", err)
+	var pv corev1.PersistentVolume
+	pv.SetName(pvName)
+	_, err := ctrl.CreateOrUpdate(ctx, r.client, &pv, func() error {
+		if !pv.GetDeletionTimestamp().IsZero() {
+			return fmt.Errorf("the restoring PV already began to be deleted: %s", pvName)
 		}
 
-	} else if existingPV.Annotations[PVAnnotationRestoredBy] != restoredBy {
-		return fmt.Errorf("existing PV is having different MantleRestore UID: %s, %s", pvName, existingPV.Annotations[PVAnnotationRestoredBy])
-	} else {
-		// PV already exists and restored by the same MantleRestore
+		if pv.Annotations == nil {
+			pv.Annotations = map[string]string{}
+		}
+		if annot, ok := pv.Annotations[PVAnnotationRestoredBy]; ok && annot != restoredBy {
+			return fmt.Errorf("the existing PV is having different MantleRestore UID: %s, %s",
+				pvName, pv.Annotations[PVAnnotationRestoredBy])
+		}
+		pv.Annotations[PVAnnotationRestoredBy] = restoredBy
+		pv.Annotations[PVAnnotationRestoredByName] = restore.GetName()
+		pv.Annotations[PVAnnotationRestoredByNamespace] = restore.GetNamespace()
+
+		// get the source PV from the backup
+		srcPV := corev1.PersistentVolume{}
+		if err := json.Unmarshal([]byte(backup.Status.PVManifest), &srcPV); err != nil {
+			return fmt.Errorf("failed to unmarshal PV manifest: %w", err)
+		}
+
+		controllerutil.AddFinalizer(&pv, RestoringPVFinalizerName)
+
+		if pv.Labels == nil {
+			pv.Labels = map[string]string{}
+		}
+		pv.Labels[labelRestoringPVKey] = labelRestoringPVValue
+
+		pv.Spec = *srcPV.Spec.DeepCopy()
+		pv.Spec.ClaimRef = nil
+		pv.Spec.CSI.VolumeAttributes = map[string]string{
+			"clusterID":     srcPV.Spec.CSI.VolumeAttributes["clusterID"],
+			"pool":          srcPV.Spec.CSI.VolumeAttributes["pool"],
+			"staticVolume":  "true",
+			"imageFeatures": srcPV.Spec.CSI.VolumeAttributes["imageFeatures"] + ",deep-flatten",
+		}
+		pv.Spec.CSI.VolumeHandle = r.restoringRBDImageName(restore)
+		pv.Spec.PersistentVolumeReclaimPolicy = corev1.PersistentVolumeReclaimRetain
+
 		return nil
-	}
+	})
 
-	// get the source PV from the backup
-	srcPV := corev1.PersistentVolume{}
-	err := json.Unmarshal([]byte(backup.Status.PVManifest), &srcPV)
-	if err != nil {
-		return fmt.Errorf("failed to unmarshal PV manifest: %v", err)
-	}
-
-	// create a new restoring PV corresponding to a restoring RBD image
-	newPV := corev1.PersistentVolume{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: pvName,
-			Annotations: map[string]string{
-				PVAnnotationRestoredBy: restoredBy,
-			},
-		},
-		Spec: *srcPV.Spec.DeepCopy(),
-	}
-	newPV.Spec.ClaimRef = nil
-	newPV.Spec.CSI.VolumeAttributes = map[string]string{
-		"clusterID":     srcPV.Spec.CSI.VolumeAttributes["clusterID"],
-		"pool":          srcPV.Spec.CSI.VolumeAttributes["pool"],
-		"staticVolume":  "true",
-		"imageFeatures": srcPV.Spec.CSI.VolumeAttributes["imageFeatures"] + ",deep-flatten",
-	}
-	newPV.Spec.CSI.VolumeHandle = r.restoringRBDImageName(restore)
-	newPV.Spec.PersistentVolumeReclaimPolicy = corev1.PersistentVolumeReclaimRetain
-
-	return r.client.Create(ctx, &newPV)
+	return err
 }
 
-func (r *MantleRestoreReconciler) createRestoringPVC(ctx context.Context, restore *mantlev1.MantleRestore, backup *mantlev1.MantleBackup) error {
+func (r *MantleRestoreReconciler) createOrUpdateRestoringPVC(ctx context.Context, restore *mantlev1.MantleRestore, backup *mantlev1.MantleBackup) error {
 	pvcName := restore.Name
 	pvcNamespace := restore.Namespace
 	restoredBy := string(restore.UID)
 
-	// check if the PVC already exists
-	existingPVC := corev1.PersistentVolumeClaim{}
-	if err := r.client.Get(ctx, client.ObjectKey{Name: pvcName, Namespace: pvcNamespace}, &existingPVC); err != nil {
-		if !errors.IsNotFound(err) {
-			return fmt.Errorf("failed to get existing PVC: %v", err)
+	var pvc corev1.PersistentVolumeClaim
+	pvc.SetName(pvcName)
+	pvc.SetNamespace(pvcNamespace)
+	_, err := ctrl.CreateOrUpdate(ctx, r.client, &pvc, func() error {
+		if pvc.Annotations == nil {
+			pvc.Annotations = map[string]string{}
+		}
+		if annot, ok := pvc.Annotations[PVCAnnotationRestoredBy]; ok && annot != restoredBy {
+			return fmt.Errorf("the existing PVC is having different MantleRestore UID: %s, %s",
+				pvcName, pvc.Annotations[PVCAnnotationRestoredBy])
+		}
+		pvc.Annotations[PVCAnnotationRestoredBy] = restoredBy
+
+		// get the source PVC from the backup
+		srcPVC := corev1.PersistentVolumeClaim{}
+		if err := json.Unmarshal([]byte(backup.Status.PVCManifest), &srcPVC); err != nil {
+			return fmt.Errorf("failed to unmarshal PVC manifest: %w", err)
 		}
 
-	} else if existingPVC.Annotations[PVCAnnotationRestoredBy] != restoredBy {
-		return fmt.Errorf("existing PVC is having different MantleRestore UID: %s, %s", pvcName, existingPVC.Annotations[PVCAnnotationRestoredBy])
-	} else {
-		// PVC already exists and restored by the same MantleRestore
+		pvc.Spec = *srcPVC.Spec.DeepCopy()
+		pvc.Spec.VolumeName = r.restoringPVName(restore)
+
+		if err := controllerutil.SetControllerReference(restore, &pvc, r.Scheme); err != nil {
+			return fmt.Errorf("failed to set controller reference: %w", err)
+		}
+
 		return nil
-	}
+	})
 
-	// get the source PVC from the backup
-	srcPVC := corev1.PersistentVolumeClaim{}
-	err := json.Unmarshal([]byte(backup.Status.PVCManifest), &srcPVC)
-	if err != nil {
-		return fmt.Errorf("failed to unmarshal PVC manifest: %v", err)
-	}
-
-	newPVC := corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      pvcName,
-			Namespace: pvcNamespace,
-			Annotations: map[string]string{
-				PVCAnnotationRestoredBy: restoredBy,
-			},
-		},
-		Spec: *srcPVC.Spec.DeepCopy(),
-	}
-	newPVC.Spec.VolumeName = r.restoringPVName(restore)
-
-	return r.client.Create(ctx, &newPVC)
+	return err
 }
 
 func (r *MantleRestoreReconciler) cleanup(ctx context.Context, restore *mantlev1.MantleRestore) (ctrl.Result, error) {
@@ -352,12 +355,6 @@ func (r *MantleRestoreReconciler) cleanup(ctx context.Context, restore *mantlev1
 		return ctrl.Result{}, err
 	}
 
-	// delete the clone image
-	if err := r.removeRBDImage(ctx, restore); err != nil {
-		logger.Error(err, "failed to remove image")
-		return ctrl.Result{}, err
-	}
-
 	// remove the finalizer
 	controllerutil.RemoveFinalizer(restore, MantleRestoreFinalizerName)
 	err = r.client.Update(ctx, restore)
@@ -370,13 +367,11 @@ func (r *MantleRestoreReconciler) cleanup(ctx context.Context, restore *mantlev1
 }
 
 // deleteRestoringPVC deletes the restoring PVC.
-// To delete RBD image, it returns an error if it still exists to ensure no one uses the PVC.
-// Note: it must use reader rather than client to check PVC existence to avoid oversighting a PVC not in the cache.
 func (r *MantleRestoreReconciler) deleteRestoringPVC(ctx context.Context, restore *mantlev1.MantleRestore) error {
 	pvcName := restore.Name
 	pvcNamespace := restore.Namespace
 	pvc := corev1.PersistentVolumeClaim{}
-	if err := r.reader.Get(ctx, client.ObjectKey{Name: pvcName, Namespace: pvcNamespace}, &pvc); err != nil {
+	if err := r.client.Get(ctx, client.ObjectKey{Name: pvcName, Namespace: pvcNamespace}, &pvc); err != nil {
 		if errors.IsNotFound(err) {
 			return nil
 		}
@@ -391,23 +386,17 @@ func (r *MantleRestoreReconciler) deleteRestoringPVC(ctx context.Context, restor
 		return fmt.Errorf("failed to delete PVC: %v", err)
 	}
 
-	if err := r.reader.Get(ctx, client.ObjectKey{Name: pvcName, Namespace: pvcNamespace}, &pvc); err != nil {
-		if errors.IsNotFound(err) {
-			return nil
-		}
-		return fmt.Errorf("failed to get PVC: %v", err)
-	} else {
-		return fmt.Errorf("PVC still exists: %s", pvcName)
-	}
+	return nil
 }
 
 // deleteRestoringPV deletes the restoring PV.
-// To delete RBD image, it returns an error if it still exists to ensure no one uses the PV.
-// Note: it must use reader rather than client to check PVC existence to avoid oversighting a PV not in the cache.
 func (r *MantleRestoreReconciler) deleteRestoringPV(ctx context.Context, restore *mantlev1.MantleRestore) error {
 	pv := corev1.PersistentVolume{}
-	if err := r.reader.Get(ctx, client.ObjectKey{Name: r.restoringPVName(restore)}, &pv); err != nil {
+	if err := r.client.Get(ctx, client.ObjectKey{Name: r.restoringPVName(restore)}, &pv); err != nil {
 		if errors.IsNotFound(err) {
+			// NOTE: Since the cache of the client may be stale, we may look
+			// over some PVs that should be removed here.  Such PVs will be
+			// removed by GarbageCollectorRunner.
 			return nil
 		}
 		return fmt.Errorf("failed to get PV: %v", err)
@@ -421,31 +410,7 @@ func (r *MantleRestoreReconciler) deleteRestoringPV(ctx context.Context, restore
 		return fmt.Errorf("failed to delete PV: %v", err)
 	}
 
-	if err := r.reader.Get(ctx, client.ObjectKey{Name: r.restoringPVName(restore)}, &pv); err != nil {
-		if errors.IsNotFound(err) {
-			return nil
-		}
-		return fmt.Errorf("failed to get PV: %v", err)
-	} else {
-		return fmt.Errorf("PV still exists: %s", pv.Name)
-	}
-}
-
-func (r *MantleRestoreReconciler) removeRBDImage(ctx context.Context, restore *mantlev1.MantleRestore) error {
-	logger := log.FromContext(ctx)
-	image := r.restoringRBDImageName(restore)
-	pool := restore.Status.Pool
-	logger.Info("removing image", "pool", pool, "image", image)
-	images, err := r.ceph.RBDLs(pool)
-	if err != nil {
-		return fmt.Errorf("failed to list RBD images: %v", err)
-	}
-
-	if !slices.Contains(images, image) {
-		return nil
-	}
-
-	return r.ceph.RBDRm(pool, image)
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

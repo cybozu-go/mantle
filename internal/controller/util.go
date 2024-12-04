@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -12,28 +14,44 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+var errEmptyClusterID error = errors.New("cluster ID is empty")
+
+func getCephClusterIDFromSCName(ctx context.Context, k8sClient client.Client, storageClassName string) (string, error) {
+	var storageClass storagev1.StorageClass
+	err := k8sClient.Get(ctx, types.NamespacedName{Name: storageClassName}, &storageClass)
+	if err != nil {
+		return "", fmt.Errorf("failed to get StorageClass: %s: %w", storageClassName, err)
+	}
+
+	// Check if the MantleBackup resource being reconciled is managed by the CephCluster we are in charge of.
+	if !strings.HasSuffix(storageClass.Provisioner, ".rbd.csi.ceph.com") {
+		return "", fmt.Errorf("SC is not managed by RBD: %s: %w", storageClassName, errEmptyClusterID)
+	}
+	clusterID, ok := storageClass.Parameters["clusterID"]
+	if !ok {
+		return "", fmt.Errorf("clusterID not found: %s: %w", storageClassName, errEmptyClusterID)
+	}
+
+	return clusterID, nil
+}
+
 func getCephClusterIDFromPVC(ctx context.Context, k8sClient client.Client, pvc *corev1.PersistentVolumeClaim) (string, error) {
 	logger := log.FromContext(ctx)
+
 	storageClassName := pvc.Spec.StorageClassName
 	if storageClassName == nil {
 		logger.Info("not managed storage class", "namespace", pvc.Namespace, "pvc", pvc.Name)
 		return "", nil
 	}
-	var storageClass storagev1.StorageClass
-	err := k8sClient.Get(ctx, types.NamespacedName{Name: *storageClassName}, &storageClass)
-	if err != nil {
-		return "", err
-	}
 
-	// Check if the MantleBackup resource being reconciled is managed by the CephCluster we are in charge of.
-	if !strings.HasSuffix(storageClass.Provisioner, ".rbd.csi.ceph.com") {
-		logger.Info("SC is not managed by RBD", "namespace", pvc.Namespace, "pvc", pvc.Name, "storageClassName", *storageClassName)
-		return "", nil
-	}
-	clusterID, ok := storageClass.Parameters["clusterID"]
-	if !ok {
-		logger.Info("clusterID not found", "namespace", pvc.Namespace, "pvc", pvc.Name, "storageClassName", *storageClassName)
-		return "", nil
+	clusterID, err := getCephClusterIDFromSCName(ctx, k8sClient, *storageClassName)
+	if err != nil {
+		logger.Info("failed to get ceph cluster ID from StorageClass name",
+			"error", err, "namespace", pvc.Namespace, "pvc", pvc.Name, "storageClassName", *storageClassName)
+		if errors.Is(err, errEmptyClusterID) {
+			return "", nil
+		}
+		return "", err
 	}
 
 	return clusterID, nil

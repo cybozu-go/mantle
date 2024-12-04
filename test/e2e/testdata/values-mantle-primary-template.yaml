@@ -5,3 +5,4 @@ controller:
   objectStorageEndpoint: {OBJECT_STORAGE_ENDPOINT}
   envSecret: export-data
   exportDataStorageClass: rook-ceph-block
+  gcInterval: 1s

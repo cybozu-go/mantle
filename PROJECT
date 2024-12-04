@@ -35,4 +35,8 @@ resources:
   kind: MantleBackupConfig
   path: github.com/cybozu-go/mantle/api/v1
   version: v1
+- controller: true
+  domain: cybozu.io
+  kind: PersistentVolume
+  version: v1
 version: "3"
