@@ -183,12 +183,11 @@ func (s *SecondaryServer) CreateOrUpdateMantleBackup(
 		return nil, fmt.Errorf("CreateOrUpdate failed: %w", err)
 	}
 
-	// Update the status here because ctrl.CreateOrUpdate doesn't change the status.
-	if err := updateStatus(ctx, s.client, &backup, func() error {
-		backup.Status.CreatedAt = backupReceived.Status.CreatedAt
-		return nil
-	}); err != nil {
-		return nil, fmt.Errorf("updateStatus failed: %w", err)
+	// Use Patch here because updateStatus is likely to fail due to "the object has been modified" error.
+	newBackup := backup.DeepCopy()
+	newBackup.Status.CreatedAt = backupReceived.Status.CreatedAt
+	if err := s.client.Status().Patch(ctx, newBackup, client.MergeFrom(&backup)); err != nil {
+		return nil, fmt.Errorf("status patch failed: %w", err)
 	}
 
 	return &proto.CreateOrUpdateMantleBackupResponse{}, nil
