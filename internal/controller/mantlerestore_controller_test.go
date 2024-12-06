@@ -349,9 +349,11 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPV() {
 		err = k8sClient.Update(ctx, &pv)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = k8sClient.Get(ctx, client.ObjectKey{Name: test.reconciler.restoringPVName(restore)}, &pv)
-		Expect(err).To(HaveOccurred())
-		Expect(errors.IsNotFound(err)).To(BeTrue())
+		Eventually(ctx, func(g Gomega) {
+			err = k8sClient.Get(ctx, client.ObjectKey{Name: test.reconciler.restoringPVName(restore)}, &pv)
+			g.Expect(err).To(HaveOccurred())
+			g.Expect(errors.IsNotFound(err)).To(BeTrue())
+		}).Should(Succeed())
 	})
 
 	It("should skip deleting the PV if it does not exist", func(ctx SpecContext) {
