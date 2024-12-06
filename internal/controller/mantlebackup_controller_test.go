@@ -121,6 +121,7 @@ var _ = Describe("MantleBackup controller", func() {
 				"dummy image",
 				"",
 				nil,
+				nil,
 			)
 			reconciler.ceph = testutil.NewFakeRBD()
 			err := reconciler.SetupWithManager(mgrUtil.GetManager())
@@ -354,6 +355,11 @@ var _ = Describe("MantleBackup controller", func() {
 					Endpoint:        "",
 					CACertConfigMap: nil,
 					CACertKey:       nil,
+				},
+				&ProxySettings{
+					HttpProxy:  "",
+					HttpsProxy: "",
+					NoProxy:    "",
 				},
 			)
 			reconciler.ceph = testutil.NewFakeRBD()
@@ -800,7 +806,7 @@ var _ = Describe("prepareForDataSynchronization", func() {
 		}
 
 		mbr := NewMantleBackupReconciler(ctrlClient,
-			ctrlClient.Scheme(), "test", RolePrimary, nil, "dummy image", "", nil)
+			ctrlClient.Scheme(), "test", RolePrimary, nil, "dummy image", "", nil, nil)
 
 		ret, err := mbr.prepareForDataSynchronization(context.Background(),
 			backup, grpcClient)
@@ -1232,6 +1238,11 @@ var _ = Describe("export", func() {
 			"dummy image",
 			"",
 			nil,
+			&ProxySettings{
+				HttpProxy:  "",
+				HttpsProxy: "",
+				NoProxy:    "",
+			},
 		)
 
 		ns = resMgr.CreateNamespace()
@@ -1351,6 +1362,7 @@ var _ = Describe("export", func() {
 			"dummy image",
 			"",
 			nil,
+			nil,
 		)
 		ns2 := resMgr.CreateNamespace()
 		createAndExportMantleBackup(mbr2, "target2", ns2)
@@ -1385,6 +1397,7 @@ var _ = Describe("import", func() {
 			"dummy-image",
 			"dummy-env-secret",
 			&ObjectStorageSettings{},
+			nil,
 		)
 		mbr.objectStorageClient = mockObjectStorage
 		mbr.ceph = testutil.NewFakeRBD()

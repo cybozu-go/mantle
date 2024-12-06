@@ -57,6 +57,9 @@ var (
 	caCertConfigMapSrc      string
 	caCertKeySrc            string
 	gcInterval              string
+	httpProxy               string
+	httpsProxy              string
+	noProxy                 string
 
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
@@ -98,6 +101,12 @@ func init() {
 			"The default value is ca.crt. This option is just ignored if --ca-cert-configmap isn't specified.")
 	flags.StringVar(&gcInterval, "gc-interval", "1h",
 		"The time period between each garbage collection for orphaned resources.")
+	flags.StringVar(&httpProxy, "http-proxy", "",
+		"The proxy URL for HTTP requests to the object storage and the gRPC endpoint of secondary mantle.")
+	flags.StringVar(&httpsProxy, "https-proxy", "",
+		"The proxy URL for HTTPS requests to the object storage and the gRPC endpoint of secondary mantle.")
+	flags.StringVar(&noProxy, "no-proxy", "",
+		"A string that contains comma-separated values specifying hosts that should be excluded from proxying.")
 
 	goflags := flag.NewFlagSet("goflags", flag.ExitOnError)
 	zapOpts.Development = true
@@ -179,6 +188,11 @@ func setupReconcilers(mgr manager.Manager, primarySettings *controller.PrimarySe
 			CACertConfigMap: caCertConfigMap,
 			CACertKey:       &caCertKeySrc,
 		},
+		&controller.ProxySettings{
+			HttpProxy:  httpProxy,
+			HttpsProxy: httpsProxy,
+			NoProxy:    noProxy,
+		},
 	)
 	if err := backupReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MantleBackup")
@@ -233,6 +247,22 @@ func setupStandalone(mgr manager.Manager) error {
 }
 
 func setupPrimary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup) error {
+	// Setup environment variables related to proxies before creating a gRPC client.
+	// cf. https://github.com/grpc/grpc-go/blob/adad26df1826bf2fb66ad56ff32a62b98bf5cb3a/Documentation/proxy.md
+	// cf. https://pkg.go.dev/golang.org/x/net/http/httpproxy
+	if err := os.Setenv("HTTP_PROXY", httpProxy); err != nil {
+		setupLog.Error(err, "failed to set HTTP_PROXY environment variable")
+		return err
+	}
+	if err := os.Setenv("HTTPS_PROXY", httpsProxy); err != nil {
+		setupLog.Error(err, "failed to set HTTPS_PROXY environment variable")
+		return err
+	}
+	if err := os.Setenv("NO_PROXY", noProxy); err != nil {
+		setupLog.Error(err, "failed to set NO_PROXY environment variable")
+		return err
+	}
+
 	conn, err := grpc.NewClient(
 		mantleServiceEndpoint,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),

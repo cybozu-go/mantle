@@ -88,6 +88,15 @@ spec:
             {{- with .Values.controller.gcInterval }}
             - --gc-interval={{ . }}
             {{- end }}
+            {{- with .Values.controller.httpProxy }}
+            - --http-proxy={{ . }}
+            {{- end }}
+            {{- with .Values.controller.httpsProxy }}
+            - --https-proxy={{ . }}
+            {{- end }}
+            {{- with .Values.controller.noProxy }}
+            - --no-proxy={{ . }}
+            {{- end }}
           env:
             - name: POD_NAME
               valueFrom:
