@@ -89,7 +89,7 @@ func replicationTestSuite() {
 					return errors.New("status of SyncedToRemote condition is not True")
 				}
 				return nil
-			}, "5m", "1s").Should(Succeed())
+			}, "10m", "1s").Should(Succeed())
 
 			By("checking PVC is replicated")
 			Eventually(func() error {

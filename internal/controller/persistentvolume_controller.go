@@ -64,6 +64,11 @@ func (r *PersistentVolumeReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, fmt.Errorf("failed to get PersistentVolume: %w", err)
 	}
 
+	// Make sure the PV has the finalizer.
+	if !controllerutil.ContainsFinalizer(&pv, RestoringPVFinalizerName) {
+		return ctrl.Result{}, nil
+	}
+
 	// Check if the PV is managed by the target Ceph cluster.
 	clusterID, err := getCephClusterIDFromSCName(ctx, r.client, pv.Spec.StorageClassName)
 	if err != nil {
@@ -74,11 +79,6 @@ func (r *PersistentVolumeReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 	if clusterID != r.managedCephClusterID {
 		logger.Info("PV is not provisioned by the target Ceph cluster", "pv", pv.Name, "clusterID", clusterID)
-		return ctrl.Result{}, nil
-	}
-
-	// Make sure the PV has the finalizer.
-	if !controllerutil.ContainsFinalizer(&pv, RestoringPVFinalizerName) {
 		return ctrl.Result{}, nil
 	}
 
