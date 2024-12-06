@@ -34,6 +34,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 )
 
+func getEnvValue(envVarAry []corev1.EnvVar, name string) (string, error) {
+	for _, env := range envVarAry {
+		if env.Name == name {
+			return env.Value, nil
+		}
+	}
+	return "", errors.New("name not found")
+}
+
 var _ = Describe("MantleBackup controller", func() {
 	var mgrUtil testutil.ManagerUtil
 	var reconciler *MantleBackupReconciler
@@ -120,6 +129,7 @@ var _ = Describe("MantleBackup controller", func() {
 				nil,
 				"dummy image",
 				"",
+				nil,
 				nil,
 			)
 			reconciler.ceph = testutil.NewFakeRBD()
@@ -332,6 +342,11 @@ var _ = Describe("MantleBackup controller", func() {
 	Context("when the role is `primary`", func() {
 		var mockCtrl *gomock.Controller
 		var grpcClient *proto.MockMantleServiceClient
+		proxySettings := &ProxySettings{
+			HttpProxy:  "dummy http proxy",
+			HttpsProxy: "dummy https proxy",
+			NoProxy:    "no proxy",
+		}
 		BeforeEach(func() {
 			mgrUtil = testutil.NewManagerUtil(context.Background(), cfg, scheme.Scheme)
 
@@ -355,6 +370,7 @@ var _ = Describe("MantleBackup controller", func() {
 					CACertConfigMap: nil,
 					CACertKey:       nil,
 				},
+				proxySettings,
 			)
 			reconciler.ceph = testutil.NewFakeRBD()
 
@@ -548,6 +564,17 @@ var _ = Describe("MantleBackup controller", func() {
 				g.Expect(*jobUpload.Spec.Template.Spec.SecurityContext.RunAsUser).To(Equal(int64(10000)))
 				g.Expect(*jobUpload.Spec.Template.Spec.SecurityContext.RunAsGroup).To(Equal(int64(10000)))
 				g.Expect(*jobUpload.Spec.Template.Spec.SecurityContext.RunAsNonRoot).To(Equal(true))
+
+				// Make sure HTTP_PROXY, HTTPS_PROXY, and NO_PROXY environment variables are correctly set.
+				httpProxy, err := getEnvValue(jobUpload.Spec.Template.Spec.Containers[0].Env, "HTTP_PROXY")
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(httpProxy).To(Equal(proxySettings.HttpProxy))
+				httpsProxy, err := getEnvValue(jobUpload.Spec.Template.Spec.Containers[0].Env, "HTTPS_PROXY")
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(httpsProxy).To(Equal(proxySettings.HttpsProxy))
+				noProxy, err := getEnvValue(jobUpload.Spec.Template.Spec.Containers[0].Env, "NO_PROXY")
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(noProxy).To(Equal(proxySettings.NoProxy))
 			}).WithContext(ctx).Should(Succeed())
 
 			// Make the all existing MantleBackups in the primary Mantle
@@ -800,7 +827,7 @@ var _ = Describe("prepareForDataSynchronization", func() {
 		}
 
 		mbr := NewMantleBackupReconciler(ctrlClient,
-			ctrlClient.Scheme(), "test", RolePrimary, nil, "dummy image", "", nil)
+			ctrlClient.Scheme(), "test", RolePrimary, nil, "dummy image", "", nil, nil)
 
 		ret, err := mbr.prepareForDataSynchronization(context.Background(),
 			backup, grpcClient)
@@ -1232,6 +1259,11 @@ var _ = Describe("export", func() {
 			"dummy image",
 			"",
 			nil,
+			&ProxySettings{
+				HttpProxy:  "",
+				HttpsProxy: "",
+				NoProxy:    "",
+			},
 		)
 
 		ns = resMgr.CreateNamespace()
@@ -1351,6 +1383,7 @@ var _ = Describe("export", func() {
 			"dummy image",
 			"",
 			nil,
+			nil,
 		)
 		ns2 := resMgr.CreateNamespace()
 		createAndExportMantleBackup(mbr2, "target2", ns2)
@@ -1385,6 +1418,7 @@ var _ = Describe("import", func() {
 			"dummy-image",
 			"dummy-env-secret",
 			&ObjectStorageSettings{},
+			nil,
 		)
 		mbr.objectStorageClient = mockObjectStorage
 		mbr.ceph = testutil.NewFakeRBD()

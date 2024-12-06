@@ -72,6 +72,12 @@ type ObjectStorageSettings struct {
 	Endpoint        string
 }
 
+type ProxySettings struct {
+	HttpProxy  string
+	HttpsProxy string
+	NoProxy    string
+}
+
 // MantleBackupReconciler reconciles a MantleBackup object
 type MantleBackupReconciler struct {
 	client.Client
@@ -85,6 +91,7 @@ type MantleBackupReconciler struct {
 	envSecret             string
 	objectStorageSettings *ObjectStorageSettings // This should be non-nil if and only if role equals 'primary' or 'secondary'.
 	objectStorageClient   objectstorage.Bucket
+	proxySettings         *ProxySettings
 }
 
 // NewMantleBackupReconciler returns NodeReconciler.
@@ -97,6 +104,7 @@ func NewMantleBackupReconciler(
 	podImage string,
 	envSecret string,
 	objectStorageSettings *ObjectStorageSettings,
+	proxySettings *ProxySettings,
 ) *MantleBackupReconciler {
 	return &MantleBackupReconciler{
 		Client:                client,
@@ -109,6 +117,7 @@ func NewMantleBackupReconciler(
 		podImage:              podImage,
 		envSecret:             envSecret,
 		objectStorageSettings: objectStorageSettings,
+		proxySettings:         proxySettings,
 	}
 }
 
@@ -1324,6 +1333,18 @@ func (r *MantleBackupReconciler) createOrUpdateExportDataUploadJob(ctx context.C
 								Key: "AWS_SECRET_ACCESS_KEY",
 							},
 						},
+					},
+					{
+						Name:  "HTTP_PROXY",
+						Value: r.proxySettings.HttpProxy,
+					},
+					{
+						Name:  "HTTPS_PROXY",
+						Value: r.proxySettings.HttpsProxy,
+					},
+					{
+						Name:  "NO_PROXY",
+						Value: r.proxySettings.NoProxy,
 					},
 				},
 				Image:           r.podImage,

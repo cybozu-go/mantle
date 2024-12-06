@@ -6,3 +6,6 @@ controller:
   envSecret: export-data
   exportDataStorageClass: rook-ceph-block
   gcInterval: 1s
+  #httpProxy: http://host.minikube.internal:8899
+  #httpsProxy: http://host.minikube.internal:8899
+  #noProxy: localhost,127.0.0.1,10.96.0.0/12
