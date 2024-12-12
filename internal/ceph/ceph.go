@@ -5,10 +5,15 @@ import (
 	"time"
 )
 
-type RBDInfo struct {
-	ParentPool  string
-	ParentImage string
-	ParentSnap  string
+type RBDImageInfo struct {
+	ID     string              `json:"id"`
+	Parent *RBDImageInfoParent `json:"parent,omitempty"`
+}
+
+type RBDImageInfoParent struct {
+	Pool     string `json:"pool"`
+	Image    string `json:"image"`
+	Snapshot string `json:"snapshot"`
 }
 
 type RBDTimeStamp struct {
@@ -35,9 +40,11 @@ type RBDSnapshot struct {
 
 type CephCmd interface {
 	RBDClone(pool, srcImage, srcSnap, dstImage, features string) error
-	RBDInfo(pool, image string) (*RBDInfo, error)
+	RBDInfo(pool, image string) (*RBDImageInfo, error)
 	RBDLs(pool string) ([]string, error)
 	RBDRm(pool, image string) error
+	RBDTrashMv(pool, image string) error
+	CephRBDTaskAddTrashRemove(pool, image string) error
 	RBDSnapCreate(pool, image, snap string) error
 	RBDSnapLs(pool, image string) ([]RBDSnapshot, error)
 	RBDSnapRm(pool, image, snap string) error

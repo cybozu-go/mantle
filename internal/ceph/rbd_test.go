@@ -97,9 +97,10 @@ var _ = Describe("CephCmd.RBDInfo", func() {
 		cmd := mockedCephCmd(m)
 		info, err := cmd.RBDInfo("pool", "image")
 		Expect(err).ToNot(HaveOccurred())
-		Expect(info.ParentPool).To(Equal("pool"))
-		Expect(info.ParentImage).To(Equal("csi-vol-39ca122a-88e1-44b6-aa2b-cae64fb383db"))
-		Expect(info.ParentSnap).To(Equal("test-snap"))
+		Expect(info.Parent).NotTo(BeNil())
+		Expect(info.Parent.Pool).To(Equal("pool"))
+		Expect(info.Parent.Image).To(Equal("csi-vol-39ca122a-88e1-44b6-aa2b-cae64fb383db"))
+		Expect(info.Parent.Snapshot).To(Equal("test-snap"))
 	})
 
 	It("should return an error, if the command failed", func() {

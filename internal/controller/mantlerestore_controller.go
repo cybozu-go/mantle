@@ -224,8 +224,11 @@ func (r *MantleRestoreReconciler) cloneImageFromBackup(ctx context.Context, rest
 		if err != nil {
 			return fmt.Errorf("failed to get RBD info: %v", err)
 		}
+		if info.Parent == nil {
+			return fmt.Errorf("failed to get RBD info: parent field is empty")
+		}
 
-		if info.ParentPool == restore.Status.Pool && info.ParentImage == bkImage && info.ParentSnap == backup.Name {
+		if info.Parent.Pool == restore.Status.Pool && info.Parent.Image == bkImage && info.Parent.Snapshot == backup.Name {
 			logger.Info("image already exists", "image", r.restoringRBDImageName(restore))
 			return nil
 		} else {

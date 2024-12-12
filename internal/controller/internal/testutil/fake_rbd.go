@@ -26,7 +26,7 @@ func (f *fakeRBD) RBDClone(pool, srcImage, srcSnap, dstImage, features string) e
 	return nil
 }
 
-func (f *fakeRBD) RBDInfo(pool, image string) (*ceph.RBDInfo, error) {
+func (f *fakeRBD) RBDInfo(pool, image string) (*ceph.RBDImageInfo, error) {
 	return nil, nil
 }
 
@@ -35,6 +35,14 @@ func (f *fakeRBD) RBDLs(pool string) ([]string, error) {
 }
 
 func (f *fakeRBD) RBDRm(pool, image string) error {
+	return nil
+}
+
+func (f *fakeRBD) RBDTrashMv(pool, image string) error {
+	return nil
+}
+
+func (f *fakeRBD) CephRBDTaskAddTrashRemove(pool, image string) error {
 	return nil
 }
 
