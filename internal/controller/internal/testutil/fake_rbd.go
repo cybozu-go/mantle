@@ -38,6 +38,14 @@ func (f *fakeRBD) RBDRm(pool, image string) error {
 	return nil
 }
 
+func (f *fakeRBD) RBDTrashMv(pool, image string) error {
+	return nil
+}
+
+func (f *fakeRBD) CephRBDTaskAddTrashRemove(pool, image string) error {
+	return nil
+}
+
 func (f *fakeRBD) RBDSnapCreate(pool, image, snap string) error {
 	key := pool + "/" + image
 

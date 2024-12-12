@@ -62,6 +62,24 @@ func (c *cephCmdImpl) RBDRm(pool, image string) error {
 	return nil
 }
 
+// RBDTrashMv removes an RBD image asynchronously.
+func (c *cephCmdImpl) RBDTrashMv(pool, image string) error {
+	_, err := c.command.execute("rbd", "trash", "mv", fmt.Sprintf("%s/%s", pool, image))
+	if err != nil {
+		return fmt.Errorf("failed to move RBD image to trash: %w", err)
+	}
+	return nil
+}
+
+// CephRBDTaskTrashRemove adds a task to remove the image from trash.
+func (c *cephCmdImpl) CephRBDTaskAddTrashRemove(pool, imageID string) error {
+	_, err := c.command.execute("ceph", "rbd", "task", "add", "trash", "remove", fmt.Sprintf("%s/%s", pool, imageID))
+	if err != nil {
+		return fmt.Errorf("failed to add task to remove the image from trash: %w", err)
+	}
+	return nil
+}
+
 // RBDSnapCreate creates an RBD snapshot.
 func (c *cephCmdImpl) RBDSnapCreate(pool, image, snap string) error {
 	_, err := c.command.execute("rbd", "snap", "create", fmt.Sprintf("%s/%s@%s", pool, image, snap))

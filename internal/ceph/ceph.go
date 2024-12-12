@@ -43,6 +43,8 @@ type CephCmd interface {
 	RBDInfo(pool, image string) (*RBDImageInfo, error)
 	RBDLs(pool string) ([]string, error)
 	RBDRm(pool, image string) error
+	RBDTrashMv(pool, image string) error
+	CephRBDTaskAddTrashRemove(pool, image string) error
 	RBDSnapCreate(pool, image, snap string) error
 	RBDSnapLs(pool, image string) ([]RBDSnapshot, error)
 	RBDSnapRm(pool, image, snap string) error
