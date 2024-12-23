@@ -1,6 +1,7 @@
 package singlek8s
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -9,6 +10,8 @@ import (
 	"github.com/cybozu-go/mantle/test/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 )
 
 const (
@@ -163,6 +166,42 @@ func (test *backupTest) testCase1() {
 			}
 			return nil
 		}).Should(Succeed())
+	})
+
+	It("should not create any resources necessary only for primary or secondary mantle controller", func() {
+		// Check that export and upload Jobs are not created.
+		stdout, _, err := kubectl("-n", cephCluster1Namespace, "get", "job", "-o", "json")
+		Expect(err).NotTo(HaveOccurred())
+		var jobs batchv1.JobList
+		err = json.Unmarshal(stdout, &jobs)
+		Expect(err).NotTo(HaveOccurred())
+		for _, job := range jobs.Items {
+			Expect(strings.HasPrefix(job.GetName(), "mantle-export-")).To(BeFalse())
+			Expect(strings.HasPrefix(job.GetName(), "mantle-upload-")).To(BeFalse())
+			Expect(strings.HasPrefix(job.GetName(), "mantle-import-")).To(BeFalse())
+			Expect(strings.HasPrefix(job.GetName(), "mantle-discard-")).To(BeFalse())
+		}
+
+		// Check that export and discard PVC are not created.
+		stdout, _, err = kubectl("-n", cephCluster1Namespace, "get", "pvc", "-o", "json")
+		Expect(err).NotTo(HaveOccurred())
+		var pvcs corev1.PersistentVolumeClaimList
+		err = json.Unmarshal(stdout, &pvcs)
+		Expect(err).NotTo(HaveOccurred())
+		for _, pvc := range pvcs.Items {
+			Expect(strings.HasPrefix(pvc.GetName(), "mantle-export-")).To(BeFalse())
+			Expect(strings.HasPrefix(pvc.GetName(), "mantle-discard-")).To(BeFalse())
+		}
+
+		// Check that discard PV is not created.
+		stdout, _, err = kubectl("-n", cephCluster1Namespace, "get", "pv", "-o", "json")
+		Expect(err).NotTo(HaveOccurred())
+		var pvs corev1.PersistentVolumeList
+		err = json.Unmarshal(stdout, &pvs)
+		Expect(err).NotTo(HaveOccurred())
+		for _, pv := range pvs.Items {
+			Expect(strings.HasPrefix(pv.GetName(), "mantle-discard-")).To(BeFalse())
+		}
 	})
 
 	It("should not delete MantleBackup resource when delete backup target PVC", func() {
