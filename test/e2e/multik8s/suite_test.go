@@ -2,12 +2,14 @@ package multik8s
 
 import (
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"os"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/cybozu-go/mantle/internal/controller"
 	"github.com/cybozu-go/mantle/test/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -35,6 +37,7 @@ func TestMtest(t *testing.T) {
 var _ = Describe("Mantle", func() {
 	Context("wait controller to be ready", waitControllerToBeReady)
 	Context("replication test", replicationTestSuite)
+	Context("change to standalone", changeToStandalone)
 })
 
 func waitControllerToBeReady() {
@@ -178,6 +181,105 @@ func replicationTestSuite() {
 				}
 				return nil
 			}).Should(Succeed())
+		})
+	})
+}
+
+func changeToStandalone() {
+	Describe("change to standalone", func() {
+		var namespace, pvcName, backupName string
+
+		It("should replicate a MantleBackup resource", func() {
+			namespace = util.GetUniqueName("ns-")
+			pvcName = util.GetUniqueName("pvc-")
+			backupName = util.GetUniqueName("mb-")
+
+			By("setting up the environment")
+			Eventually(func() error {
+				return createNamespace(primaryK8sCluster, namespace)
+			}).Should(Succeed())
+			Eventually(func() error {
+				return createNamespace(secondaryK8sCluster, namespace)
+			}).Should(Succeed())
+			Eventually(func() error {
+				return applyRBDPoolAndSCTemplate(primaryK8sCluster, cephClusterNamespace)
+			}).Should(Succeed())
+			Eventually(func() error {
+				return applyRBDPoolAndSCTemplate(secondaryK8sCluster, cephClusterNamespace)
+			}).Should(Succeed())
+			Eventually(func() error {
+				return applyPVCTemplate(primaryK8sCluster, namespace, pvcName)
+			}).Should(Succeed())
+
+			By("creating a MantleBackup resource")
+			Eventually(func() error {
+				return applyMantleBackupTemplate(primaryK8sCluster, namespace, pvcName, backupName)
+			}).Should(Succeed())
+
+			By("checking MantleBackup's SyncedToRemote status")
+			Eventually(func() error {
+				mb, err := getMB(primaryK8sCluster, namespace, backupName)
+				if err != nil {
+					return err
+				}
+				if !meta.IsStatusConditionTrue(mb.Status.Conditions, mantlev1.BackupConditionSyncedToRemote) {
+					return errors.New("status of SyncedToRemote condition is not True")
+				}
+				return nil
+			}, "10m", "1s").Should(Succeed())
+		})
+
+		It("should change the roles to standalone", func() {
+			By("changing the primary mantle to standalone")
+			err := changeClusterRole(primaryK8sCluster, controller.RoleStandalone)
+			Expect(err).NotTo(HaveOccurred())
+			By("changing the secondary mantle to standalone")
+			err = changeClusterRole(secondaryK8sCluster, controller.RoleStandalone)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should delete MantleBackup created by primary mantle from standalone mantle", func(ctx SpecContext) {
+			By("deleting the MantleBackup in the primary cluster")
+			_, _, err := kubectl(primaryK8sCluster, nil, "delete", "mb", "-n", namespace, backupName, "--wait=false")
+			Expect(err).NotTo(HaveOccurred())
+
+			By("checking that the MantleBackup is actually deleted")
+			Eventually(ctx, func(g Gomega) {
+				stdout, _, err := kubectl(primaryK8sCluster, nil, "get", "mb", "-n", namespace, "-o", "json")
+				g.Expect(err).NotTo(HaveOccurred())
+				var mbs mantlev1.MantleBackupList
+				err = json.Unmarshal(stdout, &mbs)
+				g.Expect(err).NotTo(HaveOccurred())
+				found := false
+				for _, mb := range mbs.Items {
+					if mb.GetName() == backupName {
+						found = true
+					}
+				}
+				g.Expect(found).To(BeFalse())
+			}).Should(Succeed())
+		})
+
+		It("should NOT delete MantleBackup created by secondary mantle from standalone mantle", func(ctx SpecContext) {
+			By("deleting the MantleBackup in the secondary cluster")
+			_, _, err := kubectl(secondaryK8sCluster, nil, "delete", "mb", "-n", namespace, backupName, "--wait=false")
+			Expect(err).NotTo(HaveOccurred())
+
+			By("checking that the MantleBackup is NOT deleted")
+			Consistently(ctx, func(g Gomega) {
+				stdout, _, err := kubectl(secondaryK8sCluster, nil, "get", "mb", "-n", namespace, "-o", "json")
+				g.Expect(err).NotTo(HaveOccurred())
+				var mbs mantlev1.MantleBackupList
+				err = json.Unmarshal(stdout, &mbs)
+				g.Expect(err).NotTo(HaveOccurred())
+				found := false
+				for _, mb := range mbs.Items {
+					if mb.GetName() == backupName {
+						found = true
+					}
+				}
+				g.Expect(found).To(BeTrue())
+			}, "10s", "1s").Should(Succeed())
 		})
 	})
 }

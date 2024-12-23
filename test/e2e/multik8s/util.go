@@ -4,12 +4,16 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
+	"time"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -112,7 +116,7 @@ func createNamespace(clusterNo int, name string) error {
 	return nil
 }
 
-func applyRBDPoolAndSCTemplate(clusterNo int, namespace string) error {
+func applyRBDPoolAndSCTemplate(clusterNo int, namespace string) error { //nolint:unparam
 	manifest := fmt.Sprintf(
 		testRBDPoolSCTemplate, namespace,
 		namespace, namespace, namespace, namespace)
@@ -147,4 +151,66 @@ func getPVC(clusterNo int, namespace, name string) (*corev1.PersistentVolumeClai
 
 func getMR(clusterNo int, namespace, name string) (*mantlev1.MantleRestore, error) {
 	return getObject[mantlev1.MantleRestore](clusterNo, "mantlerestore", namespace, name)
+}
+
+func getDeploy(clusterNo int, namespace, name string) (*appsv1.Deployment, error) {
+	return getObject[appsv1.Deployment](clusterNo, "deploy", namespace, name)
+}
+
+func changeClusterRole(clusterNo int, newRole string) error {
+	deployName := "mantle-controller"
+	deploy, err := getDeploy(clusterNo, cephClusterNamespace, deployName)
+	if err != nil {
+		return fmt.Errorf("failed to get mantle-controller deploy: %w", err)
+	}
+
+	roleIndex := slices.IndexFunc(
+		deploy.Spec.Template.Spec.Containers[0].Args,
+		func(arg string) bool { return strings.HasPrefix(arg, "--role=") },
+	)
+	if roleIndex == -1 {
+		return errors.New("failed to find --role= argument")
+	}
+
+	_, _, err = kubectl(
+		clusterNo, nil, "patch", "deploy", "-n", cephClusterNamespace, deployName, "--type=json",
+		fmt.Sprintf(
+			`-p=[{"op": "replace", "path": "/spec/template/spec/containers/0/args/%d", "value":"--role=%s"}]`,
+			roleIndex,
+			newRole,
+		),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to patch mantle-controller deploy: %w", err)
+	}
+
+	// Wait for the new controller to start
+	numRetries := 10
+	for i := 0; i < numRetries; i++ {
+		stdout, _, err := kubectl(clusterNo, nil, "get", "pod", "-n", cephClusterNamespace, "-o", "json")
+		if err != nil {
+			return fmt.Errorf("failed to get pod: %w", err)
+		}
+		var pods corev1.PodList
+		err = json.Unmarshal(stdout, &pods)
+		if err != nil {
+			return fmt.Errorf("failed to unmarshal pod list: %w", err)
+		}
+		ready := true
+		for _, pod := range pods.Items {
+			if strings.HasPrefix(pod.GetName(), deployName) {
+				for _, container := range pod.Spec.Containers {
+					if !slices.Contains(container.Args, fmt.Sprintf("--role=%s", newRole)) {
+						ready = false
+					}
+				}
+			}
+		}
+		if ready {
+			break
+		}
+		time.Sleep(10 * time.Second)
+	}
+
+	return nil
 }
