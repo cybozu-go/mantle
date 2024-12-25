@@ -1,9 +1,11 @@
 package multik8s
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"reflect"
 	"testing"
@@ -17,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -52,47 +55,112 @@ func waitControllerToBeReady() {
 	})
 }
 
+func setupEnvironment(namespace, pvcName string) {
+	GinkgoHelper()
+	By("setting up the environment")
+	Eventually(func() error {
+		return createNamespace(primaryK8sCluster, namespace)
+	}).Should(Succeed())
+	Eventually(func() error {
+		return createNamespace(secondaryK8sCluster, namespace)
+	}).Should(Succeed())
+	Eventually(func() error {
+		return applyRBDPoolAndSCTemplate(primaryK8sCluster, cephClusterNamespace)
+	}).Should(Succeed())
+	Eventually(func() error {
+		return applyRBDPoolAndSCTemplate(secondaryK8sCluster, cephClusterNamespace)
+	}).Should(Succeed())
+	Eventually(func() error {
+		return applyPVCTemplate(primaryK8sCluster, namespace, pvcName)
+	}).Should(Succeed())
+}
+
+func writeRandomDataToPV(ctx context.Context, namespace, pvcName string) string {
+	GinkgoHelper()
+	By("writing some random data to PV(C)")
+	writeJobName := util.GetUniqueName("job-")
+	Eventually(ctx, func() error {
+		return applyWriteJobTemplate(primaryK8sCluster, namespace, writeJobName, pvcName)
+	}).Should(Succeed())
+	Eventually(ctx, func(g Gomega) {
+		job, err := getJob(primaryK8sCluster, namespace, writeJobName)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete)).To(BeTrue())
+	}).Should(Succeed())
+	stdout, _, err := kubectl(primaryK8sCluster, nil, "logs", "-n", namespace, "job/"+writeJobName)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(len(stdout)).NotTo(Equal(0))
+	return string(stdout)
+}
+
+func createMantleBackup(namespace, pvcName, backupName string) {
+	GinkgoHelper()
+	By("creating a MantleBackup object")
+	Eventually(func() error {
+		return applyMantleBackupTemplate(primaryK8sCluster, namespace, pvcName, backupName)
+	}).Should(Succeed())
+}
+
+func waitMantleBackupSynced(namespace, backupName string) {
+	GinkgoHelper()
+	By("checking MantleBackup's SyncedToRemote status")
+	Eventually(func() error {
+		mb, err := getMB(primaryK8sCluster, namespace, backupName)
+		if err != nil {
+			return err
+		}
+		if !meta.IsStatusConditionTrue(mb.Status.Conditions, mantlev1.BackupConditionSyncedToRemote) {
+			return errors.New("status of SyncedToRemote condition is not True")
+		}
+		return nil
+	}, "10m", "1s").Should(Succeed())
+}
+
+func ensureCorrectRestoration(
+	clusterNo int,
+	ctx context.Context,
+	namespace, backupName, restoreName, writtenDataHash string,
+) {
+	GinkgoHelper()
+	mountDeployName := util.GetUniqueName("deploy-")
+	clusterName := "primary"
+	if clusterNo == secondaryK8sCluster {
+		clusterName = "secondary"
+	}
+	By(fmt.Sprintf("%s: %s: creating MantleRestore by using the MantleBackup replicated above",
+		clusterName, backupName))
+	Eventually(ctx, func() error {
+		return applyMantleRestoreTemplate(clusterNo, namespace, restoreName, backupName)
+	}).Should(Succeed())
+	By(fmt.Sprintf("%s: %s: checking the MantleRestore can be ready to use", clusterName, backupName))
+	Eventually(ctx, func(g Gomega) {
+		mr, err := getMR(clusterNo, namespace, restoreName)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(meta.IsStatusConditionTrue(mr.Status.Conditions, "ReadyToUse")).To(BeTrue())
+	}).Should(Succeed())
+	By(fmt.Sprintf("%s: %s: checking the MantleRestore has the correct contents", clusterName, backupName))
+	Eventually(ctx, func(g Gomega) {
+		err := applyMountDeployTemplate(clusterNo, namespace, mountDeployName, restoreName)
+		g.Expect(err).NotTo(HaveOccurred())
+		stdout, _, err := kubectl(clusterNo, nil, "exec", "-n", namespace, "deploy/"+mountDeployName, "--",
+			"bash", "-c", "sha256sum /volume/data | awk '{print $1}'")
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(string(stdout)).To(Equal(writtenDataHash))
+	}).Should(Succeed())
+}
+
 func replicationTestSuite() {
 	Describe("replication test", func() {
-		It("should correctly replicate PVC and MantleBackup resources", func() {
+		It("should correctly replicate PVC and MantleBackup resources", func(ctx SpecContext) {
 			namespace := util.GetUniqueName("ns-")
 			pvcName := util.GetUniqueName("pvc-")
 			backupName := util.GetUniqueName("mb-")
 			restoreName := util.GetUniqueName("mr-")
 
-			By("setting up the environment")
-			Eventually(func() error {
-				return createNamespace(primaryK8sCluster, namespace)
-			}).Should(Succeed())
-			Eventually(func() error {
-				return createNamespace(secondaryK8sCluster, namespace)
-			}).Should(Succeed())
-			Eventually(func() error {
-				return applyRBDPoolAndSCTemplate(primaryK8sCluster, cephClusterNamespace)
-			}).Should(Succeed())
-			Eventually(func() error {
-				return applyRBDPoolAndSCTemplate(secondaryK8sCluster, cephClusterNamespace)
-			}).Should(Succeed())
-			Eventually(func() error {
-				return applyPVCTemplate(primaryK8sCluster, namespace, pvcName)
-			}).Should(Succeed())
-
-			By("creating a MantleBackup object")
-			Eventually(func() error {
-				return applyMantleBackupTemplate(primaryK8sCluster, namespace, pvcName, backupName)
-			}).Should(Succeed())
-
-			By("checking MantleBackup's SyncedToRemote status")
-			Eventually(func() error {
-				mb, err := getMB(primaryK8sCluster, namespace, backupName)
-				if err != nil {
-					return err
-				}
-				if !meta.IsStatusConditionTrue(mb.Status.Conditions, mantlev1.BackupConditionSyncedToRemote) {
-					return errors.New("status of SyncedToRemote condition is not True")
-				}
-				return nil
-			}, "10m", "1s").Should(Succeed())
+			setupEnvironment(namespace, pvcName)
+			writtenDataHash := writeRandomDataToPV(ctx, namespace, pvcName)
+			createMantleBackup(namespace, pvcName, backupName)
+			waitMantleBackupSynced(namespace, backupName)
 
 			By("checking PVC is replicated")
 			Eventually(func() error {
@@ -165,22 +233,8 @@ func replicationTestSuite() {
 				return nil
 			}).Should(Succeed())
 
-			By("creating MantleRestore on the secondary k8s cluster by using the MantleBackup replicated above")
-			Eventually(func() error {
-				return applyMantleRestoreTemplate(secondaryK8sCluster, namespace, restoreName, backupName)
-			}).Should(Succeed())
-
-			By("checking MantleRestore can be ready to use")
-			Eventually(func() error {
-				mr, err := getMR(secondaryK8sCluster, namespace, restoreName)
-				if err != nil {
-					return err
-				}
-				if !meta.IsStatusConditionTrue(mr.Status.Conditions, "ReadyToUse") {
-					return errors.New("ReadyToUse of .Status.Conditions is not True")
-				}
-				return nil
-			}).Should(Succeed())
+			ensureCorrectRestoration(primaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
+			ensureCorrectRestoration(secondaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
 		})
 	})
 }
@@ -194,39 +248,9 @@ func changeToStandalone() {
 			pvcName = util.GetUniqueName("pvc-")
 			backupName = util.GetUniqueName("mb-")
 
-			By("setting up the environment")
-			Eventually(func() error {
-				return createNamespace(primaryK8sCluster, namespace)
-			}).Should(Succeed())
-			Eventually(func() error {
-				return createNamespace(secondaryK8sCluster, namespace)
-			}).Should(Succeed())
-			Eventually(func() error {
-				return applyRBDPoolAndSCTemplate(primaryK8sCluster, cephClusterNamespace)
-			}).Should(Succeed())
-			Eventually(func() error {
-				return applyRBDPoolAndSCTemplate(secondaryK8sCluster, cephClusterNamespace)
-			}).Should(Succeed())
-			Eventually(func() error {
-				return applyPVCTemplate(primaryK8sCluster, namespace, pvcName)
-			}).Should(Succeed())
-
-			By("creating a MantleBackup resource")
-			Eventually(func() error {
-				return applyMantleBackupTemplate(primaryK8sCluster, namespace, pvcName, backupName)
-			}).Should(Succeed())
-
-			By("checking MantleBackup's SyncedToRemote status")
-			Eventually(func() error {
-				mb, err := getMB(primaryK8sCluster, namespace, backupName)
-				if err != nil {
-					return err
-				}
-				if !meta.IsStatusConditionTrue(mb.Status.Conditions, mantlev1.BackupConditionSyncedToRemote) {
-					return errors.New("status of SyncedToRemote condition is not True")
-				}
-				return nil
-			}, "10m", "1s").Should(Succeed())
+			setupEnvironment(namespace, pvcName)
+			createMantleBackup(namespace, pvcName, backupName)
+			waitMantleBackupSynced(namespace, backupName)
 		})
 
 		It("should change the roles to standalone", func() {

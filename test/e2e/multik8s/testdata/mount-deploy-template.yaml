@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  selector:
+    matchLabels:
+      app: %s
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: %s
+    spec:
+      securityContext:
+        runAsUser: 10000
+        runAsGroup: 10000
+      containers:
+      - name: ubuntu
+        image: ubuntu:22.04
+        volumeMounts:
+          - name: volume
+            mountPath: /volume
+        command:
+          - bash
+          - -c
+          - |
+            sleep infinity
+      volumes:
+        - name: volume
+          persistentVolumeClaim:
+            claimName: %s

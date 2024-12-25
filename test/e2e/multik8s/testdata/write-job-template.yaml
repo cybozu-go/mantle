@@ -1,0 +1,25 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  template:
+    spec:
+      containers:
+      - name: ubuntu
+        image: ubuntu:22.04
+        command:
+        - bash
+        - -c
+        - |
+          dd if=/dev/urandom of=/volume/data bs=1K count=1 >&/dev/null
+          sha256sum /volume/data | awk '{print $1}'
+        volumeMounts:
+        - name: volume
+          mountPath: /volume
+      restartPolicy: Never
+      volumes:
+      - name: volume
+        persistentVolumeClaim:
+          claimName: %s

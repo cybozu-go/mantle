@@ -14,6 +14,7 @@ import (
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -32,6 +33,10 @@ var (
 	testMantleBackupTemplate string
 	//go:embed testdata/mantlerestore-template.yaml
 	testMantleRestoreTemplate string
+	//go:embed testdata/mount-deploy-template.yaml
+	mountDeployTemplate string
+	//go:embed testdata/write-job-template.yaml
+	writeJobTemplate string
 
 	kubectlPrefixPrimary   = os.Getenv("KUBECTL_PRIMARY")
 	kubectlPrefixSecondary = os.Getenv("KUBECTL_SECONDARY")
@@ -108,6 +113,24 @@ func applyPVCTemplate(clusterNo int, namespace, name string) error {
 	return nil
 }
 
+func applyMountDeployTemplate(clusterNo int, namespace, name, pvcName string) error {
+	manifest := fmt.Sprintf(mountDeployTemplate, name, namespace, name, name, pvcName)
+	_, _, err := kubectl(clusterNo, []byte(manifest), "apply", "-n", namespace, "-f", "-")
+	if err != nil {
+		return fmt.Errorf("kubectl apply mount deploy failed. err: %w", err)
+	}
+	return nil
+}
+
+func applyWriteJobTemplate(clusterNo int, namespace, name, pvcName string) error {
+	manifest := fmt.Sprintf(writeJobTemplate, name, namespace, pvcName)
+	_, _, err := kubectl(clusterNo, []byte(manifest), "apply", "-n", namespace, "-f", "-")
+	if err != nil {
+		return fmt.Errorf("kubectl apply write job failed. err: %w", err)
+	}
+	return nil
+}
+
 func createNamespace(clusterNo int, name string) error {
 	_, _, err := kubectl(clusterNo, nil, "create", "ns", name)
 	if err != nil {
@@ -155,6 +178,10 @@ func getMR(clusterNo int, namespace, name string) (*mantlev1.MantleRestore, erro
 
 func getDeploy(clusterNo int, namespace, name string) (*appsv1.Deployment, error) {
 	return getObject[appsv1.Deployment](clusterNo, "deploy", namespace, name)
+}
+
+func getJob(clusterNo int, namespace, name string) (*batchv1.Job, error) {
+	return getObject[batchv1.Job](clusterNo, "job", namespace, name)
 }
 
 func changeClusterRole(clusterNo int, newRole string) error {
@@ -213,4 +240,16 @@ func changeClusterRole(clusterNo int, newRole string) error {
 	}
 
 	return nil
+}
+
+// IsJobConditionTrue returns true when the conditionType is present and set to
+// `metav1.ConditionTrue`.  Otherwise, it returns false.  Note that we can't use
+// meta.IsStatusConditionTrue because it doesn't accept []JobCondition.
+func IsJobConditionTrue(conditions []batchv1.JobCondition, conditionType batchv1.JobConditionType) bool {
+	for _, cond := range conditions {
+		if cond.Type == conditionType && cond.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
 }
