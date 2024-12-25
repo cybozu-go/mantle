@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -114,6 +116,56 @@ func waitMantleBackupSynced(namespace, backupName string) {
 		}
 		return nil
 	}, "10m", "1s").Should(Succeed())
+}
+
+func ensureTemporaryResourcesRemoved(ctx context.Context) {
+	GinkgoHelper()
+	By("checking all temporary Jobs related to export and import of RBD images are removed")
+	primaryJobList, err := getObjectList[batchv1.JobList](primaryK8sCluster, "job", cephClusterNamespace)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(slices.ContainsFunc(primaryJobList.Items, func(job batchv1.Job) bool {
+		n := job.GetName()
+		return strings.HasPrefix(n, "mantle-export-") ||
+			strings.HasPrefix(n, "mantle-upload-")
+	})).To(BeFalse())
+	secondaryJobList, err := getObjectList[batchv1.JobList](secondaryK8sCluster, "job", cephClusterNamespace)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(slices.ContainsFunc(secondaryJobList.Items, func(job batchv1.Job) bool {
+		n := job.GetName()
+		return strings.HasPrefix(n, "mantle-import-") ||
+			strings.HasPrefix(n, "mantle-discard-")
+	})).To(BeFalse())
+
+	By("checking all temporary PVCs related to export and import of RBD images are removed")
+	primaryPVCList, err := getObjectList[corev1.PersistentVolumeClaimList](
+		primaryK8sCluster, "pvc", cephClusterNamespace)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(slices.ContainsFunc(primaryPVCList.Items, func(pvc corev1.PersistentVolumeClaim) bool {
+		n := pvc.GetName()
+		return strings.HasPrefix(n, "mantle-export-")
+	})).To(BeFalse())
+	secondaryPVCList, err := getObjectList[corev1.PersistentVolumeClaimList](
+		secondaryK8sCluster, "pvc", cephClusterNamespace)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(slices.ContainsFunc(secondaryPVCList.Items, func(pvc corev1.PersistentVolumeClaim) bool {
+		n := pvc.GetName()
+		return strings.HasPrefix(n, "mantle-discard-")
+	})).To(BeFalse())
+
+	By("checking all temporary PVs related to export and import of RBD images are removed")
+	secondaryPVList, err := getObjectList[corev1.PersistentVolumeList](secondaryK8sCluster, "pv", cephClusterNamespace)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(slices.ContainsFunc(secondaryPVList.Items, func(pv corev1.PersistentVolume) bool {
+		n := pv.GetName()
+		return strings.HasPrefix(n, "mantle-discard-")
+	})).To(BeFalse())
+
+	By("checking all temporary objects in the object storage related to export and import of RBD images are removed")
+	objectStorageClient, err := createObjectStorageClient(ctx)
+	Expect(err).NotTo(HaveOccurred())
+	listOutput, err := objectStorageClient.listObjects(ctx)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(len(listOutput.Contents)).To(Equal(0))
 }
 
 func ensureCorrectRestoration(
@@ -233,6 +285,7 @@ func replicationTestSuite() {
 				return nil
 			}).Should(Succeed())
 
+			ensureTemporaryResourcesRemoved(ctx)
 			ensureCorrectRestoration(primaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
 			ensureCorrectRestoration(secondaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
 		})
