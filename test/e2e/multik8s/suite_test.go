@@ -437,6 +437,50 @@ func replicationTestSuite() {
 				return mb.GetName() == backupName1
 			})).To(BeFalse())
 		})
+
+		It("should back up correctly if previous incremental MB is removed in the primary cluster", func(ctx SpecContext) {
+			namespace := util.GetUniqueName("ns-")
+			pvcName := util.GetUniqueName("pvc-")
+			backupName0 := util.GetUniqueName("mb-")
+			backupName1 := util.GetUniqueName("mb-")
+			backupName2 := util.GetUniqueName("mb-")
+			restoreName0 := util.GetUniqueName("mr-")
+			restoreName1 := util.GetUniqueName("mr-")
+			restoreName2 := util.GetUniqueName("mr-")
+
+			setupEnvironment(namespace, pvcName)
+
+			// create M0.
+			writtenDataHash0 := writeRandomDataToPV(ctx, namespace, pvcName)
+			createMantleBackup(namespace, pvcName, backupName0)
+			waitMantleBackupSynced(namespace, backupName0)
+
+			// create M1.
+			writtenDataHash1 := writeRandomDataToPV(ctx, namespace, pvcName)
+			createMantleBackup(namespace, pvcName, backupName1)
+			waitMantleBackupSynced(namespace, backupName1)
+
+			// remove M1.
+			_, _, err := kubectl(primaryK8sCluster, nil, "delete", "mb", "-n", namespace, backupName1)
+			Expect(err).NotTo(HaveOccurred())
+
+			// create M2.
+			writtenDataHash2 := writeRandomDataToPV(ctx, namespace, pvcName)
+			createMantleBackup(namespace, pvcName, backupName2)
+			waitMantleBackupSynced(namespace, backupName2)
+			ensureTemporaryResourcesRemoved(ctx)
+
+			// Make sure M2 and M2' have the same contents.
+			ensureCorrectRestoration(primaryK8sCluster, ctx, namespace, backupName2, restoreName2, writtenDataHash2)
+			ensureCorrectRestoration(secondaryK8sCluster, ctx, namespace, backupName2, restoreName2, writtenDataHash2)
+
+			// Make sure M1' has the same contents.
+			ensureCorrectRestoration(secondaryK8sCluster, ctx, namespace, backupName1, restoreName1, writtenDataHash1)
+
+			// Make sure M0 and M0' have the same contents.
+			ensureCorrectRestoration(primaryK8sCluster, ctx, namespace, backupName0, restoreName0, writtenDataHash0)
+			ensureCorrectRestoration(secondaryK8sCluster, ctx, namespace, backupName0, restoreName0, writtenDataHash0)
+		})
 	})
 }
 
