@@ -323,6 +323,7 @@ func replicationTestSuite() {
 			ensureCorrectRestoration(secondaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
 		})
 
+		//nolint:dupl
 		It("should back up correctly if previous MB is deleted in the secondary cluster", func(ctx SpecContext) {
 			namespace := util.GetUniqueName("ns-")
 			pvcName := util.GetUniqueName("pvc-")
@@ -357,6 +358,7 @@ func replicationTestSuite() {
 			ensureCorrectRestoration(primaryK8sCluster, ctx, namespace, backupName0, restoreName0, writtenDataHash0)
 		})
 
+		//nolint:dupl
 		It("should back up correctly if previous MB is deleted in the primary cluster", func(ctx SpecContext) {
 			namespace := util.GetUniqueName("ns-")
 			pvcName := util.GetUniqueName("pvc-")
