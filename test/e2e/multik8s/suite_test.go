@@ -118,7 +118,7 @@ func waitMantleBackupSynced(namespace, backupName string) {
 	}, "10m", "1s").Should(Succeed())
 }
 
-func ensureTemporaryResourcesRemoved(ctx context.Context) {
+func ensureTemporaryResourcesDeleted(ctx context.Context) {
 	GinkgoHelper()
 	By("checking all temporary Jobs related to export and import of RBD images are removed")
 	primaryJobList, err := getObjectList[batchv1.JobList](primaryK8sCluster, "job", cephClusterNamespace)
@@ -285,7 +285,7 @@ func replicationTestSuite() {
 				return nil
 			}).Should(Succeed())
 
-			ensureTemporaryResourcesRemoved(ctx)
+			ensureTemporaryResourcesDeleted(ctx)
 			ensureCorrectRestoration(primaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
 			ensureCorrectRestoration(secondaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
 		})
@@ -313,7 +313,7 @@ func replicationTestSuite() {
 			writtenDataHash1 := writeRandomDataToPV(ctx, namespace, pvcName)
 			createMantleBackup(namespace, pvcName, backupName1)
 			waitMantleBackupSynced(namespace, backupName1)
-			ensureTemporaryResourcesRemoved(ctx)
+			ensureTemporaryResourcesDeleted(ctx)
 
 			// Make sure M1 and M1' have the same contents.
 			ensureCorrectRestoration(primaryK8sCluster, ctx, namespace, backupName1, restoreName1, writtenDataHash1)
@@ -346,7 +346,7 @@ func replicationTestSuite() {
 			writtenDataHash1 := writeRandomDataToPV(ctx, namespace, pvcName)
 			createMantleBackup(namespace, pvcName, backupName1)
 			waitMantleBackupSynced(namespace, backupName1)
-			ensureTemporaryResourcesRemoved(ctx)
+			ensureTemporaryResourcesDeleted(ctx)
 
 			// Make sure M1 and M1' have the same contents.
 			ensureCorrectRestoration(primaryK8sCluster, ctx, namespace, backupName1, restoreName1, writtenDataHash1)
@@ -370,13 +370,13 @@ func replicationTestSuite() {
 			writtenDataHash0 := writeRandomDataToPV(ctx, namespace, pvcName)
 			createMantleBackup(namespace, pvcName, backupName0)
 			waitMantleBackupSynced(namespace, backupName0)
-			ensureTemporaryResourcesRemoved(ctx)
+			ensureTemporaryResourcesDeleted(ctx)
 
 			// create M1.
 			writtenDataHash1 := writeRandomDataToPV(ctx, namespace, pvcName)
 			createMantleBackup(namespace, pvcName, backupName1)
 			waitMantleBackupSynced(namespace, backupName1)
-			ensureTemporaryResourcesRemoved(ctx)
+			ensureTemporaryResourcesDeleted(ctx)
 
 			// Make sure M1 and M1' have the same contents.
 			ensureCorrectRestoration(primaryK8sCluster, ctx, namespace, backupName1, restoreName1, writtenDataHash1)
@@ -417,7 +417,7 @@ func replicationTestSuite() {
 			writtenDataHash2 := writeRandomDataToPV(ctx, namespace, pvcName)
 			createMantleBackup(namespace, pvcName, backupName2)
 			waitMantleBackupSynced(namespace, backupName2)
-			ensureTemporaryResourcesRemoved(ctx)
+			ensureTemporaryResourcesDeleted(ctx)
 
 			// Make sure M2 and M2' have the same contents.
 			ensureCorrectRestoration(primaryK8sCluster, ctx, namespace, backupName2, restoreName2, writtenDataHash2)
@@ -468,7 +468,7 @@ func replicationTestSuite() {
 			writtenDataHash2 := writeRandomDataToPV(ctx, namespace, pvcName)
 			createMantleBackup(namespace, pvcName, backupName2)
 			waitMantleBackupSynced(namespace, backupName2)
-			ensureTemporaryResourcesRemoved(ctx)
+			ensureTemporaryResourcesDeleted(ctx)
 
 			// Make sure M2 and M2' have the same contents.
 			ensureCorrectRestoration(primaryK8sCluster, ctx, namespace, backupName2, restoreName2, writtenDataHash2)
