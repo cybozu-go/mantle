@@ -80,29 +80,29 @@ func createPVC(ctx context.Context, cluster int, namespace, name string) {
 	}).Should(Succeed())
 }
 
-func writeRandomDataToPV(ctx context.Context, namespace, pvcName string) string {
+func writeRandomDataToPV(ctx context.Context, cluster int, namespace, pvcName string) string {
 	GinkgoHelper()
 	By("writing some random data to PV(C)")
 	writeJobName := util.GetUniqueName("job-")
 	Eventually(ctx, func() error {
-		return applyWriteJobTemplate(primaryK8sCluster, namespace, writeJobName, pvcName)
+		return applyWriteJobTemplate(cluster, namespace, writeJobName, pvcName)
 	}).Should(Succeed())
 	Eventually(ctx, func(g Gomega) {
-		job, err := getJob(primaryK8sCluster, namespace, writeJobName)
+		job, err := getJob(cluster, namespace, writeJobName)
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete)).To(BeTrue())
 	}).Should(Succeed())
-	stdout, _, err := kubectl(primaryK8sCluster, nil, "logs", "-n", namespace, "job/"+writeJobName)
+	stdout, _, err := kubectl(cluster, nil, "logs", "-n", namespace, "job/"+writeJobName)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(len(stdout)).NotTo(Equal(0))
 	return string(stdout)
 }
 
-func createMantleBackup(namespace, pvcName, backupName string) {
+func createMantleBackup(cluster int, namespace, pvcName, backupName string) {
 	GinkgoHelper()
 	By("creating a MantleBackup object")
 	Eventually(func() error {
-		return applyMantleBackupTemplate(primaryK8sCluster, namespace, pvcName, backupName)
+		return applyMantleBackupTemplate(cluster, namespace, pvcName, backupName)
 	}).Should(Succeed())
 }
 
@@ -214,8 +214,8 @@ func replicationTestSuite() {
 
 			setupEnvironment(namespace)
 			createPVC(ctx, primaryK8sCluster, namespace, pvcName)
-			writtenDataHash := writeRandomDataToPV(ctx, namespace, pvcName)
-			createMantleBackup(namespace, pvcName, backupName)
+			writtenDataHash := writeRandomDataToPV(ctx, primaryK8sCluster, namespace, pvcName)
+			createMantleBackup(primaryK8sCluster, namespace, pvcName, backupName)
 			waitMantleBackupSynced(namespace, backupName)
 
 			By("checking PVC is replicated")
@@ -304,10 +304,10 @@ func replicationTestSuite() {
 
 			setupEnvironment(namespace)
 			createPVC(ctx, primaryK8sCluster, namespace, pvcName)
-			writtenDataHash0 := writeRandomDataToPV(ctx, namespace, pvcName)
+			writtenDataHash0 := writeRandomDataToPV(ctx, primaryK8sCluster, namespace, pvcName)
 
 			// create M0.
-			createMantleBackup(namespace, pvcName, backupName0)
+			createMantleBackup(primaryK8sCluster, namespace, pvcName, backupName0)
 			waitMantleBackupSynced(namespace, backupName0)
 
 			// remove M0'.
@@ -315,8 +315,8 @@ func replicationTestSuite() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// create M1.
-			writtenDataHash1 := writeRandomDataToPV(ctx, namespace, pvcName)
-			createMantleBackup(namespace, pvcName, backupName1)
+			writtenDataHash1 := writeRandomDataToPV(ctx, primaryK8sCluster, namespace, pvcName)
+			createMantleBackup(primaryK8sCluster, namespace, pvcName, backupName1)
 			waitMantleBackupSynced(namespace, backupName1)
 			ensureTemporaryResourcesDeleted(ctx)
 
@@ -338,10 +338,10 @@ func replicationTestSuite() {
 
 			setupEnvironment(namespace)
 			createPVC(ctx, primaryK8sCluster, namespace, pvcName)
-			writtenDataHash0 := writeRandomDataToPV(ctx, namespace, pvcName)
+			writtenDataHash0 := writeRandomDataToPV(ctx, primaryK8sCluster, namespace, pvcName)
 
 			// create M0.
-			createMantleBackup(namespace, pvcName, backupName0)
+			createMantleBackup(primaryK8sCluster, namespace, pvcName, backupName0)
 			waitMantleBackupSynced(namespace, backupName0)
 
 			// remove M0.
@@ -349,8 +349,8 @@ func replicationTestSuite() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// create M1.
-			writtenDataHash1 := writeRandomDataToPV(ctx, namespace, pvcName)
-			createMantleBackup(namespace, pvcName, backupName1)
+			writtenDataHash1 := writeRandomDataToPV(ctx, primaryK8sCluster, namespace, pvcName)
+			createMantleBackup(primaryK8sCluster, namespace, pvcName, backupName1)
 			waitMantleBackupSynced(namespace, backupName1)
 			ensureTemporaryResourcesDeleted(ctx)
 
@@ -374,14 +374,14 @@ func replicationTestSuite() {
 			createPVC(ctx, primaryK8sCluster, namespace, pvcName)
 
 			// create M0.
-			writtenDataHash0 := writeRandomDataToPV(ctx, namespace, pvcName)
-			createMantleBackup(namespace, pvcName, backupName0)
+			writtenDataHash0 := writeRandomDataToPV(ctx, primaryK8sCluster, namespace, pvcName)
+			createMantleBackup(primaryK8sCluster, namespace, pvcName, backupName0)
 			waitMantleBackupSynced(namespace, backupName0)
 			ensureTemporaryResourcesDeleted(ctx)
 
 			// create M1.
-			writtenDataHash1 := writeRandomDataToPV(ctx, namespace, pvcName)
-			createMantleBackup(namespace, pvcName, backupName1)
+			writtenDataHash1 := writeRandomDataToPV(ctx, primaryK8sCluster, namespace, pvcName)
+			createMantleBackup(primaryK8sCluster, namespace, pvcName, backupName1)
 			waitMantleBackupSynced(namespace, backupName1)
 			ensureTemporaryResourcesDeleted(ctx)
 
@@ -408,13 +408,13 @@ func replicationTestSuite() {
 			createPVC(ctx, primaryK8sCluster, namespace, pvcName)
 
 			// create M0.
-			writtenDataHash0 := writeRandomDataToPV(ctx, namespace, pvcName)
-			createMantleBackup(namespace, pvcName, backupName0)
+			writtenDataHash0 := writeRandomDataToPV(ctx, primaryK8sCluster, namespace, pvcName)
+			createMantleBackup(primaryK8sCluster, namespace, pvcName, backupName0)
 			waitMantleBackupSynced(namespace, backupName0)
 
 			// create M1.
-			writtenDataHash1 := writeRandomDataToPV(ctx, namespace, pvcName)
-			createMantleBackup(namespace, pvcName, backupName1)
+			writtenDataHash1 := writeRandomDataToPV(ctx, primaryK8sCluster, namespace, pvcName)
+			createMantleBackup(primaryK8sCluster, namespace, pvcName, backupName1)
 			waitMantleBackupSynced(namespace, backupName1)
 
 			// remove M1'.
@@ -422,8 +422,8 @@ func replicationTestSuite() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// create M2.
-			writtenDataHash2 := writeRandomDataToPV(ctx, namespace, pvcName)
-			createMantleBackup(namespace, pvcName, backupName2)
+			writtenDataHash2 := writeRandomDataToPV(ctx, primaryK8sCluster, namespace, pvcName)
+			createMantleBackup(primaryK8sCluster, namespace, pvcName, backupName2)
 			waitMantleBackupSynced(namespace, backupName2)
 			ensureTemporaryResourcesDeleted(ctx)
 
@@ -460,13 +460,13 @@ func replicationTestSuite() {
 			createPVC(ctx, primaryK8sCluster, namespace, pvcName)
 
 			// create M0.
-			writtenDataHash0 := writeRandomDataToPV(ctx, namespace, pvcName)
-			createMantleBackup(namespace, pvcName, backupName0)
+			writtenDataHash0 := writeRandomDataToPV(ctx, primaryK8sCluster, namespace, pvcName)
+			createMantleBackup(primaryK8sCluster, namespace, pvcName, backupName0)
 			waitMantleBackupSynced(namespace, backupName0)
 
 			// create M1.
-			writtenDataHash1 := writeRandomDataToPV(ctx, namespace, pvcName)
-			createMantleBackup(namespace, pvcName, backupName1)
+			writtenDataHash1 := writeRandomDataToPV(ctx, primaryK8sCluster, namespace, pvcName)
+			createMantleBackup(primaryK8sCluster, namespace, pvcName, backupName1)
 			waitMantleBackupSynced(namespace, backupName1)
 
 			// remove M1.
@@ -474,8 +474,8 @@ func replicationTestSuite() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// create M2.
-			writtenDataHash2 := writeRandomDataToPV(ctx, namespace, pvcName)
-			createMantleBackup(namespace, pvcName, backupName2)
+			writtenDataHash2 := writeRandomDataToPV(ctx, primaryK8sCluster, namespace, pvcName)
+			createMantleBackup(primaryK8sCluster, namespace, pvcName, backupName2)
 			waitMantleBackupSynced(namespace, backupName2)
 			ensureTemporaryResourcesDeleted(ctx)
 
@@ -504,7 +504,7 @@ func changeToStandalone() {
 
 			setupEnvironment(namespace)
 			createPVC(ctx, primaryK8sCluster, namespace, pvcName)
-			createMantleBackup(namespace, pvcName, backupName)
+			createMantleBackup(primaryK8sCluster, namespace, pvcName, backupName)
 			waitMantleBackupSynced(namespace, backupName)
 		})
 
