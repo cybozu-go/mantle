@@ -44,6 +44,7 @@ var _ = Describe("Mantle", func() {
 	Context("replication test", replicationTestSuite)
 	Context("change to standalone", changeToStandalone)
 	Context("change to primary", changeToPrimary)
+	Context("change to secondary", changeToSecondary)
 })
 
 func waitControllerToBeReady() {
@@ -107,6 +108,21 @@ func createMantleBackup(cluster int, namespace, pvcName, backupName string) {
 	}).Should(Succeed())
 }
 
+func waitMantleBackupReadyToUse(cluster int, namespace, backupName string) {
+	GinkgoHelper()
+	By("checking MantleBackup's ReadyToUse status")
+	Eventually(func() error {
+		mb, err := getMB(cluster, namespace, backupName)
+		if err != nil {
+			return err
+		}
+		if !meta.IsStatusConditionTrue(mb.Status.Conditions, mantlev1.BackupConditionReadyToUse) {
+			return errors.New("status of ReadyToUse condition is not True")
+		}
+		return nil
+	}, "10m", "1s").Should(Succeed())
+}
+
 func waitMantleBackupSynced(namespace, backupName string) {
 	GinkgoHelper()
 	By("checking MantleBackup's SyncedToRemote status")
@@ -120,6 +136,18 @@ func waitMantleBackupSynced(namespace, backupName string) {
 		}
 		return nil
 	}, "10m", "1s").Should(Succeed())
+}
+
+func ensureMantleBackupNotExist(ctx context.Context, cluster int, namespace, backupName string) {
+	By("checking MantleBackup doesn't exist")
+	Consistently(ctx, func(g Gomega) {
+		mbs, err := getMBList(cluster, namespace)
+		g.Expect(err).NotTo(HaveOccurred())
+		exist := slices.ContainsFunc(mbs.Items, func(mb mantlev1.MantleBackup) bool {
+			return mb.GetName() == backupName
+		})
+		g.Expect(exist).To(BeFalse())
+	}, "10s").Should(Succeed())
 }
 
 func ensureTemporaryResourcesDeleted(ctx context.Context) {
@@ -659,5 +687,124 @@ func changeToPrimary() {
 			ensureCorrectRestoration(primaryK8sCluster, ctx, namespace, backupName10, restoreName10, writtenDataHash10)
 			ensureCorrectRestoration(secondaryK8sCluster, ctx, namespace, backupName10, restoreName10, writtenDataHash10)
 		})
+	})
+}
+
+func changeToSecondary() {
+	Describe("change to secondary", func() {
+		var (
+			namespace                                                                  string
+			pvcName0, backupName00, writtenDataHash00                                  string
+			pvcName1, backupName10, writtenDataHash10                                  string
+			pvcName2, backupName20, backupName21, writtenDataHash20, writtenDataHash21 string
+		)
+
+		/*
+			Overview of the test:
+
+			 primary k8s cluster       | secondary k8s cluster
+			===========================|==========================
+			  role=primary             | role=secondary
+			  PVC0, MB00 (created)     |
+			                           | PVC0, MB00 (synced)
+			                           | role=standalone (changed)
+			                           | PVC1, MB10 (created)
+			  (MB10 don't exist)       |
+			                           | role=secondary (changed)
+			  PVC2, MB20 (created)     |
+			                           | PVC2, MB20 (synced)
+			  MB21 (created)           |
+			                           | MB21 (synced)
+			  (MB10 don't exist)       |
+		*/
+
+		It("should set up the environment", func(ctx context.Context) {
+			namespace = util.GetUniqueName("ns-")
+			pvcName0 = util.GetUniqueName("pvc-")
+			backupName00 = util.GetUniqueName("mb-")
+			pvcName1 = util.GetUniqueName("pvc-")
+			backupName10 = util.GetUniqueName("mb-")
+			pvcName2 = util.GetUniqueName("pvc-")
+			backupName20 = util.GetUniqueName("mb-")
+			backupName21 = util.GetUniqueName("mb-")
+
+			setupEnvironment(namespace)
+		})
+
+		It("should create and restore a MantleBackup resource", func(ctx context.Context) {
+			createPVC(ctx, primaryK8sCluster, namespace, pvcName0)
+
+			writtenDataHash00 = writeRandomDataToPV(ctx, primaryK8sCluster, namespace, pvcName0)
+			createMantleBackup(primaryK8sCluster, namespace, pvcName0, backupName00)
+			waitMantleBackupSynced(namespace, backupName00)
+
+			restoreName00 := util.GetUniqueName("mr-")
+			ensureCorrectRestoration(primaryK8sCluster, ctx, namespace, backupName00, restoreName00, writtenDataHash00)
+			ensureCorrectRestoration(secondaryK8sCluster, ctx, namespace, backupName00, restoreName00, writtenDataHash00)
+		})
+
+		It("should change the role from secondary to standalone", func() {
+			By("changing the secondary mantle to standalone")
+			err := changeClusterRole(secondaryK8sCluster, controller.RoleStandalone)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should restore the synced MantleBackup in the both clusters", func(ctx context.Context) {
+			restoreName00 := util.GetUniqueName("mr-")
+			ensureCorrectRestoration(primaryK8sCluster, ctx, namespace, backupName00, restoreName00, writtenDataHash00)
+			ensureCorrectRestoration(secondaryK8sCluster, ctx, namespace, backupName00, restoreName00, writtenDataHash00)
+		})
+
+		It("should create a MantleBackup resource in the secondary k8s cluster", func(ctx context.Context) {
+			createPVC(ctx, secondaryK8sCluster, namespace, pvcName1)
+			writtenDataHash10 = writeRandomDataToPV(ctx, secondaryK8sCluster, namespace, pvcName1)
+			createMantleBackup(secondaryK8sCluster, namespace, pvcName1, backupName10)
+			waitMantleBackupReadyToUse(secondaryK8sCluster, namespace, backupName10)
+		})
+
+		It("should ensure the MantleBackup created by standalone mantle doesn't exist in the primary k8s cluster",
+			func(ctx context.Context) {
+				ensureMantleBackupNotExist(ctx, primaryK8sCluster, namespace, backupName10)
+			})
+
+		It("should change the role from standalone to secondary", func() {
+			By("changing the standalone mantle to secondary")
+			err := changeClusterRole(secondaryK8sCluster, controller.RoleSecondary)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should create and synchronize new MantleBackup resources", func(ctx SpecContext) {
+			createPVC(ctx, primaryK8sCluster, namespace, pvcName2)
+
+			writtenDataHash20 = writeRandomDataToPV(ctx, primaryK8sCluster, namespace, pvcName2)
+			createMantleBackup(primaryK8sCluster, namespace, pvcName2, backupName20)
+			waitMantleBackupSynced(namespace, backupName20)
+
+			writtenDataHash21 = writeRandomDataToPV(ctx, primaryK8sCluster, namespace, pvcName2)
+			createMantleBackup(primaryK8sCluster, namespace, pvcName2, backupName21)
+			waitMantleBackupSynced(namespace, backupName21)
+		})
+
+		It("should restore MantleBackups correctly", func(ctx SpecContext) {
+			restoreName00 := util.GetUniqueName("mr-")
+			ensureCorrectRestoration(primaryK8sCluster, ctx, namespace, backupName00, restoreName00, writtenDataHash00)
+			ensureCorrectRestoration(secondaryK8sCluster, ctx, namespace, backupName00, restoreName00, writtenDataHash00)
+
+			restoreName10 := util.GetUniqueName("mr-")
+			ensureCorrectRestoration(secondaryK8sCluster, ctx, namespace, backupName10, restoreName10, writtenDataHash10)
+
+			restoreName20 := util.GetUniqueName("mr-")
+			ensureCorrectRestoration(primaryK8sCluster, ctx, namespace, backupName20, restoreName20, writtenDataHash20)
+			ensureCorrectRestoration(secondaryK8sCluster, ctx, namespace, backupName20, restoreName20, writtenDataHash20)
+
+			restoreName21 := util.GetUniqueName("mr-")
+			ensureCorrectRestoration(primaryK8sCluster, ctx, namespace, backupName21, restoreName21, writtenDataHash21)
+			ensureCorrectRestoration(secondaryK8sCluster, ctx, namespace, backupName21, restoreName21, writtenDataHash21)
+		})
+
+		It("should ensure the MantleBackup created by standalone mantle doesn't exist in the primary k8s cluster",
+			func(ctx context.Context) {
+				ensureMantleBackupNotExist(ctx, primaryK8sCluster, namespace, backupName10)
+			})
 	})
 }

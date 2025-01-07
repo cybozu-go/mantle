@@ -208,6 +208,10 @@ func getObjectList[T any](clusterNo int, kind, namespace string) (*T, error) {
 	return &objList, nil
 }
 
+func getMBList(clusterNo int, namespace string) (*mantlev1.MantleBackupList, error) {
+	return getObjectList[mantlev1.MantleBackupList](clusterNo, "mantlebackup", namespace)
+}
+
 func changeClusterRole(clusterNo int, newRole string) error {
 	deployName := "mantle-controller"
 	deploy, err := getDeploy(clusterNo, cephClusterNamespace, deployName)
