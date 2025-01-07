@@ -43,6 +43,7 @@ var _ = Describe("Mantle", func() {
 	Context("wait controller to be ready", waitControllerToBeReady)
 	Context("replication test", replicationTestSuite)
 	Context("change to standalone", changeToStandalone)
+	Context("change to primary", changeToPrimary)
 })
 
 func waitControllerToBeReady() {
@@ -559,6 +560,104 @@ func changeToStandalone() {
 				}
 				g.Expect(found).To(BeTrue())
 			}, "10s", "1s").Should(Succeed())
+		})
+
+		It("should change their roles back to primary/secondary", func() {
+			By("changing the primary K8s cluster to standalone")
+			err := changeClusterRole(primaryK8sCluster, controller.RolePrimary)
+			Expect(err).NotTo(HaveOccurred())
+			By("changing the secondary K8s cluster to standalone")
+			err = changeClusterRole(secondaryK8sCluster, controller.RoleSecondary)
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+}
+
+func changeToPrimary() {
+	Describe("change to primary", func() {
+		var (
+			namespace                                                                  string
+			pvcName0, backupName00, backupName01, writtenDataHash00, writtenDataHash01 string
+			pvcName1, backupName10, writtenDataHash10                                  string
+		)
+
+		/*
+			Overview of the test:
+
+			 primary k8s cluster        | secondary k8s cluster
+			============================|==========================
+			  role=primary              | role=secondary
+			  PVC0, MB00 (created)      |
+			                            | PVC0, MB00 (synced)
+			  role=standalone (changed) |
+			  MB01, PVC1, MB10 (created)|
+			  role=primary (changed)    |
+			                            | MB01, PVC1, MB10 (synced)
+		*/
+
+		It("should replicate a MantleBackup resource", func(ctx context.Context) {
+			namespace = util.GetUniqueName("ns-")
+			pvcName0 = util.GetUniqueName("pvc-")
+			backupName00 = util.GetUniqueName("mb-")
+
+			setupEnvironment(namespace)
+			createPVC(ctx, primaryK8sCluster, namespace, pvcName0)
+			writtenDataHash00 = writeRandomDataToPV(ctx, primaryK8sCluster, namespace, pvcName0)
+			createMantleBackup(primaryK8sCluster, namespace, pvcName0, backupName00)
+			waitMantleBackupSynced(namespace, backupName00)
+		})
+
+		It("should change the role from primary to standalone", func() {
+			By("changing the primary mantle to standalone")
+			err := changeClusterRole(primaryK8sCluster, controller.RoleStandalone)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should restore the synced MantleBackup in the both clusters", func(ctx context.Context) {
+			restoreName00 := util.GetUniqueName("mr-")
+			ensureCorrectRestoration(primaryK8sCluster, ctx, namespace, backupName00, restoreName00, writtenDataHash00)
+			ensureCorrectRestoration(secondaryK8sCluster, ctx, namespace, backupName00, restoreName00, writtenDataHash00)
+		})
+
+		It("should create a MantleBackup resource", func(ctx SpecContext) {
+			backupName01 = util.GetUniqueName("mb-")
+			writtenDataHash01 = writeRandomDataToPV(ctx, primaryK8sCluster, namespace, pvcName0)
+
+			createMantleBackup(primaryK8sCluster, namespace, pvcName0, backupName01)
+
+			pvcName1 = util.GetUniqueName("pvc-")
+			backupName10 = util.GetUniqueName("mb-")
+
+			Eventually(func() error {
+				return applyPVCTemplate(primaryK8sCluster, namespace, pvcName1)
+			}).Should(Succeed())
+			writtenDataHash10 = writeRandomDataToPV(ctx, primaryK8sCluster, namespace, pvcName1)
+			createMantleBackup(primaryK8sCluster, namespace, pvcName1, backupName10)
+		})
+
+		It("should change the role from standalone to primary", func() {
+			By("changing the standalone mantle to primary")
+			err := changeClusterRole(primaryK8sCluster, controller.RolePrimary)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should synchronize MantleBackups correctly", func() {
+			waitMantleBackupSynced(namespace, backupName01)
+			waitMantleBackupSynced(namespace, backupName10)
+		})
+
+		It("should restore MantleBackups correctly", func(ctx SpecContext) {
+			restoreName00 := util.GetUniqueName("mr-")
+			ensureCorrectRestoration(primaryK8sCluster, ctx, namespace, backupName00, restoreName00, writtenDataHash00)
+			ensureCorrectRestoration(secondaryK8sCluster, ctx, namespace, backupName00, restoreName00, writtenDataHash00)
+
+			restoreName01 := util.GetUniqueName("mr-")
+			ensureCorrectRestoration(primaryK8sCluster, ctx, namespace, backupName01, restoreName01, writtenDataHash01)
+			ensureCorrectRestoration(secondaryK8sCluster, ctx, namespace, backupName01, restoreName01, writtenDataHash01)
+
+			restoreName10 := util.GetUniqueName("mr-")
+			ensureCorrectRestoration(primaryK8sCluster, ctx, namespace, backupName10, restoreName10, writtenDataHash10)
+			ensureCorrectRestoration(secondaryK8sCluster, ctx, namespace, backupName10, restoreName10, writtenDataHash10)
 		})
 	})
 }
