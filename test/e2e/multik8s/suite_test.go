@@ -57,7 +57,7 @@ func waitControllerToBeReady() {
 	})
 }
 
-func setupEnvironment(namespace, pvcName string) {
+func setupEnvironment(namespace string) {
 	GinkgoHelper()
 	By("setting up the environment")
 	Eventually(func() error {
@@ -72,8 +72,11 @@ func setupEnvironment(namespace, pvcName string) {
 	Eventually(func() error {
 		return applyRBDPoolAndSCTemplate(secondaryK8sCluster, cephClusterNamespace)
 	}).Should(Succeed())
-	Eventually(func() error {
-		return applyPVCTemplate(primaryK8sCluster, namespace, pvcName)
+}
+
+func createPVC(ctx context.Context, cluster int, namespace, name string) {
+	Eventually(ctx, func() error {
+		return applyPVCTemplate(cluster, namespace, name)
 	}).Should(Succeed())
 }
 
@@ -209,7 +212,8 @@ func replicationTestSuite() {
 			backupName := util.GetUniqueName("mb-")
 			restoreName := util.GetUniqueName("mr-")
 
-			setupEnvironment(namespace, pvcName)
+			setupEnvironment(namespace)
+			createPVC(ctx, primaryK8sCluster, namespace, pvcName)
 			writtenDataHash := writeRandomDataToPV(ctx, namespace, pvcName)
 			createMantleBackup(namespace, pvcName, backupName)
 			waitMantleBackupSynced(namespace, backupName)
@@ -298,7 +302,8 @@ func replicationTestSuite() {
 			restoreName0 := util.GetUniqueName("mr-")
 			restoreName1 := util.GetUniqueName("mr-")
 
-			setupEnvironment(namespace, pvcName)
+			setupEnvironment(namespace)
+			createPVC(ctx, primaryK8sCluster, namespace, pvcName)
 			writtenDataHash0 := writeRandomDataToPV(ctx, namespace, pvcName)
 
 			// create M0.
@@ -331,7 +336,8 @@ func replicationTestSuite() {
 			restoreName0 := util.GetUniqueName("mr-")
 			restoreName1 := util.GetUniqueName("mr-")
 
-			setupEnvironment(namespace, pvcName)
+			setupEnvironment(namespace)
+			createPVC(ctx, primaryK8sCluster, namespace, pvcName)
 			writtenDataHash0 := writeRandomDataToPV(ctx, namespace, pvcName)
 
 			// create M0.
@@ -364,7 +370,8 @@ func replicationTestSuite() {
 			restoreName0 := util.GetUniqueName("mr-")
 			restoreName1 := util.GetUniqueName("mr-")
 
-			setupEnvironment(namespace, pvcName)
+			setupEnvironment(namespace)
+			createPVC(ctx, primaryK8sCluster, namespace, pvcName)
 
 			// create M0.
 			writtenDataHash0 := writeRandomDataToPV(ctx, namespace, pvcName)
@@ -397,7 +404,8 @@ func replicationTestSuite() {
 			restoreName1 := util.GetUniqueName("mr-")
 			restoreName2 := util.GetUniqueName("mr-")
 
-			setupEnvironment(namespace, pvcName)
+			setupEnvironment(namespace)
+			createPVC(ctx, primaryK8sCluster, namespace, pvcName)
 
 			// create M0.
 			writtenDataHash0 := writeRandomDataToPV(ctx, namespace, pvcName)
@@ -448,7 +456,8 @@ func replicationTestSuite() {
 			restoreName1 := util.GetUniqueName("mr-")
 			restoreName2 := util.GetUniqueName("mr-")
 
-			setupEnvironment(namespace, pvcName)
+			setupEnvironment(namespace)
+			createPVC(ctx, primaryK8sCluster, namespace, pvcName)
 
 			// create M0.
 			writtenDataHash0 := writeRandomDataToPV(ctx, namespace, pvcName)
@@ -488,12 +497,13 @@ func changeToStandalone() {
 	Describe("change to standalone", func() {
 		var namespace, pvcName, backupName string
 
-		It("should replicate a MantleBackup resource", func() {
+		It("should replicate a MantleBackup resource", func(ctx context.Context) {
 			namespace = util.GetUniqueName("ns-")
 			pvcName = util.GetUniqueName("pvc-")
 			backupName = util.GetUniqueName("mb-")
 
-			setupEnvironment(namespace, pvcName)
+			setupEnvironment(namespace)
+			createPVC(ctx, primaryK8sCluster, namespace, pvcName)
 			createMantleBackup(namespace, pvcName, backupName)
 			waitMantleBackupSynced(namespace, backupName)
 		})
