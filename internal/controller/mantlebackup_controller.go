@@ -52,6 +52,14 @@ const (
 	annotRetainIfExpired          = "mantle.cybozu.io/retain-if-expired"
 	annotSyncMode                 = "mantle.cybozu.io/sync-mode"
 
+	MantleExportJobPrefix     = "mantle-export-"
+	MantleUploadJobPrefix     = "mantle-upload-"
+	MantleExportDataPVCPrefix = "mantle-export-"
+	MantleImportJobPrefix     = "mantle-import-"
+	MantleDiscardJobPrefix    = "mantle-discard-"
+	MantleDiscardPVCPrefix    = "mantle-discard-"
+	MantleDiscardPVPrefix     = "mantle-discard-"
+
 	syncModeFull        = "full"
 	syncModeIncremental = "incremental"
 )
@@ -1060,15 +1068,15 @@ func (r *MantleBackupReconciler) createOrUpdateExportDataPVC(ctx context.Context
 }
 
 func makeExportJobName(target *mantlev1.MantleBackup) string {
-	return fmt.Sprintf("mantle-export-%s", target.GetUID())
+	return MantleExportJobPrefix + string(target.GetUID())
 }
 
 func makeUploadJobName(target *mantlev1.MantleBackup) string {
-	return fmt.Sprintf("mantle-upload-%s", target.GetUID())
+	return MantleUploadJobPrefix + string(target.GetUID())
 }
 
 func makeExportDataPVCName(target *mantlev1.MantleBackup) string {
-	return fmt.Sprintf("mantle-export-%s", target.GetUID())
+	return MantleExportDataPVCPrefix + string(target.GetUID())
 }
 
 func makeObjectNameOfExportedData(name, uid string) string {
@@ -1076,19 +1084,19 @@ func makeObjectNameOfExportedData(name, uid string) string {
 }
 
 func makeImportJobName(target *mantlev1.MantleBackup) string {
-	return fmt.Sprintf("mantle-import-%s", target.GetUID())
+	return MantleImportJobPrefix + string(target.GetUID())
 }
 
 func makeDiscardJobName(target *mantlev1.MantleBackup) string {
-	return fmt.Sprintf("mantle-discard-%s", target.GetUID())
+	return MantleDiscardJobPrefix + string(target.GetUID())
 }
 
 func makeDiscardPVCName(target *mantlev1.MantleBackup) string {
-	return fmt.Sprintf("mantle-discard-%s", target.GetUID())
+	return MantleDiscardPVCPrefix + string(target.GetUID())
 }
 
 func makeDiscardPVName(target *mantlev1.MantleBackup) string {
-	return fmt.Sprintf("mantle-discard-%s", target.GetUID())
+	return MantleDiscardPVPrefix + string(target.GetUID())
 }
 
 func (r *MantleBackupReconciler) createOrUpdateExportJob(ctx context.Context, target *mantlev1.MantleBackup, sourceBackupNamePtr *string) error {

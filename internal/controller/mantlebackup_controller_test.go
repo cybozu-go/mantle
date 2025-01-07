@@ -532,7 +532,7 @@ var _ = Describe("MantleBackup controller", func() {
 				err = k8sClient.Get(
 					ctx,
 					types.NamespacedName{
-						Name:      fmt.Sprintf("mantle-upload-%s", backup.GetUID()),
+						Name:      makeUploadJobName(backup),
 						Namespace: resMgr.ClusterID,
 					},
 					&jobUpload,
@@ -551,7 +551,7 @@ var _ = Describe("MantleBackup controller", func() {
 				err = k8sClient.Get(
 					ctx,
 					types.NamespacedName{
-						Name:      fmt.Sprintf("mantle-upload-%s", backup.GetUID()),
+						Name:      makeUploadJobName(backup),
 						Namespace: resMgr.ClusterID,
 					},
 					&jobUpload,
@@ -622,7 +622,7 @@ var _ = Describe("MantleBackup controller", func() {
 				err = k8sClient.Get(
 					ctx,
 					types.NamespacedName{
-						Name:      fmt.Sprintf("mantle-export-%s", backup2.GetUID()),
+						Name:      makeExportJobName(backup2),
 						Namespace: resMgr.ClusterID,
 					},
 					&jobExport2,

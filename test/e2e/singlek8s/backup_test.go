@@ -1,14 +1,18 @@
 package singlek8s
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
+	"github.com/cybozu-go/mantle/internal/controller"
 	"github.com/cybozu-go/mantle/test/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 )
 
 const (
@@ -163,6 +167,42 @@ func (test *backupTest) testCase1() {
 			}
 			return nil
 		}).Should(Succeed())
+	})
+
+	It("should not create any resources necessary only for primary or secondary mantle controller", func() {
+		// Check that export and upload Jobs are not created.
+		stdout, _, err := kubectl("-n", cephCluster1Namespace, "get", "job", "-o", "json")
+		Expect(err).NotTo(HaveOccurred())
+		var jobs batchv1.JobList
+		err = json.Unmarshal(stdout, &jobs)
+		Expect(err).NotTo(HaveOccurred())
+		for _, job := range jobs.Items {
+			Expect(strings.HasPrefix(job.GetName(), controller.MantleExportJobPrefix)).To(BeFalse())
+			Expect(strings.HasPrefix(job.GetName(), controller.MantleUploadJobPrefix)).To(BeFalse())
+			Expect(strings.HasPrefix(job.GetName(), controller.MantleImportJobPrefix)).To(BeFalse())
+			Expect(strings.HasPrefix(job.GetName(), controller.MantleDiscardJobPrefix)).To(BeFalse())
+		}
+
+		// Check that export and discard PVC are not created.
+		stdout, _, err = kubectl("-n", cephCluster1Namespace, "get", "pvc", "-o", "json")
+		Expect(err).NotTo(HaveOccurred())
+		var pvcs corev1.PersistentVolumeClaimList
+		err = json.Unmarshal(stdout, &pvcs)
+		Expect(err).NotTo(HaveOccurred())
+		for _, pvc := range pvcs.Items {
+			Expect(strings.HasPrefix(pvc.GetName(), controller.MantleExportDataPVCPrefix)).To(BeFalse())
+			Expect(strings.HasPrefix(pvc.GetName(), controller.MantleDiscardPVCPrefix)).To(BeFalse())
+		}
+
+		// Check that discard PV is not created.
+		stdout, _, err = kubectl("-n", cephCluster1Namespace, "get", "pv", "-o", "json")
+		Expect(err).NotTo(HaveOccurred())
+		var pvs corev1.PersistentVolumeList
+		err = json.Unmarshal(stdout, &pvs)
+		Expect(err).NotTo(HaveOccurred())
+		for _, pv := range pvs.Items {
+			Expect(strings.HasPrefix(pv.GetName(), controller.MantleDiscardPVPrefix)).To(BeFalse())
+		}
 	})
 
 	It("should not delete MantleBackup resource when delete backup target PVC", func() {
