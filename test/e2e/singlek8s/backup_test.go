@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
+	"github.com/cybozu-go/mantle/internal/controller"
 	"github.com/cybozu-go/mantle/test/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -176,10 +177,10 @@ func (test *backupTest) testCase1() {
 		err = json.Unmarshal(stdout, &jobs)
 		Expect(err).NotTo(HaveOccurred())
 		for _, job := range jobs.Items {
-			Expect(strings.HasPrefix(job.GetName(), "mantle-export-")).To(BeFalse())
-			Expect(strings.HasPrefix(job.GetName(), "mantle-upload-")).To(BeFalse())
-			Expect(strings.HasPrefix(job.GetName(), "mantle-import-")).To(BeFalse())
-			Expect(strings.HasPrefix(job.GetName(), "mantle-discard-")).To(BeFalse())
+			Expect(strings.HasPrefix(job.GetName(), controller.MantleExportJobPrefix)).To(BeFalse())
+			Expect(strings.HasPrefix(job.GetName(), controller.MantleUploadJobPrefix)).To(BeFalse())
+			Expect(strings.HasPrefix(job.GetName(), controller.MantleImportJobPrefix)).To(BeFalse())
+			Expect(strings.HasPrefix(job.GetName(), controller.MantleDiscardJobPrefix)).To(BeFalse())
 		}
 
 		// Check that export and discard PVC are not created.
@@ -189,8 +190,8 @@ func (test *backupTest) testCase1() {
 		err = json.Unmarshal(stdout, &pvcs)
 		Expect(err).NotTo(HaveOccurred())
 		for _, pvc := range pvcs.Items {
-			Expect(strings.HasPrefix(pvc.GetName(), "mantle-export-")).To(BeFalse())
-			Expect(strings.HasPrefix(pvc.GetName(), "mantle-discard-")).To(BeFalse())
+			Expect(strings.HasPrefix(pvc.GetName(), controller.MantleExportDataPVCPrefix)).To(BeFalse())
+			Expect(strings.HasPrefix(pvc.GetName(), controller.MantleDiscardPVCPrefix)).To(BeFalse())
 		}
 
 		// Check that discard PV is not created.
@@ -200,7 +201,7 @@ func (test *backupTest) testCase1() {
 		err = json.Unmarshal(stdout, &pvs)
 		Expect(err).NotTo(HaveOccurred())
 		for _, pv := range pvs.Items {
-			Expect(strings.HasPrefix(pv.GetName(), "mantle-discard-")).To(BeFalse())
+			Expect(strings.HasPrefix(pv.GetName(), controller.MantleDiscardPVPrefix)).To(BeFalse())
 		}
 	})
 

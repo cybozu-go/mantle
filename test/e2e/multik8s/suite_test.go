@@ -125,15 +125,15 @@ func ensureTemporaryResourcesDeleted(ctx context.Context) {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(slices.ContainsFunc(primaryJobList.Items, func(job batchv1.Job) bool {
 		n := job.GetName()
-		return strings.HasPrefix(n, "mantle-export-") ||
-			strings.HasPrefix(n, "mantle-upload-")
+		return strings.HasPrefix(n, controller.MantleExportJobPrefix) ||
+			strings.HasPrefix(n, controller.MantleUploadJobPrefix)
 	})).To(BeFalse())
 	secondaryJobList, err := getObjectList[batchv1.JobList](secondaryK8sCluster, "job", cephClusterNamespace)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(slices.ContainsFunc(secondaryJobList.Items, func(job batchv1.Job) bool {
 		n := job.GetName()
-		return strings.HasPrefix(n, "mantle-import-") ||
-			strings.HasPrefix(n, "mantle-discard-")
+		return strings.HasPrefix(n, controller.MantleImportJobPrefix) ||
+			strings.HasPrefix(n, controller.MantleDiscardJobPrefix)
 	})).To(BeFalse())
 
 	By("checking all temporary PVCs related to export and import of RBD images are removed")
@@ -142,14 +142,14 @@ func ensureTemporaryResourcesDeleted(ctx context.Context) {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(slices.ContainsFunc(primaryPVCList.Items, func(pvc corev1.PersistentVolumeClaim) bool {
 		n := pvc.GetName()
-		return strings.HasPrefix(n, "mantle-export-")
+		return strings.HasPrefix(n, controller.MantleExportDataPVCPrefix)
 	})).To(BeFalse())
 	secondaryPVCList, err := getObjectList[corev1.PersistentVolumeClaimList](
 		secondaryK8sCluster, "pvc", cephClusterNamespace)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(slices.ContainsFunc(secondaryPVCList.Items, func(pvc corev1.PersistentVolumeClaim) bool {
 		n := pvc.GetName()
-		return strings.HasPrefix(n, "mantle-discard-")
+		return strings.HasPrefix(n, controller.MantleDiscardPVCPrefix)
 	})).To(BeFalse())
 
 	By("checking all temporary PVs related to export and import of RBD images are removed")
@@ -157,7 +157,7 @@ func ensureTemporaryResourcesDeleted(ctx context.Context) {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(slices.ContainsFunc(secondaryPVList.Items, func(pv corev1.PersistentVolume) bool {
 		n := pv.GetName()
-		return strings.HasPrefix(n, "mantle-discard-")
+		return strings.HasPrefix(n, controller.MantleDiscardPVPrefix)
 	})).To(BeFalse())
 
 	By("checking all temporary objects in the object storage related to export and import of RBD images are removed")
