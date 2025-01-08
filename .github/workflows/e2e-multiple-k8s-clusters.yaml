@@ -19,6 +19,14 @@ concurrency:
 
 jobs:
   build:
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - replication
+          - changetostandalone
+          - changetoprimary
+          - changetosecondary
     #runs-on: "ubuntu-22.04"
     runs-on: mantle_large_runner_16core
     steps:
@@ -29,4 +37,4 @@ jobs:
       - run: sudo apt-get update
       - uses: ./.github/actions/set-up-kvm-for-e2e-tests
       - run: make -C test/e2e setup
-      - run: make -C test/e2e test-multiple-k8s-clusters
+      - run: make -C test/e2e test-multiple-k8s-clusters TEST_MULTIK8S_PACKAGES=${{ matrix.package }}
