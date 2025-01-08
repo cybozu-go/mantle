@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -80,4 +83,12 @@ func IsJobConditionTrue(conditions []batchv1.JobCondition, conditionType batchv1
 		}
 	}
 	return false
+}
+
+func requeueReconciliation() ctrl.Result {
+	requeueAfter := os.Getenv("REQUEUE_RECONCILIATION_IMMEDIATELY")
+	if requeueAfter == "1" {
+		return ctrl.Result{RequeueAfter: time.Second}
+	}
+	return ctrl.Result{Requeue: true}
 }

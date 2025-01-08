@@ -7,6 +7,9 @@ controller:
   objectStorageEndpoint: {OBJECT_STORAGE_ENDPOINT}
   envSecret: export-data
   gcInterval: 1s
+  env:
+    - name: REQUEUE_RECONCILIATION_IMMEDIATELY
+      value: "1"
 
 secondaryService:
   type: NodePort
