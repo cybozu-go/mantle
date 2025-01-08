@@ -25,6 +25,7 @@ LOOP_DEV2 := /dev/loop1
 MINIKUBE_PROFILE_PRIMARY=profile1
 MINIKUBE_PROFILE_SECONDARY=profile2
 TMPDIR := tmp
+TEST_MULTIK8S_PACKAGES := replication changetostandalone changetoprimary changetosecondary
 
 export MINIKUBE_HOME
 
@@ -240,4 +241,4 @@ do-test-multik8s: $(GINKGO)
 	E2ETEST=1 \
 	KUBECTL_PRIMARY="$(MINIKUBE) -p $(MINIKUBE_PROFILE_PRIMARY) kubectl -- " \
 	KUBECTL_SECONDARY="$(MINIKUBE) -p $(MINIKUBE_PROFILE_SECONDARY) kubectl -- " \
-	$(GINKGO) --fail-fast -v $(GINKGO_FLAGS) multik8s
+	$(GINKGO) --fail-fast -v $(GINKGO_FLAGS) $(addprefix multik8s/, $(TEST_MULTIK8S_PACKAGES))
