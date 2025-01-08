@@ -46,9 +46,9 @@ var (
 	kubectlPrefixSecondary = os.Getenv("KUBECTL_SECONDARY")
 )
 
-func execAtLocal(cmd string, input []byte, args ...string) ([]byte, []byte, error) {
+func execAtLocal(ctx context.Context, cmd string, input []byte, args ...string) ([]byte, []byte, error) {
 	var stdout, stderr bytes.Buffer
-	command := exec.Command(cmd, args...)
+	command := exec.CommandContext(ctx, cmd, args...)
 	command.Stdout = &stdout
 	command.Stderr = &stderr
 
@@ -76,7 +76,11 @@ func kubectl(clusterNo int, input []byte, args ...string) ([]byte, []byte, error
 	}
 	fields := strings.Fields(kubectlPrefix)
 	fields = append(fields, args...)
-	return execAtLocal(fields[0], input, fields[1:]...)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	return execAtLocal(ctx, fields[0], input, fields[1:]...)
 }
 
 func checkDeploymentReady(clusterNo int, namespace, name string) error {
