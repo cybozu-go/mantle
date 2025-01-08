@@ -25,6 +25,9 @@ Dockerfile.cross
 *.swo
 *~
 
+ceph/go.mod
+ceph/go.sum
+ceph/packages/
 test/e2e/testdata/persistentvolumes.yaml
 test/e2e/testdata/values-mantle-primary.yaml
 test/e2e/testdata/values-mantle-secondary.yaml
