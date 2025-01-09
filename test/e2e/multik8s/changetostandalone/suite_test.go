@@ -1,7 +1,6 @@
 package changetostandalone
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"testing"
@@ -38,7 +37,7 @@ func changeToStandalone() {
 	Describe("change to standalone", func() {
 		var namespace, pvcName, backupName string
 
-		It("should replicate a MantleBackup resource", func(ctx context.Context) {
+		It("should replicate a MantleBackup resource", func(ctx SpecContext) {
 			namespace = util.GetUniqueName("ns-")
 			pvcName = util.GetUniqueName("pvc-")
 			backupName = util.GetUniqueName("mb-")

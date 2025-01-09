@@ -1,7 +1,6 @@
 package changetoprimary
 
 import (
-	"context"
 	"os"
 	"testing"
 	"time"
@@ -54,7 +53,7 @@ func changePrimaryToStandaloneTemporarily() {
 			                            | MB01, PVC1, MB10 (synced)
 		*/
 
-		It("should replicate a MantleBackup resource", func(ctx context.Context) {
+		It("should replicate a MantleBackup resource", func(ctx SpecContext) {
 			namespace = util.GetUniqueName("ns-")
 			pvcName0 = util.GetUniqueName("pvc-")
 			backupName00 = util.GetUniqueName("mb-")
@@ -72,7 +71,7 @@ func changePrimaryToStandaloneTemporarily() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("should restore the synced MantleBackup in the both clusters", func(ctx context.Context) {
+		It("should restore the synced MantleBackup in the both clusters", func(ctx SpecContext) {
 			restoreName00 := util.GetUniqueName("mr-")
 			EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName00, restoreName00, writtenDataHash00)
 			EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName00, restoreName00, writtenDataHash00)

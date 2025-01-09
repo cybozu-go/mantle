@@ -410,13 +410,13 @@ func SetupEnvironment(namespace string) {
 	}).Should(Succeed())
 }
 
-func CreatePVC(ctx context.Context, cluster int, namespace, name string) {
+func CreatePVC(ctx SpecContext, cluster int, namespace, name string) {
 	Eventually(ctx, func() error {
 		return applyPVCTemplate(cluster, namespace, name)
 	}).Should(Succeed())
 }
 
-func WriteRandomDataToPV(ctx context.Context, cluster int, namespace, pvcName string) string {
+func WriteRandomDataToPV(ctx SpecContext, cluster int, namespace, pvcName string) string {
 	GinkgoHelper()
 	By("writing some random data to PV(C)")
 	writeJobName := util.GetUniqueName("job-")
@@ -472,7 +472,7 @@ func WaitMantleBackupSynced(namespace, backupName string) {
 	}, "10m", "1s").Should(Succeed())
 }
 
-func EnsureMantleBackupNotExist(ctx context.Context, cluster int, namespace, backupName string) {
+func EnsureMantleBackupNotExist(ctx SpecContext, cluster int, namespace, backupName string) {
 	By("checking MantleBackup doesn't exist")
 	Consistently(ctx, func(g Gomega) {
 		mbs, err := GetMBList(cluster, namespace)
@@ -484,7 +484,7 @@ func EnsureMantleBackupNotExist(ctx context.Context, cluster int, namespace, bac
 	}, "10s").Should(Succeed())
 }
 
-func EnsureTemporaryResourcesDeleted(ctx context.Context) {
+func EnsureTemporaryResourcesDeleted(ctx SpecContext) {
 	GinkgoHelper()
 	By("checking all temporary Jobs related to export and import of RBD images are removed")
 	primaryJobList, err := GetObjectList[batchv1.JobList](PrimaryK8sCluster, "job", CephClusterNamespace)
@@ -536,7 +536,7 @@ func EnsureTemporaryResourcesDeleted(ctx context.Context) {
 
 func EnsureCorrectRestoration(
 	clusterNo int,
-	ctx context.Context,
+	ctx SpecContext,
 	namespace, backupName, restoreName, writtenDataHash string,
 ) {
 	GinkgoHelper()
