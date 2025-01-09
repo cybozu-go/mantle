@@ -117,7 +117,7 @@ func ApplyMantleRestoreTemplate(clusterNo int, namespace, restoreName, backupNam
 	return nil
 }
 
-func ApplyPVCTemplate(clusterNo int, namespace, name string) error {
+func applyPVCTemplate(clusterNo int, namespace, name string) error {
 	manifest := fmt.Sprintf(testPVCTemplate, name)
 	_, _, err := Kubectl(clusterNo, []byte(manifest), "apply", "-n", namespace, "-f", "-")
 	if err != nil {
@@ -412,7 +412,7 @@ func SetupEnvironment(namespace string) {
 
 func CreatePVC(ctx context.Context, cluster int, namespace, name string) {
 	Eventually(ctx, func() error {
-		return ApplyPVCTemplate(cluster, namespace, name)
+		return applyPVCTemplate(cluster, namespace, name)
 	}).Should(Succeed())
 }
 

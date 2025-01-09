@@ -87,9 +87,7 @@ func changePrimaryToStandaloneTemporarily() {
 			pvcName1 = util.GetUniqueName("pvc-")
 			backupName10 = util.GetUniqueName("mb-")
 
-			Eventually(func() error {
-				return ApplyPVCTemplate(PrimaryK8sCluster, namespace, pvcName1)
-			}).Should(Succeed())
+			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName1)
 			writtenDataHash10 = WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName1)
 			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName1, backupName10)
 		})
