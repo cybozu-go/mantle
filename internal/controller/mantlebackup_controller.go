@@ -1045,7 +1045,7 @@ func (r *MantleBackupReconciler) createOrUpdateExportDataPVC(ctx context.Context
 	pvcSize.Mul(2)
 
 	var pvc corev1.PersistentVolumeClaim
-	pvc.SetName(makeExportDataPVCName(target))
+	pvc.SetName(MakeExportDataPVCName(target))
 	pvc.SetNamespace(r.managedCephClusterID)
 	_, err := ctrl.CreateOrUpdate(ctx, r.Client, &pvc, func() error {
 		labels := pvc.GetLabels()
@@ -1070,35 +1070,35 @@ func (r *MantleBackupReconciler) createOrUpdateExportDataPVC(ctx context.Context
 	return err
 }
 
-func makeExportJobName(target *mantlev1.MantleBackup) string {
+func MakeExportJobName(target *mantlev1.MantleBackup) string {
 	return MantleExportJobPrefix + string(target.GetUID())
 }
 
-func makeUploadJobName(target *mantlev1.MantleBackup) string {
+func MakeUploadJobName(target *mantlev1.MantleBackup) string {
 	return MantleUploadJobPrefix + string(target.GetUID())
 }
 
-func makeExportDataPVCName(target *mantlev1.MantleBackup) string {
+func MakeExportDataPVCName(target *mantlev1.MantleBackup) string {
 	return MantleExportDataPVCPrefix + string(target.GetUID())
 }
 
-func makeObjectNameOfExportedData(name, uid string) string {
+func MakeObjectNameOfExportedData(name, uid string) string {
 	return fmt.Sprintf("%s-%s.bin", name, uid)
 }
 
-func makeImportJobName(target *mantlev1.MantleBackup) string {
+func MakeImportJobName(target *mantlev1.MantleBackup) string {
 	return MantleImportJobPrefix + string(target.GetUID())
 }
 
-func makeDiscardJobName(target *mantlev1.MantleBackup) string {
+func MakeDiscardJobName(target *mantlev1.MantleBackup) string {
 	return MantleDiscardJobPrefix + string(target.GetUID())
 }
 
-func makeDiscardPVCName(target *mantlev1.MantleBackup) string {
+func MakeDiscardPVCName(target *mantlev1.MantleBackup) string {
 	return MantleDiscardPVCPrefix + string(target.GetUID())
 }
 
-func makeDiscardPVName(target *mantlev1.MantleBackup) string {
+func MakeDiscardPVName(target *mantlev1.MantleBackup) string {
 	return MantleDiscardPVPrefix + string(target.GetUID())
 }
 
@@ -1114,7 +1114,7 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(ctx context.Context, ta
 	}
 
 	var job batchv1.Job
-	job.SetName(makeExportJobName(target))
+	job.SetName(MakeExportJobName(target))
 	job.SetNamespace(r.managedCephClusterID)
 	if _, err := ctrl.CreateOrUpdate(ctx, r.Client, &job, func() error {
 		labels := job.GetLabels()
@@ -1204,7 +1204,7 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(ctx context.Context, ta
 				Name: "volume-to-store",
 				VolumeSource: corev1.VolumeSource{
 					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-						ClaimName: makeExportDataPVCName(target),
+						ClaimName: MakeExportDataPVCName(target),
 					},
 				},
 			},
@@ -1261,7 +1261,7 @@ func (r *MantleBackupReconciler) checkIfExportJobIsCompleted(
 	if err := r.Client.Get(
 		ctx,
 		types.NamespacedName{
-			Name:      makeExportJobName(target),
+			Name:      MakeExportJobName(target),
 			Namespace: r.managedCephClusterID,
 		},
 		&job,
@@ -1279,7 +1279,7 @@ func (r *MantleBackupReconciler) checkIfExportJobIsCompleted(
 
 func (r *MantleBackupReconciler) createOrUpdateExportDataUploadJob(ctx context.Context, target *mantlev1.MantleBackup) error {
 	var job batchv1.Job
-	job.SetName(makeUploadJobName(target))
+	job.SetName(MakeUploadJobName(target))
 	job.SetNamespace(r.managedCephClusterID)
 	if _, err := ctrl.CreateOrUpdate(ctx, r.Client, &job, func() error {
 		labels := job.GetLabels()
@@ -1313,7 +1313,7 @@ func (r *MantleBackupReconciler) createOrUpdateExportDataUploadJob(ctx context.C
 				Env: []corev1.EnvVar{
 					{
 						Name:  "OBJ_NAME",
-						Value: makeObjectNameOfExportedData(target.GetName(), string(target.GetUID())),
+						Value: MakeObjectNameOfExportedData(target.GetName(), string(target.GetUID())),
 					},
 					{
 						Name:  "BUCKET_NAME",
@@ -1374,7 +1374,7 @@ func (r *MantleBackupReconciler) createOrUpdateExportDataUploadJob(ctx context.C
 				Name: "volume-to-store",
 				VolumeSource: corev1.VolumeSource{
 					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-						ClaimName: makeExportDataPVCName(target),
+						ClaimName: MakeExportDataPVCName(target),
 					},
 				},
 			},
@@ -1523,7 +1523,7 @@ func (r *MantleBackupReconciler) isExportDataAlreadyUploaded(
 ) (ctrl.Result, error) {
 	uploaded, err := r.objectStorageClient.Exists(
 		ctx,
-		makeObjectNameOfExportedData(target.GetName(), target.GetAnnotations()[annotRemoteUID]),
+		MakeObjectNameOfExportedData(target.GetName(), target.GetAnnotations()[annotRemoteUID]),
 	)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -1604,7 +1604,7 @@ func (r *MantleBackupReconciler) createOrUpdateDiscardPV(
 	targetPV *corev1.PersistentVolume,
 ) error {
 	var pv corev1.PersistentVolume
-	pv.SetName(makeDiscardPVName(backup))
+	pv.SetName(MakeDiscardPVName(backup))
 	_, err := ctrl.CreateOrUpdate(ctx, r.Client, &pv, func() error {
 		labels := pv.GetLabels()
 		if labels == nil {
@@ -1650,7 +1650,7 @@ func (r *MantleBackupReconciler) createOrUpdateDiscardPVC(
 	targetPVC *corev1.PersistentVolumeClaim,
 ) error {
 	var pvc corev1.PersistentVolumeClaim
-	pvc.SetName(makeDiscardPVCName(backup))
+	pvc.SetName(MakeDiscardPVCName(backup))
 	pvc.SetNamespace(r.managedCephClusterID)
 	_, err := ctrl.CreateOrUpdate(ctx, r.Client, &pvc, func() error {
 		labels := pvc.GetLabels()
@@ -1665,7 +1665,7 @@ func (r *MantleBackupReconciler) createOrUpdateDiscardPVC(
 		pvc.Spec.StorageClassName = &storageClassName
 		pvc.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
 		pvc.Spec.Resources = targetPVC.Spec.Resources
-		pvc.Spec.VolumeName = makeDiscardPVName(backup)
+		pvc.Spec.VolumeName = MakeDiscardPVName(backup)
 
 		volumeMode := corev1.PersistentVolumeBlock
 		pvc.Spec.VolumeMode = &volumeMode
@@ -1680,7 +1680,7 @@ func (r *MantleBackupReconciler) createOrUpdateDiscardJob(
 	backup *mantlev1.MantleBackup,
 ) error {
 	var job batchv1.Job
-	job.SetName(makeDiscardJobName(backup))
+	job.SetName(MakeDiscardJobName(backup))
 	job.SetNamespace(r.managedCephClusterID)
 	_, err := ctrl.CreateOrUpdate(ctx, r.Client, &job, func() error {
 		labels := job.GetLabels()
@@ -1730,7 +1730,7 @@ blkdiscard /dev/discard-rbd
 				Name: "discard-rbd",
 				VolumeSource: corev1.VolumeSource{
 					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-						ClaimName: makeDiscardPVCName(backup),
+						ClaimName: MakeDiscardPVCName(backup),
 					},
 				},
 			},
@@ -1745,7 +1745,7 @@ func (r *MantleBackupReconciler) hasDiscardJobCompleted(ctx context.Context, bac
 	var job batchv1.Job
 	if err := r.Client.Get(
 		ctx,
-		types.NamespacedName{Name: makeDiscardJobName(backup), Namespace: r.managedCephClusterID},
+		types.NamespacedName{Name: MakeDiscardJobName(backup), Namespace: r.managedCephClusterID},
 		&job,
 	); err != nil {
 		if aerrors.IsNotFound(err) {
@@ -1769,7 +1769,7 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 	if err := r.Client.Get(
 		ctx,
 		types.NamespacedName{
-			Name:      makeImportJobName(backup),
+			Name:      MakeImportJobName(backup),
 			Namespace: r.managedCephClusterID,
 		},
 		&job,
@@ -1819,7 +1819,7 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 ) error {
 	var job batchv1.Job
 
-	job.SetName(makeImportJobName(backup))
+	job.SetName(MakeImportJobName(backup))
 	job.SetNamespace(r.managedCephClusterID)
 
 	_, err := ctrl.CreateOrUpdate(ctx, r.Client, &job, func() error {
@@ -1876,7 +1876,7 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 				},
 				{
 					Name:  "OBJ_NAME",
-					Value: makeObjectNameOfExportedData(backup.GetName(), backup.GetAnnotations()[annotRemoteUID]),
+					Value: MakeObjectNameOfExportedData(backup.GetName(), backup.GetAnnotations()[annotRemoteUID]),
 				},
 				{
 					Name:  "BUCKET_NAME",
@@ -2028,7 +2028,7 @@ func (r *MantleBackupReconciler) primaryCleanup(
 	propagationPolicy := metav1.DeletePropagationBackground
 
 	var exportJob batchv1.Job
-	exportJob.SetName(makeExportJobName(target))
+	exportJob.SetName(MakeExportJobName(target))
 	exportJob.SetNamespace(r.managedCephClusterID)
 	if err := r.Client.Delete(ctx, &exportJob, &client.DeleteOptions{
 		PropagationPolicy: &propagationPolicy,
@@ -2037,7 +2037,7 @@ func (r *MantleBackupReconciler) primaryCleanup(
 	}
 
 	var uploadJob batchv1.Job
-	uploadJob.SetName(makeUploadJobName(target))
+	uploadJob.SetName(MakeUploadJobName(target))
 	uploadJob.SetNamespace(r.managedCephClusterID)
 	if err := r.Client.Delete(ctx, &uploadJob, &client.DeleteOptions{
 		PropagationPolicy: &propagationPolicy,
@@ -2046,7 +2046,7 @@ func (r *MantleBackupReconciler) primaryCleanup(
 	}
 
 	var exportDataPVC corev1.PersistentVolumeClaim
-	exportDataPVC.SetName(makeExportDataPVCName(target))
+	exportDataPVC.SetName(MakeExportDataPVCName(target))
 	exportDataPVC.SetNamespace(r.managedCephClusterID)
 	if err := r.Client.Delete(ctx, &exportDataPVC); err != nil && !aerrors.IsNotFound(err) {
 		return ctrl.Result{}, fmt.Errorf("failed to delete export data PVC: %w", err)
@@ -2112,7 +2112,7 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 	propagationPolicy := metav1.DeletePropagationBackground
 
 	var discardJob batchv1.Job
-	discardJob.SetName(makeDiscardJobName(target))
+	discardJob.SetName(MakeDiscardJobName(target))
 	discardJob.SetNamespace(r.managedCephClusterID)
 	if err := r.Client.Delete(ctx, &discardJob, &client.DeleteOptions{
 		PropagationPolicy: &propagationPolicy,
@@ -2121,7 +2121,7 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 	}
 
 	var importJob batchv1.Job
-	importJob.SetName(makeImportJobName(target))
+	importJob.SetName(MakeImportJobName(target))
 	importJob.SetNamespace(r.managedCephClusterID)
 	if err := r.Client.Delete(ctx, &importJob, &client.DeleteOptions{
 		PropagationPolicy: &propagationPolicy,
@@ -2130,14 +2130,14 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 	}
 
 	var discardPVC corev1.PersistentVolumeClaim
-	discardPVC.SetName(makeDiscardPVCName(target))
+	discardPVC.SetName(MakeDiscardPVCName(target))
 	discardPVC.SetNamespace(r.managedCephClusterID)
 	if err := r.Client.Delete(ctx, &discardPVC); err != nil && !aerrors.IsNotFound(err) {
 		return ctrl.Result{}, fmt.Errorf("failed to delete discard PVC: %w", err)
 	}
 
 	var discardPV corev1.PersistentVolume
-	discardPV.SetName(makeDiscardPVName(target))
+	discardPV.SetName(MakeDiscardPVName(target))
 	discardPV.SetNamespace(r.managedCephClusterID)
 	if err := r.Client.Delete(ctx, &discardPV); err != nil && !aerrors.IsNotFound(err) {
 		return ctrl.Result{}, fmt.Errorf("failed to delete discard PV: %w", err)
@@ -2145,7 +2145,7 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 
 	if err := r.objectStorageClient.Delete(
 		ctx,
-		makeObjectNameOfExportedData(target.GetName(), target.GetAnnotations()[annotRemoteUID]),
+		MakeObjectNameOfExportedData(target.GetName(), target.GetAnnotations()[annotRemoteUID]),
 	); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to delete exported data in the object storage: %w", err)
 	}
