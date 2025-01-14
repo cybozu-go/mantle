@@ -60,8 +60,15 @@ func NewCephCmd() CephCmd {
 	}
 }
 
-func NewCephCmdWithTools(namespace string) CephCmd {
+func NewCephCmdWithToolsAndCustomKubectl(kubectl []string, namespace string) CephCmd {
 	return &cephCmdImpl{
-		command: newCommandTools(namespace),
+		command: newCommandTools(kubectl, namespace),
 	}
+}
+
+func NewCephCmdWithTools(namespace string) CephCmd {
+	if len(envKubectlPath) == 0 {
+		panic("KUBECTL environment variable is not set")
+	}
+	return NewCephCmdWithToolsAndCustomKubectl([]string{envKubectlPath}, namespace)
 }
