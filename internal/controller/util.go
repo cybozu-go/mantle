@@ -86,9 +86,13 @@ func IsJobConditionTrue(conditions []batchv1.JobCondition, conditionType batchv1
 }
 
 func requeueReconciliation() ctrl.Result {
-	requeueAfter := os.Getenv("REQUEUE_RECONCILIATION_IMMEDIATELY")
-	if requeueAfter == "1" {
-		return ctrl.Result{RequeueAfter: time.Second}
+	requeueAfter := os.Getenv("REQUEUE_RECONCILIATION_AFTER")
+	if requeueAfter != "" {
+		duration, err := time.ParseDuration(requeueAfter)
+		if err != nil {
+			panic(fmt.Sprintf("set REQUEUE_RECONCILIATION_AFTER properly: %v", err))
+		}
+		return ctrl.Result{RequeueAfter: duration}
 	}
 	return ctrl.Result{Requeue: true}
 }

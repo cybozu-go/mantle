@@ -10,5 +10,5 @@ controller:
   #httpsProxy: http://host.minikube.internal:8899
   #noProxy: localhost,127.0.0.1,10.96.0.0/12
   env:
-    - name: REQUEUE_RECONCILIATION_IMMEDIATELY
-      value: "1"
+    - name: REQUEUE_RECONCILIATION_AFTER
+      value: "1s"
