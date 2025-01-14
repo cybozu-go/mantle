@@ -384,11 +384,11 @@ func WaitControllerToBeReady() {
 	GinkgoHelper()
 	It("wait for mantle-controller to be ready", func() {
 		Eventually(func() error {
-			return CheckDeploymentReady(PrimaryK8sCluster, "rook-ceph", "mantle-controller")
+			return CheckDeploymentReady(PrimaryK8sCluster, CephClusterNamespace, "mantle-controller")
 		}).Should(Succeed())
 
 		Eventually(func() error {
-			return CheckDeploymentReady(PrimaryK8sCluster, "rook-ceph", "mantle-controller")
+			return CheckDeploymentReady(PrimaryK8sCluster, CephClusterNamespace, "mantle-controller")
 		}).Should(Succeed())
 	})
 }
