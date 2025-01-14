@@ -122,5 +122,59 @@ func replicationFailureTestSuite() {
 			WaitTemporaryResourcesDeleted(ctx, primaryMB, secondaryMB0)
 			WaitTemporaryResourcesDeleted(ctx, primaryMB, secondaryMB1)
 		})
+
+		It("should handle removal of MantleBackup in primary k8s cluster during an incremental backup",
+			func(ctx SpecContext) {
+				namespace := util.GetUniqueName("ns-")
+				pvcName := util.GetUniqueName("pvc-")
+				backupName0 := util.GetUniqueName("mb-")
+				backupName1 := util.GetUniqueName("mb-")
+				restoreName0 := util.GetUniqueName("mr-")
+
+				SetupEnvironment(namespace)
+
+				// Create MantleBackup M0.
+				CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+				writtenDataHash0 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
+				CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName0)
+				WaitMantleBackupSynced(namespace, backupName0)
+
+				// Pause the object storage to make backups fail.
+				PauseObjectStorage(ctx)
+				defer ResumeObjectStorage(ctx)
+
+				// Create MantleBackup M1.
+				CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+				_ = WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
+				CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName1)
+
+				// Wait until an upload Job is created.
+				WaitUploadJobCreated(ctx, PrimaryK8sCluster, namespace, backupName1)
+
+				primaryMB, err := GetMB(PrimaryK8sCluster, namespace, backupName1)
+				Expect(err).NotTo(HaveOccurred())
+				secondaryMB, err := GetMB(SecondaryK8sCluster, namespace, backupName1)
+				Expect(err).NotTo(HaveOccurred())
+
+				// Delete MantleBackup M1.
+				DeleteMantleBackup(PrimaryK8sCluster, namespace, backupName1)
+
+				// Make sure M1 will disappear.
+				WaitMantleBackupDeleted(ctx, PrimaryK8sCluster, namespace, backupName1)
+
+				// Make sure M0, M0', and M1' will NOT disappear.
+				EnsureMantleBackupExists(ctx, PrimaryK8sCluster, namespace, backupName0)
+				EnsureMantleBackupExists(ctx, SecondaryK8sCluster, namespace, backupName0)
+				EnsureMantleBackupExists(ctx, SecondaryK8sCluster, namespace, backupName1)
+
+				// Make sure we can restore correct data from M0 and M0'.
+				EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName0, restoreName0, writtenDataHash0)
+				EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName0, restoreName0, writtenDataHash0)
+
+				// Make sure all unnecessary resources are removed.
+				WaitTemporaryJobsDeleted(ctx, primaryMB, secondaryMB)
+				WaitTemporaryPVCsDeleted(ctx, primaryMB, secondaryMB)
+				WaitTemporarySecondaryPVsDeleted(ctx, secondaryMB)
+			})
 	})
 }
