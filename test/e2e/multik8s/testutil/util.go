@@ -17,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
+	"github.com/cybozu-go/mantle/internal/ceph"
 	"github.com/cybozu-go/mantle/internal/controller"
 	"github.com/cybozu-go/mantle/test/util"
 	. "github.com/onsi/ginkgo/v2"
@@ -31,6 +32,7 @@ const (
 	CephClusterNamespace = "rook-ceph"
 	PrimaryK8sCluster    = 1
 	SecondaryK8sCluster  = 2
+	RgwDeployName        = "rook-ceph-rgw-ceph-object-store-a"
 )
 
 var (
@@ -65,8 +67,7 @@ func execAtLocal(ctx context.Context, cmd string, input []byte, args ...string) 
 	return stdout.Bytes(), stderr.Bytes(), err
 }
 
-// input can be nil
-func Kubectl(clusterNo int, input []byte, args ...string) ([]byte, []byte, error) {
+func getKubectlInvocation(clusterNo int) ([]string, error) {
 	kubectlPrefix := ""
 	switch clusterNo {
 	case PrimaryK8sCluster:
@@ -74,12 +75,20 @@ func Kubectl(clusterNo int, input []byte, args ...string) ([]byte, []byte, error
 	case SecondaryK8sCluster:
 		kubectlPrefix = kubectlPrefixSecondary
 	default:
-		panic(fmt.Sprintf("invalid clusterNo: %d", clusterNo))
+		return nil, fmt.Errorf("invalid clusterNo: %d", clusterNo)
 	}
 	if len(kubectlPrefix) == 0 {
-		panic("Either KUBECTL_PRIMARY or KUBECTL_SECONDARY environment variable is not set")
+		return nil, errors.New("Either KUBECTL_PRIMARY or KUBECTL_SECONDARY environment variable is not set")
 	}
-	fields := strings.Fields(kubectlPrefix)
+	return strings.Fields(kubectlPrefix), nil
+}
+
+// input can be nil
+func Kubectl(clusterNo int, input []byte, args ...string) ([]byte, []byte, error) {
+	fields, err := getKubectlInvocation(clusterNo)
+	if err != nil {
+		panic(err)
+	}
 	fields = append(fields, args...)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -164,7 +173,13 @@ func ApplyRBDPoolAndSCTemplate(clusterNo int, namespace string) error { //nolint
 }
 
 func GetObject[T any](clusterNo int, kind, namespace, name string) (*T, error) {
-	stdout, _, err := Kubectl(clusterNo, nil, "get", kind, "-n", namespace, name, "-o", "json")
+	var stdout []byte
+	var err error
+	if namespace == "" {
+		stdout, _, err = Kubectl(clusterNo, nil, "get", kind, name, "-o", "json")
+	} else {
+		stdout, _, err = Kubectl(clusterNo, nil, "get", kind, "-n", namespace, name, "-o", "json")
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -183,6 +198,10 @@ func GetMB(clusterNo int, namespace, name string) (*mantlev1.MantleBackup, error
 
 func GetPVC(clusterNo int, namespace, name string) (*corev1.PersistentVolumeClaim, error) {
 	return GetObject[corev1.PersistentVolumeClaim](clusterNo, "pvc", namespace, name)
+}
+
+func GetPV(clusterNo int, name string) (*corev1.PersistentVolume, error) {
+	return GetObject[corev1.PersistentVolume](clusterNo, "pv", "", name)
 }
 
 func GetMR(clusterNo int, namespace, name string) (*mantlev1.MantleRestore, error) {
@@ -219,6 +238,22 @@ func GetObjectList[T any](clusterNo int, kind, namespace string) (*T, error) {
 
 func GetMBList(clusterNo int, namespace string) (*mantlev1.MantleBackupList, error) {
 	return GetObjectList[mantlev1.MantleBackupList](clusterNo, "mantlebackup", namespace)
+}
+
+func GetPodList(clusterNo int, namespace string) (*corev1.PodList, error) {
+	return GetObjectList[corev1.PodList](clusterNo, "pod", namespace)
+}
+
+func GetJobList(clusterNo int, namespace string) (*batchv1.JobList, error) {
+	return GetObjectList[batchv1.JobList](clusterNo, "job", namespace)
+}
+
+func GetPVCList(clusterNo int, namespace string) (*corev1.PersistentVolumeClaimList, error) {
+	return GetObjectList[corev1.PersistentVolumeClaimList](clusterNo, "pvc", namespace)
+}
+
+func GetPVList(clusterNo int) (*corev1.PersistentVolumeList, error) {
+	return GetObjectList[corev1.PersistentVolumeList](clusterNo, "pv", "")
 }
 
 func ChangeClusterRole(clusterNo int, newRole string) error {
@@ -472,7 +507,15 @@ func WaitMantleBackupSynced(namespace, backupName string) {
 	}, "10m", "1s").Should(Succeed())
 }
 
+func EnsureMantleBackupExists(ctx SpecContext, cluster int, namespace, backupName string) {
+	GinkgoHelper()
+	By("checking MantleBackup exists")
+	_, err := GetMB(cluster, namespace, backupName)
+	Expect(err).NotTo(HaveOccurred())
+}
+
 func EnsureMantleBackupNotExist(ctx SpecContext, cluster int, namespace, backupName string) {
+	GinkgoHelper()
 	By("checking MantleBackup doesn't exist")
 	Consistently(ctx, func(g Gomega) {
 		mbs, err := GetMBList(cluster, namespace)
@@ -565,4 +608,241 @@ func EnsureCorrectRestoration(
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(string(stdout)).To(Equal(writtenDataHash))
 	}).Should(Succeed())
+}
+
+func WaitMantleBackupDeleted(ctx SpecContext, cluster int, namespace, backupName string) {
+	GinkgoHelper()
+	By("waiting for MantleBackup to be removed")
+	Eventually(ctx, func(g Gomega) {
+		mbs, err := GetMBList(cluster, namespace)
+		g.Expect(err).NotTo(HaveOccurred())
+		exists := slices.ContainsFunc(mbs.Items, func(mb mantlev1.MantleBackup) bool {
+			return mb.GetName() == backupName
+		})
+		g.Expect(exists).To(BeFalse())
+	}).Should(Succeed())
+}
+
+func ResumeObjectStorage(ctx SpecContext) {
+	GinkgoHelper()
+	By("resuming the object storage")
+	_, _, err := Kubectl(
+		SecondaryK8sCluster,
+		nil,
+		"patch",
+		"cephobjectstore",
+		"-n",
+		CephClusterNamespace,
+		"ceph-object-store",
+		"--type",
+		"json",
+		"-p",
+		`[{"op": "replace", "path": "/spec/gateway/placement", "value":{}}]`,
+	)
+	Expect(err).NotTo(HaveOccurred())
+
+	_, _, err = Kubectl(
+		SecondaryK8sCluster,
+		nil,
+		"delete", "-n", CephClusterNamespace, "deploy", RgwDeployName,
+	)
+	Expect(err).NotTo(HaveOccurred())
+
+	By("waiting for the RGW pods to be ready")
+	Eventually(ctx, func(g Gomega) {
+		pods, err := GetPodList(SecondaryK8sCluster, CephClusterNamespace)
+		g.Expect(err).NotTo(HaveOccurred())
+		index := slices.IndexFunc(pods.Items, func(pod corev1.Pod) bool {
+			return strings.HasPrefix(pod.GetName(), RgwDeployName)
+		})
+		g.Expect(index).NotTo(Equal(-1))
+		for _, s := range pods.Items[index].Status.ContainerStatuses {
+			g.Expect(s.Ready).To(BeTrue())
+		}
+	}).Should(Succeed())
+}
+
+// PauseObjectStorage pauses the object storage by patching the CephObjectStore
+// resource, which makes Rook attempt to deploy RGW pods on nodes that don't
+// exist. Note that setting /spec/gateway/instances to 0 won't work for this
+// purpose, as Rook does not allow it.
+// cf. https://github.com/rook/rook/blob/8767bf263e47f4c8c0c72fafccee71e732088b97/pkg/operator/ceph/object/rgw.go#L103-L107
+//
+//nolint:lll
+func PauseObjectStorage(ctx SpecContext) {
+	GinkgoHelper()
+	By("pausing the object storage")
+	_, _, err := Kubectl(
+		SecondaryK8sCluster,
+		nil,
+		"patch",
+		"-n",
+		CephClusterNamespace,
+		"cephobjectstore",
+		"ceph-object-store",
+		"--type",
+		"json",
+		"-p",
+		`[{
+			"op": "replace",
+			"path": "/spec/gateway/placement",
+			"value":{
+				"nodeAffinity":{
+					"requiredDuringSchedulingIgnoredDuringExecution": {
+						"nodeSelectorTerms": [{
+							"matchExpressions": [{
+								"key":"role",
+								"operator":"In",
+								"values":["non-existing-node"]
+							}]
+						}]
+					}
+				}
+			}
+		}]`,
+	)
+	Expect(err).NotTo(HaveOccurred())
+
+	By("waiting for the RGW pods to be terminated")
+	Eventually(ctx, func(g Gomega) {
+		pods, err := GetPodList(SecondaryK8sCluster, CephClusterNamespace)
+		g.Expect(err).NotTo(HaveOccurred())
+		exist := slices.ContainsFunc(pods.Items, func(pod corev1.Pod) bool {
+			return strings.HasPrefix(pod.GetName(), RgwDeployName)
+		})
+		g.Expect(exist).NotTo(BeFalse())
+	}).Should(Succeed())
+}
+
+func ListRBDSnapshotsInPVC(cluster int, namespace, pvcName string) ([]ceph.RBDSnapshot, error) {
+	pvc, err := GetPVC(cluster, namespace, pvcName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get PVC: %w", err)
+	}
+	pv, err := GetPV(cluster, pvc.Spec.VolumeName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get PV: %w", err)
+	}
+	cmd := createCephCmd(cluster)
+	snaps, err := cmd.RBDSnapLs("rook-ceph-block", pv.Spec.CSI.VolumeAttributes["imageName"])
+	if err != nil {
+		return nil, fmt.Errorf("failed to create ceph cmd: %w", err)
+	}
+	return snaps, nil
+}
+
+func EnsurePVCHasNoSnapshots(cluster int, namespace, pvcName string) {
+	GinkgoHelper()
+	By("checking PVC has no snapshots")
+	snaps, err := ListRBDSnapshotsInPVC(cluster, namespace, pvcName)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(snaps).To(BeEmpty())
+}
+
+func createCephCmd(cluster int) ceph.CephCmd {
+	kubectl, err := getKubectlInvocation(cluster)
+	if err != nil {
+		panic(err)
+	}
+	return ceph.NewCephCmdWithToolsAndCustomKubectl(kubectl, CephClusterNamespace)
+}
+
+func WaitUploadJobCreated(ctx SpecContext, cluster int, namespace, backupName string) {
+	GinkgoHelper()
+	By("waiting for an upload job to be created")
+	Eventually(ctx, func(g Gomega) {
+		mb, err := GetMB(cluster, namespace, backupName)
+		g.Expect(err).NotTo(HaveOccurred())
+		jobs, err := GetJobList(cluster, CephClusterNamespace)
+		g.Expect(err).NotTo(HaveOccurred())
+		exist := slices.ContainsFunc(jobs.Items, func(job batchv1.Job) bool {
+			return job.GetName() == controller.MakeUploadJobName(mb)
+		})
+		g.Expect(exist).To(BeTrue())
+	}).Should(Succeed())
+}
+
+func WaitJobDeleted(ctx SpecContext, cluster int, namespace, jobName string) {
+	GinkgoHelper()
+	By("waiting for a job to be deleted")
+	Eventually(ctx, func(g Gomega) {
+		jobs, err := GetJobList(cluster, CephClusterNamespace)
+		g.Expect(err).NotTo(HaveOccurred())
+		exist := slices.ContainsFunc(jobs.Items, func(job batchv1.Job) bool {
+			return job.GetName() == jobName
+		})
+		g.Expect(exist).To(BeFalse())
+	}).Should(Succeed())
+}
+
+func WaitTemporaryPrimaryJobsDeleted(ctx SpecContext, primaryMB *mantlev1.MantleBackup) {
+	GinkgoHelper()
+	WaitJobDeleted(ctx, PrimaryK8sCluster, CephClusterNamespace, controller.MakeExportJobName(primaryMB))
+	WaitJobDeleted(ctx, PrimaryK8sCluster, CephClusterNamespace, controller.MakeUploadJobName(primaryMB))
+}
+
+func WaitTemporarySecondaryJobsDeleted(ctx SpecContext, secondaryMB *mantlev1.MantleBackup) {
+	GinkgoHelper()
+	WaitJobDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace, controller.MakeImportJobName(secondaryMB))
+	WaitJobDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace, controller.MakeDiscardJobName(secondaryMB))
+}
+
+func WaitTemporaryJobsDeleted(ctx SpecContext, primaryMB, secondaryMB *mantlev1.MantleBackup) {
+	GinkgoHelper()
+	WaitTemporaryPrimaryJobsDeleted(ctx, primaryMB)
+	WaitTemporarySecondaryJobsDeleted(ctx, secondaryMB)
+}
+
+func WaitPVCDeleted(ctx SpecContext, cluster int, namespace, pvcName string) {
+	GinkgoHelper()
+	By("waiting for a PVC to be deleted")
+	Eventually(ctx, func(g Gomega) {
+		pvcs, err := GetPVCList(cluster, CephClusterNamespace)
+		g.Expect(err).NotTo(HaveOccurred())
+		exist := slices.ContainsFunc(pvcs.Items, func(pvc corev1.PersistentVolumeClaim) bool {
+			return pvc.GetName() == pvcName
+		})
+		g.Expect(exist).To(BeFalse())
+	}).Should(Succeed())
+}
+
+func WaitTemporaryPrimaryPVCsDeleted(ctx SpecContext, primaryMB *mantlev1.MantleBackup) {
+	GinkgoHelper()
+	WaitPVCDeleted(ctx, PrimaryK8sCluster, CephClusterNamespace, controller.MakeExportDataPVCName(primaryMB))
+}
+
+func WaitTemporarySecondaryPVCsDeleted(ctx SpecContext, secondaryMB *mantlev1.MantleBackup) {
+	GinkgoHelper()
+	WaitPVCDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace, controller.MakeDiscardPVCName(secondaryMB))
+}
+
+func WaitTemporaryPVCsDeleted(ctx SpecContext, primaryMB, secondaryMB *mantlev1.MantleBackup) {
+	GinkgoHelper()
+	WaitTemporaryPrimaryPVCsDeleted(ctx, primaryMB)
+	WaitTemporarySecondaryPVCsDeleted(ctx, secondaryMB)
+}
+
+func WaitPVDeleted(ctx SpecContext, cluster int, namespace, pvName string) {
+	GinkgoHelper()
+	By("waiting for a PV to be deleted")
+	Eventually(ctx, func(g Gomega) {
+		pvs, err := GetPVList(cluster)
+		g.Expect(err).NotTo(HaveOccurred())
+		exist := slices.ContainsFunc(pvs.Items, func(pv corev1.PersistentVolume) bool {
+			return pv.GetName() == pvName
+		})
+		g.Expect(exist).To(BeFalse())
+	}).Should(Succeed())
+}
+
+func WaitTemporarySecondaryPVsDeleted(ctx SpecContext, secondaryMB *mantlev1.MantleBackup) {
+	GinkgoHelper()
+	WaitPVDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace, controller.MakeDiscardPVName(secondaryMB))
+}
+
+func DeleteMantleBackup(cluster int, namespace, backupName string) {
+	GinkgoHelper()
+	By("deleting MantleBackup")
+	_, _, err := Kubectl(cluster, nil, "delete", "-n", namespace, "mantlebackup", backupName, "--wait=false")
+	Expect(err).NotTo(HaveOccurred())
 }
