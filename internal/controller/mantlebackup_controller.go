@@ -11,9 +11,12 @@ import (
 	_ "embed"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
+	"github.com/cybozu-go/mantle/cmd/backup"
 	"github.com/cybozu-go/mantle/internal/ceph"
 	"github.com/cybozu-go/mantle/internal/controller/internal/objectstorage"
+	"github.com/cybozu-go/mantle/internal/controller/metrics"
 	"github.com/cybozu-go/mantle/pkg/controller/proto"
+	"github.com/prometheus/client_golang/prometheus"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	aerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -2067,6 +2070,21 @@ func (r *MantleBackupReconciler) primaryCleanup(
 	}); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to update SyncedToRemote to True: %w", err)
 	}
+
+	duration := time.Since(target.GetCreationTimestamp().Time).Seconds()
+	source := "none"
+	if _, ok := target.GetLabels()[backup.MantleBackupConfigUID]; ok {
+		source = "mantle-backup-config"
+	}
+	metrics.BackupCreationDuration.
+		With(prometheus.Labels{
+			"cluster_namespace": r.managedCephClusterID,
+			// PVC is located in the same namespace as the MantleBackup.
+			"pvc_namespace": target.GetNamespace(),
+			"pvc":           target.Spec.PVC,
+			"source":        source,
+		}).
+		Observe(duration)
 
 	return ctrl.Result{}, nil
 }

@@ -374,15 +374,21 @@ func IsJobConditionTrue(conditions []batchv1.JobCondition, conditionType batchv1
 	return false
 }
 
+func GetControllerPodName(clusterNo int) (string, error) {
+	stdout, _, err := Kubectl(clusterNo, nil, "get", "pod", "-n", CephClusterNamespace,
+		"-l", "app.kubernetes.io/name=mantle", "-o", "jsonpath={.items[0].metadata.name}")
+	return string(stdout), err
+}
+
 func WaitControllerToBeReady() {
 	GinkgoHelper()
 	It("wait for mantle-controller to be ready", func() {
 		Eventually(func() error {
-			return CheckDeploymentReady(PrimaryK8sCluster, "rook-ceph", "mantle-controller")
+			return CheckDeploymentReady(PrimaryK8sCluster, CephClusterNamespace, "mantle-controller")
 		}).Should(Succeed())
 
 		Eventually(func() error {
-			return CheckDeploymentReady(PrimaryK8sCluster, "rook-ceph", "mantle-controller")
+			return CheckDeploymentReady(PrimaryK8sCluster, CephClusterNamespace, "mantle-controller")
 		}).Should(Succeed())
 	})
 }

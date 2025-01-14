@@ -5,6 +5,7 @@ import (
 	"os"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -325,5 +326,26 @@ func replicationTestSuite() {
 			EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName0, restoreName0, writtenDataHash0)
 			EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName0, restoreName0, writtenDataHash0)
 		})
+
+		It("should get metrics from the controller pod in the primary cluster", func(ctx SpecContext) {
+			metrics := []string{
+				`mantle_backup_creation_duration_seconds_count`,
+				`mantle_backup_creation_duration_seconds_sum`,
+			}
+			ensureMetricsAreExposed(metrics)
+		})
 	})
+}
+
+func ensureMetricsAreExposed(metrics []string) {
+	GinkgoHelper()
+	controllerPod, err := GetControllerPodName(PrimaryK8sCluster)
+	Expect(err).NotTo(HaveOccurred())
+
+	stdout, _, err := Kubectl(PrimaryK8sCluster, nil, "exec", "-n", CephClusterNamespace, controllerPod, "--",
+		"curl", "-s", "http://localhost:8080/metrics")
+	Expect(err).NotTo(HaveOccurred())
+	for _, metric := range metrics {
+		Expect(strings.Contains(string(stdout), metric)).To(BeTrue())
+	}
 }
