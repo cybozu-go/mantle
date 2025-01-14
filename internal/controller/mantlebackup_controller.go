@@ -262,7 +262,7 @@ func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *
 	}
 	if !ok {
 		logger.Info("waiting for PVC bound.")
-		return nil, ctrl.Result{Requeue: true}, nil
+		return nil, requeueReconciliation(), nil
 	}
 
 	pvName := pvc.Spec.VolumeName
@@ -392,7 +392,7 @@ func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, back
 	default:
 		return ctrl.Result{}, getSnapshotTargetErr
 	}
-	if result.Requeue {
+	if !result.IsZero() {
 		return result, nil
 	}
 
@@ -415,7 +415,7 @@ func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, back
 		if err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{Requeue: true}, nil
+		return requeueReconciliation(), nil
 	}
 
 	if err := r.expire(ctx, backup); err != nil {
@@ -461,7 +461,7 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 	default:
 		return ctrl.Result{}, getSnapshotTargetErr
 	}
-	if result.Requeue {
+	if !result.IsZero() {
 		return result, nil
 	}
 
@@ -564,7 +564,7 @@ func (r *MantleBackupReconciler) replicateManifests(
 			*backup1.Status.SnapID < *backup.Status.SnapID &&
 				backup1.ObjectMeta.DeletionTimestamp.IsZero() &&
 				!meta.IsStatusConditionTrue(backup1.Status.Conditions, mantlev1.BackupConditionSyncedToRemote) {
-			return ctrl.Result{Requeue: true}, nil
+			return requeueReconciliation(), nil
 		}
 	}
 
@@ -703,7 +703,7 @@ func (r *MantleBackupReconciler) finalizeStandalone(
 ) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	if _, ok := backup.GetAnnotations()[annotDiffTo]; ok {
-		return ctrl.Result{Requeue: true}, nil
+		return requeueReconciliation(), nil
 	}
 
 	if !controllerutil.ContainsFinalizer(backup, MantleBackupFinalizerName) {
@@ -741,7 +741,7 @@ func (r *MantleBackupReconciler) finalizeSecondary(
 ) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	if _, ok := backup.GetAnnotations()[annotDiffTo]; ok {
-		return ctrl.Result{Requeue: true}, nil
+		return requeueReconciliation(), nil
 	}
 
 	if !controllerutil.ContainsFinalizer(backup, MantleBackupFinalizerName) {
@@ -965,7 +965,7 @@ func (r *MantleBackupReconciler) export(
 		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{Requeue: true}, nil
+	return requeueReconciliation(), nil
 }
 
 func (r *MantleBackupReconciler) annotateExportTargetMantleBackup(
@@ -1025,7 +1025,7 @@ func (r *MantleBackupReconciler) checkIfNewJobCanBeCreated(ctx context.Context) 
 	}
 
 	if len(jobs.Items) >= r.primarySettings.MaxExportJobs {
-		return ctrl.Result{Requeue: true}, nil
+		return requeueReconciliation(), nil
 	}
 
 	return ctrl.Result{}, nil
@@ -1271,7 +1271,7 @@ func (r *MantleBackupReconciler) checkIfExportJobIsCompleted(
 		return ctrl.Result{}, nil
 	}
 
-	return ctrl.Result{Requeue: true}, nil
+	return requeueReconciliation(), nil
 }
 
 func (r *MantleBackupReconciler) createOrUpdateExportDataUploadJob(ctx context.Context, target *mantlev1.MantleBackup) error {
@@ -1422,7 +1422,7 @@ func (r *MantleBackupReconciler) startImport(
 ) (ctrl.Result, error) {
 	if !r.doesMantleBackupHaveSyncModeAnnot(backup) {
 		// SetSynchronizingg is not called yet or the cache is stale.
-		return ctrl.Result{Requeue: true}, nil
+		return requeueReconciliation(), nil
 	}
 
 	if result, err := r.isExportDataAlreadyUploaded(ctx, backup); err != nil || !result.IsZero() {
@@ -1431,7 +1431,7 @@ func (r *MantleBackupReconciler) startImport(
 
 	// Requeue if the PV is smaller than the PVC. (This may be the case if pvc-autoresizer is used.)
 	if isPVSmallerThanPVC(target.pv, target.pvc) {
-		return ctrl.Result{Requeue: true}, nil
+		return requeueReconciliation(), nil
 	}
 
 	if err := r.updateStatusManifests(ctx, backup, target.pv, target.pvc); err != nil {
@@ -1528,7 +1528,7 @@ func (r *MantleBackupReconciler) isExportDataAlreadyUploaded(
 	if uploaded {
 		return ctrl.Result{}, nil
 	}
-	return ctrl.Result{Requeue: true}, nil
+	return requeueReconciliation(), nil
 }
 
 func isPVSmallerThanPVC(
@@ -1592,7 +1592,7 @@ func (r *MantleBackupReconciler) reconcileDiscardJob(
 	if completed {
 		return ctrl.Result{}, nil
 	}
-	return ctrl.Result{Requeue: true}, nil
+	return requeueReconciliation(), nil
 }
 
 func (r *MantleBackupReconciler) createOrUpdateDiscardPV(
@@ -1777,11 +1777,11 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 		if err := r.createOrImportJob(ctx, backup, snapshotTarget); err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{Requeue: true}, nil
+		return requeueReconciliation(), nil
 	}
 
 	if !IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete) {
-		return ctrl.Result{Requeue: true}, nil
+		return requeueReconciliation(), nil
 	}
 
 	snapshot, err := ceph.FindRBDSnapshot(

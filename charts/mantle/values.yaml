@@ -25,6 +25,7 @@ affinity: {}
 controller:
   role: standalone
   ports: []
+  env: []
 
 secondaryService:
   # type:

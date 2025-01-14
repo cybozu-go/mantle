@@ -137,7 +137,7 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, restore *mantlev1
 	// check if the backup is ReadyToUse
 	if !meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse) {
 		logger.Info("backup is not ready to use", "backup", backup.Name, "namespace", backup.Namespace)
-		return ctrl.Result{Requeue: true}, nil
+		return requeueReconciliation(), nil
 	}
 
 	// store the pool name in the status
