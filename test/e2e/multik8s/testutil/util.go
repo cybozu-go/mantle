@@ -731,6 +731,17 @@ func ListRBDSnapshotsInPVC(cluster int, namespace, pvcName string) ([]ceph.RBDSn
 	return snaps, nil
 }
 
+func EnsurePVCHasSnapshot(cluster int, namespace, pvcName, snapName string) {
+	GinkgoHelper()
+	By("checking the PVC has a snapshot")
+	snaps, err := ListRBDSnapshotsInPVC(cluster, namespace, pvcName)
+	Expect(err).NotTo(HaveOccurred())
+	exists := slices.ContainsFunc(snaps, func(snap ceph.RBDSnapshot) bool {
+		return snap.Name == snapName
+	})
+	Expect(exists).To(BeTrue())
+}
+
 func EnsurePVCHasNoSnapshots(cluster int, namespace, pvcName string) {
 	GinkgoHelper()
 	By("checking PVC has no snapshots")
@@ -838,6 +849,31 @@ func WaitPVDeleted(ctx SpecContext, cluster int, namespace, pvName string) {
 func WaitTemporarySecondaryPVsDeleted(ctx SpecContext, secondaryMB *mantlev1.MantleBackup) {
 	GinkgoHelper()
 	WaitPVDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace, controller.MakeDiscardPVName(secondaryMB))
+}
+
+func WaitTemporaryS3ObjectDeleted(ctx SpecContext, primaryMB *mantlev1.MantleBackup) {
+	GinkgoHelper()
+	By("waiting for the temporary s3 object to be deleted")
+	expectedObjectName := controller.MakeObjectNameOfExportedData(
+		primaryMB.GetName(), string(primaryMB.GetUID()))
+	Eventually(ctx, func(g Gomega) {
+		objectStorageClient, err := CreateObjectStorageClient(ctx)
+		g.Expect(err).NotTo(HaveOccurred())
+		listOutput, err := objectStorageClient.listObjects(ctx)
+		g.Expect(err).NotTo(HaveOccurred())
+		for _, c := range listOutput.Contents {
+			g.Expect(c.Key).NotTo(BeNil())
+			g.Expect(*c.Key).NotTo(Equal(expectedObjectName))
+		}
+	}).Should(Succeed())
+}
+
+func WaitTemporaryResourcesDeleted(ctx SpecContext, primaryMB, secondaryMB *mantlev1.MantleBackup) {
+	GinkgoHelper()
+	WaitTemporaryJobsDeleted(ctx, primaryMB, secondaryMB)
+	WaitTemporaryPVCsDeleted(ctx, primaryMB, secondaryMB)
+	WaitTemporarySecondaryPVsDeleted(ctx, secondaryMB)
+	WaitTemporaryS3ObjectDeleted(ctx, primaryMB)
 }
 
 func DeleteMantleBackup(cluster int, namespace, backupName string) {

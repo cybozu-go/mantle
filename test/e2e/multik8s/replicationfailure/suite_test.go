@@ -73,5 +73,54 @@ func replicationFailureTestSuite() {
 			WaitTemporaryPVCsDeleted(ctx, primaryMB, secondaryMB)
 			WaitTemporarySecondaryPVsDeleted(ctx, secondaryMB)
 		})
+
+		It("should handle removal of MantleBackup in secondary k8s cluster during a full backup", func(ctx SpecContext) {
+			namespace := util.GetUniqueName("ns-")
+			pvcName := util.GetUniqueName("pvc-")
+			backupName := util.GetUniqueName("mb-")
+			restoreName := util.GetUniqueName("mr-")
+
+			SetupEnvironment(namespace)
+
+			// Pause the object storage to make backups fail.
+			PauseObjectStorage(ctx)
+			defer ResumeObjectStorage(ctx)
+
+			// Create MantleBackup M0.
+			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+			writtenDataHash := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
+			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
+
+			// Wait until an upload Job is created.
+			WaitUploadJobCreated(ctx, PrimaryK8sCluster, namespace, backupName)
+
+			primaryMB, err := GetMB(PrimaryK8sCluster, namespace, backupName)
+			Expect(err).NotTo(HaveOccurred())
+			secondaryMB0, err := GetMB(SecondaryK8sCluster, namespace, backupName)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Delete M0'.
+			DeleteMantleBackup(SecondaryK8sCluster, namespace, backupName)
+
+			// Resume the object storage so that M0' will be deleted correctly after its finalization.
+			ResumeObjectStorage(ctx)
+
+			// M0' should be re-created and synced.
+			WaitMantleBackupSynced(namespace, backupName)
+
+			// Make sure the PVC in the primary and secondary cluster DOES have a snapshot.
+			EnsurePVCHasSnapshot(PrimaryK8sCluster, namespace, pvcName, backupName)
+			EnsurePVCHasSnapshot(SecondaryK8sCluster, namespace, pvcName, backupName)
+
+			// Make sure we can restore correct data in the primary and secondary cluster.
+			EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
+			EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
+
+			// Make sure all unnecessary resources are removed.
+			secondaryMB1, err := GetMB(SecondaryK8sCluster, namespace, backupName)
+			Expect(err).NotTo(HaveOccurred())
+			WaitTemporaryResourcesDeleted(ctx, primaryMB, secondaryMB0)
+			WaitTemporaryResourcesDeleted(ctx, primaryMB, secondaryMB1)
+		})
 	})
 }
