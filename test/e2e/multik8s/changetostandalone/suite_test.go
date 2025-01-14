@@ -103,10 +103,10 @@ func changeToStandalone() {
 		})
 
 		It("should change their roles back to primary/secondary", func() {
-			By("changing the primary K8s cluster to standalone")
+			By("reverting the standalone mantle back to primary in the primary K8s cluster")
 			err := ChangeClusterRole(PrimaryK8sCluster, controller.RolePrimary)
 			Expect(err).NotTo(HaveOccurred())
-			By("changing the secondary K8s cluster to standalone")
+			By("reverting the standalone mantle back to secondary in the secondary K8s cluster")
 			err = ChangeClusterRole(SecondaryK8sCluster, controller.RoleSecondary)
 			Expect(err).NotTo(HaveOccurred())
 		})
