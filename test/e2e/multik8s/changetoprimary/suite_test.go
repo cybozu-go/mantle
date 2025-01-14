@@ -29,10 +29,10 @@ func TestMtest(t *testing.T) {
 
 var _ = Describe("Mantle", func() {
 	Context("wait controller to be ready", WaitControllerToBeReady)
-	Context("change to primary", changeToPrimary)
+	Context("change to primary", changePrimaryToStandaloneTemporarily)
 })
 
-func changeToPrimary() {
+func changePrimaryToStandaloneTemporarily() {
 	Describe("change to primary", func() {
 		var (
 			namespace                                                                  string
