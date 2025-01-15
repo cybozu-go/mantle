@@ -494,7 +494,7 @@ func WaitMantleBackupReadyToUse(cluster int, namespace, backupName string) {
 
 func WaitMantleBackupSynced(namespace, backupName string) {
 	GinkgoHelper()
-	By("checking MantleBackup's SyncedToRemote status")
+	By(fmt.Sprintf("checking MantleBackup's SyncedToRemote status: %s/%s", namespace, backupName))
 	Eventually(func() error {
 		mb, err := GetMB(PrimaryK8sCluster, namespace, backupName)
 		if err != nil {
