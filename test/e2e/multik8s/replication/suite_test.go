@@ -80,6 +80,7 @@ func replicationTestSuite() {
 			}).Should(Succeed())
 
 			By("checking MantleBackup is replicated")
+			var primaryMB, secondaryMB *mantlev1.MantleBackup
 			Eventually(func() error {
 				primaryPVC, err := GetPVC(PrimaryK8sCluster, namespace, pvcName)
 				if err != nil {
@@ -89,12 +90,12 @@ func replicationTestSuite() {
 				if err != nil {
 					return err
 				}
-				primaryMB, err := GetMB(PrimaryK8sCluster, namespace, backupName)
+				primaryMB, err = GetMB(PrimaryK8sCluster, namespace, backupName)
 				if err != nil {
 					return err
 				}
 
-				secondaryMB, err := GetMB(SecondaryK8sCluster, namespace, backupName)
+				secondaryMB, err = GetMB(SecondaryK8sCluster, namespace, backupName)
 				if err != nil {
 					return err
 				}
@@ -123,7 +124,7 @@ func replicationTestSuite() {
 				return nil
 			}).Should(Succeed())
 
-			EnsureTemporaryResourcesDeleted(ctx)
+			WaitTemporaryResourcesDeleted(ctx, primaryMB, secondaryMB)
 			EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
 			EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
 		})
@@ -153,7 +154,12 @@ func replicationTestSuite() {
 			writtenDataHash1 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName1)
 			WaitMantleBackupSynced(namespace, backupName1)
-			EnsureTemporaryResourcesDeleted(ctx)
+
+			primaryMB1, err := GetMB(PrimaryK8sCluster, namespace, backupName1)
+			Expect(err).NotTo(HaveOccurred())
+			secondaryMB1, err := GetMB(SecondaryK8sCluster, namespace, backupName1)
+			Expect(err).NotTo(HaveOccurred())
+			WaitTemporaryResourcesDeleted(ctx, primaryMB1, secondaryMB1)
 
 			// Make sure M1 and M1' have the same contents.
 			EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName1, restoreName1, writtenDataHash1)
@@ -188,7 +194,12 @@ func replicationTestSuite() {
 			writtenDataHash1 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName1)
 			WaitMantleBackupSynced(namespace, backupName1)
-			EnsureTemporaryResourcesDeleted(ctx)
+
+			primaryMB1, err := GetMB(PrimaryK8sCluster, namespace, backupName1)
+			Expect(err).NotTo(HaveOccurred())
+			secondaryMB1, err := GetMB(SecondaryK8sCluster, namespace, backupName1)
+			Expect(err).NotTo(HaveOccurred())
+			WaitTemporaryResourcesDeleted(ctx, primaryMB1, secondaryMB1)
 
 			// Make sure M1 and M1' have the same contents.
 			EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName1, restoreName1, writtenDataHash1)
@@ -213,13 +224,23 @@ func replicationTestSuite() {
 			writtenDataHash0 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName0)
 			WaitMantleBackupSynced(namespace, backupName0)
-			EnsureTemporaryResourcesDeleted(ctx)
+
+			primaryMB0, err := GetMB(PrimaryK8sCluster, namespace, backupName0)
+			Expect(err).NotTo(HaveOccurred())
+			secondaryMB0, err := GetMB(SecondaryK8sCluster, namespace, backupName0)
+			Expect(err).NotTo(HaveOccurred())
+			WaitTemporaryResourcesDeleted(ctx, primaryMB0, secondaryMB0)
 
 			// create M1.
 			writtenDataHash1 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName1)
 			WaitMantleBackupSynced(namespace, backupName1)
-			EnsureTemporaryResourcesDeleted(ctx)
+
+			primaryMB1, err := GetMB(PrimaryK8sCluster, namespace, backupName1)
+			Expect(err).NotTo(HaveOccurred())
+			secondaryMB1, err := GetMB(SecondaryK8sCluster, namespace, backupName1)
+			Expect(err).NotTo(HaveOccurred())
+			WaitTemporaryResourcesDeleted(ctx, primaryMB1, secondaryMB1)
 
 			// Make sure M1 and M1' have the same contents.
 			EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName1, restoreName1, writtenDataHash1)
@@ -261,7 +282,12 @@ func replicationTestSuite() {
 			writtenDataHash2 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName2)
 			WaitMantleBackupSynced(namespace, backupName2)
-			EnsureTemporaryResourcesDeleted(ctx)
+
+			primaryMB2, err := GetMB(PrimaryK8sCluster, namespace, backupName2)
+			Expect(err).NotTo(HaveOccurred())
+			secondaryMB2, err := GetMB(SecondaryK8sCluster, namespace, backupName2)
+			Expect(err).NotTo(HaveOccurred())
+			WaitTemporaryResourcesDeleted(ctx, primaryMB2, secondaryMB2)
 
 			// Make sure M2 and M2' have the same contents.
 			EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName2, restoreName2, writtenDataHash2)
@@ -313,7 +339,12 @@ func replicationTestSuite() {
 			writtenDataHash2 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName2)
 			WaitMantleBackupSynced(namespace, backupName2)
-			EnsureTemporaryResourcesDeleted(ctx)
+
+			primaryMB2, err := GetMB(PrimaryK8sCluster, namespace, backupName2)
+			Expect(err).NotTo(HaveOccurred())
+			secondaryMB2, err := GetMB(SecondaryK8sCluster, namespace, backupName2)
+			Expect(err).NotTo(HaveOccurred())
+			WaitTemporaryResourcesDeleted(ctx, primaryMB2, secondaryMB2)
 
 			// Make sure M2 and M2' have the same contents.
 			EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName2, restoreName2, writtenDataHash2)

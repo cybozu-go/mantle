@@ -527,56 +527,6 @@ func EnsureMantleBackupNotExist(ctx SpecContext, cluster int, namespace, backupN
 	}, "10s").Should(Succeed())
 }
 
-func EnsureTemporaryResourcesDeleted(ctx SpecContext) {
-	GinkgoHelper()
-	By("checking all temporary Jobs related to export and import of RBD images are removed")
-	primaryJobList, err := GetObjectList[batchv1.JobList](PrimaryK8sCluster, "job", CephClusterNamespace)
-	Expect(err).NotTo(HaveOccurred())
-	Expect(slices.ContainsFunc(primaryJobList.Items, func(job batchv1.Job) bool {
-		n := job.GetName()
-		return strings.HasPrefix(n, controller.MantleExportJobPrefix) ||
-			strings.HasPrefix(n, controller.MantleUploadJobPrefix)
-	})).To(BeFalse())
-	secondaryJobList, err := GetObjectList[batchv1.JobList](SecondaryK8sCluster, "job", CephClusterNamespace)
-	Expect(err).NotTo(HaveOccurred())
-	Expect(slices.ContainsFunc(secondaryJobList.Items, func(job batchv1.Job) bool {
-		n := job.GetName()
-		return strings.HasPrefix(n, controller.MantleImportJobPrefix) ||
-			strings.HasPrefix(n, controller.MantleDiscardJobPrefix)
-	})).To(BeFalse())
-
-	By("checking all temporary PVCs related to export and import of RBD images are removed")
-	primaryPVCList, err := GetObjectList[corev1.PersistentVolumeClaimList](
-		PrimaryK8sCluster, "pvc", CephClusterNamespace)
-	Expect(err).NotTo(HaveOccurred())
-	Expect(slices.ContainsFunc(primaryPVCList.Items, func(pvc corev1.PersistentVolumeClaim) bool {
-		n := pvc.GetName()
-		return strings.HasPrefix(n, controller.MantleExportDataPVCPrefix)
-	})).To(BeFalse())
-	secondaryPVCList, err := GetObjectList[corev1.PersistentVolumeClaimList](
-		SecondaryK8sCluster, "pvc", CephClusterNamespace)
-	Expect(err).NotTo(HaveOccurred())
-	Expect(slices.ContainsFunc(secondaryPVCList.Items, func(pvc corev1.PersistentVolumeClaim) bool {
-		n := pvc.GetName()
-		return strings.HasPrefix(n, controller.MantleDiscardPVCPrefix)
-	})).To(BeFalse())
-
-	By("checking all temporary PVs related to export and import of RBD images are removed")
-	secondaryPVList, err := GetObjectList[corev1.PersistentVolumeList](SecondaryK8sCluster, "pv", CephClusterNamespace)
-	Expect(err).NotTo(HaveOccurred())
-	Expect(slices.ContainsFunc(secondaryPVList.Items, func(pv corev1.PersistentVolume) bool {
-		n := pv.GetName()
-		return strings.HasPrefix(n, controller.MantleDiscardPVPrefix)
-	})).To(BeFalse())
-
-	By("checking all temporary objects in the object storage related to export and import of RBD images are removed")
-	objectStorageClient, err := CreateObjectStorageClient(ctx)
-	Expect(err).NotTo(HaveOccurred())
-	listOutput, err := objectStorageClient.listObjects(ctx)
-	Expect(err).NotTo(HaveOccurred())
-	Expect(len(listOutput.Contents)).To(Equal(0))
-}
-
 func EnsureCorrectRestoration(
 	clusterNo int,
 	ctx SpecContext,
