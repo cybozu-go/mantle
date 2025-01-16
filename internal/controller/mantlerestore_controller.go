@@ -205,7 +205,7 @@ func (r *MantleRestoreReconciler) cloneImageFromBackup(ctx context.Context, rest
 	pv := corev1.PersistentVolume{}
 	err := json.Unmarshal([]byte(backup.Status.PVManifest), &pv)
 	if err != nil {
-		return fmt.Errorf("failed to unmarshal PV manifest: %v", err)
+		return fmt.Errorf("failed to unmarshal PV manifest: %w", err)
 	}
 
 	bkImage := pv.Spec.CSI.VolumeAttributes["imageName"]
@@ -215,14 +215,14 @@ func (r *MantleRestoreReconciler) cloneImageFromBackup(ctx context.Context, rest
 
 	images, err := r.ceph.RBDLs(restore.Status.Pool)
 	if err != nil {
-		return fmt.Errorf("failed to list RBD images: %v", err)
+		return fmt.Errorf("failed to list RBD images: %w", err)
 	}
 
 	// check if the image already exists
 	if slices.Contains(images, r.restoringRBDImageName(restore)) {
 		info, err := r.ceph.RBDInfo(restore.Status.Pool, r.restoringRBDImageName(restore))
 		if err != nil {
-			return fmt.Errorf("failed to get RBD info: %v", err)
+			return fmt.Errorf("failed to get RBD info: %w", err)
 		}
 		if info.Parent == nil {
 			return fmt.Errorf("failed to get RBD info: parent field is empty")
@@ -378,7 +378,7 @@ func (r *MantleRestoreReconciler) deleteRestoringPVC(ctx context.Context, restor
 		if errors.IsNotFound(err) {
 			return nil
 		}
-		return fmt.Errorf("failed to get PVC: %v", err)
+		return fmt.Errorf("failed to get PVC: %w", err)
 	}
 
 	if pvc.Annotations[PVCAnnotationRestoredBy] != string(restore.UID) {
@@ -386,7 +386,7 @@ func (r *MantleRestoreReconciler) deleteRestoringPVC(ctx context.Context, restor
 	}
 
 	if err := r.client.Delete(ctx, &pvc); err != nil {
-		return fmt.Errorf("failed to delete PVC: %v", err)
+		return fmt.Errorf("failed to delete PVC: %w", err)
 	}
 
 	return nil
@@ -402,7 +402,7 @@ func (r *MantleRestoreReconciler) deleteRestoringPV(ctx context.Context, restore
 			// removed by GarbageCollectorRunner.
 			return nil
 		}
-		return fmt.Errorf("failed to get PV: %v", err)
+		return fmt.Errorf("failed to get PV: %w", err)
 	}
 
 	if pv.Annotations[PVAnnotationRestoredBy] != string(restore.UID) {
@@ -410,7 +410,7 @@ func (r *MantleRestoreReconciler) deleteRestoringPV(ctx context.Context, restore
 	}
 
 	if err := r.client.Delete(ctx, &pv); err != nil {
-		return fmt.Errorf("failed to delete PV: %v", err)
+		return fmt.Errorf("failed to delete PV: %w", err)
 	}
 
 	return nil

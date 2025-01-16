@@ -150,7 +150,7 @@ func (r *MantleBackupReconciler) removeRBDSnapshot(ctx context.Context, poolName
 	rmErr := r.ceph.RBDSnapRm(poolName, imageName, snapshotName)
 	if rmErr != nil {
 		_, findErr := ceph.FindRBDSnapshot(r.ceph, poolName, imageName, snapshotName)
-		if findErr != nil && findErr != ceph.ErrSnapshotNotFound {
+		if findErr != nil && errors.Is(findErr, ceph.ErrSnapshotNotFound) {
 			err := errors.Join(rmErr, findErr)
 			logger.Error(err, "failed to remove rbd snapshot", "poolName", poolName, "imageName", imageName, "snapshotName", snapshotName)
 			return fmt.Errorf("failed to remove rbd snapshot: %w", err)
@@ -229,8 +229,8 @@ type errTargetPVCNotFound struct {
 }
 
 func isErrTargetPVCNotFound(err error) bool {
-	_, ok := err.(errTargetPVCNotFound)
-	return ok
+	target := errTargetPVCNotFound{}
+	return errors.As(err, &target)
 }
 
 func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *mantlev1.MantleBackup) (
@@ -387,7 +387,7 @@ func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, back
 
 	target, result, getSnapshotTargetErr := r.getSnapshotTarget(ctx, backup)
 	switch {
-	case getSnapshotTargetErr == errSkipProcessing:
+	case errors.Is(getSnapshotTargetErr, errSkipProcessing):
 		return ctrl.Result{}, nil
 	case isErrTargetPVCNotFound(getSnapshotTargetErr):
 		// deletion logic may run.
@@ -456,7 +456,7 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 
 	target, result, getSnapshotTargetErr := r.getSnapshotTarget(ctx, backup)
 	switch {
-	case getSnapshotTargetErr == errSkipProcessing:
+	case errors.Is(getSnapshotTargetErr, errSkipProcessing):
 		return ctrl.Result{}, nil
 	case isErrTargetPVCNotFound(getSnapshotTargetErr):
 		// deletion logic may run.

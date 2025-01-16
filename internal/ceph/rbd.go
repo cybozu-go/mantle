@@ -15,7 +15,7 @@ func (c *cephCmdImpl) RBDClone(pool, srcImage, srcSnap, dstImage, features strin
 		src, dst,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to clone RBD image: %v", err)
+		return fmt.Errorf("failed to clone RBD image: %w", err)
 	}
 
 	return nil
@@ -25,13 +25,13 @@ func (c *cephCmdImpl) RBDClone(pool, srcImage, srcSnap, dstImage, features strin
 func (c *cephCmdImpl) RBDInfo(pool, image string) (*RBDImageInfo, error) {
 	out, err := c.command.execute("rbd", "info", "--format", "json", fmt.Sprintf("%s/%s", pool, image))
 	if err != nil {
-		return nil, fmt.Errorf("failed to get RBD info: %v", err)
+		return nil, fmt.Errorf("failed to get RBD info: %w", err)
 	}
 
 	imageInfo := &RBDImageInfo{}
 	err = json.Unmarshal(out, imageInfo)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal RBD info: %v", err)
+		return nil, fmt.Errorf("failed to unmarshal RBD info: %w", err)
 	}
 	return imageInfo, nil
 }
@@ -40,13 +40,13 @@ func (c *cephCmdImpl) RBDInfo(pool, image string) (*RBDImageInfo, error) {
 func (c *cephCmdImpl) RBDLs(pool string) ([]string, error) {
 	out, err := c.command.execute("rbd", "ls", "-p", pool, "--format", "json")
 	if err != nil {
-		return nil, fmt.Errorf("failed to list RBD images: %v", err)
+		return nil, fmt.Errorf("failed to list RBD images: %w", err)
 	}
 
 	var images []string
 	err = json.Unmarshal(out, &images)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal RBD images: %v", err)
+		return nil, fmt.Errorf("failed to unmarshal RBD images: %w", err)
 	}
 
 	return images, nil
@@ -56,7 +56,7 @@ func (c *cephCmdImpl) RBDLs(pool string) ([]string, error) {
 func (c *cephCmdImpl) RBDRm(pool, image string) error {
 	_, err := c.command.execute("rbd", "rm", fmt.Sprintf("%s/%s", pool, image))
 	if err != nil {
-		return fmt.Errorf("failed to remove RBD image: %v", err)
+		return fmt.Errorf("failed to remove RBD image: %w", err)
 	}
 
 	return nil
@@ -84,7 +84,7 @@ func (c *cephCmdImpl) CephRBDTaskAddTrashRemove(pool, imageID string) error {
 func (c *cephCmdImpl) RBDSnapCreate(pool, image, snap string) error {
 	_, err := c.command.execute("rbd", "snap", "create", fmt.Sprintf("%s/%s@%s", pool, image, snap))
 	if err != nil {
-		return fmt.Errorf("failed to create RBD snapshot: %v", err)
+		return fmt.Errorf("failed to create RBD snapshot: %w", err)
 	}
 
 	return nil
@@ -94,13 +94,13 @@ func (c *cephCmdImpl) RBDSnapCreate(pool, image, snap string) error {
 func (c *cephCmdImpl) RBDSnapLs(pool, image string) ([]RBDSnapshot, error) {
 	out, err := c.command.execute("rbd", "snap", "ls", "--format", "json", fmt.Sprintf("%s/%s", pool, image))
 	if err != nil {
-		return nil, fmt.Errorf("failed to list RBD snapshots: %v", err)
+		return nil, fmt.Errorf("failed to list RBD snapshots: %w", err)
 	}
 
 	var snapshots []RBDSnapshot
 	err = json.Unmarshal(out, &snapshots)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal RBD snapshots: %v", err)
+		return nil, fmt.Errorf("failed to unmarshal RBD snapshots: %w", err)
 	}
 
 	return snapshots, nil
@@ -110,7 +110,7 @@ func (c *cephCmdImpl) RBDSnapLs(pool, image string) ([]RBDSnapshot, error) {
 func (c *cephCmdImpl) RBDSnapRm(pool, image, snap string) error {
 	_, err := c.command.execute("rbd", "snap", "rm", fmt.Sprintf("%s/%s@%s", pool, image, snap))
 	if err != nil {
-		return fmt.Errorf("failed to remove RBD snapshot: %v", err)
+		return fmt.Errorf("failed to remove RBD snapshot: %w", err)
 	}
 
 	return nil

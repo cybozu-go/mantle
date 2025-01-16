@@ -19,9 +19,10 @@ issues:
 linters:
   disable-all: true
   enable:
+    - copyloopvar
     - dupl
     - errcheck
-    - copyloopvar
+    - errorlint
     - goconst
     - gocyclo
     - gofmt
