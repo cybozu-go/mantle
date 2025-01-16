@@ -1686,7 +1686,7 @@ var _ = Describe("import", func() {
 			)
 
 			// Perform secondaryCleanup
-			res, err := mbr.secondaryCleanup(ctx, backup)
+			res, err := mbr.secondaryCleanup(ctx, backup, true)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.IsZero()).To(BeTrue())
 
@@ -1739,14 +1739,7 @@ var _ = Describe("import", func() {
 			err = k8sClient.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup)
 			Expect(err).NotTo(HaveOccurred())
 
-			// Expect access to the object storage
-			mockObjectStorage.EXPECT().Delete(gomock.Any(), gomock.Eq("target-uid.bin")).DoAndReturn(
-				func(_ context.Context, _ string) error {
-					return nil
-				},
-			)
-
-			res, err := mbr.secondaryCleanup(ctx, backup)
+			res, err := mbr.secondaryCleanup(ctx, backup, false)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.IsZero()).To(BeTrue())
 		})

@@ -487,7 +487,7 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 		}
 	}
 
-	return r.secondaryCleanup(ctx, backup)
+	return r.secondaryCleanup(ctx, backup, true)
 }
 
 func scheduleExpire(_ context.Context, evt event.GenericEvent, q workqueue.RateLimitingInterface) {
@@ -751,7 +751,7 @@ func (r *MantleBackupReconciler) finalizeSecondary(
 		return ctrl.Result{}, nil
 	}
 
-	result, err := r.secondaryCleanup(ctx, backup)
+	result, err := r.secondaryCleanup(ctx, backup, false)
 	if err != nil || result != (ctrl.Result{}) {
 		return result, err
 	}
@@ -2092,6 +2092,7 @@ func (r *MantleBackupReconciler) primaryCleanup(
 func (r *MantleBackupReconciler) secondaryCleanup(
 	ctx context.Context,
 	target *mantlev1.MantleBackup,
+	deleteExportData bool,
 ) (ctrl.Result, error) {
 	diffFrom, ok := target.GetAnnotations()[annotDiffFrom]
 	if ok {
@@ -2143,11 +2144,13 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 		return ctrl.Result{}, fmt.Errorf("failed to delete discard PV: %w", err)
 	}
 
-	if err := r.objectStorageClient.Delete(
-		ctx,
-		MakeObjectNameOfExportedData(target.GetName(), target.GetAnnotations()[annotRemoteUID]),
-	); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to delete exported data in the object storage: %w", err)
+	if deleteExportData {
+		if err := r.objectStorageClient.Delete(
+			ctx,
+			MakeObjectNameOfExportedData(target.GetName(), target.GetAnnotations()[annotRemoteUID]),
+		); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to delete exported data in the object storage: %w", err)
+		}
 	}
 
 	delete(target.GetAnnotations(), annotDiffFrom)
