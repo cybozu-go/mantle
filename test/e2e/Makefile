@@ -115,20 +115,8 @@ $(HELM): | $(BINDIR)
 		| tar xvz -C $(BINDIR) --strip-components 1 linux-amd64/helm
 
 .PHONY: launch-minikube
-launch-minikube: MINIKUBE_PROFILE=
 launch-minikube:
-	# TODO: Is there any better way to verify whether k8s cluster is available or not?
-	if $(MINIKUBE) profile $(MINIKUBE_PROFILE) |& grep "not found" > /dev/null; then \
-		$(MINIKUBE) start \
-			--kubernetes-version="v$(KUBERNETES_VERSION)" \
-			--driver=kvm2 \
-			--memory 6g \
-			--cpus=2 \
-			--extra-config=kubeadm.node-name=$(NODE_NAME) \
-			--extra-config=kubelet.hostname-override=$(NODE_NAME) \
-			--network mantle-test \
-			-p $(MINIKUBE_PROFILE) ; \
-	fi
+	$(MAKE) do-minikube-start
 	$(MINIKUBE) profile $(MINIKUBE_PROFILE)
 	$(MAKE) image-build
 	$(MAKE) create-loop-dev
@@ -139,6 +127,35 @@ launch-minikube:
 		testdata/persistentvolumes-template.yaml \
 		> testdata/persistentvolumes.yaml
 	$(KUBECTL) apply -f testdata/persistentvolumes.yaml
+
+.PHONY: do-minikube-start
+do-minikube-start:
+	# TODO: Is there any better way to verify whether k8s cluster is available or not?
+	if $(MINIKUBE) profile $(MINIKUBE_PROFILE) |& grep "not found" > /dev/null; then \
+		ok=0; \
+		for i in $(shell seq 1 3) ; do \
+			if [ "$$ok" -eq 0 ]; then \
+				if [ "$$i" -ne 1 ]; then \
+					$(MINIKUBE) delete -p $(MINIKUBE_PROFILE) || true; \
+				fi; \
+				$(MINIKUBE) start \
+					--kubernetes-version="v$(KUBERNETES_VERSION)" \
+					--driver=kvm2 \
+					--memory 6g \
+					--cpus=2 \
+					--extra-config=kubeadm.node-name=$(NODE_NAME) \
+					--extra-config=kubelet.hostname-override=$(NODE_NAME) \
+					--network mantle-test \
+					-p $(MINIKUBE_PROFILE) ; \
+				if [ "$$?" -eq 0 ]; then \
+					ok=1; \
+				fi; \
+			fi; \
+		done; \
+		if [ $$ok -eq 0 ]; then \
+			exit 1; \
+		fi \
+	fi
 
 .PHONY: create-loop-dev
 create-loop-dev:
