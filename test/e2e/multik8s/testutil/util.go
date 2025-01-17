@@ -666,7 +666,7 @@ func ListRBDSnapshotsInPVC(cluster int, namespace, pvcName string) ([]ceph.RBDSn
 	if err != nil {
 		return nil, fmt.Errorf("failed to get PV: %w", err)
 	}
-	cmd := CreateCephCmd(cluster)
+	cmd := createCephCmd(cluster)
 	snaps, err := cmd.RBDSnapLs("rook-ceph-block", pv.Spec.CSI.VolumeAttributes["imageName"])
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ceph cmd: %w", err)
@@ -693,7 +693,7 @@ func EnsurePVCHasNoSnapshots(cluster int, namespace, pvcName string) {
 	Expect(snaps).To(BeEmpty())
 }
 
-func CreateCephCmd(cluster int) ceph.CephCmd {
+func createCephCmd(cluster int) ceph.CephCmd {
 	kubectl, err := getKubectlInvocation(cluster)
 	if err != nil {
 		panic(err)
