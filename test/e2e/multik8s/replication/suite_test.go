@@ -358,6 +358,77 @@ func replicationTestSuite() {
 			EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName0, restoreName0, writtenDataHash0)
 		})
 
+		It("should back up resized RBD images correctly", func(ctx SpecContext) {
+			namespace := util.GetUniqueName("ns-")
+			pvcName := util.GetUniqueName("pvc-")
+			backupName0 := util.GetUniqueName("mb-")
+			backupName1 := util.GetUniqueName("mb-")
+			restoreName0 := util.GetUniqueName("mr-")
+			restoreName1 := util.GetUniqueName("mr-")
+
+			SetupEnvironment(namespace)
+			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+			writtenDataHash0 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
+			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName0)
+			WaitMantleBackupSynced(namespace, backupName0)
+
+			By("getting the RBD image size before resizing")
+			originalImageSize, err := GetRBDImageSize(PrimaryK8sCluster, namespace, pvcName)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("resizing the RBD image")
+			_, _, err = Kubectl(PrimaryK8sCluster, nil, "patch", "-n", namespace, "pvc", pvcName,
+				"--type=json",
+				`-p=[{"op": "replace", "path": "/spec/resources/requests/storage", "value":"2Gi"}]`)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("waiting for the RBD image to be resized")
+			Eventually(ctx, func(g Gomega) {
+				curImageSize, err := GetRBDImageSize(PrimaryK8sCluster, namespace, pvcName)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(curImageSize).NotTo(Equal(originalImageSize))
+			}).Should(Succeed())
+
+			writtenDataHash1 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
+			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName1)
+			WaitMantleBackupSynced(namespace, backupName1)
+
+			primaryMB0, secondaryMB0, err := GetBothMBs(namespace, backupName0)
+			Expect(err).NotTo(HaveOccurred())
+			primaryMB1, secondaryMB1, err := GetBothMBs(namespace, backupName1)
+			Expect(err).NotTo(HaveOccurred())
+			WaitTemporaryResourcesDeleted(ctx, primaryMB0, secondaryMB0)
+			WaitTemporaryResourcesDeleted(ctx, primaryMB1, secondaryMB1)
+
+			EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName0, restoreName0, writtenDataHash0)
+			EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName0, restoreName0, writtenDataHash0)
+			EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName1, restoreName1, writtenDataHash1)
+			EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName1, restoreName1, writtenDataHash1)
+
+			By("checking the RBD images in primary and secondary clusters have the same size")
+			primaryImageSize, err := GetRBDImageSize(PrimaryK8sCluster, namespace, pvcName)
+			Expect(err).NotTo(HaveOccurred())
+			secondaryImageSize, err := GetRBDImageSize(SecondaryK8sCluster, namespace, pvcName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(primaryImageSize).To(Equal(secondaryImageSize))
+
+			By("checking the PVCs in primary and secondary clusters have the same size")
+			primaryPVC, err := GetPVC(PrimaryK8sCluster, namespace, pvcName)
+			Expect(err).NotTo(HaveOccurred())
+			secondaryPVC, err := GetPVC(SecondaryK8sCluster, namespace, pvcName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(
+				primaryPVC.Spec.Resources.Requests.Storage().Equal(*secondaryPVC.Spec.Resources.Requests.Storage()),
+			).To(BeTrue())
+
+			By("checking the PVs in primary and secondary clusters have the same size")
+			primaryPV, err := GetPV(PrimaryK8sCluster, primaryPVC.Spec.VolumeName)
+			Expect(err).NotTo(HaveOccurred())
+			secondaryPV, err := GetPV(SecondaryK8sCluster, secondaryPVC.Spec.VolumeName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(primaryPV.Spec.Capacity.Storage().Equal(*secondaryPV.Spec.Capacity.Storage())).To(BeTrue())
+		})
+
 		It("should get metrics from the controller pod in the primary cluster", func(ctx SpecContext) {
 			metrics := []string{
 				`mantle_backup_creation_duration_seconds_count`,
