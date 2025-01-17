@@ -612,6 +612,13 @@ func ResumeObjectStorage(ctx SpecContext) {
 	}).Should(Succeed())
 }
 
+// PauseObjectStorage pauses the object storage by patching the CephObjectStore
+// resource, which makes Rook attempt to deploy RGW pods on nodes that don't
+// exist. Note that setting /spec/gateway/instances to 0 won't work for this
+// purpose, as Rook does not allow it.
+// cf. https://github.com/rook/rook/blob/8767bf263e47f4c8c0c72fafccee71e732088b97/pkg/operator/ceph/object/rgw.go#L103-L107
+//
+//nolint:lll
 func PauseObjectStorage(ctx SpecContext) {
 	GinkgoHelper()
 	By("pausing the object storage")
