@@ -794,9 +794,9 @@ func WaitTemporarySecondaryPVsDeleted(ctx SpecContext, secondaryMB *mantlev1.Man
 	WaitPVDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace, controller.MakeDiscardPVName(secondaryMB))
 }
 
-func WaitTemporaryObjectsDeleted(ctx SpecContext, primaryMB *mantlev1.MantleBackup) {
+func WaitTemporaryS3ObjectDeleted(ctx SpecContext, primaryMB *mantlev1.MantleBackup) {
 	GinkgoHelper()
-	By("waiting for an object to be deleted")
+	By("waiting for the temporary s3 object to be deleted")
 	expectedObjectName := controller.MakeObjectNameOfExportedData(
 		primaryMB.GetName(), string(primaryMB.GetUID()))
 	Eventually(ctx, func(g Gomega) {
@@ -816,7 +816,7 @@ func WaitTemporaryResourcesDeleted(ctx SpecContext, primaryMB, secondaryMB *mant
 	WaitTemporaryJobsDeleted(ctx, primaryMB, secondaryMB)
 	WaitTemporaryPVCsDeleted(ctx, primaryMB, secondaryMB)
 	WaitTemporarySecondaryPVsDeleted(ctx, secondaryMB)
-	WaitTemporaryObjectsDeleted(ctx, primaryMB)
+	WaitTemporaryS3ObjectDeleted(ctx, primaryMB)
 }
 
 func DeleteMantleBackup(cluster int, namespace, backupName string) {
