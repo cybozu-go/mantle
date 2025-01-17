@@ -33,7 +33,7 @@ func (t *RBDTimeStamp) UnmarshalJSON(data []byte) error {
 type RBDSnapshot struct {
 	Id        int          `json:"id,omitempty"`
 	Name      string       `json:"name,omitempty"`
-	Size      int          `json:"size,omitempty"`
+	Size      int64        `json:"size,omitempty"`
 	Protected bool         `json:"protected,string,omitempty"`
 	Timestamp RBDTimeStamp `json:"timestamp,omitempty"`
 }
