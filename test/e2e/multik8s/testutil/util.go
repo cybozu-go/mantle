@@ -33,6 +33,7 @@ const (
 	PrimaryK8sCluster    = 1
 	SecondaryK8sCluster  = 2
 	RgwDeployName        = "rook-ceph-rgw-ceph-object-store-a"
+	RBDPoolName          = "rook-ceph-block"
 )
 
 var (
@@ -665,16 +666,12 @@ func PauseObjectStorage(ctx SpecContext) {
 }
 
 func ListRBDSnapshotsInPVC(cluster int, namespace, pvcName string) ([]ceph.RBDSnapshot, error) {
-	pvc, err := GetPVC(cluster, namespace, pvcName)
+	rbdImageName, err := getRBDImageName(cluster, namespace, pvcName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get PVC: %w", err)
-	}
-	pv, err := GetPV(cluster, pvc.Spec.VolumeName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get PV: %w", err)
+		return nil, fmt.Errorf("failed to get rbd image name: %w", err)
 	}
 	cmd := createCephCmd(cluster)
-	snaps, err := cmd.RBDSnapLs("rook-ceph-block", pv.Spec.CSI.VolumeAttributes["imageName"])
+	snaps, err := cmd.RBDSnapLs(RBDPoolName, rbdImageName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ceph cmd: %w", err)
 	}
@@ -831,4 +828,41 @@ func DeleteMantleBackup(cluster int, namespace, backupName string) {
 	By("deleting MantleBackup")
 	_, _, err := Kubectl(cluster, nil, "delete", "-n", namespace, "mantlebackup", backupName, "--wait=false")
 	Expect(err).NotTo(HaveOccurred())
+}
+
+func GetBothMBs(namespace, backupName string) (*mantlev1.MantleBackup, *mantlev1.MantleBackup, error) {
+	primaryMB, err := GetMB(PrimaryK8sCluster, namespace, backupName)
+	if err != nil {
+		return nil, nil, err
+	}
+	secondaryMB, err := GetMB(SecondaryK8sCluster, namespace, backupName)
+	if err != nil {
+		return nil, nil, err
+	}
+	return primaryMB, secondaryMB, nil
+}
+
+func getRBDImageName(cluster int, namespace, pvcName string) (string, error) {
+	pvc, err := GetPVC(cluster, namespace, pvcName)
+	if err != nil {
+		return "", fmt.Errorf("failed to get PVC: %w", err)
+	}
+	pv, err := GetPV(cluster, pvc.Spec.VolumeName)
+	if err != nil {
+		return "", fmt.Errorf("failed to get PV: %w", err)
+	}
+	return pv.Spec.CSI.VolumeAttributes["imageName"], nil
+}
+
+func GetRBDImageSize(cluster int, namespace, pvcName string) (int, error) {
+	rbdImageName, err := getRBDImageName(cluster, namespace, pvcName)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rbd image name: %w", err)
+	}
+	cmd := createCephCmd(cluster)
+	info, err := cmd.RBDInfo(RBDPoolName, rbdImageName)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create ceph cmd: %w", err)
+	}
+	return info.Size, nil
 }
