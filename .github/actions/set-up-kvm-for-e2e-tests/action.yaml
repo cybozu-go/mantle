@@ -1,5 +1,5 @@
 name: "Set up KVM for end-to-end tests"
-description: "This action sets up KVM for end-to-end tests. It purges lots of unnecessary deb packages, too."
+description: "This action sets up KVM for end-to-end tests."
 inputs: {}
 outputs: {}
 runs:

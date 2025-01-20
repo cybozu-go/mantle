@@ -21,7 +21,6 @@ jobs:
         with:
           go-version-file: "go.mod"
       - run: sudo apt-get update
-      - uses: ./.github/actions/purge-unnecessary-deb-packages
       - uses: ./.github/actions/set-up-kvm-for-e2e-tests
       - run: make -C test/e2e setup
       - run: make -C test/e2e test
