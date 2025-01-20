@@ -1266,6 +1266,9 @@ func (r *MantleBackupReconciler) checkIfExportJobIsCompleted(
 		},
 		&job,
 	); err != nil {
+		if aerrors.IsNotFound(err) { // the cache may be stale.
+			return requeueReconciliation(), nil
+		}
 		return ctrl.Result{}, err
 	}
 
