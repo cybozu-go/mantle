@@ -177,11 +177,7 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPV() {
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: fmt.Sprintf("mr-%s-%s", test.tenantNamespace, restore.Name)}, &pv2)
 		Expect(err).NotTo(HaveOccurred())
 
-		pv1Bin, err := pv1.Marshal()
-		Expect(err).NotTo(HaveOccurred())
-		pv2Bin, err := pv2.Marshal()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(pv1Bin).To(Equal(pv2Bin))
+		Expect(pv1).To(Equal(pv2))
 	})
 
 	It("should return an error, if the PV already exists and having different RestoredBy annotation", func(ctx SpecContext) {
@@ -196,11 +192,7 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPV() {
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: fmt.Sprintf("mr-%s-%s", test.tenantNamespace, restore.Name)}, &pv3)
 		Expect(err).NotTo(HaveOccurred())
 
-		pv1Bin, err := pv1.Marshal()
-		Expect(err).NotTo(HaveOccurred())
-		pv3Bin, err := pv3.Marshal()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(pv1Bin).To(Equal(pv3Bin))
+		Expect(pv1).To(Equal(pv3))
 	})
 }
 
@@ -241,11 +233,7 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPVC() {
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &pvc2)
 		Expect(err).NotTo(HaveOccurred())
 
-		pvc1Bin, err := pvc1.Marshal()
-		Expect(err).NotTo(HaveOccurred())
-		pvc2Bin, err := pvc2.Marshal()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(pvc1Bin).To(Equal(pvc2Bin))
+		Expect(pvc1).To(Equal(pvc2))
 	})
 
 	It("should return an error, if the PVC already exists and having different RestoredBy annotation", func(ctx SpecContext) {
@@ -260,11 +248,7 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPVC() {
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &pvc3)
 		Expect(err).NotTo(HaveOccurred())
 
-		pvc1Bin, err := pvc1.Marshal()
-		Expect(err).NotTo(HaveOccurred())
-		pvc3Bin, err := pvc3.Marshal()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(pvc1Bin).To(Equal(pvc3Bin))
+		Expect(pvc1).To(Equal(pvc3))
 	})
 }
 
