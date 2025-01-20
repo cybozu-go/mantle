@@ -2065,13 +2065,17 @@ func (r *MantleBackupReconciler) primaryCleanup(
 		return ctrl.Result{}, nil
 	}
 
-	// Update the status of the MantleBackup.
-	if err := r.updateStatusCondition(ctx, target, metav1.Condition{
+	// Update the status of the MantleBackup. Use Patch here because
+	// updateStatusCondition is likely to fail due to "the object has been
+	// modified" error.
+	newTarget := target.DeepCopy()
+	meta.SetStatusCondition(&newTarget.Status.Conditions, metav1.Condition{
 		Type:   mantlev1.BackupConditionSyncedToRemote,
 		Status: metav1.ConditionTrue,
 		Reason: mantlev1.BackupReasonNone,
-	}); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to update SyncedToRemote to True: %w", err)
+	})
+	if err := r.Client.Status().Patch(ctx, newTarget, client.MergeFrom(target)); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to update SyncedToRemote to True by Patch: %w", err)
 	}
 
 	duration := time.Since(target.GetCreationTimestamp().Time).Seconds()
