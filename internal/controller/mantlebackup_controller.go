@@ -650,16 +650,23 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 	}
 
 	// If the given MantleBackup is not ready to use, create a new RBD snapshot and update its status.
-	if meta.IsStatusConditionTrue(
-		backup.Status.Conditions,
-		mantlev1.BackupConditionReadyToUse,
-	) {
+	if meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse) {
 		return nil
+	}
+
+	pvcSize, ok := target.pvc.Spec.Resources.Requests.Storage().AsInt64()
+	if !ok {
+		return errors.New("failed to get PVC size")
 	}
 
 	snapshot, err := r.createRBDSnapshot(ctx, target.poolName, target.imageName, backup)
 	if err != nil {
 		return err
+	}
+
+	if snapshot.Size != pvcSize {
+		return fmt.Errorf("failed to create a snapshot: snapshot size (%d) != PVC size (%d)",
+			snapshot.Size, pvcSize)
 	}
 
 	if err := updateStatus(ctx, r.Client, backup, func() error {
