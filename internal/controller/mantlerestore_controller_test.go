@@ -204,6 +204,48 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPVC() {
 		restore = test.restoreResource()
 	})
 
+	It("should return an error if the PVC already exists and has no RestoredBy annotation", func(ctx SpecContext) {
+		err := k8sClient.Create(ctx, &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: restore.Name, Namespace: test.tenantNamespace},
+			Spec: corev1.PersistentVolumeClaimSpec{
+				AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+				Resources: corev1.VolumeResourceRequirements{
+					Requests: test.srcPVC.Spec.Resources.Requests,
+				},
+				StorageClassName: test.srcPVC.Spec.StorageClassName,
+
+				// We intentionally leave volumeName unset here. Setting it
+				// would cause createOrUpdate to fail since volumeName is
+				// immutable. Our goal is to test that createOrUpdate isn't
+				// applied to this PVC, so we keep it empty.
+			},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		var pvc corev1.PersistentVolumeClaim
+		err = k8sClient.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &pvc)
+		Expect(err).NotTo(HaveOccurred())
+
+		err = test.reconciler.createOrUpdateRestoringPVC(ctx, restore, test.backup)
+		Expect(err).To(HaveOccurred())
+
+		By("PVC should not be updated")
+		var updatedPVC corev1.PersistentVolumeClaim
+		err = k8sClient.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &updatedPVC)
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(pvc).To(Equal(updatedPVC))
+
+		// delete pvc0 for the following tests
+		pvc.ObjectMeta.Finalizers = []string{}
+		err = k8sClient.Update(ctx, &pvc)
+		Expect(err).NotTo(HaveOccurred())
+		err = k8sClient.Delete(ctx, &pvc)
+		Expect(err).NotTo(HaveOccurred())
+		err = k8sClient.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &updatedPVC)
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+	})
+
 	It("should create a correct PVC", func(ctx SpecContext) {
 		err := test.reconciler.createOrUpdateRestoringPVC(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())

@@ -311,8 +311,13 @@ func (r *MantleRestoreReconciler) createOrUpdateRestoringPVC(ctx context.Context
 		if pvc.Annotations == nil {
 			pvc.Annotations = map[string]string{}
 		}
-		if annot, ok := pvc.Annotations[PVCAnnotationRestoredBy]; ok && annot != restoredBy {
-			return fmt.Errorf("the existing PVC is having different MantleRestore UID: %s, %s",
+		annotatedRestoredBy, ok := pvc.Annotations[PVCAnnotationRestoredBy]
+		if !pvc.CreationTimestamp.IsZero() && !ok {
+			return fmt.Errorf("the existing PVC was not created by any mantle-controller: %s/%s",
+				pvcNamespace, pvcName)
+		}
+		if ok && annotatedRestoredBy != restoredBy {
+			return fmt.Errorf("the existing PVC was created by different mantle-controller: %s, %s",
 				pvcName, pvc.Annotations[PVCAnnotationRestoredBy])
 		}
 		pvc.Annotations[PVCAnnotationRestoredBy] = restoredBy
