@@ -68,7 +68,7 @@ func (test *backupTest) setupEnv() {
 		Expect(err).NotTo(HaveOccurred())
 
 		err = applyRBDPoolAndSCTemplate(cephCluster1Namespace, test.poolName, test.storageClassName)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(HaveOccurred())
 
 		for _, name := range []string{test.pvcName1, test.pvcName2} {
 			By(fmt.Sprintf("Creating PVC, PV and RBD image (%s)", name))

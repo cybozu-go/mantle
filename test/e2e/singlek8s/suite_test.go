@@ -29,6 +29,19 @@ func TestMtest(t *testing.T) {
 	RunSpecs(t, "rbd backup system test")
 }
 
+var _ = ReportAfterSuite("Report on failure", func(report Report) {
+	if !report.SuiteSucceeded {
+		for _, clusterNS := range []string{cephCluster1Namespace, cephCluster2Namespace} {
+			logs, err := getControllerLogs(clusterNS)
+			if err != nil {
+				GinkgoLogr.Error(err, "failed to get controller logs", "clusterNS", clusterNS)
+				continue
+			}
+			GinkgoLogr.Info("controller pod logs", "clusterNS", clusterNS, "logs", logs)
+		}
+	}
+})
+
 var _ = Describe("Mantle", func() {
 	Context("wait environment", waitEnvironment)
 	Context("backup", backupTestSuite)
