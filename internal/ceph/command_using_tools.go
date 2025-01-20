@@ -7,28 +7,28 @@ import (
 )
 
 var (
-	kubectlPath = os.Getenv("KUBECTL")
+	envKubectlPath = os.Getenv("KUBECTL")
 )
 
 type commandToolsImpl struct {
+	kubectl   []string
 	namespace string
 }
 
-func newCommandTools(namespace string) command {
+func newCommandTools(kubectl []string, namespace string) command {
 	return &commandToolsImpl{
+		kubectl:   kubectl,
 		namespace: namespace,
 	}
 }
 
 func (c *commandToolsImpl) execute(cephCommand ...string) ([]byte, error) {
-	if len(kubectlPath) == 0 {
-		panic("KUBECTL environment variable is not set")
-	}
-
 	var stdout bytes.Buffer
-	arg := []string{"exec", "-n", c.namespace, "deploy/rook-ceph-tools", "--"}
+	arg := []string{}
+	arg = append(arg, c.kubectl...)
+	arg = append(arg, "exec", "-n", c.namespace, "deploy/rook-ceph-tools", "--")
 	arg = append(arg, cephCommand...)
-	command := exec.Command(kubectlPath, arg...)
+	command := exec.Command(arg[0], arg[1:]...)
 	command.Stdout = &stdout
 
 	err := command.Run()

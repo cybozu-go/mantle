@@ -1,7 +1,6 @@
 package changetosecondary
 
 import (
-	"context"
 	"os"
 	"testing"
 	"time"
@@ -60,7 +59,7 @@ func changeSecondaryToStandaloneTemporarily() {
 			  (MB10 don't exist)       |
 		*/
 
-		It("should set up the environment", func(ctx context.Context) {
+		It("should set up the environment", func(ctx SpecContext) {
 			namespace = util.GetUniqueName("ns-")
 			pvcName0 = util.GetUniqueName("pvc-")
 			backupName00 = util.GetUniqueName("mb-")
@@ -73,7 +72,7 @@ func changeSecondaryToStandaloneTemporarily() {
 			SetupEnvironment(namespace)
 		})
 
-		It("should create and restore a MantleBackup resource", func(ctx context.Context) {
+		It("should create and restore a MantleBackup resource", func(ctx SpecContext) {
 			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName0)
 
 			writtenDataHash00 = WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName0)
@@ -91,13 +90,13 @@ func changeSecondaryToStandaloneTemporarily() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("should restore the synced MantleBackup in the both clusters", func(ctx context.Context) {
+		It("should restore the synced MantleBackup in the both clusters", func(ctx SpecContext) {
 			restoreName00 := util.GetUniqueName("mr-")
 			EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName00, restoreName00, writtenDataHash00)
 			EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName00, restoreName00, writtenDataHash00)
 		})
 
-		It("should create a MantleBackup resource in the secondary k8s cluster", func(ctx context.Context) {
+		It("should create a MantleBackup resource in the secondary k8s cluster", func(ctx SpecContext) {
 			CreatePVC(ctx, SecondaryK8sCluster, namespace, pvcName1)
 			writtenDataHash10 = WriteRandomDataToPV(ctx, SecondaryK8sCluster, namespace, pvcName1)
 			CreateMantleBackup(SecondaryK8sCluster, namespace, pvcName1, backupName10)
@@ -105,7 +104,7 @@ func changeSecondaryToStandaloneTemporarily() {
 		})
 
 		It("should ensure the MantleBackup created by standalone mantle doesn't exist in the primary k8s cluster",
-			func(ctx context.Context) {
+			func(ctx SpecContext) {
 				EnsureMantleBackupNotExist(ctx, PrimaryK8sCluster, namespace, backupName10)
 			})
 
@@ -145,7 +144,7 @@ func changeSecondaryToStandaloneTemporarily() {
 		})
 
 		It("should ensure the MantleBackup created by standalone mantle doesn't exist in the primary k8s cluster",
-			func(ctx context.Context) {
+			func(ctx SpecContext) {
 				EnsureMantleBackupNotExist(ctx, PrimaryK8sCluster, namespace, backupName10)
 			})
 	})

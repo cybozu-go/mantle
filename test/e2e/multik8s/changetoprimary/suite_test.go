@@ -1,7 +1,6 @@
 package changetoprimary
 
 import (
-	"context"
 	"os"
 	"testing"
 	"time"
@@ -33,6 +32,45 @@ var _ = Describe("Mantle", func() {
 })
 
 func changePrimaryToStandaloneTemporarily() {
+	Describe("change role from primary to standalone during full backup", func() {
+		It("should cancel a full backup if the role is changed from primary to standalone", func(ctx SpecContext) {
+			namespace := util.GetUniqueName("ns-")
+			pvcName := util.GetUniqueName("pvc-")
+			backupName := util.GetUniqueName("mb-")
+			restoreName := util.GetUniqueName("mr-")
+
+			SetupEnvironment(namespace)
+
+			PauseObjectStorage(ctx)
+			defer ResumeObjectStorage(ctx)
+
+			By("should create a MantleBackup resource")
+			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+			writtenDataHash := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
+			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
+			WaitMantleBackupReadyToUse(PrimaryK8sCluster, namespace, backupName)
+
+			By("changing the primary mantle to standalone")
+			err := ChangeClusterRole(PrimaryK8sCluster, controller.RoleStandalone)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("checking the MantleBackup in the primary K8s cluster remains")
+			Consistently(ctx, func(g Gomega) {
+				_, err := GetMB(PrimaryK8sCluster, namespace, backupName)
+				g.Expect(err).NotTo(HaveOccurred())
+			}, "10s", "1s").Should(Succeed())
+
+			EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
+
+			By("changing the standalone mantle to primary")
+			err = ChangeClusterRole(PrimaryK8sCluster, controller.RolePrimary)
+			Expect(err).NotTo(HaveOccurred())
+
+			ResumeObjectStorage(ctx)
+			WaitMantleBackupSynced(namespace, backupName)
+		})
+	})
+
 	Describe("change to primary", func() {
 		var (
 			namespace                                                                  string
@@ -54,7 +92,7 @@ func changePrimaryToStandaloneTemporarily() {
 			                            | MB01, PVC1, MB10 (synced)
 		*/
 
-		It("should replicate a MantleBackup resource", func(ctx context.Context) {
+		It("should replicate a MantleBackup resource", func(ctx SpecContext) {
 			namespace = util.GetUniqueName("ns-")
 			pvcName0 = util.GetUniqueName("pvc-")
 			backupName00 = util.GetUniqueName("mb-")
@@ -72,7 +110,7 @@ func changePrimaryToStandaloneTemporarily() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("should restore the synced MantleBackup in the both clusters", func(ctx context.Context) {
+		It("should restore the synced MantleBackup in the both clusters", func(ctx SpecContext) {
 			restoreName00 := util.GetUniqueName("mr-")
 			EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName00, restoreName00, writtenDataHash00)
 			EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName00, restoreName00, writtenDataHash00)
@@ -87,9 +125,7 @@ func changePrimaryToStandaloneTemporarily() {
 			pvcName1 = util.GetUniqueName("pvc-")
 			backupName10 = util.GetUniqueName("mb-")
 
-			Eventually(func() error {
-				return ApplyPVCTemplate(PrimaryK8sCluster, namespace, pvcName1)
-			}).Should(Succeed())
+			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName1)
 			writtenDataHash10 = WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName1)
 			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName1, backupName10)
 		})
