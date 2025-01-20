@@ -120,7 +120,7 @@ func changePrimaryToStandaloneTemporarily() {
 		It("should change the role from primary to standalone", func() {
 			By("changing the primary mantle to standalone")
 			err := ChangeClusterRole(PrimaryK8sCluster, controller.RoleStandalone)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(err).To(HaveOccurred())
 		})
 
 		It("should restore the synced MantleBackup in the both clusters", func(ctx SpecContext) {

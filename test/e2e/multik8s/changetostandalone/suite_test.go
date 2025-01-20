@@ -64,7 +64,7 @@ func changeToStandalone() {
 		It("should change the roles to standalone", func() {
 			By("changing the primary mantle to standalone")
 			err := ChangeClusterRole(PrimaryK8sCluster, controller.RoleStandalone)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(err).To(HaveOccurred())
 			By("changing the secondary mantle to standalone")
 			err = ChangeClusterRole(SecondaryK8sCluster, controller.RoleStandalone)
 			Expect(err).NotTo(HaveOccurred())

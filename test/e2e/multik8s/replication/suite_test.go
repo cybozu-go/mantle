@@ -92,6 +92,8 @@ func replicationTestSuite() {
 				return nil
 			}).Should(Succeed())
 
+			Expect(errors.New("foo")).NotTo(HaveOccurred())
+
 			By("checking MantleBackup is replicated")
 			var primaryMB, secondaryMB *mantlev1.MantleBackup
 			Eventually(func() error {
