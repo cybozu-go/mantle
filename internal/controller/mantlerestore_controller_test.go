@@ -177,11 +177,7 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPV() {
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: fmt.Sprintf("mr-%s-%s", test.tenantNamespace, restore.Name)}, &pv2)
 		Expect(err).NotTo(HaveOccurred())
 
-		pv1Bin, err := pv1.Marshal()
-		Expect(err).NotTo(HaveOccurred())
-		pv2Bin, err := pv2.Marshal()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(pv1Bin).To(Equal(pv2Bin))
+		Expect(pv1).To(Equal(pv2))
 	})
 
 	It("should return an error, if the PV already exists and having different RestoredBy annotation", func(ctx SpecContext) {
@@ -196,11 +192,7 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPV() {
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: fmt.Sprintf("mr-%s-%s", test.tenantNamespace, restore.Name)}, &pv3)
 		Expect(err).NotTo(HaveOccurred())
 
-		pv1Bin, err := pv1.Marshal()
-		Expect(err).NotTo(HaveOccurred())
-		pv3Bin, err := pv3.Marshal()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(pv1Bin).To(Equal(pv3Bin))
+		Expect(pv1).To(Equal(pv3))
 	})
 }
 
@@ -210,6 +202,48 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPVC() {
 
 	It("should prepare restore resource", func() {
 		restore = test.restoreResource()
+	})
+
+	It("should return an error if the PVC already exists and has no RestoredBy annotation", func(ctx SpecContext) {
+		err := k8sClient.Create(ctx, &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: restore.Name, Namespace: test.tenantNamespace},
+			Spec: corev1.PersistentVolumeClaimSpec{
+				AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+				Resources: corev1.VolumeResourceRequirements{
+					Requests: test.srcPVC.Spec.Resources.Requests,
+				},
+				StorageClassName: test.srcPVC.Spec.StorageClassName,
+
+				// We intentionally leave volumeName unset here. Setting it
+				// would cause createOrUpdate to fail since volumeName is
+				// immutable. Our goal is to test that createOrUpdate isn't
+				// applied to this PVC, so we keep it empty.
+			},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		var pvc corev1.PersistentVolumeClaim
+		err = k8sClient.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &pvc)
+		Expect(err).NotTo(HaveOccurred())
+
+		err = test.reconciler.createOrUpdateRestoringPVC(ctx, restore, test.backup)
+		Expect(err).To(HaveOccurred())
+
+		By("PVC should not be updated")
+		var updatedPVC corev1.PersistentVolumeClaim
+		err = k8sClient.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &updatedPVC)
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(pvc).To(Equal(updatedPVC))
+
+		// delete pvc0 for the following tests
+		pvc.ObjectMeta.Finalizers = []string{}
+		err = k8sClient.Update(ctx, &pvc)
+		Expect(err).NotTo(HaveOccurred())
+		err = k8sClient.Delete(ctx, &pvc)
+		Expect(err).NotTo(HaveOccurred())
+		err = k8sClient.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &updatedPVC)
+		Expect(errors.IsNotFound(err)).To(BeTrue())
 	})
 
 	It("should create a correct PVC", func(ctx SpecContext) {
@@ -241,11 +275,7 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPVC() {
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &pvc2)
 		Expect(err).NotTo(HaveOccurred())
 
-		pvc1Bin, err := pvc1.Marshal()
-		Expect(err).NotTo(HaveOccurred())
-		pvc2Bin, err := pvc2.Marshal()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(pvc1Bin).To(Equal(pvc2Bin))
+		Expect(pvc1).To(Equal(pvc2))
 	})
 
 	It("should return an error, if the PVC already exists and having different RestoredBy annotation", func(ctx SpecContext) {
@@ -260,11 +290,7 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPVC() {
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &pvc3)
 		Expect(err).NotTo(HaveOccurred())
 
-		pvc1Bin, err := pvc1.Marshal()
-		Expect(err).NotTo(HaveOccurred())
-		pvc3Bin, err := pvc3.Marshal()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(pvc1Bin).To(Equal(pvc3Bin))
+		Expect(pvc1).To(Equal(pvc3))
 	})
 }
 
