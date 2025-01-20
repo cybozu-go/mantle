@@ -423,7 +423,7 @@ func WaitControllerToBeReady() {
 		}).Should(Succeed())
 
 		Eventually(func() error {
-			return CheckDeploymentReady(PrimaryK8sCluster, CephClusterNamespace, "mantle-controller")
+			return CheckDeploymentReady(SecondaryK8sCluster, CephClusterNamespace, "mantle-controller")
 		}).Should(Succeed())
 	})
 }
