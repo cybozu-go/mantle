@@ -26,6 +26,19 @@ func TestMtest(t *testing.T) {
 	RunSpecs(t, "replication test with multiple k8s clusters")
 }
 
+var _ = ReportAfterSuite("Report on failure", func(report Report) {
+	if !report.SuiteSucceeded {
+		for _, clusterNo := range []int{PrimaryK8sCluster, SecondaryK8sCluster} {
+			logs, err := GetControllerLogs(clusterNo)
+			if err != nil {
+				GinkgoLogr.Error(err, "failed to get controller logs", "clusterNo", clusterNo)
+				continue
+			}
+			GinkgoLogr.Info("controller pod logs", "clusterNo", clusterNo, "logs", logs)
+		}
+	}
+})
+
 var _ = Describe("Mantle", func() {
 	Context("wait controller to be ready", WaitControllerToBeReady)
 	Context("change to primary", changePrimaryToStandaloneTemporarily)

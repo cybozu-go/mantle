@@ -832,3 +832,21 @@ func DeleteMantleBackup(cluster int, namespace, backupName string) {
 	_, _, err := Kubectl(cluster, nil, "delete", "-n", namespace, "mantlebackup", backupName, "--wait=false")
 	Expect(err).NotTo(HaveOccurred())
 }
+
+func GetControllerLogs(clusterNo int) (string, error) {
+	controllerPod, err := GetControllerPodName(clusterNo)
+	if err != nil {
+		return "", err
+	}
+	stdout, _, err := Kubectl(clusterNo, nil, "logs", "-n", CephClusterNamespace, controllerPod)
+	if err != nil {
+		return "", err
+	}
+	result := strings.TrimSpace(string(stdout))
+	const numLogs = 200
+	lines := strings.Split(result, "\n")
+	if len(lines) > numLogs {
+		result = strings.Join(lines[len(lines)-numLogs:], "\n")
+	}
+	return result, nil
+}

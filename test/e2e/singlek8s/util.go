@@ -496,3 +496,27 @@ func getImageAndSnapNames(namespace, pool string) ([]string, error) {
 
 	return append(images, snaps...), nil
 }
+
+func getControllerPodName(ns string) (string, error) {
+	stdout, _, err := kubectl("get", "pod", "-n", ns, "-l", "app.kubernetes.io/name=mantle",
+		"-o", "jsonpath={.items[0].metadata.name}")
+	return string(stdout), err
+}
+
+func getControllerLogs(ns string) (string, error) {
+	controllerPod, err := getControllerPodName(ns)
+	if err != nil {
+		return "", err
+	}
+	stdout, _, err := kubectl("logs", "-n", ns, controllerPod)
+	if err != nil {
+		return "", err
+	}
+	result := strings.TrimSpace(string(stdout))
+	const numLogs = 200
+	lines := strings.Split(result, "\n")
+	if len(lines) > numLogs {
+		result = strings.Join(lines[len(lines)-numLogs:], "\n")
+	}
+	return result, nil
+}
