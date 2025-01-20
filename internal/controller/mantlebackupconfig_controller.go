@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -234,15 +235,23 @@ func (r *MantleBackupConfigReconciler) createOrUpdateCronJob(ctx context.Context
 			"--namespace", mbc.GetNamespace(),
 		}
 		container.ImagePullPolicy = corev1.PullIfNotPresent
-		container.Env = []corev1.EnvVar{
-			{
-				Name: "JOB_NAME", ValueFrom: &corev1.EnvVarSource{
-					FieldRef: &corev1.ObjectFieldSelector{
-						FieldPath: "metadata.labels['batch.kubernetes.io/job-name']",
-					},
-				},
-			},
+
+		envName := "JOB_NAME"
+		envIndex := slices.IndexFunc(container.Env, func(e corev1.EnvVar) bool {
+			return e.Name == envName
+		})
+		if envIndex == -1 {
+			container.Env = append(container.Env, corev1.EnvVar{Name: envName})
+			envIndex = len(container.Env) - 1
 		}
+		env := &container.Env[envIndex]
+		if env.ValueFrom == nil {
+			env.ValueFrom = &corev1.EnvVarSource{}
+		}
+		if env.ValueFrom.FieldRef == nil {
+			env.ValueFrom.FieldRef = &corev1.ObjectFieldSelector{}
+		}
+		env.ValueFrom.FieldRef.FieldPath = "metadata.labels['batch.kubernetes.io/job-name']"
 
 		return nil
 	})
