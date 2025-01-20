@@ -485,7 +485,7 @@ var _ = Describe("MantleBackup controller", func() {
 				err = k8sClient.Get(
 					ctx,
 					types.NamespacedName{
-						Name:      makeExportDataPVCName(backup),
+						Name:      MakeExportDataPVCName(backup),
 						Namespace: resMgr.ClusterID,
 					},
 					&pvcExport,
@@ -501,7 +501,7 @@ var _ = Describe("MantleBackup controller", func() {
 				err = k8sClient.Get(
 					ctx,
 					types.NamespacedName{
-						Name:      makeExportJobName(backup),
+						Name:      MakeExportJobName(backup),
 						Namespace: resMgr.ClusterID,
 					},
 					&jobExport,
@@ -532,7 +532,7 @@ var _ = Describe("MantleBackup controller", func() {
 				err = k8sClient.Get(
 					ctx,
 					types.NamespacedName{
-						Name:      makeUploadJobName(backup),
+						Name:      MakeUploadJobName(backup),
 						Namespace: resMgr.ClusterID,
 					},
 					&jobUpload,
@@ -551,7 +551,7 @@ var _ = Describe("MantleBackup controller", func() {
 				err = k8sClient.Get(
 					ctx,
 					types.NamespacedName{
-						Name:      makeUploadJobName(backup),
+						Name:      MakeUploadJobName(backup),
 						Namespace: resMgr.ClusterID,
 					},
 					&jobUpload,
@@ -622,7 +622,7 @@ var _ = Describe("MantleBackup controller", func() {
 				err = k8sClient.Get(
 					ctx,
 					types.NamespacedName{
-						Name:      makeExportJobName(backup2),
+						Name:      MakeExportJobName(backup2),
 						Namespace: resMgr.ClusterID,
 					},
 					&jobExport2,
@@ -1490,7 +1490,7 @@ var _ = Describe("import", func() {
 
 			var importJob batchv1.Job
 			err = k8sClient.Get(ctx, types.NamespacedName{
-				Name:      makeImportJobName(backup),
+				Name:      MakeImportJobName(backup),
 				Namespace: nsController,
 			}, &importJob)
 			Expect(err).NotTo(HaveOccurred())
@@ -1544,7 +1544,7 @@ var _ = Describe("import", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Create export and upload Jobs
-			for _, name := range []string{makeExportJobName(backup), makeUploadJobName(backup)} {
+			for _, name := range []string{MakeExportJobName(backup), MakeUploadJobName(backup)} {
 				var job batchv1.Job
 				job.SetName(name)
 				job.SetNamespace(nsController)
@@ -1556,7 +1556,7 @@ var _ = Describe("import", func() {
 
 			// Create export data PVC
 			var exportDataPVC corev1.PersistentVolumeClaim
-			exportDataPVC.SetName(makeExportDataPVCName(backup))
+			exportDataPVC.SetName(MakeExportDataPVCName(backup))
 			exportDataPVC.SetNamespace(nsController)
 			exportDataPVC.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
 			exportDataPVC.Spec.Resources.Requests = corev1.ResourceList(map[corev1.ResourceName]resource.Quantity{
@@ -1588,7 +1588,7 @@ var _ = Describe("import", func() {
 			Expect(meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionSyncedToRemote)).To(BeTrue())
 
 			// Check that the Jobs are deleted
-			for _, name := range []string{makeExportJobName(backup), makeUploadJobName(backup)} {
+			for _, name := range []string{MakeExportJobName(backup), MakeUploadJobName(backup)} {
 				var job batchv1.Job
 				err = k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: nsController}, &job)
 				Expect(err).To(HaveOccurred())
@@ -1596,7 +1596,7 @@ var _ = Describe("import", func() {
 			}
 
 			// Check that PVC has deletionTimestamp
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: makeExportDataPVCName(backup), Namespace: nsController}, &exportDataPVC)
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeExportDataPVCName(backup), Namespace: nsController}, &exportDataPVC)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(exportDataPVC.GetDeletionTimestamp().IsZero()).To(BeFalse())
 		})
@@ -1644,7 +1644,7 @@ var _ = Describe("import", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Create discard and import Jobs
-			for _, name := range []string{makeDiscardJobName(backup), makeImportJobName(backup)} {
+			for _, name := range []string{MakeDiscardJobName(backup), MakeImportJobName(backup)} {
 				var job batchv1.Job
 				job.SetName(name)
 				job.SetNamespace(nsController)
@@ -1656,7 +1656,7 @@ var _ = Describe("import", func() {
 
 			// Create discard data PVC
 			var discardDataPVC corev1.PersistentVolumeClaim
-			discardDataPVC.SetName(makeDiscardPVCName(backup))
+			discardDataPVC.SetName(MakeDiscardPVCName(backup))
 			discardDataPVC.SetNamespace(nsController)
 			discardDataPVC.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
 			discardDataPVC.Spec.Resources.Requests = corev1.ResourceList(map[corev1.ResourceName]resource.Quantity{
@@ -1667,7 +1667,7 @@ var _ = Describe("import", func() {
 
 			// Create discard data PV
 			var discardDataPV corev1.PersistentVolume
-			discardDataPV.SetName(makeDiscardPVName(backup))
+			discardDataPV.SetName(MakeDiscardPVName(backup))
 			discardDataPV.SetNamespace(nsController)
 			discardDataPV.Spec.HostPath = &corev1.HostPathVolumeSource{Path: "/dummy"}
 			discardDataPV.Spec.StorageClassName = "manual"
@@ -1686,7 +1686,7 @@ var _ = Describe("import", func() {
 			)
 
 			// Perform secondaryCleanup
-			res, err := mbr.secondaryCleanup(ctx, backup)
+			res, err := mbr.secondaryCleanup(ctx, backup, true)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.IsZero()).To(BeTrue())
 
@@ -1705,7 +1705,7 @@ var _ = Describe("import", func() {
 			Expect(ok).To(BeFalse())
 
 			// Check that the Jobs are deleted
-			for _, name := range []string{makeDiscardJobName(backup), makeImportJobName(backup)} {
+			for _, name := range []string{MakeDiscardJobName(backup), MakeImportJobName(backup)} {
 				var job batchv1.Job
 				err = k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: nsController}, &job)
 				Expect(err).To(HaveOccurred())
@@ -1713,12 +1713,12 @@ var _ = Describe("import", func() {
 			}
 
 			// Check that PVC has deletionTimestamp
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: makeDiscardPVCName(backup), Namespace: nsController}, &discardDataPVC)
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeDiscardPVCName(backup), Namespace: nsController}, &discardDataPVC)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(discardDataPVC.GetDeletionTimestamp().IsZero()).To(BeFalse())
 
 			// Check that PV has deletionTimestamp
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: makeDiscardPVName(backup), Namespace: nsController}, &discardDataPV)
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeDiscardPVName(backup), Namespace: nsController}, &discardDataPV)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(discardDataPV.GetDeletionTimestamp().IsZero()).To(BeFalse())
 		})
@@ -1739,14 +1739,7 @@ var _ = Describe("import", func() {
 			err = k8sClient.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup)
 			Expect(err).NotTo(HaveOccurred())
 
-			// Expect access to the object storage
-			mockObjectStorage.EXPECT().Delete(gomock.Any(), gomock.Eq("target-uid.bin")).DoAndReturn(
-				func(_ context.Context, _ string) error {
-					return nil
-				},
-			)
-
-			res, err := mbr.secondaryCleanup(ctx, backup)
+			res, err := mbr.secondaryCleanup(ctx, backup, false)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.IsZero()).To(BeTrue())
 		})
@@ -1769,17 +1762,17 @@ var _ = Describe("import", func() {
 			Expect(result.Requeue).To(BeFalse())
 
 			var pv corev1.PersistentVolume
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: makeDiscardPVName(backup), Namespace: nsController}, &pv)
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeDiscardPVName(backup), Namespace: nsController}, &pv)
 			Expect(err).To(HaveOccurred())
 			Expect(aerrors.IsNotFound(err)).To(BeTrue())
 
 			var pvc corev1.PersistentVolume
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: makeDiscardPVCName(backup), Namespace: nsController}, &pvc)
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeDiscardPVCName(backup), Namespace: nsController}, &pvc)
 			Expect(err).To(HaveOccurred())
 			Expect(aerrors.IsNotFound(err)).To(BeTrue())
 
 			var job batchv1.Job
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: makeDiscardJobName(backup), Namespace: nsController}, &job)
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeDiscardJobName(backup), Namespace: nsController}, &job)
 			Expect(err).To(HaveOccurred())
 			Expect(aerrors.IsNotFound(err)).To(BeTrue())
 		})
@@ -1850,7 +1843,7 @@ var _ = Describe("import", func() {
 			Expect(result.Requeue).To(BeTrue())
 
 			var pv corev1.PersistentVolume
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: makeDiscardPVName(backup), Namespace: nsController}, &pv)
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeDiscardPVName(backup), Namespace: nsController}, &pv)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(pv.GetLabels()["app.kubernetes.io/name"]).To(Equal(labelAppNameValue))
 			Expect(pv.GetLabels()["app.kubernetes.io/component"]).To(Equal(labelComponentDiscardVolume))
@@ -1871,7 +1864,7 @@ var _ = Describe("import", func() {
 			Expect(pv.Spec.StorageClassName).To(Equal(""))
 
 			var pvc corev1.PersistentVolumeClaim
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: makeDiscardPVName(backup), Namespace: nsController}, &pvc)
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeDiscardPVName(backup), Namespace: nsController}, &pvc)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(pvc.GetLabels()["app.kubernetes.io/name"]).To(Equal(labelAppNameValue))
 			Expect(pvc.GetLabels()["app.kubernetes.io/component"]).To(Equal(labelComponentDiscardVolume))
@@ -1880,10 +1873,10 @@ var _ = Describe("import", func() {
 			Expect(pvc.Spec.AccessModes[0]).To(Equal(corev1.ReadWriteOnce))
 			Expect(pvc.Spec.Resources).To(Equal(pvcResources))
 			Expect(*pvc.Spec.VolumeMode).To(Equal(corev1.PersistentVolumeBlock))
-			Expect(pvc.Spec.VolumeName).To(Equal(makeDiscardPVName(backup)))
+			Expect(pvc.Spec.VolumeName).To(Equal(MakeDiscardPVName(backup)))
 
 			var job batchv1.Job
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: makeDiscardJobName(backup), Namespace: nsController}, &job)
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeDiscardJobName(backup), Namespace: nsController}, &job)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(job.GetLabels()["app.kubernetes.io/name"]).To(Equal(labelAppNameValue))
 			Expect(job.GetLabels()["app.kubernetes.io/component"]).To(Equal(labelComponentDiscardJob))
@@ -1903,7 +1896,7 @@ var _ = Describe("import", func() {
 				Name: "discard-rbd",
 				VolumeSource: corev1.VolumeSource{
 					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-						ClaimName: makeDiscardPVCName(backup),
+						ClaimName: MakeDiscardPVCName(backup),
 					},
 				},
 			}))

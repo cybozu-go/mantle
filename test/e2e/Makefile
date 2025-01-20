@@ -25,7 +25,7 @@ LOOP_DEV2 := /dev/loop1
 MINIKUBE_PROFILE_PRIMARY=profile1
 MINIKUBE_PROFILE_SECONDARY=profile2
 TMPDIR := tmp
-TEST_MULTIK8S_PACKAGES := replication changetostandalone changetoprimary changetosecondary
+TEST_MULTIK8S_PACKAGES := replication replicationfailure changetostandalone changetoprimary changetosecondary
 
 export MINIKUBE_HOME
 
