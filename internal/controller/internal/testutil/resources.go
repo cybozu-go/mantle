@@ -81,13 +81,19 @@ func (r *ResourceManager) CreateStorageClass(ctx context.Context) error {
 // CreateUniquePVAndPVC creates a unique named PV and PVC. The PV is bound to the PVC.
 func (r *ResourceManager) CreateUniquePVAndPVC(ctx context.Context, ns string) (
 	*corev1.PersistentVolume, *corev1.PersistentVolumeClaim, error) {
-	return r.createPVAndPVC(ctx, ns, util.GetUniqueName("pv-"), util.GetUniqueName("pvc-"))
+	return r.createPVAndPVC(ctx, ns, util.GetUniqueName("pv-"), util.GetUniqueName("pvc-"),
+		resource.MustParse("5Gi"), resource.MustParse("1Gi"))
 }
 
-func (r *ResourceManager) createPVAndPVC(ctx context.Context, ns, pvName, pvcName string) (
+func (r *ResourceManager) CreateUniquePVAndPVCSized(ctx context.Context, ns string, pvSize, pvcSize resource.Quantity) (
+	*corev1.PersistentVolume, *corev1.PersistentVolumeClaim, error) {
+	return r.createPVAndPVC(ctx, ns, util.GetUniqueName("pv-"), util.GetUniqueName("pvc-"), pvSize, pvcSize)
+}
+
+func (r *ResourceManager) createPVAndPVC(ctx context.Context, ns, pvName, pvcName string, pvSize, pvcSize resource.Quantity) (
 	*corev1.PersistentVolume, *corev1.PersistentVolumeClaim, error) {
 	accessModes := []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
-	size := resource.MustParse("1Gi")
+	size := pvcSize
 	volumeMode := corev1.PersistentVolumeFilesystem
 
 	pv := corev1.PersistentVolume{
@@ -96,7 +102,7 @@ func (r *ResourceManager) createPVAndPVC(ctx context.Context, ns, pvName, pvcNam
 		},
 		Spec: corev1.PersistentVolumeSpec{
 			AccessModes: accessModes,
-			Capacity:    corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("5Gi")},
+			Capacity:    corev1.ResourceList{corev1.ResourceStorage: pvSize},
 			PersistentVolumeSource: corev1.PersistentVolumeSource{
 				CSI: &corev1.CSIPersistentVolumeSource{
 					Driver: "restore.rbd.csi.ceph.com",

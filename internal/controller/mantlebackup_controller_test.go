@@ -49,6 +49,22 @@ var _ = Describe("MantleBackup controller", func() {
 	var ns string
 	var lastExpireQueuedBackups sync.Map
 
+	ensureReadyToUseNotTrue := func(ctx context.Context, backup *mantlev1.MantleBackup) {
+		GinkgoHelper()
+		Consistently(ctx, func(g Gomega, ctx context.Context) {
+			namespacedName := types.NamespacedName{
+				Namespace: backup.Namespace,
+				Name:      backup.Name,
+			}
+			err := k8sClient.Get(ctx, namespacedName, backup)
+			g.Expect(err).NotTo(HaveOccurred())
+			condition := meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse)
+			if condition != nil {
+				g.Expect(condition.Status).NotTo(Equal(metav1.ConditionTrue))
+			}
+		}, "10s", "1s").Should(Succeed())
+	}
+
 	waitForBackupNotReady := func(ctx context.Context, backup *mantlev1.MantleBackup) {
 		EventuallyWithOffset(1, func(g Gomega, ctx context.Context) {
 			namespacedName := types.NamespacedName{
@@ -336,6 +352,17 @@ var _ = Describe("MantleBackup controller", func() {
 
 			err = k8sClient.Create(ctx, backup)
 			Expect(err).To(HaveOccurred())
+		})
+
+		It("should fail to take a backup if the size of the taken snapshot is not equal to the PVC size", func(ctx SpecContext) {
+			// The snapshot size is fixed to 1Gi in fakeRBD, so we should make
+			// Mantle fail to take a backup with a PV and PVC of different size.
+			_, pvc, err := resMgr.CreateUniquePVAndPVCSized(ctx, ns, resource.MustParse("1Gi"), resource.MustParse("2Gi"))
+			Expect(err).NotTo(HaveOccurred())
+
+			backup, err := resMgr.CreateUniqueBackupFor(ctx, pvc)
+			Expect(err).NotTo(HaveOccurred())
+			ensureReadyToUseNotTrue(ctx, backup)
 		})
 	})
 
