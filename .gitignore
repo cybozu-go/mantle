@@ -25,6 +25,7 @@ Dockerfile.cross
 *.swo
 *~
 
+ceph/ceph-custom.tar
 ceph/go.mod
 ceph/go.sum
 ceph/packages/
