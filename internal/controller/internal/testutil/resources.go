@@ -82,7 +82,7 @@ func (r *ResourceManager) CreateStorageClass(ctx context.Context) error {
 func (r *ResourceManager) CreateUniquePVAndPVC(ctx context.Context, ns string) (
 	*corev1.PersistentVolume, *corev1.PersistentVolumeClaim, error) {
 	return r.createPVAndPVC(ctx, ns, util.GetUniqueName("pv-"), util.GetUniqueName("pvc-"),
-		resource.MustParse("5Gi"), resource.MustParse("1Gi"))
+		resource.MustParse("1Gi"), resource.MustParse("1Gi"))
 }
 
 func (r *ResourceManager) CreateUniquePVAndPVCSized(ctx context.Context, ns string, pvSize, pvcSize resource.Quantity) (

@@ -364,6 +364,17 @@ var _ = Describe("MantleBackup controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			ensureReadyToUseNotTrue(ctx, backup)
 		})
+
+		It("should fail to take a backup if the size of the taken snapshot is not equal to the PV size", func(ctx SpecContext) {
+			// The snapshot size is fixed to 1Gi in fakeRBD, so we should make
+			// Mantle fail to take a backup with a PV and PVC of different size.
+			_, pvc, err := resMgr.CreateUniquePVAndPVCSized(ctx, ns, resource.MustParse("500Mi"), resource.MustParse("1Gi"))
+			Expect(err).NotTo(HaveOccurred())
+
+			backup, err := resMgr.CreateUniqueBackupFor(ctx, pvc)
+			Expect(err).NotTo(HaveOccurred())
+			ensureReadyToUseNotTrue(ctx, backup)
+		})
 	})
 
 	Context("when the role is `primary`", func() {

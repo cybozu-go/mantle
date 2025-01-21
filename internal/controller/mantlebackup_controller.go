@@ -658,15 +658,19 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 	if !ok {
 		return errors.New("failed to get PVC size")
 	}
+	pvSize, ok := target.pv.Spec.Capacity.Storage().AsInt64()
+	if !ok {
+		return errors.New("failed to get PV size")
+	}
 
 	snapshot, err := r.createRBDSnapshot(ctx, target.poolName, target.imageName, backup)
 	if err != nil {
 		return err
 	}
 
-	if snapshot.Size != pvcSize {
-		return fmt.Errorf("failed to create a snapshot: snapshot size (%d) != PVC size (%d)",
-			snapshot.Size, pvcSize)
+	if snapshot.Size != pvcSize || pvSize != pvcSize {
+		return fmt.Errorf("failed to create a snapshot: snapshot size (%d) != PVC size (%d) or PV size (%d) != PVC size (%d)",
+			snapshot.Size, pvcSize, pvSize, pvcSize)
 	}
 
 	if err := updateStatus(ctx, r.Client, backup, func() error {
