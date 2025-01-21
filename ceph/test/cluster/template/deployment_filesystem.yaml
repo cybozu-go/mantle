@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: "%s"
+  name: "%s"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: "%s"
+  template:
+    metadata:
+      labels:
+        app: "%s"
+    spec:
+      containers:
+        - name: ubuntu
+          image: ghcr.io/cybozu/ubuntu:22.04
+          command: ["pause"]
+          volumeMounts:
+            - name: rbd-volume
+              mountPath: /mnt
+      volumes:
+        - name: rbd-volume
+          persistentVolumeClaim:
+            claimName: "%s"

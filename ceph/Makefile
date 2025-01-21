@@ -15,18 +15,16 @@ export MINIKUBE_HOME
 .PHONY: build
 build: ceph-custom.tar packages/touch
 
-ceph-custom.tar: build-docker
+ceph-custom.tar: Dockerfile $(PATCH_FILES)
+	docker build -f Dockerfile -t ceph-custom .
 	docker save ceph-custom -o $@
 
-packages/touch: build-docker
+packages/touch: ceph-custom.tar
 	rm -rf packages
 	docker create --name ceph-proc ceph-custom
 	docker cp ceph-proc:/packages .
 	docker rm ceph-proc
 	touch $@
-
-build-docker: Dockerfile $(PATCH_FILES)
-	docker build -f Dockerfile -t ceph-custom .
 
 .PHONY: test
 test: ceph-custom.tar
@@ -35,7 +33,9 @@ test: ceph-custom.tar
 	$(MAKE) -C ${E2E_DIR} install-rook-ceph-cluster1
 	$(MINIKUBE_CMD) image load ceph-custom.tar
 	$(KUBECTL_CMD) apply -k ./manifests/
-	go test -v -count=1 ./test/
+	env \
+	  KUBECTL=$(KUBECTL_CMD) \
+	  go test -v -count=1 -timeout 1h ./test/
 
 .PHONY: setup
 setup:
