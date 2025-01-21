@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: "%s"
+  name: "%s"
+spec:
+  containers:
+    - name: ubuntu
+      image: ghcr.io/cybozu/ubuntu:22.04
+      command: ["pause"]
+      volumeDevices:
+        - name: rbd-device
+          devicePath: /dev/rbd-device
+  volumes:
+    - name: rbd-device
+      persistentVolumeClaim:
+        claimName: "%s"
