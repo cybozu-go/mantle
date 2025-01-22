@@ -58,7 +58,7 @@ func (f *fakeRBD) RBDSnapCreate(pool, image, snap string) error {
 	f.snapshots[key] = append(snaps, ceph.RBDSnapshot{
 		Id:        f.nextSnapId,
 		Name:      snap,
-		Size:      10,
+		Size:      5368709120, // 5Gi
 		Protected: false,
 		Timestamp: ceph.NewRBDTimeStamp(time.Now().UTC()),
 	})

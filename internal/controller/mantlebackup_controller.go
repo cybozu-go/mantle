@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"time"
 
 	_ "embed"
@@ -628,6 +629,55 @@ func (r *MantleBackupReconciler) replicateManifests(
 	return ctrl.Result{}, nil
 }
 
+func (r *MantleBackupReconciler) checkSnapshotValid(
+	target *snapshotTarget,
+	snapshot *ceph.RBDSnapshot,
+) error {
+	msgResizeNotSupported := "resize detected: resizing a PV(C) is not supported in Mantle: "
+
+	resizing := slices.ContainsFunc(
+		target.pvc.Status.Conditions,
+		func(c corev1.PersistentVolumeClaimCondition) bool {
+			return c.Type == corev1.PersistentVolumeClaimResizing && c.Status == corev1.ConditionTrue
+		},
+	)
+	if resizing {
+		return fmt.Errorf("%s: Resizing condition is True", msgResizeNotSupported)
+	}
+
+	pvcSize, ok := target.pvc.Spec.Resources.Requests.Storage().AsInt64()
+	if !ok {
+		return errors.New("failed to get PVC size")
+	}
+	pvSize, ok := target.pv.Spec.Capacity.Storage().AsInt64()
+	if !ok {
+		return errors.New("failed to get PV size")
+	}
+
+	if pvSize < pvcSize {
+		return fmt.Errorf("%s: pvSize (%d) < PVC size (%d)", msgResizeNotSupported, pvSize, pvcSize)
+	}
+
+	if snapshot.Size != pvSize {
+		return fmt.Errorf("%s: snapshot size (%d) != PV size (%d)", msgResizeNotSupported, snapshot.Size, pvSize)
+	}
+
+	snapshots, err := r.ceph.RBDSnapLs(target.poolName, target.imageName)
+	if err != nil {
+		return fmt.Errorf("failed to list snapshots: %s: %s",
+			target.poolName, target.imageName)
+	}
+
+	for _, snapshot := range snapshots {
+		if snapshot.Size != pvSize {
+			return fmt.Errorf("%s: existing snapshot size (%d) != PV size (%d)",
+				msgResizeNotSupported, snapshot.Size, pvSize)
+		}
+	}
+
+	return nil
+}
+
 func (r *MantleBackupReconciler) provisionRBDSnapshot(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
@@ -660,6 +710,11 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 	snapshot, err := r.createRBDSnapshot(ctx, target.poolName, target.imageName, backup)
 	if err != nil {
 		return err
+	}
+
+	if err := r.checkSnapshotValid(target, snapshot); err != nil {
+		return fmt.Errorf("failed to create a valid snapshot: %s/%s: %w",
+			backup.GetNamespace(), backup.GetName(), err)
 	}
 
 	if err := updateStatus(ctx, r.Client, backup, func() error {
