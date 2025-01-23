@@ -1,0 +1,24 @@
+name: "ceph custom export-diff release"
+on:
+  push:
+    tags:
+      - "ceph-export-diff-v*.*.*.*"
+jobs:
+  release:
+    runs-on: mantle_large_runner_16core
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - run: sudo apt-get update
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+      - uses: ./.github/actions/set-up-kvm-for-e2e-tests
+      - run: make -C ceph setup
+      - run: make -C ceph build
+      - run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          zip -j packages.zip ceph/packages/*.deb
+          gh release create ${VERSION} -t "Release ${VERSION}"
+          gh release upload ${VERSION} packages.zip
