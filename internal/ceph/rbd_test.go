@@ -242,7 +242,7 @@ var _ = Describe("CephCmd.RBDSnapLs", func() {
 		snap := snaps[0]
 		Expect(snap.Id).To(Equal(int(4)))
 		Expect(snap.Name).To(Equal("test"))
-		Expect(snap.Size).To(Equal(int(10737418240)))
+		Expect(snap.Size).To(Equal(int64(10737418240)))
 		Expect(snap.Protected).To(Equal(false))
 		Expect(snap.Timestamp).To(Equal(NewRBDTimeStamp(time.Date(2024, 10, 1, 10, 11, 31, 0, time.UTC))))
 	})
