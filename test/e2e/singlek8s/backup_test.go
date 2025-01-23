@@ -55,6 +55,7 @@ func backupTestSuite() {
 	Describe("setup environment", test.setupEnv)
 	Describe("test case 1", test.testCase1)
 	Describe("test case 2", test.testCase2)
+	Describe("make sure resizing PV(C)s is not supported", test.testResizingNotSupported)
 	Describe("teardown environment", test.teardownEnv)
 }
 
@@ -362,5 +363,68 @@ func (test *backupTest) testCase2() {
 			_, err := getCronJob(cephCluster1Namespace, cronJobName)
 			return err
 		}).Should(Succeed())
+	})
+}
+
+func (test *backupTest) testResizingNotSupported() {
+	var err error
+
+	waitMantleBackupReadyToUse := func(ctx SpecContext, namespace, name string) {
+		GinkgoHelper()
+		Eventually(ctx, func(g Gomega) {
+			ready, err := isMantleBackupReady(namespace, name)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(ready).To(BeTrue())
+		}).Should(Succeed())
+	}
+
+	It("should not perform an incremental backup for a PV(C) resized after a previous backup", func(ctx SpecContext) {
+		namespace := util.GetUniqueName("ns-")
+		pvcName1 := util.GetUniqueName("pvc-")
+		mantleBackupName1 := util.GetUniqueName("mb-")
+		mantleBackupName2 := util.GetUniqueName("mb-")
+
+		By("setting up the environment")
+		err = createNamespace(namespace)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("creating PVC")
+		err = applyPVCTemplate(namespace, pvcName1, test.storageClassName)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("creating MantleBackup1 for a PVC1")
+		err = applyMantleBackupTemplate(namespace, pvcName1, mantleBackupName1)
+		Expect(err).NotTo(HaveOccurred())
+		waitMantleBackupReadyToUse(ctx, namespace, mantleBackupName1)
+
+		By("resizing PVC1")
+		_, _, err = kubectl("patch", "-n", namespace, "pvc", pvcName1,
+			"--type=json", `-p=[{"op": "replace", "path": "/spec/resources/requests/storage", "value":"2Gi"}]`)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("making sure PVC1 is resized")
+		Eventually(ctx, func(g Gomega) {
+			pvName, err := getPVFromPVC(namespace, pvcName1)
+			g.Expect(err).NotTo(HaveOccurred())
+			stdout, _, err := kubectl("get", "pv", pvName, "-o", "json")
+			g.Expect(err).NotTo(HaveOccurred())
+			pv := corev1.PersistentVolume{}
+			err = json.Unmarshal(stdout, &pv)
+			g.Expect(err).NotTo(HaveOccurred())
+			capacity, ok := pv.Spec.Capacity.Storage().AsInt64()
+			g.Expect(ok).To(BeTrue())
+			g.Expect(capacity).To(Equal(int64(2 * 1024 * 1024 * 1024)))
+		}).Should(Succeed())
+
+		By("creating MantleBackup2 for a PVC1")
+		err = applyMantleBackupTemplate(namespace, pvcName1, mantleBackupName2)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("confirming MantleBackup2 is not ReadyToUse==True")
+		Consistently(ctx, func(g Gomega) {
+			ready, err := isMantleBackupReady(namespace, mantleBackupName2)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(ready).To(BeFalse())
+		}, "10s", "1s").Should(Succeed())
 	})
 }
