@@ -249,13 +249,31 @@ do_test: $(GINKGO)
 	PATH=${PATH} \
 	E2ETEST=1 \
 	KUBECTL=$(KUBECTL) \
-	$(GINKGO) --fail-fast -v $(GINKGO_FLAGS) singlek8s
+	$(GINKGO) --fail-fast -v $(GINKGO_FLAGS) singlek8s; \
+	if [ "$$?" -ne 0 ]; then \
+		echo "Controller logs for $(CEPH_CLUSTER1_NAMESPACE) namespace:"; \
+		$(KUBECTL) logs --tail 100 -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle -c mantle; \
+		echo ""; \
+		echo "Controller logs for $(CEPH_CLUSTER2_NAMESPACE) namespace:"; \
+		$(KUBECTL) logs --tail 100 -n $(CEPH_CLUSTER2_NAMESPACE) -l app.kubernetes.io/name=mantle -c mantle; \
+		# Explicitly fail the test to mark the CI job as failed. \
+		exit 1; \
+	fi
 
 .PHONY: do-test-multik8s
 do-test-multik8s: $(GINKGO)
+	export KUBECTL_PRIMARY="$(MINIKUBE) -p $(MINIKUBE_PROFILE_PRIMARY) kubectl -- "; \
+	export KUBECTL_SECONDARY="$(MINIKUBE) -p $(MINIKUBE_PROFILE_SECONDARY) kubectl -- "; \
 	env \
 	PATH=${PATH} \
 	E2ETEST=1 \
-	KUBECTL_PRIMARY="$(MINIKUBE) -p $(MINIKUBE_PROFILE_PRIMARY) kubectl -- " \
-	KUBECTL_SECONDARY="$(MINIKUBE) -p $(MINIKUBE_PROFILE_SECONDARY) kubectl -- " \
-	$(GINKGO) --fail-fast -v $(GINKGO_FLAGS) $(addprefix multik8s/, $(TEST_MULTIK8S_PACKAGES))
+	$(GINKGO) --fail-fast -v $(GINKGO_FLAGS) $(addprefix multik8s/, $(TEST_MULTIK8S_PACKAGES)); \
+	if [ "$$?" -ne 0 ]; then \
+		echo "Controller logs for $(MINIKUBE_PROFILE_PRIMARY):"; \
+		$${KUBECTL_PRIMARY} logs --tail 100 -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle -c mantle; \
+		echo ""; \
+		echo "Controller logs for $(MINIKUBE_PROFILE_SECONDARY):"; \
+		$${KUBECTL_SECONDARY}  logs --tail 100 -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle -c mantle; \
+		# Explicitly fail the test to mark the CI job as failed. \
+		exit 1; \
+	fi
