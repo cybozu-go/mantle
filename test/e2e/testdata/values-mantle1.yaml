@@ -1,3 +1,8 @@
+image:
+  repository: controller
+  pullPolicy: IfNotPresent
+  tag: latest
+
 controller:
   overwriteMBCSchedule: "* * * * *"
   gcInterval: 1s

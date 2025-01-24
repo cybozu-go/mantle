@@ -1,2 +1,7 @@
+image:
+  repository: controller
+  pullPolicy: IfNotPresent
+  tag: latest
+
 controller:
   gcInterval: 1s
