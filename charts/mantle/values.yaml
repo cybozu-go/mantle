@@ -1,9 +1,9 @@
 replicaCount: 1
 
 image:
-  repository: controller
-  pullPolicy: IfNotPresent
-  tag: latest
+  repository: ghcr.io/cybozu-go/mantle
+  pullPolicy:
+  tag: # {{ .Chart.AppVersion }}
 
 imagePullSecrets: []
 nameOverride: ""
