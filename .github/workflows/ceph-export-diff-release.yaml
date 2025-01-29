@@ -19,6 +19,6 @@ jobs:
       - run: make -C ceph build
       - run: |
           VERSION=${GITHUB_REF#refs/tags/}
-          zip -j packages.zip ceph/packages/*.deb
+          zip -j packages.zip ceph/packages/*.deb ceph/packages/COPYING*
           gh release create ${VERSION} -t "Release ${VERSION}"
           gh release upload ${VERSION} packages.zip
