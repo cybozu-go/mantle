@@ -124,6 +124,12 @@ spec:
                 description: '''createdAt'' specifies the creation date and time'
                 format: date-time
                 type: string
+              largestCompletedExportPartNum:
+                type: integer
+              largestCompletedImportPartNum:
+                type: integer
+              largestCompletedUploadPartNum:
+                type: integer
               pvManifest:
                 description: '''pvManifest'' saving backup target PV manifest'
                 type: string
@@ -133,6 +139,15 @@ spec:
               snapID:
                 description: '''snapID'' indicates SNAPID of `rbd snap ls`'
                 type: integer
+              snapSize:
+                format: int64
+                type: integer
+              transferPartSize:
+                anyOf:
+                - type: integer
+                - type: string
+                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                x-kubernetes-int-or-string: true
             type: object
         type: object
     served: true

@@ -49,7 +49,7 @@ func replicationFailureTestSuite() {
 			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
 
 			// Wait until an upload Job is created.
-			WaitUploadJobCreated(ctx, PrimaryK8sCluster, namespace, backupName)
+			WaitUploadJobCreated(ctx, PrimaryK8sCluster, namespace, backupName, 0)
 
 			primaryMB, err := GetMB(PrimaryK8sCluster, namespace, backupName)
 			Expect(err).NotTo(HaveOccurred())
@@ -92,7 +92,7 @@ func replicationFailureTestSuite() {
 			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
 
 			// Wait until an upload Job is created.
-			WaitUploadJobCreated(ctx, PrimaryK8sCluster, namespace, backupName)
+			WaitUploadJobCreated(ctx, PrimaryK8sCluster, namespace, backupName, 0)
 
 			primaryMB, err := GetMB(PrimaryK8sCluster, namespace, backupName)
 			Expect(err).NotTo(HaveOccurred())
@@ -149,7 +149,7 @@ func replicationFailureTestSuite() {
 				CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName1)
 
 				// Wait until an upload Job is created.
-				WaitUploadJobCreated(ctx, PrimaryK8sCluster, namespace, backupName1)
+				WaitUploadJobCreated(ctx, PrimaryK8sCluster, namespace, backupName1, 0)
 
 				primaryMB, err := GetMB(PrimaryK8sCluster, namespace, backupName1)
 				Expect(err).NotTo(HaveOccurred())
@@ -204,7 +204,7 @@ func replicationFailureTestSuite() {
 				CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName1)
 
 				// Wait until an upload Job is created.
-				WaitUploadJobCreated(ctx, PrimaryK8sCluster, namespace, backupName1)
+				WaitUploadJobCreated(ctx, PrimaryK8sCluster, namespace, backupName1, 0)
 
 				primaryMB1, err := GetMB(PrimaryK8sCluster, namespace, backupName1)
 				Expect(err).NotTo(HaveOccurred())
