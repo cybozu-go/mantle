@@ -58,7 +58,7 @@ ENV WORKSPACE=/workspace
 ENV PACKAGES=/packages
 
 # Since the package file is extracted outside the docker image at the end, keep the files.
-COPY --from=build-ceph ${WORKSPACE}/*.deb ${WORKSPACE}/COPYING* ${PACKAGES}/
+COPY --from=build-ceph ${WORKSPACE}/*.deb ${WORKSPACE}/ceph/COPYING* ${PACKAGES}/
 
 WORKDIR ${WORKSPACE}
 RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/usr/local/bin/kubectl"
