@@ -11,10 +11,10 @@
  // encryption arguments
  static const std::string ENCRYPTION_FORMAT("encryption-format");
 diff --git a/src/tools/rbd/action/Export.cc b/src/tools/rbd/action/Export.cc
-index ddcf0f2c30cef..cc84a68193bdc 100644
+index ddcf0f2c30cef..af43a94be13a5 100644
 --- a/src/tools/rbd/action/Export.cc
 +++ b/src/tools/rbd/action/Export.cc
-@@ -123,16 +123,26 @@ class C_ExportDiff : public Context {
+@@ -123,16 +123,27 @@ class C_ExportDiff : public Context {
  
  
  int do_export_diff_fd(librbd::Image& image, const char *fromsnapname,
@@ -27,10 +27,11 @@ index ddcf0f2c30cef..cc84a68193bdc 100644
    int r;
    librbd::image_info_t info;
  
-+  std::cerr << "do_export_diff: fromsnapname=" << fromsnapname <<
-+    " endsnapname=" << endsnapname << " out_fromsnapname=" << out_fromsnapname <<
-+    " out_endsnapname=" << out_endsnapname << " offset=" << offset <<
-+    " length=" << length << std::endl;
++  std::cerr << "do_export_diff(fromsnapname=" << (fromsnapname ? fromsnapname : "null") <<
++    " endsnapname=" << (endsnapname ? endsnapname : "null") <<
++    " out_fromsnapname=" << (out_fromsnapname ? out_fromsnapname : "null") <<
++    " out_endsnapname=" << (out_endsnapname ? out_endsnapname : "null") <<
++    " offset=" << offset << " length=" << length << ")" << std::endl;
 +
    r = image.stat(info, sizeof(info));
    if (r < 0)
@@ -43,7 +44,7 @@ index ddcf0f2c30cef..cc84a68193bdc 100644
    {
      // header
      bufferlist bl;
-@@ -143,10 +153,10 @@ int do_export_diff_fd(librbd::Image& image, const char *fromsnapname,
+@@ -143,10 +154,10 @@ int do_export_diff_fd(librbd::Image& image, const char *fromsnapname,
  
      __u8 tag;
      uint64_t len = 0;
@@ -56,7 +57,7 @@ index ddcf0f2c30cef..cc84a68193bdc 100644
        if (export_format == 2) {
  	len = from.length() + 4;
  	encode(len, bl);
-@@ -154,10 +164,10 @@ int do_export_diff_fd(librbd::Image& image, const char *fromsnapname,
+@@ -154,10 +165,10 @@ int do_export_diff_fd(librbd::Image& image, const char *fromsnapname,
        encode(from, bl);
      }
  
@@ -69,7 +70,7 @@ index ddcf0f2c30cef..cc84a68193bdc 100644
        if (export_format == 2) {
          len = to.length() + 4;
          encode(len, bl);
-@@ -192,10 +202,10 @@ int do_export_diff_fd(librbd::Image& image, const char *fromsnapname,
+@@ -192,10 +203,10 @@ int do_export_diff_fd(librbd::Image& image, const char *fromsnapname,
        return r;
      }
    }
@@ -82,7 +83,7 @@ index ddcf0f2c30cef..cc84a68193bdc 100644
                            &C_ExportDiff::export_diff_cb, (void *)&edc);
    if (r < 0) {
      goto out;
-@@ -223,8 +233,9 @@ int do_export_diff_fd(librbd::Image& image, const char *fromsnapname,
+@@ -223,8 +234,9 @@ int do_export_diff_fd(librbd::Image& image, const char *fromsnapname,
  }
  
  int do_export_diff(librbd::Image& image, const char *fromsnapname,
@@ -94,7 +95,7 @@ index ddcf0f2c30cef..cc84a68193bdc 100644
  {
    int r;
    int fd;
-@@ -236,7 +247,9 @@ int do_export_diff(librbd::Image& image, const char *fromsnapname,
+@@ -236,7 +248,9 @@ int do_export_diff(librbd::Image& image, const char *fromsnapname,
    if (fd < 0)
      return -errno;
  
@@ -105,7 +106,7 @@ index ddcf0f2c30cef..cc84a68193bdc 100644
  
    if (fd != 1)
      close(fd);
-@@ -260,10 +273,52 @@ void get_arguments_diff(po::options_description *positional,
+@@ -260,10 +274,52 @@ void get_arguments_diff(po::options_description *positional,
    options->add_options()
      (at::FROM_SNAPSHOT_NAME.c_str(), po::value<std::string>(),
       "snapshot starting point")
@@ -159,7 +160,7 @@ index ddcf0f2c30cef..cc84a68193bdc 100644
  int execute_diff(const po::variables_map &vm,
                   const std::vector<std::string> &ceph_global_init_args) {
    size_t arg_index = 0;
-@@ -290,6 +345,26 @@ int execute_diff(const po::variables_map &vm,
+@@ -290,6 +346,26 @@ int execute_diff(const po::variables_map &vm,
      from_snap_name = vm[at::FROM_SNAPSHOT_NAME].as<std::string>();
    }
  
@@ -186,7 +187,7 @@ index ddcf0f2c30cef..cc84a68193bdc 100644
    librados::Rados rados;
    librados::IoCtx io_ctx;
    librbd::Image image;
-@@ -299,9 +374,24 @@ int execute_diff(const po::variables_map &vm,
+@@ -299,9 +375,28 @@ int execute_diff(const po::variables_map &vm,
      return r;
    }
  
@@ -194,6 +195,10 @@ index ddcf0f2c30cef..cc84a68193bdc 100644
 +  std::string out_end_snap_name = snap_name;
 +
 +  if (offset != 0 || length != 0) {
++    if (snap_name.empty()) {
++      std::cerr << "rbd: must specify snapshot when specifying offset and length" << std::endl;
++      return -EINVAL;
++    }
 +    r = get_snapshot_name_for_offset_length(image, mid_snap_prefix,
 +                                            &out_from_snap_name, &out_end_snap_name,
 +                                            &offset, &length);
@@ -211,7 +216,7 @@ index ddcf0f2c30cef..cc84a68193bdc 100644
                       vm[at::WHOLE_OBJECT].as<bool>(), path.c_str(),
                       vm[at::NO_PROGRESS].as<bool>());
    if (r < 0) {
-@@ -501,7 +591,8 @@ static int do_export_v2(librbd::Image& image, librbd::image_info_t &info, int fd
+@@ -501,7 +596,8 @@ static int do_export_v2(librbd::Image& image, librbd::image_info_t &info, int fd
    const char *last_snap = NULL;
    for (size_t i = 0; i < snaps.size(); ++i) {
      utils::snap_set(image, snaps[i].name.c_str());
@@ -221,7 +226,7 @@ index ddcf0f2c30cef..cc84a68193bdc 100644
      if (r < 0) {
        return r;
      }
-@@ -509,7 +600,8 @@ static int do_export_v2(librbd::Image& image, librbd::image_info_t &info, int fd
+@@ -509,7 +605,8 @@ static int do_export_v2(librbd::Image& image, librbd::image_info_t &info, int fd
      last_snap = snaps[i].name.c_str();
    }
    utils::snap_set(image, std::string(""));
