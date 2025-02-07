@@ -52,9 +52,15 @@ func RemoveFileByPod(namespace, deployName, target string) error {
 		return err
 	}
 	_, err = Kubectl("exec", "-n", namespace, podName, "--", "rm", "-f", target)
+	if err != nil {
+		return fmt.Errorf("failed to remove file in pod: %w", err)
+	}
+
+	_, err = Kubectl("exec", "-n", namespace, podName, "--", "sync")
 	return err
 }
 
+// CompareFilesInPod compares the file in the host(expected) with in the pod.
 func CompareFilesInPod(filename, namespace, deployName, target string) error {
 	workFilename := util.GetUniqueName("compare-file-")
 	defer func() {

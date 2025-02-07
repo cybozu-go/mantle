@@ -205,3 +205,38 @@ func GetImageNameByPVC(namespace, pvcName string) (string, error) {
 
 	return string(stdout), nil
 }
+
+func ScaleDeployment(namespace, deployName string, replicas int) error {
+	_, err := Kubectl("scale", "deploy", "-n", namespace, deployName, fmt.Sprintf("--replicas=%d", replicas))
+	if err != nil {
+		return fmt.Errorf("failed to scale deployment: %w", err)
+	}
+	if replicas == 0 {
+		_, err = Kubectl("wait", "--for=delete", "pod", "-n", namespace, "--selector=app="+deployName)
+		if err != nil {
+			return fmt.Errorf("failed to wait for pod deletion: %w", err)
+		}
+	} else {
+		_, err = Kubectl("wait", "--for=condition=available", "deploy", "-n", namespace, deployName)
+		if err != nil {
+			return fmt.Errorf("failed to wait for deployment available: %w", err)
+		}
+	}
+	return nil
+}
+
+// RunWithStopPod runs the function with stopping the pod.
+// If deployName is empty, it just runs the function.
+func RunWithStopPod(namespace, deployName string, f func() error) error {
+	if len(deployName) == 0 {
+		return f()
+	}
+
+	if err := ScaleDeployment(namespace, deployName, 0); err != nil {
+		return err
+	}
+	if err := f(); err != nil {
+		return err
+	}
+	return ScaleDeployment(namespace, deployName, 1)
+}

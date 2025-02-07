@@ -29,6 +29,12 @@ func ImportDiff(filename, pool, image string) error {
 	return nil
 }
 
+func ImportDiffWithStoppingPod(filename, pool, image, namespace, deployName string) error {
+	return RunWithStopPod(namespace, deployName, func() error {
+		return ImportDiff(filename, pool, image)
+	})
+}
+
 func SnapCreate(pool, image, snap string) error {
 	stdout, err := Rbd("snap", "create", pool+"/"+image+"@"+snap)
 	if err != nil {
@@ -47,30 +53,12 @@ func SnapRemove(pool, image string, snaps []string) error {
 	return nil
 }
 
-func SnapRollback(namespace, deployName, pool, image, snap string) error {
-	if len(deployName) != 0 {
-		_, err := Kubectl("scale", "deploy", "-n", namespace, deployName, "--replicas=0")
+func SnapRollback(pool, image, snap, namespace, deployName string) error {
+	return RunWithStopPod(namespace, deployName, func() error {
+		stdout, err := Rbd("snap", "rollback", pool+"/"+image+"@"+snap)
 		if err != nil {
-			return fmt.Errorf("failed to scale down deployment: %w", err)
+			return fmt.Errorf("failed to rollback snapshot: %w, %s", err, string(stdout))
 		}
-		_, err = Kubectl("wait", "--for=delete", "pod", "-n", namespace, "--selector=app="+deployName)
-		if err != nil {
-			return fmt.Errorf("failed to wait for pod deletion: %w", err)
-		}
-	}
-	stdout, err := Rbd("snap", "rollback", pool+"/"+image+"@"+snap)
-	if err != nil {
-		return fmt.Errorf("failed to rollback snapshot: %w, %s", err, string(stdout))
-	}
-	if len(deployName) != 0 {
-		_, err := Kubectl("scale", "deploy", "-n", namespace, deployName, "--replicas=1")
-		if err != nil {
-			return fmt.Errorf("failed to scale up deployment: %w", err)
-		}
-		_, err = Kubectl("wait", "--for=condition=available", "deploy", "-n", namespace, deployName)
-		if err != nil {
-			return fmt.Errorf("failed to wait for deployment: %w", err)
-		}
-	}
-	return nil
+		return nil
+	})
 }

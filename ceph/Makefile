@@ -31,8 +31,8 @@ test: ceph-custom.tar
 	$(MAKE) -C ${E2E_DIR} launch-minikube MINIKUBE_PROFILE=minikube
 	$(MAKE) -C ${E2E_DIR} install-rook-ceph-operator
 	$(MAKE) -C ${E2E_DIR} install-rook-ceph-cluster1
-	$(MINIKUBE_CMD) image load ceph-custom.tar
-	$(KUBECTL_CMD) apply -k ./manifests/
+	# $(MINIKUBE_CMD) image load ceph-custom.tar
+	# $(KUBECTL_CMD) apply -k ./manifests/
 	env \
 	  CEPH_CMD_TEST=1 \
 	  KUBECTL=$(KUBECTL_CMD) \

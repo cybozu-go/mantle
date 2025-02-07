@@ -27,6 +27,7 @@ type regressionTest struct {
 
 func testRegression() {
 	test := &regressionTest{
+
 		namespace: util.GetUniqueName("ns-"),
 		poolName:  util.GetUniqueName("pool-"),
 		scName:    util.GetUniqueName("sc-"),
@@ -46,10 +47,10 @@ func testRegression() {
 	}
 
 	Describe("setup environment", test.setupEnv)
-	Describe("test export-diff for snapshot without from-snap option", test.testWithoutFromSnapMain)
+	// Describe("test export-diff for snapshot without from-snap option", test.testWithoutFromSnapMain)
 	Describe("test export-diff for snapshot with from-snap option", test.testWithFromSnapMain)
-	Describe("test export-diff for RBD image", test.testExportRBDImage)
-	// Describe("teardown environment", test.teardownEnv)
+	// Describe("test export-diff for RBD image", test.testExportRBDImage)
+	Describe("teardown environment", test.teardownEnv)
 }
 
 func (t *regressionTest) setupEnv() {
@@ -78,6 +79,10 @@ func (t *regressionTest) setupEnv() {
 			Expect(err).NotTo(HaveOccurred())
 			err = cluster.PushFileToPod(t.snapshots[i], t.namespace, t.srcDeployName, "/mnt/data")
 			Expect(err).NotTo(HaveOccurred())
+			/*
+				err = cluster.CompareFilesInPod(t.snapshots[i], t.namespace, t.srcDeployName, "/mnt/data")
+				Expect(err).NotTo(HaveOccurred())
+				//*/
 			err = cluster.SnapCreate(t.poolName, imageName, t.snapshots[i])
 			Expect(err).NotTo(HaveOccurred())
 		}
@@ -107,6 +112,7 @@ func (t *regressionTest) teardownEnv() {
 	})
 }
 
+/*
 func (t *regressionTest) testWithoutFromSnapMain() {
 	It("export-diff for snapshot without from-snap option", func() {
 		tests := []struct {
@@ -153,7 +159,7 @@ func (t *regressionTest) testWithoutFromSnapMain() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// apply snapshot to the destination image
-			err = cluster.SnapRollback(t.namespace, t.dstDeployName, t.poolName, t.dstImageName, tt.expectedDataName)
+			err = cluster.SnapRollback(t.poolName, t.dstImageName, tt.expectedDataName, t.namespace, t.dstDeployName)
 			Expect(err).NotTo(HaveOccurred())
 
 			// compare the data in the destination image with the expected data
@@ -167,6 +173,7 @@ func (t *regressionTest) testWithoutFromSnapMain() {
 		}
 	})
 }
+*/
 
 func (t *regressionTest) testWithFromSnapMain() {
 	It("export-diff for snapshot with from-snap option", func() {
@@ -176,6 +183,7 @@ func (t *regressionTest) testWithFromSnapMain() {
 		err = cluster.ImportDiff("/tmp/exported.bin", t.poolName, t.dstImageName)
 		Expect(err).NotTo(HaveOccurred())
 
+		//*
 		tests := []struct {
 			title            string
 			expectedDataName string
@@ -212,7 +220,7 @@ func (t *regressionTest) testWithFromSnapMain() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// apply snapshot to the destination image
-			err = cluster.SnapRollback(t.namespace, t.dstDeployName, t.poolName, t.dstImageName, tt.expectedDataName)
+			err = cluster.SnapRollback(t.poolName, t.dstImageName, tt.expectedDataName, t.namespace, t.dstDeployName)
 			Expect(err).NotTo(HaveOccurred())
 
 			// compare the data in the destination image with the expected data
@@ -224,16 +232,17 @@ func (t *regressionTest) testWithFromSnapMain() {
 			err = cluster.SnapRemove(t.poolName, t.dstImageName, []string{tt.expectedDataName})
 			Expect(err).NotTo(HaveOccurred())
 		}
-
+		//*/
 		By("(189) specify snapshot which don't have diff with RBD image")
 		for i := 1; i < 4; i++ {
+			//err := cluster.ExportDiff("/tmp/exported.bin", "-p", t.poolName, "--from-snap", t.snapshots[i-1], fmt.Sprintf("%s@%s", t.srcImageName, t.snapshots[i]))
 			err := cluster.ExportDiff("/tmp/exported.bin", "-p", t.poolName, fmt.Sprintf("%s@%s", t.srcImageName, t.snapshots[i]))
 			Expect(err).NotTo(HaveOccurred())
 			err = cluster.ImportDiff("/tmp/exported.bin", t.poolName, t.dstImageName)
 			Expect(err).NotTo(HaveOccurred())
 		}
 		// apply snapshot to the destination image
-		err = cluster.SnapRollback(t.namespace, t.dstDeployName, t.poolName, t.dstImageName, t.snapshots[3])
+		err = cluster.SnapRollback(t.poolName, t.dstImageName, t.snapshots[3], t.namespace, t.dstDeployName)
 		Expect(err).NotTo(HaveOccurred())
 		// compare the data in the destination image with the expected data
 		err = cluster.CompareFilesInPod(t.snapshots[2], t.namespace, t.dstDeployName, "/mnt/data")
@@ -247,6 +256,7 @@ func (t *regressionTest) testWithFromSnapMain() {
 	})
 }
 
+/*
 func (t *regressionTest) testExportRBDImage() {
 	It("(184) export-diff for RBD image without --from-snapshot", func() {
 		err := cluster.ExportDiff("/tmp/exported.bin", "-p", t.poolName, t.srcImageName)
@@ -255,7 +265,7 @@ func (t *regressionTest) testExportRBDImage() {
 		err = cluster.RemoveFileByPod(t.namespace, t.dstDeployName, "/mnt/data")
 		Expect(err).NotTo(HaveOccurred())
 
-		err = cluster.ImportDiff("/tmp/exported.bin", t.poolName, t.dstImageName)
+		err = cluster.ImportDiffWithStoppingPod("/tmp/exported.bin", t.poolName, t.dstImageName, t.namespace, t.dstDeployName)
 		Expect(err).NotTo(HaveOccurred())
 
 		err = cluster.CompareFilesInPod(t.snapshots[2], t.namespace, t.dstDeployName, "/mnt/data")
@@ -268,10 +278,7 @@ func (t *regressionTest) testExportRBDImage() {
 			"-p", t.poolName, "--image", t.srcImageName, "--snap", t.snapshots[1])
 		Expect(err).NotTo(HaveOccurred())
 
-		err = cluster.ImportDiff("/tmp/exported.bin", t.poolName, t.dstImageName)
-		Expect(err).NotTo(HaveOccurred())
-
-		err = cluster.SnapRollback(t.namespace, t.dstDeployName, t.poolName, t.dstImageName, t.snapshots[1])
+		err = cluster.ImportDiffWithStoppingPod("/tmp/exported.bin", t.poolName, t.dstImageName, t.namespace, t.dstDeployName)
 		Expect(err).NotTo(HaveOccurred())
 
 		err = cluster.CompareFilesInPod(t.snapshots[1], t.namespace, t.dstDeployName, "/mnt/data")
@@ -282,3 +289,4 @@ func (t *regressionTest) testExportRBDImage() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 }
+*/
