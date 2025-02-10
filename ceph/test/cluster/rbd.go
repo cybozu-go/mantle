@@ -20,18 +20,21 @@ func ExportDiff(filename string, args ...string) error {
 	return nil
 }
 
-func ImportDiff(filename, pool, image string) error {
-	stdout, err := Kubectl("exec", "-n", ROOK_NAMESPACE, "deploy/rook-ceph-tools", "--",
-		"sh", "-c", fmt.Sprintf("cat %s | rbd import-diff -p %s - %s", filename, pool, image))
-	if err != nil {
-		return fmt.Errorf("failed to import diff: %w, %s", err, string(stdout))
-	}
-	return nil
-}
-
-func ImportDiffWithStoppingPod(filename, pool, image, namespace, deployName string) error {
+func ImportDiff(filename, pool, image, rollbackTo, namespace, deployName string) error {
 	return RunWithStopPod(namespace, deployName, func() error {
-		return ImportDiff(filename, pool, image)
+		if rollbackTo != "" {
+			stdout, err := Rbd("snap", "rollback", pool+"/"+image+"@"+rollbackTo)
+			if err != nil {
+				return fmt.Errorf("failed to rollback snapshot: %w, %s", err, string(stdout))
+			}
+		}
+
+		stdout, err := Kubectl("exec", "-n", ROOK_NAMESPACE, "deploy/rook-ceph-tools", "--",
+			"sh", "-c", fmt.Sprintf("cat %s | rbd import-diff -p %s - %s", filename, pool, image))
+		if err != nil {
+			return fmt.Errorf("failed to import diff: %w, %s", err, string(stdout))
+		}
+		return nil
 	})
 }
 

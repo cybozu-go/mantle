@@ -27,7 +27,7 @@ packages/touch: ceph-custom.tar
 	touch $@
 
 .PHONY: test
-test: ceph-custom.tar
+test: # ceph-custom.tar
 	$(MAKE) -C ${E2E_DIR} launch-minikube MINIKUBE_PROFILE=minikube
 	$(MAKE) -C ${E2E_DIR} install-rook-ceph-operator
 	$(MAKE) -C ${E2E_DIR} install-rook-ceph-cluster1

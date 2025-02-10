@@ -74,8 +74,13 @@ func (t *regressionTest) setupEnv() {
 		// creating snapshots
 		// snapshots[0] and snapshots[1] have diff with the image
 		// snapshots[2] and snapshots[2] has no diff with the image
+		dummyDataEntries := []string{
+			"0000000",
+			"1111111",
+			"2222222",
+		}
 		for i := 0; i < 3; i++ {
-			err := cluster.MakeRandomFile(t.snapshots[i], 5*1024*1024)
+			err := cluster.MakeDummyFile(t.snapshots[i], 5*1024*1024, dummyDataEntries[i])
 			Expect(err).NotTo(HaveOccurred())
 			err = cluster.PushFileToPod(t.snapshots[i], t.namespace, t.srcDeployName, "/mnt/data")
 			Expect(err).NotTo(HaveOccurred())
@@ -180,43 +185,46 @@ func (t *regressionTest) testWithFromSnapMain() {
 		// export snapshot[0] and import it to the destination image before running the tests
 		err := cluster.ExportDiff("/tmp/exported.bin", "-p", t.poolName, fmt.Sprintf("%s@%s", t.srcImageName, t.snapshots[0]))
 		Expect(err).NotTo(HaveOccurred())
-		err = cluster.ImportDiff("/tmp/exported.bin", t.poolName, t.dstImageName)
+		err = cluster.ImportDiff("/tmp/exported.bin", t.poolName, t.dstImageName, "", t.namespace, t.dstDeployName)
 		Expect(err).NotTo(HaveOccurred())
 
 		//*
 		tests := []struct {
-			title            string
-			expectedDataName string
-			args             []string
+			title                string
+			expectedDataName     string
+			exportArgs           []string
+			rollbackBeforeImport string
 		}{
 			{
 				title:            "(186) specify snapshot name with <image>@<snap> format",
 				expectedDataName: t.snapshots[1],
-				args: []string{
+				exportArgs: []string{
 					"-p", t.poolName,
 					"--from-snap", t.snapshots[0],
 					fmt.Sprintf("%s@%s", t.srcImageName, t.snapshots[1]),
 				},
+				rollbackBeforeImport: t.snapshots[0],
 			},
 			{
 				title:            "(187) specify snapshot name with --snap option",
 				expectedDataName: t.snapshots[1],
-				args: []string{
+				exportArgs: []string{
 					"-p", t.poolName,
 					"--from-snap", t.snapshots[0],
 					"--image", t.srcImageName,
 					"--snap", t.snapshots[1],
 				},
+				rollbackBeforeImport: t.snapshots[0],
 			},
 		}
 		for _, tt := range tests {
 			By(tt.title)
 			// export from source snapshot to file
-			err = cluster.ExportDiff("/tmp/exported.bin", tt.args...)
+			err = cluster.ExportDiff("/tmp/exported.bin", tt.exportArgs...)
 			Expect(err).NotTo(HaveOccurred())
 
 			// import to destination image
-			err = cluster.ImportDiff("/tmp/exported.bin", t.poolName, t.dstImageName)
+			err = cluster.ImportDiff("/tmp/exported.bin", t.poolName, t.dstImageName, tt.rollbackBeforeImport, t.namespace, t.dstDeployName)
 			Expect(err).NotTo(HaveOccurred())
 
 			// apply snapshot to the destination image
@@ -238,7 +246,7 @@ func (t *regressionTest) testWithFromSnapMain() {
 			//err := cluster.ExportDiff("/tmp/exported.bin", "-p", t.poolName, "--from-snap", t.snapshots[i-1], fmt.Sprintf("%s@%s", t.srcImageName, t.snapshots[i]))
 			err := cluster.ExportDiff("/tmp/exported.bin", "-p", t.poolName, fmt.Sprintf("%s@%s", t.srcImageName, t.snapshots[i]))
 			Expect(err).NotTo(HaveOccurred())
-			err = cluster.ImportDiff("/tmp/exported.bin", t.poolName, t.dstImageName)
+			err = cluster.ImportDiff("/tmp/exported.bin", t.poolName, t.dstImageName, "" /* t.snapshots[i-1] */, t.namespace, t.dstDeployName)
 			Expect(err).NotTo(HaveOccurred())
 		}
 		// apply snapshot to the destination image

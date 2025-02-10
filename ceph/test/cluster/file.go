@@ -24,6 +24,28 @@ func MakeRandomFile(filename string, size int) error {
 	return command.Run()
 }
 
+func MakeDummyFile(filename string, size int, line string) error {
+	if !strings.HasSuffix(line, "\n") {
+		line = line + "\n"
+	}
+	linesIn1K := 1024 / len(line)
+	buf := strings.Repeat(line, linesIn1K)
+	bufSize := len(buf)
+	count := size / bufSize
+	file, err := os.Create(path.Join(workDir, filename))
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	for i := 0; i < count; i++ {
+		if _, err := file.WriteString(buf); err != nil {
+			return fmt.Errorf("failed to write file: %w", err)
+		}
+	}
+	return nil
+}
+
 func getPodNameByDeploy(namespace, deployName string) (string, error) {
 	stdout, err := Kubectl("get", "pod", "-n", namespace, "-l", "app="+deployName, "-o", "jsonpath={.items[0].metadata.name}")
 	if err != nil {
@@ -63,9 +85,11 @@ func RemoveFileByPod(namespace, deployName, target string) error {
 // CompareFilesInPod compares the file in the host(expected) with in the pod.
 func CompareFilesInPod(filename, namespace, deployName, target string) error {
 	workFilename := util.GetUniqueName("compare-file-")
-	defer func() {
-		_ = os.Remove(path.Join(workDir, workFilename))
-	}()
+	/*
+		defer func() {
+			_ = os.Remove(path.Join(workDir, workFilename))
+		}()
+	//*/
 
 	podName, err := getPodNameByDeploy(namespace, deployName)
 	if err != nil {
