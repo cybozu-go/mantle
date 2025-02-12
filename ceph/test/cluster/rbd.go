@@ -202,3 +202,26 @@ func SnapRollback(pool, image, snap, namespace, deployName string) error {
 		return nil
 	})
 }
+
+type SnapLsEntry struct {
+	Name string `json:"name"`
+}
+
+func SnapExists(pool, image, snap string) (bool, error) {
+	stdout, err := Rbd("snap", "ls", pool+"/"+image, "--format", "json")
+	if err != nil {
+		return false, fmt.Errorf("failed to list snapshots: %w, %s", err, string(stdout))
+	}
+
+	var snaps []SnapLsEntry
+	if err := json.Unmarshal(stdout, &snaps); err != nil {
+		return false, fmt.Errorf("failed to unmarshal snapshots: %w", err)
+	}
+
+	for _, s := range snaps {
+		if s.Name == snap {
+			return true, nil
+		}
+	}
+	return false, nil
+}

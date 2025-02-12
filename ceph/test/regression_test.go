@@ -78,12 +78,12 @@ func (t *regressionTest) setupEnv() {
 			Expect(err).NotTo(HaveOccurred())
 			err = cluster.PushFileToPod(t.snapshots[i], t.namespace, t.srcDeployName, "/mnt/data")
 			Expect(err).NotTo(HaveOccurred())
-			err = cluster.SnapCreate(t.poolName, imageName, t.snapshots[i])
+			err = cluster.SnapCreate(t.poolName, t.srcImageName, t.snapshots[i])
 			Expect(err).NotTo(HaveOccurred())
 		}
 		// crate snapshot[3] with the same data as snapshot[2]
 		// random file snapshot[3] is not exist
-		err = cluster.SnapCreate(t.poolName, imageName, t.snapshots[3])
+		err = cluster.SnapCreate(t.poolName, t.srcImageName, t.snapshots[3])
 		Expect(err).NotTo(HaveOccurred())
 
 		err = cluster.CreatePVC(t.namespace, t.dstPVCName, t.scName, "10Mi")
@@ -135,7 +135,6 @@ func (t *regressionTest) testWithoutFromSnapMain() {
 				title:            "(185) specify snapshot which don't have diff with RBD image",
 				expectedDataName: t.snapshots[2],
 				exportArgs: []string{
-
 					"-p", t.poolName,
 					fmt.Sprintf("%s@%s", t.srcImageName, t.snapshots[2]),
 				},
