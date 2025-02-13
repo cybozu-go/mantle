@@ -26,13 +26,15 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 const (
-	CephClusterNamespace = "rook-ceph"
-	PrimaryK8sCluster    = 1
-	SecondaryK8sCluster  = 2
-	RgwDeployName        = "rook-ceph-rgw-ceph-object-store-a"
+	CephClusterNamespace       = "rook-ceph"
+	PrimaryK8sCluster          = 1
+	SecondaryK8sCluster        = 2
+	RgwDeployName              = "rook-ceph-rgw-ceph-object-store-a"
+	MantleControllerDeployName = "mantle-controller"
 )
 
 var (
@@ -257,8 +259,7 @@ func GetPVList(clusterNo int) (*corev1.PersistentVolumeList, error) {
 }
 
 func ChangeClusterRole(clusterNo int, newRole string) error {
-	deployName := "mantle-controller"
-	deploy, err := GetDeploy(clusterNo, CephClusterNamespace, deployName)
+	deploy, err := GetDeploy(clusterNo, CephClusterNamespace, MantleControllerDeployName)
 	if err != nil {
 		return fmt.Errorf("failed to get mantle-controller deploy: %w", err)
 	}
@@ -272,7 +273,7 @@ func ChangeClusterRole(clusterNo int, newRole string) error {
 	}
 
 	_, _, err = Kubectl(
-		clusterNo, nil, "patch", "deploy", "-n", CephClusterNamespace, deployName, "--type=json",
+		clusterNo, nil, "patch", "deploy", "-n", CephClusterNamespace, MantleControllerDeployName, "--type=json",
 		fmt.Sprintf(
 			`-p=[{"op": "replace", "path": "/spec/template/spec/containers/0/args/%d", "value":"--role=%s"}]`,
 			roleIndex,
@@ -297,7 +298,7 @@ func ChangeClusterRole(clusterNo int, newRole string) error {
 		}
 		ready := true
 		for _, pod := range pods.Items {
-			if strings.HasPrefix(pod.GetName(), deployName) {
+			if strings.HasPrefix(pod.GetName(), MantleControllerDeployName) {
 				for _, container := range pod.Spec.Containers {
 					if !slices.Contains(container.Args, fmt.Sprintf("--role=%s", newRole)) {
 						ready = false
@@ -861,4 +862,29 @@ func DeleteMantleBackup(cluster int, namespace, backupName string) {
 	By("deleting MantleBackup")
 	_, _, err := Kubectl(cluster, nil, "delete", "-n", namespace, "mantlebackup", backupName, "--wait=false")
 	Expect(err).NotTo(HaveOccurred())
+}
+
+func GetBackupTransferPartSize() (*resource.Quantity, error) {
+	deployMC, err := GetDeploy(PrimaryK8sCluster, CephClusterNamespace, MantleControllerDeployName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get mantle-controller deploy: %w", err)
+	}
+	args := deployMC.Spec.Template.Spec.Containers[0].Args
+	backupTransferPartSizeIndex := slices.IndexFunc(
+		args,
+		func(arg string) bool { return strings.HasPrefix(arg, "--backup-transfer-part-size=") },
+	)
+	if backupTransferPartSizeIndex == -1 {
+		return nil, errors.New("failed to find --backup-transfer-part-size= argument")
+	}
+	qty, ok := strings.CutPrefix(args[backupTransferPartSizeIndex], "--backup-transfer-part-size=")
+	if !ok {
+		return nil, errors.New("failed to parse --backup-transfer-part-size= argument")
+	}
+	qtyParsed, err := resource.ParseQuantity(qty)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse --backup-transfer-part-size= argument: %w", err)
+	}
+
+	return &qtyParsed, nil
 }
