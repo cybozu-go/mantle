@@ -8,6 +8,8 @@ import (
 	"github.com/cybozu-go/mantle/internal/ceph"
 )
 
+const FakeRBDSnapshotSize = 5368709120 // 5Gi
+
 type fakeRBD struct {
 	nextSnapId int
 	snapshots  map[string][]ceph.RBDSnapshot
@@ -58,7 +60,7 @@ func (f *fakeRBD) RBDSnapCreate(pool, image, snap string) error {
 	f.snapshots[key] = append(snaps, ceph.RBDSnapshot{
 		Id:        f.nextSnapId,
 		Name:      snap,
-		Size:      5368709120, // 5Gi
+		Size:      FakeRBDSnapshotSize,
 		Protected: false,
 		Timestamp: ceph.NewRBDTimeStamp(time.Now().UTC()),
 	})

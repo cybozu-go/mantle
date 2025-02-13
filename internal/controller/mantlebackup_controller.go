@@ -2132,6 +2132,19 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 		}
 	}
 
+	// Make sure all of the import Jobs are completed.
+	if backup.Status.SnapSize == nil || backup.Status.TransferPartSize == nil {
+		return ctrl.Result{}, errors.New("failed to get .status.snapSize and/or .status.transferPartSize")
+	}
+	finalPartNum, err := r.calcNumOfExportDataParts(*backup.Status.SnapSize, backup.Status.TransferPartSize)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to calcuate num of export data parts: %w", err)
+	}
+	if partNum != int(finalPartNum) {
+		return requeueReconciliation(), nil
+	}
+
+	// Make sure the (final) RBD snapshot is created.
 	snapshot, err := ceph.FindRBDSnapshot(
 		r.ceph,
 		snapshotTarget.poolName,
