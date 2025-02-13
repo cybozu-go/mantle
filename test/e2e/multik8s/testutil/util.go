@@ -682,6 +682,19 @@ func ListRBDSnapshotsInPVC(cluster int, namespace, pvcName string) ([]ceph.RBDSn
 	return snaps, nil
 }
 
+func FindRBDSnapshotInPVC(cluster int, namespace, pvcName, snapName string) (*ceph.RBDSnapshot, error) {
+	snaps, err := ListRBDSnapshotsInPVC(SecondaryK8sCluster, namespace, pvcName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list RBD snapshots in PVC: %s/%s: %w",
+			namespace, pvcName, err)
+	}
+	index := slices.IndexFunc(snaps, func(snap ceph.RBDSnapshot) bool { return snap.Name == snapName })
+	if index == -1 {
+		return nil, fmt.Errorf("failed to find the RBD snapshot in PVC: %s/%s: %s: %w", namespace, pvcName, snapName, err)
+	}
+	return &snaps[index], nil
+}
+
 func EnsurePVCHasSnapshot(cluster int, namespace, pvcName, snapName string) {
 	GinkgoHelper()
 	By("checking the PVC has a snapshot")
