@@ -2,6 +2,7 @@ package replication
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"reflect"
 	"slices"
@@ -119,6 +120,67 @@ func replicationTestSuite() {
 				}
 				if !meta.IsStatusConditionTrue(secondaryMB.Status.Conditions, "ReadyToUse") {
 					return errors.New("ReadyToUse of .Status.Conditions is not True")
+				}
+
+				// Check if .status.LargestCompleted{Export,Import,Upload}PartNum are correct
+				backupTransferPartSize, err := GetBackupTransferPartSize()
+				if err != nil {
+					return fmt.Errorf("failed to get backup transfer part size :%w", err)
+				}
+				pvcSize := primaryPVC.Spec.Resources.Requests.Storage()
+				expectedNumOfParts := 1
+				if pvcSize.Cmp(*backupTransferPartSize) > 0 { // pvcSize > backupTransferPartSize
+					backupTransferPartSize, ok := backupTransferPartSize.AsInt64()
+					if !ok {
+						return errors.New("failed to convert backup transfer part size to i64")
+					}
+					pvcSizeI64, ok := pvcSize.AsInt64()
+					if !ok {
+						return errors.New("failed to convert pvc size to i64")
+					}
+					expectedNumOfParts = int(pvcSizeI64 / backupTransferPartSize)
+					if pvcSizeI64%backupTransferPartSize != 0 {
+						expectedNumOfParts++
+					}
+				}
+
+				if primaryMB.Status.LargestCompletedExportPartNum == nil {
+					return fmt.Errorf(
+						".status.largestCompletedExportPartNum of the primary MB is not correct: expected %d: got nil",
+						expectedNumOfParts,
+					)
+				} else if *primaryMB.Status.LargestCompletedExportPartNum != expectedNumOfParts-1 {
+					return fmt.Errorf(
+						".status.largestCompletedExportPartNum of the primary MB is not correct: expected %d: got %d",
+						expectedNumOfParts,
+						*primaryMB.Status.LargestCompletedExportPartNum,
+					)
+				}
+
+				if primaryMB.Status.LargestCompletedUploadPartNum == nil {
+					return fmt.Errorf(
+						".status.largestCompletedUploadPartNum of the primary MB is not correct: expected %d: got nil",
+						expectedNumOfParts,
+					)
+				} else if *primaryMB.Status.LargestCompletedUploadPartNum != expectedNumOfParts-1 {
+					return fmt.Errorf(
+						".status.largestCompletedUploadPartNum of the primary MB is not correct: expected %d: got %d",
+						expectedNumOfParts,
+						*primaryMB.Status.LargestCompletedUploadPartNum,
+					)
+				}
+
+				if secondaryMB.Status.LargestCompletedImportPartNum == nil {
+					return fmt.Errorf(
+						".status.largestCompletedImportPartNum of the secondary MB is not correct: expected %d: got nil",
+						expectedNumOfParts,
+					)
+				} else if *secondaryMB.Status.LargestCompletedImportPartNum != expectedNumOfParts-1 {
+					return fmt.Errorf(
+						".status.largestCompletedImportPartNum of the secondary MB is not correct: expected %d: got %d",
+						expectedNumOfParts,
+						*secondaryMB.Status.LargestCompletedImportPartNum,
+					)
 				}
 
 				return nil
