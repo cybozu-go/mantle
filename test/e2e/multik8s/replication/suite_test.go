@@ -138,26 +138,8 @@ func replicationTestSuite() { //nolint:gocyclo
 					}
 
 					// Check if .status.LargestCompleted{Export,Import,Upload}PartNum are correct
-					backupTransferPartSize, err := GetBackupTransferPartSize()
-					if err != nil {
-						return fmt.Errorf("failed to get backup transfer part size :%w", err)
-					}
-					pvcSize := primaryPVC.Spec.Resources.Requests.Storage()
-					expectedNumOfParts := 1
-					if pvcSize.Cmp(*backupTransferPartSize) > 0 { // pvcSize > backupTransferPartSize
-						backupTransferPartSize, ok := backupTransferPartSize.AsInt64()
-						if !ok {
-							return errors.New("failed to convert backup transfer part size to i64")
-						}
-						pvcSizeI64, ok := pvcSize.AsInt64()
-						if !ok {
-							return errors.New("failed to convert pvc size to i64")
-						}
-						expectedNumOfParts = int(pvcSizeI64 / backupTransferPartSize)
-						if pvcSizeI64%backupTransferPartSize != 0 {
-							expectedNumOfParts++
-						}
-					}
+					expectedNumOfParts, err := GetNumberOfBackupParts(primaryPVC.Spec.Resources.Requests.Storage())
+					Expect(err).NotTo(HaveOccurred())
 
 					if primaryMB.Status.LargestCompletedExportPartNum == nil {
 						return fmt.Errorf(
@@ -434,6 +416,68 @@ func replicationTestSuite() { //nolint:gocyclo
 			// Make sure M0 and M0' have the same contents.
 			EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName0, restoreName0, writtenDataHash0)
 			EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName0, restoreName0, writtenDataHash0)
+		})
+
+		It("should succeed to back up if backup-transfer-part-size is changed during uploading", func(ctx SpecContext) {
+			namespace := util.GetUniqueName("ns-")
+			pvcName := util.GetUniqueName("pvc-")
+			backupName := util.GetUniqueName("mb-")
+			restoreName := util.GetUniqueName("mr-")
+
+			SetupEnvironment(namespace)
+
+			// Pause the object storage to make upload Jobs fail.
+			PauseObjectStorage(ctx)
+			defer ResumeObjectStorage(ctx)
+
+			// Create MantleBackup M0.
+			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+			writtenDataHash := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
+			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
+
+			// Wait until an upload Job is created.
+			WaitUploadJobCreated(ctx, PrimaryK8sCluster, namespace, backupName, 0)
+
+			// Get the expected number of the backup parts before changing backup-transfer-part-size.
+			pvc, err := GetPVC(PrimaryK8sCluster, namespace, pvcName)
+			Expect(err).NotTo(HaveOccurred())
+			numParts, err := GetNumberOfBackupParts(pvc.Spec.Resources.Requests.Storage())
+			Expect(err).NotTo(HaveOccurred())
+
+			// Change backup-transfer-part-size
+			originalBackupTransferPartSize, err := GetBackupTransferPartSize()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(originalBackupTransferPartSize.String()).To(Equal("3Mi"))
+			ChangeBackupTransferPartSize("7Mi")
+			defer ChangeBackupTransferPartSize(originalBackupTransferPartSize.String())
+			newNumParts, err := GetNumberOfBackupParts(pvc.Spec.Resources.Requests.Storage())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(newNumParts).NotTo(Equal(numParts))
+
+			// Resume the process.
+			ResumeObjectStorage(ctx)
+
+			// Wait for MB to be synced.
+			WaitMantleBackupSynced(namespace, backupName)
+
+			// .status.LargestCompleted{Export,Upload,Import}PartNum should be correct.
+			Eventually(ctx, func(g Gomega) {
+				primaryMB, err := GetMB(PrimaryK8sCluster, namespace, backupName)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(primaryMB.Status.LargestCompletedExportPartNum).NotTo(BeNil())
+				g.Expect(primaryMB.Status.LargestCompletedUploadPartNum).NotTo(BeNil())
+				g.Expect(*primaryMB.Status.LargestCompletedExportPartNum).To(Equal(numParts - 1))
+				g.Expect(*primaryMB.Status.LargestCompletedUploadPartNum).To(Equal(numParts - 1))
+
+				secondaryMB, err := GetMB(SecondaryK8sCluster, namespace, backupName)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(secondaryMB.Status.LargestCompletedImportPartNum).NotTo(BeNil())
+				g.Expect(*secondaryMB.Status.LargestCompletedImportPartNum).To(Equal(numParts - 1))
+			}).Should(Succeed())
+
+			// Make sure backups are correct.
+			EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
+			EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
 		})
 
 		It("should get metrics from the controller pod in the primary cluster", func(ctx SpecContext) {
