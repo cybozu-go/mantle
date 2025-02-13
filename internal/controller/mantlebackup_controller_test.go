@@ -1573,6 +1573,14 @@ var _ = Describe("import", func() {
 			err = setStatusTransferPartSize(ctx, backup)
 			Expect(err).NotTo(HaveOccurred())
 
+			// set .status.snapSize
+			err = updateStatus(ctx, k8sClient, backup, func() error {
+				var i int64 = testutil.FakeRBDSnapshotSize
+				backup.Status.SnapSize = &i
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+
 			snapshotTarget := &snapshotTarget{
 				pvc: &corev1.PersistentVolumeClaim{},
 				pv: &corev1.PersistentVolume{
@@ -1593,7 +1601,11 @@ var _ = Describe("import", func() {
 			mockObjectStorage.EXPECT().Exists(gomock.Any(), gomock.Eq("target--0.bin")).DoAndReturn(
 				func(_ context.Context, _ string) (bool, error) {
 					return true, nil
-				}).MinTimes(1)
+				}).Times(2)
+			mockObjectStorage.EXPECT().Exists(gomock.Any(), gomock.Eq("target--5.bin")).DoAndReturn(
+				func(_ context.Context, _ string) (bool, error) {
+					return false, nil
+				}).Times(1)
 
 			// The first call to reconcileImportJob should create an import Job
 			res, err := mbr.reconcileImportJob(ctx, backup, snapshotTarget)
@@ -1620,6 +1632,14 @@ var _ = Describe("import", func() {
 			err = mbr.ceph.RBDSnapCreate("", "", backup.GetName())
 			Expect(err).NotTo(HaveOccurred())
 			dummySnapshot, err := ceph.FindRBDSnapshot(mbr.ceph, "", "", backup.GetName())
+			Expect(err).NotTo(HaveOccurred())
+
+			// Update .status.largestCompletedImportPartNum
+			err = updateStatus(ctx, k8sClient, backup, func() error {
+				i := int(testutil.FakeRBDSnapshotSize/backup.Status.TransferPartSize.Value() - 1)
+				backup.Status.LargestCompletedImportPartNum = &i
+				return nil
+			})
 			Expect(err).NotTo(HaveOccurred())
 
 			// The call should update the status of the MantleBackup resource.

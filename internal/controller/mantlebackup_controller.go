@@ -2188,6 +2188,16 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 		}
 	}
 
+	// Make sure all of the import Jobs are completed.
+	finalPartNum, err := r.getNumberOfParts(backup)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to calcuate num of export data parts: %w", err)
+	}
+	if partNum != finalPartNum {
+		return requeueReconciliation(), nil
+	}
+
+	// Make sure the (final) RBD snapshot is created.
 	snapshot, err := ceph.FindRBDSnapshot(
 		r.ceph,
 		snapshotTarget.poolName,
