@@ -122,6 +122,16 @@ func replicationTestSuite() {
 					return errors.New("ReadyToUse of .Status.Conditions is not True")
 				}
 
+				// Check if snapshots are created correctly in the secondary Rook/Ceph cluster
+				snap, err := FindRBDSnapshotInPVC(SecondaryK8sCluster,
+					secondaryPVC.GetNamespace(), secondaryPVC.GetName(), secondaryMB.GetName())
+				if err != nil {
+					return fmt.Errorf("failed to find snapshot in PVC: %w", err)
+				}
+				if secondaryMB.Status.SnapID == nil || snap.Id != *secondaryMB.Status.SnapID {
+					return errors.New("invalid .status.snapID of secondary MB")
+				}
+
 				// Check if .status.LargestCompleted{Export,Import,Upload}PartNum are correct
 				backupTransferPartSize, err := GetBackupTransferPartSize()
 				if err != nil {
