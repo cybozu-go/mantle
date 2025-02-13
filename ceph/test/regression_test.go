@@ -98,7 +98,9 @@ func (t *regressionTest) setupEnv() {
 
 func (t *regressionTest) teardownEnv() {
 	It("delete resources", func() {
-		err := cluster.SnapRemove(t.poolName, t.srcImageName, t.snapshots)
+		err := cluster.SnapRemoveAll(t.poolName, t.srcImageName)
+		Expect(err).NotTo(HaveOccurred())
+		err = cluster.SnapRemoveAll(t.poolName, t.dstImageName)
 		Expect(err).NotTo(HaveOccurred())
 		err = cluster.CleanupNamespace(t.namespace)
 		Expect(err).NotTo(HaveOccurred())

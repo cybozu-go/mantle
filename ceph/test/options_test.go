@@ -62,7 +62,7 @@ func (t *optionsTest) setupEnv() {
 
 func (t *optionsTest) teardownEnv() {
 	It("delete resources", func() {
-		err := cluster.SnapRemove(t.poolName, t.imageName, []string{t.snapName})
+		err := cluster.SnapRemoveAll(t.poolName, t.imageName)
 		Expect(err).NotTo(HaveOccurred())
 		err = cluster.CleanupNamespace(t.namespace)
 		Expect(err).NotTo(HaveOccurred())

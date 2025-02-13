@@ -25,7 +25,8 @@ func TestMtest(t *testing.T) {
 }
 
 var _ = Describe("root of tests", func() {
-	Context("snapshot name", testSnapshotName)
 	Context("regression", testRegression)
+	Context("rollback", testRollback)
+	Context("snapshot name", testSnapshotName)
 	Context("options", testOptions)
 })

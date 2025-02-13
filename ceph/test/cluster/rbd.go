@@ -193,6 +193,25 @@ func SnapRemove(pool, image string, snaps []string) error {
 	return nil
 }
 
+func SnapRemoveAll(pool, image string) error {
+	stdout, err := Rbd("snap", "ls", pool+"/"+image, "--format", "json")
+	if err != nil {
+		return fmt.Errorf("failed to list snapshots: %w, %s", err, string(stdout))
+	}
+
+	var snaps []SnapLsEntry
+	if err := json.Unmarshal(stdout, &snaps); err != nil {
+		return fmt.Errorf("failed to unmarshal snapshots: %w", err)
+	}
+
+	snapNames := make([]string, 0, len(snaps))
+	for _, s := range snaps {
+		snapNames = append(snapNames, s.Name)
+	}
+
+	return SnapRemove(pool, image, snapNames)
+}
+
 func SnapRollback(pool, image, snap, namespace, deployName string) error {
 	return RunWithStopPod(namespace, deployName, func() error {
 		stdout, err := Rbd("snap", "rollback", pool+"/"+image+"@"+snap)

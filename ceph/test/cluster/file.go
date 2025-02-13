@@ -25,7 +25,8 @@ func MakeRandomFile(filename string, size int) error {
 }
 
 func getPodNameByDeploy(namespace, deployName string) (string, error) {
-	stdout, err := Kubectl("get", "pod", "-n", namespace, "-l", "app="+deployName, "-o", "jsonpath={.items[0].metadata.name}")
+	stdout, err := Kubectl("get", "pod", "-n", namespace, "-l", "app="+deployName,
+		"-o", "jsonpath={.items[0].metadata.name}")
 	if err != nil {
 		return "", err
 	}

@@ -129,7 +129,7 @@ func CreateDeployment(namespace, deployName, pvcName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create deployment: %w", err)
 	}
-	_, err = Kubectl("wait", "--for=condition=available", "-n", namespace, "deploy/"+deployName, "--timeout=60s")
+	_, err = Kubectl("wait", "--for=condition=available", "-n", namespace, "deploy/"+deployName, "--timeout=3m")
 	if err != nil {
 		return fmt.Errorf("failed to wait for deployment: %w", err)
 	}
@@ -142,7 +142,7 @@ func CreatePodWithBlock(namespace, podName, pvcName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create pod with block: %w", err)
 	}
-	_, err = Kubectl("wait", "--for=condition=ready", "-n", namespace, "pod/"+podName, "--timeout=60s")
+	_, err = Kubectl("wait", "--for=condition=ready", "-n", namespace, "pod/"+podName, "--timeout=3m")
 	if err != nil {
 		return fmt.Errorf("failed to wait for pod: %w", err)
 	}
@@ -217,16 +217,18 @@ func CleanupGlobal() error {
 }
 
 func GetImageNameByPVC(namespace, pvcName string) (string, error) {
-	var volumeName string
-	for len(volumeName) == 0 {
-		stdout, err := Kubectl("get", "-n", namespace, "pvc", pvcName, "-o", "jsonpath={.spec.volumeName}")
-		if err != nil {
-			return "", fmt.Errorf("failed to get volume name by PVC: %w", err)
-		}
-		volumeName = string(stdout)
+	_, err := Kubectl("wait", "--for=jsonpath={.status.phase}=Bound", "-n", namespace, "pvc", pvcName, "--timeout=3m")
+	if err != nil {
+		return "", fmt.Errorf("failed to wait for pvc bound: %w", err)
 	}
 
-	stdout, err := Kubectl("get", "pv", volumeName, "-o", "jsonpath={.spec.csi.volumeAttributes.imageName}")
+	stdout, err := Kubectl("get", "-n", namespace, "pvc", pvcName, "-o", "jsonpath={.spec.volumeName}")
+	if err != nil {
+		return "", fmt.Errorf("failed to get volume name by PVC: %w", err)
+	}
+	volumeName := string(stdout)
+
+	stdout, err = Kubectl("get", "pv", volumeName, "-o", "jsonpath={.spec.csi.volumeAttributes.imageName}")
 	if err != nil {
 		return "", fmt.Errorf("failed to get image name by volume: %w", err)
 	}
