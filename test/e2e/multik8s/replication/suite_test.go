@@ -39,7 +39,7 @@ var _ = Describe("Mantle", func() {
 	Context("replication test", replicationTestSuite)
 })
 
-func replicationTestSuite() {
+func replicationTestSuite() { //nolint:gocyclo
 	Describe("replication test", func() {
 		It("should correctly replicate PVC and MantleBackup resources", func(ctx SpecContext) {
 			namespace := util.GetUniqueName("ns-")
