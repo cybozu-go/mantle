@@ -901,3 +901,52 @@ func GetBackupTransferPartSize() (*resource.Quantity, error) {
 
 	return &qtyParsed, nil
 }
+
+func GetNumberOfBackupParts(snapshotSize *resource.Quantity) (int, error) {
+	backupTransferPartSize, err := GetBackupTransferPartSize()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get backup transfer part size :%w", err)
+	}
+	var expectedNumOfParts int64 = 1
+	if snapshotSize.Cmp(*backupTransferPartSize) > 0 { // pvcSize > backupTransferPartSize
+		backupTransferPartSize, ok := backupTransferPartSize.AsInt64()
+		if !ok {
+			return 0, errors.New("failed to convert backup transfer part size to i64")
+		}
+		pvcSizeI64, ok := snapshotSize.AsInt64()
+		if !ok {
+			return 0, errors.New("failed to convert pvc size to i64")
+		}
+		expectedNumOfParts = pvcSizeI64 / backupTransferPartSize
+		if pvcSizeI64%backupTransferPartSize != 0 {
+			expectedNumOfParts++
+		}
+	}
+	return int(expectedNumOfParts), nil
+}
+
+func ChangeBackupTransferPartSize(size string) {
+	GinkgoHelper()
+
+	deployMC, err := GetDeploy(PrimaryK8sCluster, CephClusterNamespace, MantleControllerDeployName)
+	Expect(err).NotTo(HaveOccurred())
+
+	args := deployMC.Spec.Template.Spec.Containers[0].Args
+	backupTransferPartSizeIndex := slices.IndexFunc(
+		args,
+		func(arg string) bool { return strings.HasPrefix(arg, "--backup-transfer-part-size=") },
+	)
+	Expect(backupTransferPartSizeIndex).NotTo(Equal(-1))
+
+	_, _, err = Kubectl(
+		PrimaryK8sCluster, nil,
+		"patch", "deploy", "-n", CephClusterNamespace, MantleControllerDeployName, "--type=json",
+		fmt.Sprintf(
+			`-p=[{"op": "replace", "path": "/spec/template/spec/containers/0/args/%d", `+
+				`"value":"--backup-transfer-part-size=%s"}]`,
+			backupTransferPartSizeIndex,
+			size,
+		),
+	)
+	Expect(err).NotTo(HaveOccurred())
+}
