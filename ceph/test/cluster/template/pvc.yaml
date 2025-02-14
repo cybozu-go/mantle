@@ -6,6 +6,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
+  volumeMode: "%s"
   resources:
     requests:
       storage: "%s"

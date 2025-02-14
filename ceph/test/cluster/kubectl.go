@@ -20,10 +20,10 @@ const (
 )
 
 var (
-	//go:embed template/deployment.yaml
-	deploymentTemplate string
-	//go:embed template/pod_with_block.yaml
-	podWithBlockTemplate string
+	//go:embed template/deployment_filesystem.yaml
+	deploymentFilesystemTemplate string
+	//go:embed template/deployment_block.yaml
+	deploymentBlockTemplate string
 	//go:embed template/pool.yaml
 	poolTemplate string
 	//go:embed template/pvc.yaml
@@ -123,8 +123,19 @@ func CreateNamespace(namespace string) error {
 	return nil
 }
 
-func CreateDeployment(namespace, deployName, pvcName string) error {
-	manifest := fmt.Sprintf(deploymentTemplate, namespace, deployName, deployName, deployName, pvcName)
+type VolumeMode string
+
+const (
+	VolumeModeFilesystem VolumeMode = "Filesystem"
+	VolumeModeBlock      VolumeMode = "Block"
+)
+
+func CreateDeployment(namespace, deployName, pvcName string, volumeMode VolumeMode) error {
+	template := deploymentFilesystemTemplate
+	if volumeMode == VolumeModeBlock {
+		template = deploymentBlockTemplate
+	}
+	manifest := fmt.Sprintf(template, namespace, deployName, deployName, deployName, pvcName)
 	_, err := KubectlWithInput([]byte(manifest), "apply", "-f", "-")
 	if err != nil {
 		return fmt.Errorf("failed to create deployment: %w", err)
@@ -132,19 +143,6 @@ func CreateDeployment(namespace, deployName, pvcName string) error {
 	_, err = Kubectl("wait", "--for=condition=available", "-n", namespace, "deploy/"+deployName, "--timeout=3m")
 	if err != nil {
 		return fmt.Errorf("failed to wait for deployment: %w", err)
-	}
-	return nil
-}
-
-func CreatePodWithBlock(namespace, podName, pvcName string) error {
-	manifest := fmt.Sprintf(podWithBlockTemplate, namespace, podName, pvcName)
-	_, err := KubectlWithInput([]byte(manifest), "apply", "-f", "-")
-	if err != nil {
-		return fmt.Errorf("failed to create pod with block: %w", err)
-	}
-	_, err = Kubectl("wait", "--for=condition=ready", "-n", namespace, "pod/"+podName, "--timeout=3m")
-	if err != nil {
-		return fmt.Errorf("failed to wait for pod: %w", err)
 	}
 	return nil
 }
@@ -158,8 +156,8 @@ func CreatePool(poolName string) error {
 	return nil
 }
 
-func CreatePVC(namespace, pvcName, scName, size string) error {
-	manifest := fmt.Sprintf(pvcTemplate, namespace, pvcName, size, scName)
+func CreatePVC(namespace, pvcName, scName, size string, volumeMode VolumeMode) error {
+	manifest := fmt.Sprintf(pvcTemplate, namespace, pvcName, volumeMode, size, scName)
 	_, err := KubectlWithInput([]byte(manifest), "apply", "-f", "-")
 	if err != nil {
 		return fmt.Errorf("failed to create PVC: %w", err)
@@ -253,6 +251,15 @@ func ScaleDeployment(namespace, deployName string, replicas int) error {
 		}
 	}
 	return nil
+}
+
+func GetPodNameByDeploy(namespace, deployName string) (string, error) {
+	stdout, err := Kubectl("get", "pod", "-n", namespace, "-l", "app="+deployName,
+		"-o", "jsonpath={.items[0].metadata.name}")
+	if err != nil {
+		return "", err
+	}
+	return string(stdout), nil
 }
 
 // RunWithStopPod runs the function with stopping the pod.

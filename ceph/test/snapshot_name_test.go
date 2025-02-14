@@ -54,13 +54,13 @@ func (t *snapshotNameTest) setupEnv() {
 		err = cluster.CreateNamespace(t.namespace)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = cluster.CreatePVC(t.namespace, t.srcPVCName, t.scName, "10Mi")
+		err = cluster.CreatePVC(t.namespace, t.srcPVCName, t.scName, "10Mi", cluster.VolumeModeFilesystem)
 		Expect(err).NotTo(HaveOccurred())
 		imageName, err := cluster.GetImageNameByPVC(t.namespace, t.srcPVCName)
 		Expect(err).NotTo(HaveOccurred())
 		t.srcImageName = imageName
 
-		err = cluster.CreatePVC(t.namespace, t.dstPVCName, t.scName, "10Mi")
+		err = cluster.CreatePVC(t.namespace, t.dstPVCName, t.scName, "10Mi", cluster.VolumeModeFilesystem)
 		Expect(err).NotTo(HaveOccurred())
 		imageName, err = cluster.GetImageNameByPVC(t.namespace, t.dstPVCName)
 		Expect(err).NotTo(HaveOccurred())
@@ -95,7 +95,7 @@ func (t *snapshotNameTest) normalCases() {
 		)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = cluster.ExportDiff("/tmp/snapshot0-offset-1024.bin",
+		err = cluster.ExportDiff("/tmp/snapshot0-offset-1Ki.bin",
 			"--read-offset", "0",
 			"--read-length", "1024",
 			"--mid-snap-prefix", "snapshot0",
@@ -104,7 +104,7 @@ func (t *snapshotNameTest) normalCases() {
 		)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = cluster.ExportDiff("/tmp/snapshot1-offset-1024.bin",
+		err = cluster.ExportDiff("/tmp/snapshot1-offset-1Ki.bin",
 			"--read-offset", "0",
 			"--read-length", "1024",
 			"--mid-snap-prefix", "snapshot1",
@@ -115,9 +115,9 @@ func (t *snapshotNameTest) normalCases() {
 		Expect(err).NotTo(HaveOccurred())
 
 		rollbackMap := map[string]string{
-			"/tmp/snapshot0.bin":             "",
-			"/tmp/snapshot0-offset-1024.bin": "",
-			"/tmp/snapshot1-offset-1024.bin": t.snapshots[0],
+			"/tmp/snapshot0.bin":            "",
+			"/tmp/snapshot0-offset-1Ki.bin": "",
+			"/tmp/snapshot1-offset-1Ki.bin": t.snapshots[0],
 		}
 
 		tests := []struct {
@@ -181,7 +181,7 @@ func (t *snapshotNameTest) normalCases() {
 			{
 				title:                "(195)",
 				expectedSnapshotName: t.snapshots[0],
-				importsBefore:        []string{"/tmp/snapshot0-offset-1024.bin"},
+				importsBefore:        []string{"/tmp/snapshot0-offset-1Ki.bin"},
 				exportArgs: []string{
 					"--read-offset", "1024",
 					"--read-length", "0",
@@ -194,7 +194,7 @@ func (t *snapshotNameTest) normalCases() {
 			{
 				title:                "(198)",
 				expectedSnapshotName: "snapshot0-offset-2048",
-				importsBefore:        []string{"/tmp/snapshot0-offset-1024.bin"},
+				importsBefore:        []string{"/tmp/snapshot0-offset-1Ki.bin"},
 				exportArgs: []string{
 					"--read-offset", "1024",
 					"--read-length", "1024",
@@ -207,7 +207,7 @@ func (t *snapshotNameTest) normalCases() {
 			{
 				title:                "(199)",
 				expectedSnapshotName: t.snapshots[0],
-				importsBefore:        []string{"/tmp/snapshot0-offset-1024.bin"},
+				importsBefore:        []string{"/tmp/snapshot0-offset-1Ki.bin"},
 				exportArgs: []string{
 					"--read-offset", "1024",
 					"--read-length", "10484736", // 10Mi - 1024
@@ -220,7 +220,7 @@ func (t *snapshotNameTest) normalCases() {
 			{
 				title:                "(200)",
 				expectedSnapshotName: t.snapshots[0],
-				importsBefore:        []string{"/tmp/snapshot0-offset-1024.bin"},
+				importsBefore:        []string{"/tmp/snapshot0-offset-1Ki.bin"},
 				exportArgs: []string{
 					"--read-offset", "1024",
 					"--read-length", "11534336", // 11Mi
@@ -256,7 +256,7 @@ func (t *snapshotNameTest) normalCases() {
 			},
 			{
 				title:                "(205)",
-				expectedSnapshotName: "snapshot1-offset-1024",
+				expectedSnapshotName: "snapshot1-offset-1Ki",
 				importsBefore:        []string{"/tmp/snapshot0.bin"},
 				exportArgs: []string{
 					"--read-offset", "0",
@@ -299,7 +299,7 @@ func (t *snapshotNameTest) normalCases() {
 			{
 				title:                "(208)",
 				expectedSnapshotName: t.snapshots[1],
-				importsBefore:        []string{"/tmp/snapshot0.bin", "/tmp/snapshot1-offset-1024.bin"},
+				importsBefore:        []string{"/tmp/snapshot0.bin", "/tmp/snapshot1-offset-1Ki.bin"},
 				exportArgs: []string{
 					"--read-offset", "1024",
 					"--read-length", "0",
@@ -313,7 +313,7 @@ func (t *snapshotNameTest) normalCases() {
 			{
 				title:                "(209)",
 				expectedSnapshotName: "snapshot1-offset-2048",
-				importsBefore:        []string{"/tmp/snapshot0.bin", "/tmp/snapshot1-offset-1024.bin"},
+				importsBefore:        []string{"/tmp/snapshot0.bin", "/tmp/snapshot1-offset-1Ki.bin"},
 				exportArgs: []string{
 					"--read-offset", "1024",
 					"--read-length", "1024",
@@ -327,7 +327,7 @@ func (t *snapshotNameTest) normalCases() {
 			{
 				title:                "(210)",
 				expectedSnapshotName: t.snapshots[1],
-				importsBefore:        []string{"/tmp/snapshot0.bin", "/tmp/snapshot1-offset-1024.bin"},
+				importsBefore:        []string{"/tmp/snapshot0.bin", "/tmp/snapshot1-offset-1Ki.bin"},
 				exportArgs: []string{
 					"--read-offset", "1024",
 					"--read-length", "10484736", // 10Mi - 1024
@@ -341,7 +341,7 @@ func (t *snapshotNameTest) normalCases() {
 			{
 				title:                "(211)",
 				expectedSnapshotName: t.snapshots[1],
-				importsBefore:        []string{"/tmp/snapshot0.bin", "/tmp/snapshot1-offset-1024.bin"},
+				importsBefore:        []string{"/tmp/snapshot0.bin", "/tmp/snapshot1-offset-1Ki.bin"},
 				exportArgs: []string{
 					"--read-offset", "1024",
 					"--read-length", "11534336", // 11Mi
@@ -401,7 +401,6 @@ func (t *snapshotNameTest) errorCases() {
 			title      string
 			exportArgs []string
 		}{
-			/* 🚧 TODO after fix
 			{
 				title: "(196)",
 				exportArgs: []string{
@@ -412,7 +411,6 @@ func (t *snapshotNameTest) errorCases() {
 					fmt.Sprintf("%s@%s", t.srcImageName, t.snapshots[0]),
 				},
 			},
-			*/
 			{
 				title: "(197)",
 				exportArgs: []string{
@@ -423,7 +421,6 @@ func (t *snapshotNameTest) errorCases() {
 					fmt.Sprintf("%s@%s", t.srcImageName, t.snapshots[0]),
 				},
 			},
-			/* 🚧 TODO after fix
 			{
 				title: "(201)",
 				exportArgs: []string{
@@ -434,7 +431,6 @@ func (t *snapshotNameTest) errorCases() {
 					fmt.Sprintf("%s@%s", t.srcImageName, t.snapshots[0]),
 				},
 			},
-			*/
 			{
 				title: "(202)",
 				exportArgs: []string{

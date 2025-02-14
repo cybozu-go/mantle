@@ -10,12 +10,12 @@ import (
 )
 
 type optionsTest struct {
-	namespace string
-	poolName  string
-	scName    string
-	podName   string
-	pvcName   string
-	snapName  string
+	namespace  string
+	poolName   string
+	scName     string
+	deployName string
+	pvcName    string
+	snapName   string
 
 	// image name will be set in setupEnv after creating PVC
 	imageName string
@@ -23,12 +23,12 @@ type optionsTest struct {
 
 func testOptions() {
 	test := &optionsTest{
-		namespace: util.GetUniqueName("ns-"),
-		poolName:  util.GetUniqueName("pool-"),
-		scName:    util.GetUniqueName("sc-"),
-		podName:   util.GetUniqueName("pod-"),
-		pvcName:   util.GetUniqueName("pvc-"),
-		snapName:  util.GetUniqueName("snap-"),
+		namespace:  util.GetUniqueName("ns-"),
+		poolName:   util.GetUniqueName("pool-"),
+		scName:     util.GetUniqueName("sc-"),
+		deployName: util.GetUniqueName("pod-"),
+		pvcName:    util.GetUniqueName("pvc-"),
+		snapName:   util.GetUniqueName("snap-"),
 	}
 
 	Describe("setup environment", test.setupEnv)
@@ -46,9 +46,9 @@ func (t *optionsTest) setupEnv() {
 		err = cluster.CreateNamespace(t.namespace)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = cluster.CreatePVC(t.namespace, t.pvcName, t.scName, "1Gi")
+		err = cluster.CreatePVC(t.namespace, t.pvcName, t.scName, "1Gi", cluster.VolumeModeFilesystem)
 		Expect(err).NotTo(HaveOccurred())
-		err = cluster.CreateDeployment(t.namespace, t.podName, t.pvcName)
+		err = cluster.CreateDeployment(t.namespace, t.deployName, t.pvcName, cluster.VolumeModeFilesystem)
 		Expect(err).NotTo(HaveOccurred())
 
 		imageName, err := cluster.GetImageNameByPVC(t.namespace, t.pvcName)

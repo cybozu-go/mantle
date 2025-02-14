@@ -62,9 +62,9 @@ func (t *regressionTest) setupEnv() {
 		err = cluster.CreateNamespace(t.namespace)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = cluster.CreatePVC(t.namespace, t.srcPVCName, t.scName, "10Mi")
+		err = cluster.CreatePVC(t.namespace, t.srcPVCName, t.scName, "10Mi", cluster.VolumeModeFilesystem)
 		Expect(err).NotTo(HaveOccurred())
-		err = cluster.CreateDeployment(t.namespace, t.srcDeployName, t.srcPVCName)
+		err = cluster.CreateDeployment(t.namespace, t.srcDeployName, t.srcPVCName, cluster.VolumeModeFilesystem)
 		Expect(err).NotTo(HaveOccurred())
 		imageName, err := cluster.GetImageNameByPVC(t.namespace, t.srcPVCName)
 		Expect(err).NotTo(HaveOccurred())
@@ -86,9 +86,9 @@ func (t *regressionTest) setupEnv() {
 		err = cluster.SnapCreate(t.poolName, t.srcImageName, t.snapshots[3])
 		Expect(err).NotTo(HaveOccurred())
 
-		err = cluster.CreatePVC(t.namespace, t.dstPVCName, t.scName, "10Mi")
+		err = cluster.CreatePVC(t.namespace, t.dstPVCName, t.scName, "10Mi", cluster.VolumeModeFilesystem)
 		Expect(err).NotTo(HaveOccurred())
-		err = cluster.CreateDeployment(t.namespace, t.dstDeployName, t.dstPVCName)
+		err = cluster.CreateDeployment(t.namespace, t.dstDeployName, t.dstPVCName, cluster.VolumeModeFilesystem)
 		Expect(err).NotTo(HaveOccurred())
 		imageName, err = cluster.GetImageNameByPVC(t.namespace, t.dstPVCName)
 		Expect(err).NotTo(HaveOccurred())

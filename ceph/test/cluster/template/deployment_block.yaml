@@ -10,17 +10,17 @@ spec:
       app: "%s"
   template:
     metadata:
-      labels:
+     labels:
         app: "%s"
     spec:
       containers:
         - name: ubuntu
           image: ghcr.io/cybozu/ubuntu:22.04
           command: ["pause"]
-          volumeMounts:
-            - mountPath: /mnt
-              name: my-volume
+          volumeDevices:
+            - name: rbd-device
+              devicePath: /dev/rbd-device
       volumes:
-        - name: my-volume
+        - name: rbd-device
           persistentVolumeClaim:
             claimName: "%s"

@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path"
-	"strconv"
 	"strings"
 
 	"github.com/cybozu-go/mantle/test/util"
@@ -15,7 +14,7 @@ import (
 var workDir string
 
 func MakeRandomFile(filename string, size int) error {
-	args := []string{"if=/dev/urandom", "of=" + path.Join(workDir, filename), "bs=1K", "count=" + strconv.Itoa(size/1024)}
+	args := []string{"if=/dev/urandom", "of=" + path.Join(workDir, filename), "bs=1K", fmt.Sprintf("count=%d", size/1024)}
 	log.Printf("📂 dd %s", strings.Join(args, " "))
 	command := exec.Command("dd", args...)
 	command.Stdout = os.Stdout
@@ -24,17 +23,8 @@ func MakeRandomFile(filename string, size int) error {
 	return command.Run()
 }
 
-func getPodNameByDeploy(namespace, deployName string) (string, error) {
-	stdout, err := Kubectl("get", "pod", "-n", namespace, "-l", "app="+deployName,
-		"-o", "jsonpath={.items[0].metadata.name}")
-	if err != nil {
-		return "", err
-	}
-	return string(stdout), nil
-}
-
 func PushFileToPod(filename, namespace, deployName, dst string) error {
-	podName, err := getPodNameByDeploy(namespace, deployName)
+	podName, err := GetPodNameByDeploy(namespace, deployName)
 	if err != nil {
 		return err
 	}
@@ -48,7 +38,7 @@ func PushFileToPod(filename, namespace, deployName, dst string) error {
 }
 
 func RemoveFileByPod(namespace, deployName, target string) error {
-	podName, err := getPodNameByDeploy(namespace, deployName)
+	podName, err := GetPodNameByDeploy(namespace, deployName)
 	if err != nil {
 		return err
 	}
@@ -68,7 +58,7 @@ func CompareFilesInPod(filename, namespace, deployName, target string) error {
 		_ = os.Remove(path.Join(workDir, workFilename))
 	}()
 
-	podName, err := getPodNameByDeploy(namespace, deployName)
+	podName, err := GetPodNameByDeploy(namespace, deployName)
 	if err != nil {
 		return err
 	}
@@ -83,7 +73,7 @@ func CompareFilesInPod(filename, namespace, deployName, target string) error {
 	if err != nil {
 		showMD5Sum(path.Join(workDir, filename))
 		showMD5Sum(path.Join(workDir, workFilename))
-		return fmt.Errorf("the file would have differences: %w", err)
+		return fmt.Errorf("the files having differences: %w", err)
 	}
 	return nil
 }

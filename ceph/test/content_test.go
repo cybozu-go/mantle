@@ -10,7 +10,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-type rollbackTest struct {
+type contentTest struct {
 	namespace string
 	poolName  string
 	scName    string
@@ -26,8 +26,8 @@ type rollbackTest struct {
 	snapshots []string
 }
 
-func testRollback() {
-	test := &rollbackTest{
+func testContent() {
+	test := &contentTest{
 		namespace: util.GetUniqueName("ns-"),
 		poolName:  util.GetUniqueName("pool-"),
 		scName:    util.GetUniqueName("sc-"),
@@ -40,15 +40,18 @@ func testRollback() {
 		snapshots: []string{
 			util.GetUniqueName("snap-"),
 			util.GetUniqueName("snap-"),
+			util.GetUniqueName("snap-"),
+			util.GetUniqueName("snap-"),
 		},
 	}
 
 	Describe("setup environment", test.setupEnv)
-	Describe("normal cases", test.withFromSnap)
+	Describe("create snapshot", test.createSnapshot)
+	Describe("normal cases", test.normalCases)
 	Describe("teardown environment", test.teardownEnv)
 }
 
-func (t *rollbackTest) setupEnv() {
+func (t *contentTest) setupEnv() {
 	It("create resources", func() {
 		err := cluster.CreatePool(t.poolName)
 		Expect(err).NotTo(HaveOccurred())
@@ -58,35 +61,55 @@ func (t *rollbackTest) setupEnv() {
 		err = cluster.CreateNamespace(t.namespace)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = cluster.CreatePVC(t.namespace, t.srcPVCName, t.scName, "10Mi", cluster.VolumeModeFilesystem)
+		err = cluster.CreatePVC(t.namespace, t.srcPVCName, t.scName, "3Mi", cluster.VolumeModeBlock)
 		Expect(err).NotTo(HaveOccurred())
-		err = cluster.CreateDeployment(t.namespace, t.srcDeployName, t.srcPVCName, cluster.VolumeModeFilesystem)
+		err = cluster.CreateDeployment(t.namespace, t.srcDeployName, t.srcPVCName, cluster.VolumeModeBlock)
 		Expect(err).NotTo(HaveOccurred())
 		imageName, err := cluster.GetImageNameByPVC(t.namespace, t.srcPVCName)
 		Expect(err).NotTo(HaveOccurred())
 		t.srcImageName = imageName
 
-		err = cluster.CreatePVC(t.namespace, t.dstPVCName, t.scName, "10Mi", cluster.VolumeModeFilesystem)
+		err = cluster.CreatePVC(t.namespace, t.dstPVCName, t.scName, "3Mi", cluster.VolumeModeBlock)
 		Expect(err).NotTo(HaveOccurred())
-		err = cluster.CreateDeployment(t.namespace, t.dstDeployName, t.dstPVCName, cluster.VolumeModeFilesystem)
+		err = cluster.CreateDeployment(t.namespace, t.dstDeployName, t.dstPVCName, cluster.VolumeModeBlock)
 		Expect(err).NotTo(HaveOccurred())
 		imageName, err = cluster.GetImageNameByPVC(t.namespace, t.dstPVCName)
 		Expect(err).NotTo(HaveOccurred())
 		t.dstImageName = imageName
-
-		// creating snapshots
-		for i := 0; i < 2; i++ {
-			err := cluster.MakeRandomFile(t.snapshots[i], 1*1024*1024)
-			Expect(err).NotTo(HaveOccurred())
-			err = cluster.PushFileToPod(t.snapshots[i], t.namespace, t.srcDeployName, "/mnt/data")
-			Expect(err).NotTo(HaveOccurred())
-			err = cluster.SnapCreate(t.poolName, t.srcImageName, t.snapshots[i])
-			Expect(err).NotTo(HaveOccurred())
-		}
 	})
 }
 
-func (t *rollbackTest) teardownEnv() {
+func (t *contentTest) createSnapshot() {
+	It("create snapshot", func() {
+		// snapshot0 has 0.5MB data
+		err := cluster.WriteRandomBlock(t.namespace, t.srcDeployName, 512*1024)
+		Expect(err).NotTo(HaveOccurred())
+		err = cluster.SnapCreate(t.poolName, t.srcImageName, t.snapshots[0])
+		Expect(err).NotTo(HaveOccurred())
+		err = cluster.GetBlockAsFile(t.namespace, t.srcDeployName, t.snapshots[0])
+		Expect(err).NotTo(HaveOccurred())
+
+		// snapshot1 has the same data as snapshot0
+		err = cluster.SnapCreate(t.poolName, t.srcImageName, t.snapshots[1])
+		Expect(err).NotTo(HaveOccurred())
+
+		// snapshot2 has different 1.5MB data
+		err = cluster.WriteRandomBlock(t.namespace, t.srcDeployName, 1536*1024)
+		Expect(err).NotTo(HaveOccurred())
+		err = cluster.SnapCreate(t.poolName, t.srcImageName, t.snapshots[2])
+		Expect(err).NotTo(HaveOccurred())
+		err = cluster.GetBlockAsFile(t.namespace, t.srcDeployName, t.snapshots[2])
+		Expect(err).NotTo(HaveOccurred())
+
+		// snapshot3 has discard volume
+		err = cluster.DiscardBlock(t.namespace, t.srcDeployName)
+		Expect(err).NotTo(HaveOccurred())
+		err = cluster.SnapCreate(t.poolName, t.srcImageName, t.snapshots[3])
+		Expect(err).NotTo(HaveOccurred())
+	})
+}
+
+func (t *contentTest) teardownEnv() {
 	It("delete resources", func() {
 		err := cluster.SnapRemoveAll(t.poolName, t.srcImageName)
 		Expect(err).NotTo(HaveOccurred())
@@ -99,15 +122,9 @@ func (t *rollbackTest) teardownEnv() {
 	})
 }
 
-func (t *rollbackTest) withFromSnap() {
-	It("normal case", func() {
-		err := cluster.ExportDiff("/tmp/snapshot0.bin",
-			"-p", t.poolName,
-			fmt.Sprintf("%s@%s", t.srcImageName, t.snapshots[0]),
-		)
-		Expect(err).NotTo(HaveOccurred())
-
-		err = cluster.ExportDiff("/tmp/snapshot0-offset-1Ki.bin",
+func (t *contentTest) normalCases() {
+	It("", func() {
+		err := cluster.ExportDiff("/tmp/snapshot0-offset-1Ki.bin",
 			"--read-offset", "0",
 			"--read-length", "1024",
 			"--mid-snap-prefix", "snapshot0",
@@ -116,20 +133,18 @@ func (t *rollbackTest) withFromSnap() {
 		)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = cluster.ExportDiff("/tmp/snapshot1-offset-1Ki.bin",
+		err = cluster.ExportDiff("/tmp/snapshot0-offset-1Mi.bin",
 			"--read-offset", "0",
-			"--read-length", "1024",
-			"--mid-snap-prefix", "snapshot1",
-			"--from-snap", t.snapshots[0],
+			"--read-length", "1048576",
+			"--mid-snap-prefix", "snapshot0",
 			"-p", t.poolName,
-			fmt.Sprintf("%s@%s", t.srcImageName, t.snapshots[1]),
+			fmt.Sprintf("%s@%s", t.srcImageName, t.snapshots[0]),
 		)
 		Expect(err).NotTo(HaveOccurred())
 
 		rollbackMap := map[string]string{
-			"/tmp/snapshot0.bin":            "",
 			"/tmp/snapshot0-offset-1Ki.bin": "",
-			"/tmp/snapshot1-offset-1Ki.bin": t.snapshots[0],
+			"/tmp/snapshot0-offset-1Mi.bin": "",
 		}
 
 		tests := []struct {
@@ -140,79 +155,57 @@ func (t *rollbackTest) withFromSnap() {
 			rollbackTo       string
 		}{
 			{
-				title:            "(212)",
-				expectedDataName: t.snapshots[1],
-				importsBefore:    []string{"/tmp/snapshot0.bin"},
-				exportArgs: []string{
-					"--from-snap", t.snapshots[0],
-					"-p", t.poolName,
-					t.srcImageName,
-				},
-				rollbackTo: t.snapshots[0],
-			},
-			{
-				title:            "(213)",
-				expectedDataName: t.snapshots[1],
-				importsBefore:    []string{"/tmp/snapshot0.bin"},
-				exportArgs: []string{
-					"--read-offset", "0",
-					"--read-length", "0",
-					"--from-snap", t.snapshots[0],
-					"-p", t.poolName,
-					t.srcImageName,
-				},
-				rollbackTo: t.snapshots[0],
-			},
-			{
-				title:            "(214)",
-				expectedDataName: t.snapshots[1],
-				exportArgs: []string{
-					"-p", t.poolName,
-					t.srcImageName,
-				},
-			},
-			{
-				title:            "(215)",
-				expectedDataName: t.snapshots[1],
-				exportArgs: []string{
-					"--read-offset", "0",
-					"--read-length", "0",
-					"-p", t.poolName,
-					t.srcImageName,
-				},
-			},
-			{
-				title:            "extra 1",
-				expectedDataName: t.snapshots[1],
-				importsBefore:    []string{"/tmp/snapshot0.bin", "/tmp/snapshot1-offset-1Ki.bin"},
-				exportArgs: []string{
-					"--read-offset", "1024",
-					"--read-length", "0",
-					"--mid-snap-prefix", "snapshot1",
-					"--from-snap", t.snapshots[0],
-					"-p", t.poolName,
-					fmt.Sprintf("%s@%s", t.srcImageName, t.snapshots[1]),
-				},
-				rollbackTo: "snapshot1-offset-1024",
-			},
-			{
-				title:            "extra 2",
+				title:            "(216)",
 				expectedDataName: t.snapshots[0],
 				importsBefore:    []string{"/tmp/snapshot0-offset-1Ki.bin"},
 				exportArgs: []string{
 					"--read-offset", "1024",
-					"--read-length", "0",
+					"--read-length", "3144704", // 3Mi - 1024
 					"--mid-snap-prefix", "snapshot0",
 					"-p", t.poolName,
 					fmt.Sprintf("%s@%s", t.srcImageName, t.snapshots[0]),
 				},
-				rollbackTo: "snapshot0-offset-1024",
+			},
+			{
+				title:            "(217)",
+				expectedDataName: t.snapshots[0],
+				importsBefore:    []string{"/tmp/snapshot0-offset-1Ki.bin"},
+				exportArgs: []string{
+					"--read-offset", "1024",
+					"--read-length", "5242880", // 5Mi
+					"--mid-snap-prefix", "snapshot0",
+					"-p", t.poolName,
+					fmt.Sprintf("%s@%s", t.srcImageName, t.snapshots[0]),
+				},
+			},
+			{
+				title:            "(218)",
+				expectedDataName: t.snapshots[0],
+				importsBefore:    []string{"/tmp/snapshot0-offset-1Mi.bin"},
+				exportArgs: []string{
+					"--read-offset", "1048576", // 1Mi
+					"--read-length", "2097152", // 2Mi
+					"--mid-snap-prefix", "snapshot0",
+					"-p", t.poolName,
+					fmt.Sprintf("%s@%s", t.srcImageName, t.snapshots[0]),
+				},
+			},
+			{
+				title:            "(219)",
+				expectedDataName: t.snapshots[0],
+				importsBefore:    []string{"/tmp/snapshot0-offset-1Mi.bin"},
+				exportArgs: []string{
+					"--read-offset", "1048576", // 1Mi
+					"--read-length", "5242880", // 5Mi
+					"--mid-snap-prefix", "snapshot0",
+					"-p", t.poolName,
+					fmt.Sprintf("%s@%s", t.srcImageName, t.snapshots[0]),
+				},
 			},
 		}
 
 		for _, tt := range tests {
 			By(tt.title)
-
 			// export from source snapshot to file
 			err := cluster.ExportDiff("/tmp/exported.bin", tt.exportArgs...)
 			Expect(err).NotTo(HaveOccurred())
@@ -225,18 +218,12 @@ func (t *rollbackTest) withFromSnap() {
 				}
 			}
 
-			// overwrite data in pod before rollback
-			err = cluster.MakeRandomFile("dummy", 2*1024*1024)
-			Expect(err).NotTo(HaveOccurred())
-			err = cluster.PushFileToPod("dummy", t.namespace, t.dstDeployName, "/mnt/data")
-			Expect(err).NotTo(HaveOccurred())
-
 			// rollback in import process
 			err = cluster.ImportDiff("/tmp/exported.bin", t.poolName, t.dstImageName,
 				tt.rollbackTo, t.namespace, t.dstDeployName, t.dstPVCName)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = cluster.CompareFilesInPod(tt.expectedDataName, t.namespace, t.dstDeployName, "/mnt/data")
+			err = cluster.CompareBlockWithFile(t.namespace, t.dstDeployName, tt.expectedDataName)
 			Expect(err).NotTo(HaveOccurred())
 
 			// cleanup

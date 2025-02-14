@@ -80,7 +80,7 @@ func discardVolume(namespace, pvcName string) error {
 
 	discardPVName := util.GetUniqueName("discard-pv-")
 	discardPVCName := util.GetUniqueName("discard-pvc-")
-	discardPodName := util.GetUniqueName("discard-pod-")
+	discardDeployName := util.GetUniqueName("discard-pod-")
 
 	volumeMode := corev1.PersistentVolumeBlock
 	discardPV := corev1.PersistentVolume{
@@ -146,18 +146,16 @@ func discardVolume(namespace, pvcName string) error {
 		return fmt.Errorf("failed to create PVC: %w", err)
 	}
 
-	err = CreatePodWithBlock(namespace, discardPodName, discardPVCName)
+	err = CreateDeployment(namespace, discardDeployName, discardPVCName, VolumeModeBlock)
 	if err != nil {
 		return fmt.Errorf("failed to create pod: %w", err)
 	}
 
-	_, err = Kubectl("exec", "-n", namespace, discardPodName, "--",
-		"blkdiscard", "/dev/rbd-device")
-	if err != nil {
-		return fmt.Errorf("failed to discard volume: %w", err)
+	if err := DiscardBlock(namespace, discardDeployName); err != nil {
+		return err
 	}
 
-	err = DeleteObject("pod", namespace, discardPodName)
+	err = DeleteObject("deployment", namespace, discardDeployName)
 	if err != nil {
 		return fmt.Errorf("failed to delete pod: %w", err)
 	}
