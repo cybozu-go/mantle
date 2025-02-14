@@ -480,6 +480,73 @@ func replicationTestSuite() { //nolint:gocyclo
 			EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
 		})
 
+		It("should succeed to back up two MantleBackups in parallel", func(ctx SpecContext) {
+			namespace := util.GetUniqueName("ns-")
+			pvcName1 := util.GetUniqueName("pvc-")
+			pvcName2 := util.GetUniqueName("pvc-")
+			backupName1 := util.GetUniqueName("mb-")
+			backupName2 := util.GetUniqueName("mb-")
+			restoreName1 := util.GetUniqueName("mr-")
+			restoreName2 := util.GetUniqueName("mr-")
+
+			SetupEnvironment(namespace)
+
+			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName1)
+			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName2)
+			writtenDataHash1 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName1)
+			writtenDataHash2 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName2)
+			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName1, backupName1)
+			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName2, backupName2)
+			WaitMantleBackupSynced(namespace, backupName1)
+			WaitMantleBackupSynced(namespace, backupName2)
+
+			primaryMB1, err := GetMB(PrimaryK8sCluster, namespace, backupName1)
+			Expect(err).NotTo(HaveOccurred())
+			secondaryMB1, err := GetMB(SecondaryK8sCluster, namespace, backupName1)
+			Expect(err).NotTo(HaveOccurred())
+			WaitTemporaryResourcesDeleted(ctx, primaryMB1, secondaryMB1)
+
+			primaryMB2, err := GetMB(PrimaryK8sCluster, namespace, backupName2)
+			Expect(err).NotTo(HaveOccurred())
+			secondaryMB2, err := GetMB(SecondaryK8sCluster, namespace, backupName2)
+			Expect(err).NotTo(HaveOccurred())
+			WaitTemporaryResourcesDeleted(ctx, primaryMB2, secondaryMB2)
+
+			Expect(meta.IsStatusConditionTrue(secondaryMB1.Status.Conditions, "ReadyToUse")).To(BeTrue())
+			Expect(meta.IsStatusConditionTrue(secondaryMB2.Status.Conditions, "ReadyToUse")).To(BeTrue())
+
+			primaryPVC1, err := GetPVC(PrimaryK8sCluster, namespace, pvcName1)
+			Expect(err).NotTo(HaveOccurred())
+			expectedNumOfParts1, err := GetNumberOfBackupParts(primaryPVC1.Spec.Resources.Requests.Storage())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(secondaryMB1.Status.LargestCompletedImportPartNum).NotTo(BeNil())
+			Expect(*secondaryMB1.Status.LargestCompletedImportPartNum).To(Equal(expectedNumOfParts1 - 1))
+
+			primaryPVC2, err := GetPVC(PrimaryK8sCluster, namespace, pvcName2)
+			Expect(err).NotTo(HaveOccurred())
+			expectedNumOfParts2, err := GetNumberOfBackupParts(primaryPVC2.Spec.Resources.Requests.Storage())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(secondaryMB2.Status.LargestCompletedImportPartNum).NotTo(BeNil())
+			Expect(*secondaryMB2.Status.LargestCompletedImportPartNum).To(Equal(expectedNumOfParts2 - 1))
+
+			snap, err := FindRBDSnapshotInPVC(SecondaryK8sCluster, namespace, pvcName1, backupName1)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(secondaryMB1.Status.SnapID).NotTo(BeNil())
+			Expect(*secondaryMB1.Status.SnapID).To(Equal(snap.Id))
+			Expect(snap.Name).To(Equal(secondaryMB1.Name))
+
+			snap, err = FindRBDSnapshotInPVC(SecondaryK8sCluster, namespace, pvcName2, backupName2)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(secondaryMB2.Status.SnapID).NotTo(BeNil())
+			Expect(*secondaryMB2.Status.SnapID).To(Equal(snap.Id))
+			Expect(snap.Name).To(Equal(secondaryMB2.Name))
+
+			EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName1, restoreName1, writtenDataHash1)
+			EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName2, restoreName2, writtenDataHash2)
+			EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName1, restoreName1, writtenDataHash1)
+			EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName2, restoreName2, writtenDataHash2)
+		})
+
 		It("should get metrics from the controller pod in the primary cluster", func(ctx SpecContext) {
 			metrics := []string{
 				`mantle_backup_creation_duration_seconds_count`,
