@@ -1379,8 +1379,8 @@ var _ = Describe("export", func() {
 				MaxExportJobs:          1,
 			},
 			"dummy image",
-			"",
-			nil,
+			"dummy-secret",
+			&ObjectStorageSettings{},
 			&ProxySettings{
 				HttpProxy:  "",
 				HttpsProxy: "",
@@ -1426,6 +1426,65 @@ var _ = Describe("export", func() {
 		Expect(ok).To(BeTrue())
 		Expect(diffFrom).To(Equal(target.GetName()))
 	})
+
+	DescribeTable(
+		"Deletion of completed export Jobs",
+		func(ctx SpecContext, backupTransferPartSize int64, numOfParts int) {
+			runStartExportAndUpload := func(target *mantlev1.MantleBackup) {
+				grpcClient.EXPECT().SetSynchronizing(gomock.Any(), gomock.Any()).
+					Times(1).Return(&proto.SetSynchronizingResponse{}, nil)
+				ret, err := mbr.startExportAndUpload(ctx, target, &dataSyncPrepareResult{
+					isIncremental:                     false,
+					isSecondaryMantleBackupReadyToUse: false,
+					diffFrom:                          nil,
+				})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(ret.Requeue).To(BeTrue())
+			}
+
+			mbr.primarySettings.MaxExportJobs = 2
+			mbr.backupTransferPartSize = *resource.NewQuantity(backupTransferPartSize, resource.BinarySI)
+
+			target1 := createAndExportMantleBackup(ctx, mbr, fmt.Sprintf("target1"), ns, false, false, nil)
+			target2 := createAndExportMantleBackup(ctx, mbr, fmt.Sprintf("target2"), ns, false, false, nil)
+
+			for partNum := 0; partNum < numOfParts; partNum++ {
+				// Get export Job for target1
+				var job batchv1.Job
+				Eventually(ctx, func(g Gomega, ctx SpecContext) {
+					err := k8sClient.Get(ctx,
+						types.NamespacedName{Name: MakeExportJobName(target1, partNum), Namespace: nsController}, &job)
+					g.Expect(err).NotTo(HaveOccurred())
+				}).Should(Succeed())
+
+				// Make export Job for target 1 Completed.
+				err := resMgr.ChangeJobCondition(ctx, &job, batchv1.JobComplete, corev1.ConditionTrue)
+				Expect(err).NotTo(HaveOccurred())
+
+				// Run startExportAndUpload
+				runStartExportAndUpload(target1)
+
+				// Make sure the export Job for target 1 is deleted.
+				Eventually(ctx, func(g Gomega, ctx SpecContext) {
+					err := k8sClient.Get(ctx,
+						types.NamespacedName{Name: MakeExportJobName(target1, partNum), Namespace: nsController}, &job)
+					g.Expect(err).To(HaveOccurred())
+					g.Expect(aerrors.IsNotFound(err)).To(BeTrue())
+				}).Should(Succeed())
+			}
+
+			// Make sure the export Job of part 0 for target 2 is NOT deleted.
+			Consistently(ctx, func(g Gomega, ctx SpecContext) {
+				var job batchv1.Job
+				err := k8sClient.Get(ctx,
+					types.NamespacedName{Name: MakeExportJobName(target2, 0), Namespace: nsController}, &job)
+				g.Expect(err).NotTo(HaveOccurred())
+			}, "3s", "1s").Should(Succeed())
+		},
+		Entry("snap size < transfer part size", int64(testutil.FakeRBDSnapshotSize)+1, 1),
+		Entry("snap size = transfer part size", int64(testutil.FakeRBDSnapshotSize), 1),
+		Entry("snap size > transfer part size", int64(testutil.FakeRBDSnapshotSize-1), 2),
+	)
 
 	It("should throttle export jobs correctly", func(ctx SpecContext) {
 		getNumOfExportJobs := func(ns string) (int, error) {
