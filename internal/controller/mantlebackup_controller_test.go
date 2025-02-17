@@ -1333,6 +1333,35 @@ var _ = Describe("export", func() {
 	var mbr *MantleBackupReconciler
 	var nsController, ns string
 
+	createAndExportMantleBackup := func(
+		ctx SpecContext,
+		mbr *MantleBackupReconciler,
+		name, ns string,
+		isIncremental, isSecondaryMantleBackupReadyToUse bool,
+		diffFrom *mantlev1.MantleBackup,
+	) *mantlev1.MantleBackup {
+		GinkgoHelper()
+
+		target, err := createMantleBackupUsingDummyPVC(ctx, name, ns)
+		Expect(err).NotTo(HaveOccurred())
+
+		err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, target)
+		Expect(err).NotTo(HaveOccurred())
+
+		grpcClient.EXPECT().SetSynchronizing(gomock.Any(), gomock.Any()).
+			Times(1).Return(&proto.SetSynchronizingResponse{}, nil)
+
+		ret, err := mbr.startExportAndUpload(ctx, target, &dataSyncPrepareResult{
+			isIncremental:                     isIncremental,
+			isSecondaryMantleBackupReadyToUse: isSecondaryMantleBackupReadyToUse,
+			diffFrom:                          diffFrom,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ret.Requeue).To(BeTrue())
+
+		return target
+	}
+
 	BeforeEach(func() {
 		var t reporter
 		mockCtrl = gomock.NewController(t)
@@ -1373,43 +1402,16 @@ var _ = Describe("export", func() {
 
 	It("should set correct annotations after export() is called", func(ctx SpecContext) {
 		// test a full backup
-		target, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
-		Expect(err).NotTo(HaveOccurred())
+		target := createAndExportMantleBackup(ctx, mbr, "target", ns, false, false, nil)
 
-		err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, target)
-		Expect(err).NotTo(HaveOccurred())
-
-		grpcClient.EXPECT().SetSynchronizing(gomock.Any(), gomock.Any()).
-			Times(1).Return(&proto.SetSynchronizingResponse{}, nil)
-
-		ret, err := mbr.startExportAndUpload(ctx, target, &dataSyncPrepareResult{
-			isIncremental:                     false,
-			isSecondaryMantleBackupReadyToUse: false,
-			diffFrom:                          nil,
-		})
-		Expect(err).NotTo(HaveOccurred())
-		Expect(ret.Requeue).To(BeTrue())
-
-		err = k8sClient.Get(ctx,
+		err := k8sClient.Get(ctx,
 			types.NamespacedName{Name: target.GetName(), Namespace: target.GetNamespace()}, target)
 		Expect(err).NotTo(HaveOccurred())
 		_, ok := target.GetAnnotations()[annotDiffFrom]
 		Expect(ok).To(BeFalse())
 
 		// test an incremental backup
-		target2, err := createMantleBackupUsingDummyPVC(ctx, "target2", ns)
-		Expect(err).NotTo(HaveOccurred())
-
-		grpcClient.EXPECT().SetSynchronizing(gomock.Any(), gomock.Any()).
-			Times(1).Return(&proto.SetSynchronizingResponse{}, nil)
-
-		ret, err = mbr.startExportAndUpload(ctx, target2, &dataSyncPrepareResult{
-			isIncremental:                     true,
-			isSecondaryMantleBackupReadyToUse: false,
-			diffFrom:                          target,
-		})
-		Expect(err).NotTo(HaveOccurred())
-		Expect(ret.Requeue).To(BeTrue())
+		target2 := createAndExportMantleBackup(ctx, mbr, "target2", ns, true, false, target)
 
 		err = k8sClient.Get(ctx,
 			types.NamespacedName{Name: target.GetName(), Namespace: target.GetNamespace()}, target)
@@ -1439,27 +1441,9 @@ var _ = Describe("export", func() {
 			return len(jobs.Items), err
 		}
 
-		createAndExportMantleBackup := func(mbr *MantleBackupReconciler, name, ns string) {
-			target, err := createMantleBackupUsingDummyPVC(ctx, name, ns)
-			Expect(err).NotTo(HaveOccurred())
-
-			err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, target)
-			Expect(err).NotTo(HaveOccurred())
-
-			grpcClient.EXPECT().SetSynchronizing(gomock.Any(), gomock.Any()).
-				Times(1).Return(&proto.SetSynchronizingResponse{}, nil)
-
-			_, err = mbr.startExportAndUpload(ctx, target, &dataSyncPrepareResult{
-				isIncremental:                     false,
-				isSecondaryMantleBackupReadyToUse: false,
-				diffFrom:                          nil,
-			})
-			Expect(err).NotTo(HaveOccurred())
-		}
-
 		// create 5 different MantleBackup resources and call export() for each of them
 		for i := 0; i < 5; i++ {
-			createAndExportMantleBackup(mbr, fmt.Sprintf("target1-%d", i), ns)
+			createAndExportMantleBackup(ctx, mbr, fmt.Sprintf("target1-%d", i), ns, false, false, nil)
 		}
 
 		// make sure that only 1 Job is created
@@ -1490,7 +1474,7 @@ var _ = Describe("export", func() {
 		)
 		mbr2.ceph = testutil.NewFakeRBD()
 		ns2 := resMgr.CreateNamespace()
-		createAndExportMantleBackup(mbr2, "target2", ns2)
+		createAndExportMantleBackup(ctx, mbr2, "target2", ns2, false, false, nil)
 		Eventually(ctx, func(g Gomega) error {
 			numJobs, err := getNumOfExportJobs(nsController2)
 			g.Expect(err).NotTo(HaveOccurred())
