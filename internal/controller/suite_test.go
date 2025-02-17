@@ -35,7 +35,7 @@ func TestControllers(t *testing.T) {
 	RegisterFailHandler(Fail)
 
 	SetDefaultEventuallyPollingInterval(time.Second)
-	SetDefaultEventuallyTimeout(3 * time.Minute)
+	SetDefaultEventuallyTimeout(1 * time.Minute)
 	EnforceDefaultTimeoutsWhenUsingContexts()
 
 	RunSpecs(t, "Controller Suite")
