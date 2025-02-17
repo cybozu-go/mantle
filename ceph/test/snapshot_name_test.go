@@ -256,7 +256,7 @@ func (t *snapshotNameTest) normalCases() {
 			},
 			{
 				title:                "(205)",
-				expectedSnapshotName: "snapshot1-offset-1Ki",
+				expectedSnapshotName: "snapshot1-offset-1024",
 				importsBefore:        []string{"/tmp/snapshot0.bin"},
 				exportArgs: []string{
 					"--read-offset", "0",

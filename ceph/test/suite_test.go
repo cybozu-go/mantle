@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cybozu-go/mantle/ceph/test/cluster"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -14,7 +13,7 @@ func TestMTest(t *testing.T) {
 	if os.Getenv("CEPH_CMD_TEST") == "" {
 		t.Skip("Run under ceph/")
 	}
-	defer cluster.RemoveWorkDir()
+	// defer cluster.RemoveWorkDir()
 
 	RegisterFailHandler(Fail)
 
@@ -26,6 +25,8 @@ func TestMTest(t *testing.T) {
 }
 
 var _ = Describe("root of tests", func() {
+	Context("extend", testExtend)
+
 	Context("content", testContent)
 	Context("regression", testRegression)
 	Context("rollback", testRollback)

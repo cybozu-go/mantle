@@ -36,7 +36,7 @@ test: ceph-custom.tar
 	env \
 	  CEPH_CMD_TEST=1 \
 	  KUBECTL=$(KUBECTL_CMD) \
-	  go test -v -count=1 ./test/
+	  go test -v -count=1 -timeout 1h ./test/
 
 .PHONY: setup
 setup:

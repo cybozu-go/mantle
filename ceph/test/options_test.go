@@ -93,7 +93,6 @@ func (t *optionsTest) testOptions() {
 					fmt.Sprintf("%s@%s", t.imageName, t.snapName),
 				},
 			},
-			/* TODO: 🚧 implement additional func to rise error this case
 			{
 
 				title: "(181) not specify snapshot name",
@@ -101,7 +100,6 @@ func (t *optionsTest) testOptions() {
 					"--read-offset", "0",
 					"--read-length", "1024",
 					"-p", t.poolName,
-					fmt.Sprintf("%s@%s", t.imageName, t.snapName),
 				},
 			},
 			{
@@ -146,11 +144,10 @@ func (t *optionsTest) testOptions() {
 					"--read-offset", "0",
 					"--read-length", "1024",
 					"-p", t.poolName,
-					"--mid-snap-prefix", "/invalid",
+					"--mid-snap-prefix", "@invalid",
 					fmt.Sprintf("%s@%s", t.imageName, t.snapName),
 				},
 			},
-			*/
 		}
 
 		for _, tt := range tests {

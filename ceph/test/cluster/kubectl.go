@@ -165,6 +165,30 @@ func CreatePVC(namespace, pvcName, scName, size string, volumeMode VolumeMode) e
 	return nil
 }
 
+func ResizePVC(namespace, pvcName, size string) error {
+	before, err := Kubectl("get", "-n", namespace, "pvc", pvcName, "-o", "jsonpath={.status.capacity.storage}")
+	if err != nil {
+		return fmt.Errorf("failed to get PVC size: %w", err)
+	}
+
+	_, err = Kubectl("patch", "-n", namespace, "pvc", pvcName,
+		"-p", fmt.Sprintf(`{"spec":{"resources":{"requests":{"storage":"%s"}}}}`, size))
+	if err != nil {
+		return fmt.Errorf("failed to patch PVC: %w", err)
+	}
+
+	for i := 0; i < 30; i++ {
+		after, err := Kubectl("get", "-n", namespace, "pvc", pvcName, "-o", "jsonpath={.status.capacity.storage}")
+		if err != nil {
+			return fmt.Errorf("failed to get PVC size: %w", err)
+		}
+		if string(after) != string(before) {
+			return nil
+		}
+	}
+	return fmt.Errorf("PVC size is not changed")
+}
+
 func CreateSC(scName, poolName string) error {
 	manifest := fmt.Sprintf(scTemplate, scName, poolName)
 	_, err := KubectlWithInput([]byte(manifest), "apply", "-f", "-")

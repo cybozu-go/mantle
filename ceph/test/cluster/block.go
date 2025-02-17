@@ -20,9 +20,10 @@ func DiscardBlock(namespace, deployName string) error {
 	return nil
 }
 
-func WriteRandomBlock(namespace, deployName string, size int) error {
+func WriteRandomBlock(namespace, deployName string, offset, size int) error {
 	_, err := Kubectl("exec", "-n", namespace, "deploy/"+deployName, "--",
-		"dd", "if=/dev/urandom", "of=/dev/rbd-device", "bs=1K", fmt.Sprintf("count=%d", size/1024))
+		"dd", "if=/dev/urandom", "of=/dev/rbd-device", "bs=1K",
+		fmt.Sprintf("seek=%d", offset/1024), fmt.Sprintf("count=%d", size/1024), "oflag=direct,dsync")
 	if err != nil {
 		return fmt.Errorf("failed to write random block: %w", err)
 	}
