@@ -1327,7 +1327,7 @@ func setStatusTransferPartSize(ctx context.Context, backup *mantlev1.MantleBacku
 	return nil
 }
 
-var _ = Describe("export", func() {
+var _ = Describe("export and upload", func() {
 	var mockCtrl *gomock.Controller
 	var grpcClient *proto.MockMantleServiceClient
 	var mbr *MantleBackupReconciler
@@ -1362,6 +1362,53 @@ var _ = Describe("export", func() {
 		return target
 	}
 
+	runStartExportAndUpload := func(ctx SpecContext, target *mantlev1.MantleBackup) {
+		grpcClient.EXPECT().SetSynchronizing(gomock.Any(), gomock.Any()).
+			Times(1).Return(&proto.SetSynchronizingResponse{}, nil)
+		ret, err := mbr.startExportAndUpload(ctx, target, &dataSyncPrepareResult{
+			isIncremental:                     false,
+			isSecondaryMantleBackupReadyToUse: false,
+			diffFrom:                          nil,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ret.Requeue).To(BeTrue())
+	}
+
+	completeJob := func(ctx SpecContext, jobName string) {
+		GinkgoHelper()
+
+		// Get export Job for target1
+		var job batchv1.Job
+		Eventually(ctx, func(g Gomega, ctx SpecContext) {
+			err := k8sClient.Get(ctx,
+				types.NamespacedName{Name: jobName, Namespace: nsController}, &job)
+			g.Expect(err).NotTo(HaveOccurred())
+		}).Should(Succeed())
+
+		// Make export Job for target 1 Completed.
+		err := resMgr.ChangeJobCondition(ctx, &job, batchv1.JobComplete, corev1.ConditionTrue)
+		Expect(err).NotTo(HaveOccurred())
+	}
+
+	waitJobDeleted := func(ctx SpecContext, jobName string) {
+		Eventually(ctx, func(g Gomega, ctx SpecContext) {
+			var job batchv1.Job
+			err := k8sClient.Get(ctx,
+				types.NamespacedName{Name: jobName, Namespace: nsController}, &job)
+			g.Expect(err).To(HaveOccurred())
+			g.Expect(aerrors.IsNotFound(err)).To(BeTrue())
+		}).Should(Succeed())
+	}
+
+	ensureJobNotDeleted := func(ctx SpecContext, jobName string) {
+		Consistently(ctx, func(g Gomega, ctx SpecContext) {
+			var job batchv1.Job
+			err := k8sClient.Get(ctx,
+				types.NamespacedName{Name: jobName, Namespace: nsController}, &job)
+			g.Expect(err).NotTo(HaveOccurred())
+		}, "3s", "1s").Should(Succeed())
+	}
+
 	BeforeEach(func() {
 		var t reporter
 		mockCtrl = gomock.NewController(t)
@@ -1380,8 +1427,8 @@ var _ = Describe("export", func() {
 				MaxExportJobs:          1,
 			},
 			"dummy image",
-			"",
-			nil,
+			"dummy-secret",
+			&ObjectStorageSettings{},
 			&ProxySettings{
 				HttpProxy:  "",
 				HttpsProxy: "",
@@ -1400,87 +1447,152 @@ var _ = Describe("export", func() {
 		}
 	})
 
-	It("should set correct annotations after export() is called", func(ctx SpecContext) {
-		// test a full backup
-		target := createAndExportMantleBackup(ctx, mbr, "target", ns, false, false, nil)
+	Context("export", func() {
+		It("should set correct annotations after export() is called", func(ctx SpecContext) {
+			// test a full backup
+			target := createAndExportMantleBackup(ctx, mbr, "target", ns, false, false, nil)
 
-		err := k8sClient.Get(ctx,
-			types.NamespacedName{Name: target.GetName(), Namespace: target.GetNamespace()}, target)
-		Expect(err).NotTo(HaveOccurred())
-		_, ok := target.GetAnnotations()[annotDiffFrom]
-		Expect(ok).To(BeFalse())
+			err := k8sClient.Get(ctx,
+				types.NamespacedName{Name: target.GetName(), Namespace: target.GetNamespace()}, target)
+			Expect(err).NotTo(HaveOccurred())
+			_, ok := target.GetAnnotations()[annotDiffFrom]
+			Expect(ok).To(BeFalse())
 
-		// test an incremental backup
-		target2 := createAndExportMantleBackup(ctx, mbr, "target2", ns, true, false, target)
+			// test an incremental backup
+			target2 := createAndExportMantleBackup(ctx, mbr, "target2", ns, true, false, target)
 
-		err = k8sClient.Get(ctx,
-			types.NamespacedName{Name: target.GetName(), Namespace: target.GetNamespace()}, target)
-		Expect(err).NotTo(HaveOccurred())
-		diffTo, ok := target.GetAnnotations()[annotDiffTo]
-		Expect(ok).To(BeTrue())
-		Expect(diffTo).To(Equal(target2.GetName()))
+			err = k8sClient.Get(ctx,
+				types.NamespacedName{Name: target.GetName(), Namespace: target.GetNamespace()}, target)
+			Expect(err).NotTo(HaveOccurred())
+			diffTo, ok := target.GetAnnotations()[annotDiffTo]
+			Expect(ok).To(BeTrue())
+			Expect(diffTo).To(Equal(target2.GetName()))
 
-		err = k8sClient.Get(ctx,
-			types.NamespacedName{Name: target2.GetName(), Namespace: target2.GetNamespace()}, target2)
-		Expect(err).NotTo(HaveOccurred())
-		diffFrom, ok := target2.GetAnnotations()[annotDiffFrom]
-		Expect(ok).To(BeTrue())
-		Expect(diffFrom).To(Equal(target.GetName()))
+			err = k8sClient.Get(ctx,
+				types.NamespacedName{Name: target2.GetName(), Namespace: target2.GetNamespace()}, target2)
+			Expect(err).NotTo(HaveOccurred())
+			diffFrom, ok := target2.GetAnnotations()[annotDiffFrom]
+			Expect(ok).To(BeTrue())
+			Expect(diffFrom).To(Equal(target.GetName()))
+		})
+
+		It("should throttle export jobs correctly", func(ctx SpecContext) {
+			getNumOfExportJobs := func(ns string) (int, error) {
+				var jobs batchv1.JobList
+				err := k8sClient.List(ctx, &jobs, &client.ListOptions{
+					Namespace: ns,
+					LabelSelector: labels.SelectorFromSet(map[string]string{
+						"app.kubernetes.io/name":      labelAppNameValue,
+						"app.kubernetes.io/component": labelComponentExportJob,
+					}),
+				})
+				return len(jobs.Items), err
+			}
+
+			// create 5 different MantleBackup resources and call export() for each of them
+			for i := 0; i < 5; i++ {
+				createAndExportMantleBackup(ctx, mbr, fmt.Sprintf("target1-%d", i), ns, false, false, nil)
+			}
+
+			// make sure that only 1 Job is created
+			Consistently(ctx, func(g Gomega) error {
+				numJobs, err := getNumOfExportJobs(nsController)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(numJobs).To(Equal(1))
+				return nil
+			}, "1s").Should(Succeed())
+
+			// make sure that another mantle-controller existing in a different namespace can create an export Job.
+			nsController2 := resMgr.CreateNamespace()
+			mbr2 := NewMantleBackupReconciler(
+				k8sClient,
+				scheme.Scheme,
+				nsController2,
+				RolePrimary,
+				&PrimarySettings{
+					Client:                 grpcClient,
+					ExportDataStorageClass: resMgr.StorageClassName,
+					MaxExportJobs:          1,
+				},
+				"dummy image",
+				"",
+				nil,
+				nil,
+				resource.MustParse("1Gi"),
+			)
+			mbr2.ceph = testutil.NewFakeRBD()
+			ns2 := resMgr.CreateNamespace()
+			createAndExportMantleBackup(ctx, mbr2, "target2", ns2, false, false, nil)
+			Eventually(ctx, func(g Gomega) error {
+				numJobs, err := getNumOfExportJobs(nsController2)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(numJobs).To(Equal(1))
+				return nil
+			}).Should(Succeed())
+		})
+
+		DescribeTable(
+			"Deletion of completed export Jobs",
+			func(ctx SpecContext, backupTransferPartSize int64, numOfParts int) {
+				mbr.primarySettings.MaxExportJobs = 2
+				mbr.backupTransferPartSize = *resource.NewQuantity(backupTransferPartSize, resource.BinarySI)
+
+				target1 := createAndExportMantleBackup(ctx, mbr, "target1", ns, false, false, nil)
+				target2 := createAndExportMantleBackup(ctx, mbr, "target2", ns, false, false, nil)
+
+				for partNum := 0; partNum < numOfParts; partNum++ {
+					completeJob(ctx, MakeExportJobName(target1, partNum))
+					runStartExportAndUpload(ctx, target1)
+					runStartExportAndUpload(ctx, target2)
+
+					// Make sure the export Job for target 1 is deleted.
+					waitJobDeleted(ctx, MakeExportJobName(target1, partNum))
+				}
+
+				// Make sure the export Job of part 0 for target 2 is NOT deleted.
+				ensureJobNotDeleted(ctx, MakeExportJobName(target2, 0))
+			},
+			Entry("snap size < transfer part size", int64(testutil.FakeRBDSnapshotSize)+1, 1),
+			Entry("snap size = transfer part size", int64(testutil.FakeRBDSnapshotSize), 1),
+			Entry("snap size > transfer part size", int64(testutil.FakeRBDSnapshotSize-1), 2),
+		)
 	})
 
-	It("should throttle export jobs correctly", func(ctx SpecContext) {
-		getNumOfExportJobs := func(ns string) (int, error) {
-			var jobs batchv1.JobList
-			err := k8sClient.List(ctx, &jobs, &client.ListOptions{
-				Namespace: ns,
-				LabelSelector: labels.SelectorFromSet(map[string]string{
-					"app.kubernetes.io/name":      labelAppNameValue,
-					"app.kubernetes.io/component": labelComponentExportJob,
-				}),
-			})
-			return len(jobs.Items), err
-		}
+	Context("upload", func() {
+		DescribeTable(
+			"Deletion of completed upload Jobs",
+			func(ctx SpecContext, backupTransferPartSize int64, numOfParts int) {
+				mbr.primarySettings.MaxExportJobs = 2
+				mbr.backupTransferPartSize = *resource.NewQuantity(backupTransferPartSize, resource.BinarySI)
 
-		// create 5 different MantleBackup resources and call export() for each of them
-		for i := 0; i < 5; i++ {
-			createAndExportMantleBackup(ctx, mbr, fmt.Sprintf("target1-%d", i), ns, false, false, nil)
-		}
+				target1 := createAndExportMantleBackup(ctx, mbr, "target1", ns, false, false, nil)
+				target2 := createAndExportMantleBackup(ctx, mbr, "target2", ns, false, false, nil)
 
-		// make sure that only 1 Job is created
-		Consistently(ctx, func(g Gomega) error {
-			numJobs, err := getNumOfExportJobs(nsController)
-			g.Expect(err).NotTo(HaveOccurred())
-			g.Expect(numJobs).To(Equal(1))
-			return nil
-		}, "1s").Should(Succeed())
+				// Complete all export Jobs
+				for partNum := 0; partNum < numOfParts; partNum++ {
+					completeJob(ctx, MakeExportJobName(target1, partNum))
+					runStartExportAndUpload(ctx, target1)
+					completeJob(ctx, MakeExportJobName(target2, partNum))
+					runStartExportAndUpload(ctx, target2)
+				}
 
-		// make sure that another mantle-controller existing in a different namespace can create an export Job.
-		nsController2 := resMgr.CreateNamespace()
-		mbr2 := NewMantleBackupReconciler(
-			k8sClient,
-			scheme.Scheme,
-			nsController2,
-			RolePrimary,
-			&PrimarySettings{
-				Client:                 grpcClient,
-				ExportDataStorageClass: resMgr.StorageClassName,
-				MaxExportJobs:          1,
+				// Complete upload Jobs and check that they are deleted.
+				for partNum := 0; partNum < numOfParts; partNum++ {
+					completeJob(ctx, MakeUploadJobName(target1, partNum))
+					runStartExportAndUpload(ctx, target1)
+					runStartExportAndUpload(ctx, target2)
+
+					// Make sure the upload Job for target 1 is deleted.
+					waitJobDeleted(ctx, MakeUploadJobName(target1, partNum))
+				}
+
+				// Make sure the upload Job of part 0 for target 2 is NOT deleted.
+				ensureJobNotDeleted(ctx, MakeUploadJobName(target2, 0))
 			},
-			"dummy image",
-			"",
-			nil,
-			nil,
-			resource.MustParse("1Gi"),
+			Entry("snap size < transfer part size", int64(testutil.FakeRBDSnapshotSize)+1, 1),
+			Entry("snap size = transfer part size", int64(testutil.FakeRBDSnapshotSize), 1),
+			Entry("snap size > transfer part size", int64(testutil.FakeRBDSnapshotSize-1), 2),
 		)
-		mbr2.ceph = testutil.NewFakeRBD()
-		ns2 := resMgr.CreateNamespace()
-		createAndExportMantleBackup(ctx, mbr2, "target2", ns2, false, false, nil)
-		Eventually(ctx, func(g Gomega) error {
-			numJobs, err := getNumOfExportJobs(nsController2)
-			g.Expect(err).NotTo(HaveOccurred())
-			g.Expect(numJobs).To(Equal(1))
-			return nil
-		}).Should(Succeed())
 	})
 })
 
