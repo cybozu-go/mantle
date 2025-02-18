@@ -2161,4 +2161,75 @@ var _ = Describe("import", func() {
 			Expect(result.Requeue).To(BeFalse())
 		})
 	})
+
+	Context("handleCompletedImportJobs", func() {
+		DescribeTable(
+			"Deletion of completed import Jobs",
+			func(ctx SpecContext, backupTransferPartSize int64, numOfParts int) {
+				// Arrange
+				createImportJob := func(backup *mantlev1.MantleBackup) *batchv1.Job {
+					job := batchv1.Job{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      MakeImportJobName(backup, 0),
+							Namespace: nsController,
+							Labels: map[string]string{
+								"app.kubernetes.io/name":      labelAppNameValue,
+								"app.kubernetes.io/component": labelComponentImportJob,
+							},
+						},
+						Spec: batchv1.JobSpec{
+							Template: corev1.PodTemplateSpec{
+								Spec: corev1.PodSpec{
+									RestartPolicy: corev1.RestartPolicyOnFailure,
+									Containers: []corev1.Container{
+										{
+											Name:  "dummy",
+											Image: "dummy",
+										},
+									},
+								},
+							},
+						},
+					}
+					err := k8sClient.Create(ctx, &job)
+					Expect(err).NotTo(HaveOccurred())
+					return &job
+				}
+				backup1, err := createMantleBackupUsingDummyPVC(ctx, "target1", ns)
+				Expect(err).NotTo(HaveOccurred())
+				job1 := createImportJob(backup1)
+				err = resMgr.ChangeJobCondition(ctx, job1, batchv1.JobComplete, corev1.ConditionTrue)
+				Expect(err).NotTo(HaveOccurred())
+
+				backup2, err := createMantleBackupUsingDummyPVC(ctx, "target2", ns)
+				Expect(err).NotTo(HaveOccurred())
+				_ = createImportJob(backup2)
+
+				// Act
+				err = mbr.handleCompletedImportJobs(ctx, backup1)
+				Expect(err).NotTo(HaveOccurred())
+				err = mbr.handleCompletedImportJobs(ctx, backup2)
+				Expect(err).NotTo(HaveOccurred())
+
+				// Assert
+				// job1 should be deleted.
+				Eventually(ctx, func(g Gomega, ctx SpecContext) {
+					var job batchv1.Job
+					err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeImportJobName(backup1, 0), Namespace: nsController}, &job)
+					Expect(err).To(HaveOccurred())
+					Expect(aerrors.IsNotFound(err)).To(BeTrue())
+				}).Should(Succeed())
+
+				// job2 should NOT be deleted.
+				Eventually(ctx, func(g Gomega, ctx SpecContext) {
+					var job batchv1.Job
+					err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeImportJobName(backup2, 0), Namespace: nsController}, &job)
+					Expect(err).NotTo(HaveOccurred())
+				}).Should(Succeed())
+			},
+			Entry("snap size < transfer part size", int64(testutil.FakeRBDSnapshotSize)+1, 1),
+			Entry("snap size = transfer part size", int64(testutil.FakeRBDSnapshotSize), 1),
+			Entry("snap size > transfer part size", int64(testutil.FakeRBDSnapshotSize-1), 2),
+		)
+	})
 })
