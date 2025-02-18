@@ -183,6 +183,16 @@ func replicationTestSuite() { //nolint:gocyclo
 					return nil
 				}).Should(Succeed())
 
+				// Make sure snapshots are correctly created.
+				primarySnaps, err := ListRBDSnapshotsInPVC(PrimaryK8sCluster, namespace, pvcName)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(len(primarySnaps)).To(Equal(1))
+				Expect(primarySnaps[0].Name).To(Equal(backupName))
+				secondarySnaps, err := ListRBDSnapshotsInPVC(SecondaryK8sCluster, namespace, pvcName)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(len(secondarySnaps)).To(Equal(1)) // middle snapshots should be deleted.
+				Expect(secondarySnaps[0].Name).To(Equal(backupName))
+
 				WaitTemporaryResourcesDeleted(ctx, primaryMB, secondaryMB)
 				EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
 				EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
