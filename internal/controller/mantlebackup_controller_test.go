@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/kube-openapi/pkg/validation/strfmt"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -1750,7 +1751,110 @@ var _ = Describe("import", func() {
 		})
 	})
 
+	// Utility functions used in the tests for primaryCleanup and secondaryCleanup.
+	createTargetBackup := func(ctx SpecContext, name string, diffFrom, remoteUID *string) *mantlev1.MantleBackup {
+		GinkgoHelper()
+		backup, err := createMantleBackupUsingDummyPVC(ctx, name, ns)
+		Expect(err).NotTo(HaveOccurred())
+		m := map[string]string{}
+		if diffFrom == nil {
+			m[annotSyncMode] = syncModeFull
+		} else {
+			m[annotSyncMode] = syncModeIncremental
+			m[annotDiffFrom] = *diffFrom
+		}
+		if remoteUID != nil {
+			m[annotRemoteUID] = *remoteUID
+		}
+		backup.SetAnnotations(m)
+		err = k8sClient.Update(ctx, backup)
+		Expect(err).NotTo(HaveOccurred())
+		err = setStatusTransferPartSize(ctx, backup)
+		Expect(err).NotTo(HaveOccurred())
+		err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, backup)
+		Expect(err).NotTo(HaveOccurred())
+		return backup
+	}
+	createJob := func(ctx context.Context, name string) {
+		GinkgoHelper()
+		var job batchv1.Job
+		job.SetName(name)
+		job.SetNamespace(nsController)
+		job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
+		job.Spec.Template.Spec.Containers = []corev1.Container{{Name: "dummy", Image: "dummy"}}
+		err := k8sClient.Create(ctx, &job)
+		Expect(err).NotTo(HaveOccurred())
+	}
+	createPVC := func(ctx context.Context, name string) {
+		GinkgoHelper()
+		var pvc corev1.PersistentVolumeClaim
+		pvc.SetName(name)
+		pvc.SetNamespace(nsController)
+		pvc.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
+		pvc.Spec.Resources.Requests = corev1.ResourceList(map[corev1.ResourceName]resource.Quantity{
+			"storage": resource.MustParse("1Gi"),
+		})
+		err := k8sClient.Create(ctx, &pvc)
+		Expect(err).NotTo(HaveOccurred())
+	}
+	checkPVCDeleted := func(ctx context.Context, name string) {
+		GinkgoHelper()
+		// Check that PVC has deletionTimestamp
+		var pvc corev1.PersistentVolumeClaim
+		err := k8sClient.Get(
+			ctx,
+			types.NamespacedName{Name: name, Namespace: nsController},
+			&pvc,
+		)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(pvc.GetDeletionTimestamp().IsZero()).To(BeFalse())
+	}
+	checkPVCExists := func(ctx context.Context, name string) {
+		GinkgoHelper()
+		var pvc corev1.PersistentVolumeClaim
+		err := k8sClient.Get(
+			ctx,
+			types.NamespacedName{Name: name, Namespace: nsController},
+			&pvc,
+		)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(pvc.GetDeletionTimestamp().IsZero()).To(BeTrue())
+	}
+	checkJobDeleted := func(ctx context.Context, name string) {
+		GinkgoHelper()
+		var job batchv1.Job
+		err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: nsController}, &job)
+		Expect(err).To(HaveOccurred())
+		Expect(aerrors.IsNotFound(err)).To(BeTrue())
+	}
+	checkJobExists := func(ctx context.Context, name string) {
+		GinkgoHelper()
+		var job batchv1.Job
+		err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: nsController}, &job)
+		Expect(err).NotTo(HaveOccurred())
+	}
+
 	Context("primaryCleanup", func() {
+		// Utility functions used in the tests for primaryCleanup.
+		createExportAndUploadJobs := func(ctx context.Context, backup *mantlev1.MantleBackup) {
+			GinkgoHelper()
+			createJob(ctx, MakeExportJobName(backup, 0))
+			createJob(ctx, MakeUploadJobName(backup, 0))
+		}
+		createExportDataPVC := func(ctx context.Context, backup *mantlev1.MantleBackup) {
+			GinkgoHelper()
+			createPVC(ctx, MakeExportDataPVCName(backup, 0))
+		}
+		checkExportAndUploadJobsDeleted := func(ctx context.Context, backup *mantlev1.MantleBackup) {
+			GinkgoHelper()
+			checkJobDeleted(ctx, MakeExportJobName(backup, 0))
+			checkJobDeleted(ctx, MakeUploadJobName(backup, 0))
+		}
+		checkExportDataPVCDeleted := func(ctx context.Context, backup *mantlev1.MantleBackup) {
+			GinkgoHelper()
+			checkPVCDeleted(ctx, MakeExportDataPVCName(backup, 0))
+		}
+
 		It("should delete annotations, Jobs, and PVCs, and update SyncedToRemote", func(ctx SpecContext) {
 			// Create source MantleBackup
 			source, err := createMantleBackupUsingDummyPVC(ctx, "source", ns)
@@ -1764,40 +1868,13 @@ var _ = Describe("import", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Create target MantleBackup
-			backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
-			Expect(err).NotTo(HaveOccurred())
-			backup.SetAnnotations(map[string]string{
-				annotDiffFrom: "source",
-				annotSyncMode: syncModeIncremental,
-			})
-			err = k8sClient.Update(ctx, backup)
-			Expect(err).NotTo(HaveOccurred())
-			err = setStatusTransferPartSize(ctx, backup)
-			Expect(err).NotTo(HaveOccurred())
-			err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, backup)
-			Expect(err).NotTo(HaveOccurred())
+			backup := createTargetBackup(ctx, "target", ptr.To("source"), nil)
 
 			// Create export and upload Jobs
-			for _, name := range []string{MakeExportJobName(backup, 0), MakeUploadJobName(backup, 0)} {
-				var job batchv1.Job
-				job.SetName(name)
-				job.SetNamespace(nsController)
-				job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
-				job.Spec.Template.Spec.Containers = []corev1.Container{{Name: "dummy", Image: "dummy"}}
-				err = k8sClient.Create(ctx, &job)
-				Expect(err).NotTo(HaveOccurred())
-			}
+			createExportAndUploadJobs(ctx, backup)
 
 			// Create export data PVC
-			var exportDataPVC corev1.PersistentVolumeClaim
-			exportDataPVC.SetName(MakeExportDataPVCName(backup, 0))
-			exportDataPVC.SetNamespace(nsController)
-			exportDataPVC.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
-			exportDataPVC.Spec.Resources.Requests = corev1.ResourceList(map[corev1.ResourceName]resource.Quantity{
-				"storage": resource.MustParse("1Gi"),
-			})
-			err = k8sClient.Create(ctx, &exportDataPVC)
-			Expect(err).NotTo(HaveOccurred())
+			createExportDataPVC(ctx, backup)
 
 			// Perform primaryCleanup
 			res, err := mbr.primaryCleanup(ctx, backup)
@@ -1822,17 +1899,10 @@ var _ = Describe("import", func() {
 			Expect(meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionSyncedToRemote)).To(BeTrue())
 
 			// Check that the Jobs are deleted
-			for _, name := range []string{MakeExportJobName(backup, 0), MakeUploadJobName(backup, 0)} {
-				var job batchv1.Job
-				err = k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: nsController}, &job)
-				Expect(err).To(HaveOccurred())
-				Expect(aerrors.IsNotFound(err)).To(BeTrue())
-			}
+			checkExportAndUploadJobsDeleted(ctx, backup)
 
 			// Check that PVC has deletionTimestamp
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeExportDataPVCName(backup, 0), Namespace: nsController}, &exportDataPVC)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(exportDataPVC.GetDeletionTimestamp().IsZero()).To(BeFalse())
+			checkExportDataPVCDeleted(ctx, backup)
 		})
 
 		It("should work correctly if deletionTimestamp is set", func(ctx SpecContext) {
@@ -1857,10 +1927,87 @@ var _ = Describe("import", func() {
 			// SyncedToRemote should NOT be true.
 			Expect(meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionSyncedToRemote)).To(BeFalse())
 		})
+
+		It("should not delete unrelated resources", func(ctx SpecContext) {
+			// Arrange
+			backup1 := createTargetBackup(ctx, "backup1", nil, nil)
+			backup2 := createTargetBackup(ctx, "backup2", nil, nil)
+			createExportAndUploadJobs(ctx, backup1)
+			createExportAndUploadJobs(ctx, backup2)
+			createExportDataPVC(ctx, backup1)
+			createExportDataPVC(ctx, backup2)
+
+			// Act
+			res, err := mbr.primaryCleanup(ctx, backup1)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.IsZero()).To(BeTrue())
+
+			// Assert
+			// The resources for backup1 should be removed.
+			checkExportAndUploadJobsDeleted(ctx, backup1)
+			checkExportDataPVCDeleted(ctx, backup1)
+
+			// The resources for backup2 should NOT be removed.
+			checkJobExists(ctx, MakeExportJobName(backup2, 0))
+			checkJobExists(ctx, MakeUploadJobName(backup2, 0))
+			checkPVCExists(ctx, MakeExportDataPVCName(backup2, 0))
+		})
 	})
 
 	Context("secondaryCleanup", func() {
+		// Utility functions used in the tests for secondaryCleanup.
+		createDiscardAndImportJobs := func(ctx context.Context, backup *mantlev1.MantleBackup) {
+			GinkgoHelper()
+			for _, name := range []string{MakeDiscardJobName(backup), MakeImportJobName(backup, 0)} {
+				createJob(ctx, name)
+			}
+		}
+		createDiscardDataPVC := func(ctx context.Context, backup *mantlev1.MantleBackup) {
+			GinkgoHelper()
+			createPVC(ctx, MakeDiscardPVCName(backup))
+		}
+		createDiscardDataPV := func(ctx context.Context, backup *mantlev1.MantleBackup) {
+			GinkgoHelper()
+			var discardDataPV corev1.PersistentVolume
+			discardDataPV.SetName(MakeDiscardPVName(backup))
+			discardDataPV.SetNamespace(nsController)
+			discardDataPV.Spec.HostPath = &corev1.HostPathVolumeSource{Path: "/dummy"}
+			discardDataPV.Spec.StorageClassName = "manual"
+			discardDataPV.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
+			discardDataPV.Spec.Capacity = corev1.ResourceList(map[corev1.ResourceName]resource.Quantity{
+				"storage": resource.MustParse("1Gi"),
+			})
+			err := k8sClient.Create(ctx, &discardDataPV)
+			Expect(err).NotTo(HaveOccurred())
+		}
+		expectAccessToObjectStorage := func(backup *mantlev1.MantleBackup) {
+			prefix := fmt.Sprintf("%s-%s-", backup.GetName(), backup.GetAnnotations()[annotRemoteUID])
+			mockObjectStorage.EXPECT().Delete(gomock.Any(), gomock.Eq(prefix+"0.bin")).Return(nil)
+			mockObjectStorage.EXPECT().Delete(gomock.Any(), gomock.Eq(prefix+"1.bin")).Return(nil)
+			mockObjectStorage.EXPECT().Delete(gomock.Any(), gomock.Eq(prefix+"2.bin")).Return(nil)
+			mockObjectStorage.EXPECT().Delete(gomock.Any(), gomock.Eq(prefix+"3.bin")).Return(nil)
+			mockObjectStorage.EXPECT().Delete(gomock.Any(), gomock.Eq(prefix+"4.bin")).Return(nil)
+		}
+		checkDiscardDataPVCDeleted := func(ctx context.Context, backup *mantlev1.MantleBackup) {
+			checkPVCDeleted(ctx, MakeDiscardPVCName(backup))
+		}
+		checkDiscardDataPVDeleted := func(ctx context.Context, backup *mantlev1.MantleBackup) {
+			var pv corev1.PersistentVolume
+			err := k8sClient.Get(
+				ctx,
+				types.NamespacedName{Name: MakeDiscardPVName(backup), Namespace: nsController},
+				&pv,
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pv.GetDeletionTimestamp().IsZero()).To(BeFalse())
+		}
+		checkDiscardAndImportJobsDeleted := func(ctx context.Context, backup *mantlev1.MantleBackup) {
+			checkJobDeleted(ctx, MakeDiscardJobName(backup))
+			checkJobDeleted(ctx, MakeImportJobName(backup, 0))
+		}
+
 		It("should delete annotations, Jobs, PVs, PVCs, and exported data on the object storage", func(ctx SpecContext) {
+			// Arrange
 			// Create source MantleBackup
 			source, err := createMantleBackupUsingDummyPVC(ctx, "source", ns)
 			Expect(err).NotTo(HaveOccurred())
@@ -1875,61 +2022,19 @@ var _ = Describe("import", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Create target MantleBackup
-			backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
-			Expect(err).NotTo(HaveOccurred())
-			backup.SetAnnotations(map[string]string{
-				annotDiffFrom:  "source",
-				annotSyncMode:  syncModeIncremental,
-				annotRemoteUID: "uid",
-			})
-			err = k8sClient.Update(ctx, backup)
-			Expect(err).NotTo(HaveOccurred())
-			err = setStatusTransferPartSize(ctx, backup)
-			Expect(err).NotTo(HaveOccurred())
-			err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, backup)
-			Expect(err).NotTo(HaveOccurred())
+			backup := createTargetBackup(ctx, "target", ptr.To("source"), ptr.To("uid"))
 
-			// Create discard and import Jobs
-			for _, name := range []string{MakeDiscardJobName(backup), MakeImportJobName(backup, 0)} {
-				var job batchv1.Job
-				job.SetName(name)
-				job.SetNamespace(nsController)
-				job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
-				job.Spec.Template.Spec.Containers = []corev1.Container{{Name: "dummy", Image: "dummy"}}
-				err = k8sClient.Create(ctx, &job)
-				Expect(err).NotTo(HaveOccurred())
-			}
+			// Create necessary resources
+			createDiscardAndImportJobs(ctx, backup)
 
 			// Create discard data PVC
-			var discardDataPVC corev1.PersistentVolumeClaim
-			discardDataPVC.SetName(MakeDiscardPVCName(backup))
-			discardDataPVC.SetNamespace(nsController)
-			discardDataPVC.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
-			discardDataPVC.Spec.Resources.Requests = corev1.ResourceList(map[corev1.ResourceName]resource.Quantity{
-				"storage": resource.MustParse("1Gi"),
-			})
-			err = k8sClient.Create(ctx, &discardDataPVC)
-			Expect(err).NotTo(HaveOccurred())
+			createDiscardDataPVC(ctx, backup)
 
 			// Create discard data PV
-			var discardDataPV corev1.PersistentVolume
-			discardDataPV.SetName(MakeDiscardPVName(backup))
-			discardDataPV.SetNamespace(nsController)
-			discardDataPV.Spec.HostPath = &corev1.HostPathVolumeSource{Path: "/dummy"}
-			discardDataPV.Spec.StorageClassName = "manual"
-			discardDataPV.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
-			discardDataPV.Spec.Capacity = corev1.ResourceList(map[corev1.ResourceName]resource.Quantity{
-				"storage": resource.MustParse("1Gi"),
-			})
-			err = k8sClient.Create(ctx, &discardDataPV)
-			Expect(err).NotTo(HaveOccurred())
+			createDiscardDataPV(ctx, backup)
 
 			// Expect access to the mocked object storage
-			mockObjectStorage.EXPECT().Delete(gomock.Any(), gomock.Eq("target-uid-0.bin")).Return(nil)
-			mockObjectStorage.EXPECT().Delete(gomock.Any(), gomock.Eq("target-uid-1.bin")).Return(nil)
-			mockObjectStorage.EXPECT().Delete(gomock.Any(), gomock.Eq("target-uid-2.bin")).Return(nil)
-			mockObjectStorage.EXPECT().Delete(gomock.Any(), gomock.Eq("target-uid-3.bin")).Return(nil)
-			mockObjectStorage.EXPECT().Delete(gomock.Any(), gomock.Eq("target-uid-4.bin")).Return(nil)
+			expectAccessToObjectStorage(backup)
 
 			// Perform secondaryCleanup
 			res, err := mbr.secondaryCleanup(ctx, backup, true)
@@ -1951,22 +2056,13 @@ var _ = Describe("import", func() {
 			Expect(ok).To(BeFalse())
 
 			// Check that the Jobs are deleted
-			for _, name := range []string{MakeDiscardJobName(backup), MakeImportJobName(backup, 0)} {
-				var job batchv1.Job
-				err = k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: nsController}, &job)
-				Expect(err).To(HaveOccurred())
-				Expect(aerrors.IsNotFound(err)).To(BeTrue())
-			}
+			checkDiscardAndImportJobsDeleted(ctx, backup)
 
 			// Check that PVC has deletionTimestamp
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeDiscardPVCName(backup), Namespace: nsController}, &discardDataPVC)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(discardDataPVC.GetDeletionTimestamp().IsZero()).To(BeFalse())
+			checkDiscardDataPVCDeleted(ctx, backup)
 
 			// Check that PV has deletionTimestamp
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeDiscardPVName(backup), Namespace: nsController}, &discardDataPV)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(discardDataPV.GetDeletionTimestamp().IsZero()).To(BeFalse())
+			checkDiscardDataPVDeleted(ctx, backup)
 		})
 
 		It("should work correctly if deletionTimestamp is set", func(ctx SpecContext) {
@@ -1992,6 +2088,55 @@ var _ = Describe("import", func() {
 			res, err := mbr.secondaryCleanup(ctx, backup, false)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.IsZero()).To(BeTrue())
+		})
+
+		It("should not delete unrelated resources", func(ctx SpecContext) {
+			// Arrange
+			backup1 := createTargetBackup(ctx, "backup1", nil, ptr.To("uid"))
+			createDiscardAndImportJobs(ctx, backup1)
+			createDiscardDataPVC(ctx, backup1)
+			createDiscardDataPV(ctx, backup1)
+			expectAccessToObjectStorage(backup1)
+			backup2 := createTargetBackup(ctx, "backup2", nil, ptr.To("uid"))
+			createDiscardAndImportJobs(ctx, backup2)
+			createDiscardDataPVC(ctx, backup2)
+			createDiscardDataPV(ctx, backup2)
+			// We don't expect access to the (mocked) object storage for backup2, so
+			// let's NOT call mockObjectStorage.EXPECT() here.
+
+			// Act
+			res, err := mbr.secondaryCleanup(ctx, backup1, true)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.IsZero()).To(BeTrue())
+
+			// Assert
+			// The resources for backup1 should be deleted.
+			checkDiscardAndImportJobsDeleted(ctx, backup1)
+			checkDiscardDataPVCDeleted(ctx, backup1)
+			checkDiscardDataPVDeleted(ctx, backup1)
+
+			// The resources for backup2 should NOT be deleted.
+			checkJobExists(ctx, MakeDiscardJobName(backup2))
+			checkJobExists(ctx, MakeImportJobName(backup2, 0))
+			checkPVCExists(ctx, MakeDiscardPVCName(backup2))
+
+			// The PV for backup2 should not be deleted.
+			var pv corev1.PersistentVolume
+			err = k8sClient.Get(
+				ctx,
+				types.NamespacedName{Name: MakeDiscardPVName(backup2), Namespace: nsController},
+				&pv,
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pv.GetDeletionTimestamp().IsZero()).To(BeTrue())
+
+			// the snapshot for backup2 should not be deleted.
+			snaps, err := mbr.ceph.RBDSnapLs(dummyPoolName, dummyImageName)
+			Expect(err).NotTo(HaveOccurred())
+			index := slices.IndexFunc(snaps, func(snap ceph.RBDSnapshot) bool {
+				return snap.Id == *backup2.Status.SnapID
+			})
+			Expect(index).NotTo(Equal(-1))
 		})
 	})
 
