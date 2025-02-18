@@ -1557,6 +1557,33 @@ var _ = Describe("export and upload", func() {
 			Entry("snap size = transfer part size", int64(testutil.FakeRBDSnapshotSize), 1),
 			Entry("snap size > transfer part size", int64(testutil.FakeRBDSnapshotSize-1), 2),
 		)
+
+		It("should use the original transfer part size if it's changed", func(ctx SpecContext) {
+			origSize := *resource.NewQuantity(testutil.FakeRBDSnapshotSize-1, resource.BinarySI)
+			newSize := *resource.NewQuantity(testutil.FakeRBDSnapshotSize+1, resource.BinarySI)
+			mbr.backupTransferPartSize = origSize
+			backup := createAndExportMantleBackup(ctx, mbr, "backup", ns, false, false, nil)
+			mbr.backupTransferPartSize = newSize
+
+			// mimic as if the reconciler is called at least once after setting the new transfer part size.
+			runStartExportAndUpload(ctx, backup)
+
+			Eventually(ctx, func(g Gomega, ctx SpecContext) {
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup)
+				Expect(err).NotTo(HaveOccurred())
+			}).Should(Succeed())
+			Expect(backup.Status.TransferPartSize.Equal(origSize)).To(BeTrue())
+
+			completeJob(ctx, MakeExportJobName(backup, 0))
+			runStartExportAndUpload(ctx, backup)
+			completeJob(ctx, MakeExportJobName(backup, 1))
+			runStartExportAndUpload(ctx, backup)
+
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(backup.Status.LargestCompletedExportPartNum).NotTo(BeNil())
+			Expect(*backup.Status.LargestCompletedExportPartNum).To(Equal(1))
+		})
 	})
 
 	Context("upload", func() {
