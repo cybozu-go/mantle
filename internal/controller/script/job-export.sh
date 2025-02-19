@@ -57,9 +57,26 @@ EOF
 write_endpoints
 
 # export diff
-rm -f /mantle/export.bin
-if [ -z "${FROM_SNAP_NAME}" ]; then
-    rbd export-diff -p ${POOL_NAME} ${SRC_IMAGE_NAME}@${SRC_SNAP_NAME} /mantle/export.bin
-else
-    rbd export-diff -p ${POOL_NAME} --from-snap ${FROM_SNAP_NAME} ${SRC_IMAGE_NAME}@${SRC_SNAP_NAME} /mantle/export.bin
+if [ -e "/mantle/export-${PART_NUM}.bin" ]; then
+    exit
 fi
+rm -f /mantle/tmp.bin
+if [ -z "${FROM_SNAP_NAME}" ]; then
+    rbd export-diff \
+      -p ${POOL_NAME} \
+      --read-offset $((${PART_NUM} * ${TRANSFER_PART_SIZE_IN_BYTES})) \
+      --read-length ${TRANSFER_PART_SIZE_IN_BYTES} \
+      --mid-snap-prefix ${EXPORT_TARGET_MANTLE_BACKUP_UID} \
+      ${SRC_IMAGE_NAME}@${SRC_SNAP_NAME} \
+      /mantle/tmp.bin
+else
+    rbd export-diff \
+      -p ${POOL_NAME} \
+      --read-offset $((${PART_NUM} * ${TRANSFER_PART_SIZE_IN_BYTES})) \
+      --read-length ${TRANSFER_PART_SIZE_IN_BYTES} \
+      --from-snap ${FROM_SNAP_NAME} \
+      --mid-snap-prefix ${EXPORT_TARGET_MANTLE_BACKUP_UID} \
+      ${SRC_IMAGE_NAME}@${SRC_SNAP_NAME} \
+      /mantle/tmp.bin
+fi
+mv /mantle/tmp.bin /mantle/export-${PART_NUM}.bin
