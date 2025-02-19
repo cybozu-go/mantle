@@ -1319,7 +1319,7 @@ var _ = Describe("export", func() {
 		grpcClient.EXPECT().SetSynchronizing(gomock.Any(), gomock.Any()).
 			Times(1).Return(&proto.SetSynchronizingResponse{}, nil)
 
-		ret, err := mbr.export(ctx, target, &dataSyncPrepareResult{
+		ret, err := mbr.startExportAndUpload(ctx, target, &dataSyncPrepareResult{
 			isIncremental:                     false,
 			isSecondaryMantleBackupReadyToUse: false,
 			diffFrom:                          nil,
@@ -1340,7 +1340,7 @@ var _ = Describe("export", func() {
 		grpcClient.EXPECT().SetSynchronizing(gomock.Any(), gomock.Any()).
 			Times(1).Return(&proto.SetSynchronizingResponse{}, nil)
 
-		ret, err = mbr.export(ctx, target2, &dataSyncPrepareResult{
+		ret, err = mbr.startExportAndUpload(ctx, target2, &dataSyncPrepareResult{
 			isIncremental:                     true,
 			isSecondaryMantleBackupReadyToUse: false,
 			diffFrom:                          target,
@@ -1383,7 +1383,7 @@ var _ = Describe("export", func() {
 			grpcClient.EXPECT().SetSynchronizing(gomock.Any(), gomock.Any()).
 				Times(1).Return(&proto.SetSynchronizingResponse{}, nil)
 
-			_, err = mbr.export(ctx, target, &dataSyncPrepareResult{
+			_, err = mbr.startExportAndUpload(ctx, target, &dataSyncPrepareResult{
 				isIncremental:                     false,
 				isSecondaryMantleBackupReadyToUse: false,
 				diffFrom:                          nil,

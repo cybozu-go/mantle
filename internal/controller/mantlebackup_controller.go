@@ -538,7 +538,7 @@ func (r *MantleBackupReconciler) replicate(
 	if prepareResult.isSecondaryMantleBackupReadyToUse {
 		return r.primaryCleanup(ctx, backup)
 	}
-	return r.export(ctx, backup, prepareResult)
+	return r.startExportAndUpload(ctx, backup, prepareResult)
 }
 
 func (r *MantleBackupReconciler) replicateManifests(
@@ -968,7 +968,7 @@ func searchForDiffOriginMantleBackup(
 	return diffOrigin
 }
 
-func (r *MantleBackupReconciler) export(
+func (r *MantleBackupReconciler) startExportAndUpload(
 	ctx context.Context,
 	targetBackup *mantlev1.MantleBackup,
 	prepareResult *dataSyncPrepareResult,
@@ -1003,24 +1003,12 @@ func (r *MantleBackupReconciler) export(
 		return ctrl.Result{}, err
 	}
 
-	if result, err := r.checkIfNewJobCanBeCreated(ctx); err != nil || !result.IsZero() {
+	if result, err := r.startExport(ctx, targetBackup, sourceBackupName); err != nil || !result.IsZero() {
 		return result, err
 	}
 
-	if err := r.createOrUpdateExportDataPVC(ctx, targetBackup); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	if err := r.createOrUpdateExportJob(ctx, targetBackup, sourceBackupName); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	if result, err := r.checkIfExportJobIsCompleted(ctx, targetBackup); err != nil || !result.IsZero() {
+	if result, err := r.startUpload(ctx, targetBackup); err != nil || !result.IsZero() {
 		return result, err
-	}
-
-	if err := r.createOrUpdateExportDataUploadJob(ctx, targetBackup); err != nil {
-		return ctrl.Result{}, err
 	}
 
 	return requeueReconciliation(), nil
@@ -1066,6 +1054,26 @@ func (r *MantleBackupReconciler) annotateExportSourceMantleBackup(
 	return err
 }
 
+func (r *MantleBackupReconciler) startExport(
+	ctx context.Context,
+	targetBackup *mantlev1.MantleBackup,
+	sourceBackupName *string,
+) (ctrl.Result, error) {
+	if result, err := r.checkIfNewJobCanBeCreated(ctx); err != nil || !result.IsZero() {
+		return result, err
+	}
+
+	if err := r.createOrUpdateExportDataPVC(ctx, targetBackup); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if err := r.createOrUpdateExportJob(ctx, targetBackup, sourceBackupName); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
 func (r *MantleBackupReconciler) checkIfNewJobCanBeCreated(ctx context.Context) (ctrl.Result, error) {
 	if r.primarySettings.MaxExportJobs == 0 {
 		return ctrl.Result{}, nil
@@ -1084,6 +1092,18 @@ func (r *MantleBackupReconciler) checkIfNewJobCanBeCreated(ctx context.Context) 
 
 	if len(jobs.Items) >= r.primarySettings.MaxExportJobs {
 		return requeueReconciliation(), nil
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func (r *MantleBackupReconciler) startUpload(ctx context.Context, targetBackup *mantlev1.MantleBackup) (ctrl.Result, error) {
+	if result, err := r.checkIfExportJobIsCompleted(ctx, targetBackup); err != nil || !result.IsZero() {
+		return result, err
+	}
+
+	if err := r.createOrUpdateExportDataUploadJob(ctx, targetBackup); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{}, nil
