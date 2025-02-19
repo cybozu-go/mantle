@@ -708,7 +708,7 @@ func createCephCmd(cluster int) ceph.CephCmd {
 	return ceph.NewCephCmdWithToolsAndCustomKubectl(kubectl, CephClusterNamespace)
 }
 
-func WaitUploadJobCreated(ctx SpecContext, cluster int, namespace, backupName string) {
+func WaitUploadJobCreated(ctx SpecContext, cluster int, namespace, backupName string, partNum int) {
 	GinkgoHelper()
 	By("waiting for an upload job to be created")
 	Eventually(ctx, func(g Gomega) {
@@ -717,7 +717,7 @@ func WaitUploadJobCreated(ctx SpecContext, cluster int, namespace, backupName st
 		jobs, err := GetJobList(cluster, CephClusterNamespace)
 		g.Expect(err).NotTo(HaveOccurred())
 		exist := slices.ContainsFunc(jobs.Items, func(job batchv1.Job) bool {
-			return job.GetName() == controller.MakeUploadJobName(mb)
+			return job.GetName() == controller.MakeUploadJobName(mb, partNum)
 		})
 		g.Expect(exist).To(BeTrue())
 	}).Should(Succeed())
@@ -736,16 +736,33 @@ func WaitJobDeleted(ctx SpecContext, cluster int, namespace, jobName string) {
 	}).Should(Succeed())
 }
 
+func WaitJobsDeleted(ctx SpecContext, cluster int, namespace, jobNamePrefix string) {
+	GinkgoHelper()
+	By("waiting for jobs to be deleted")
+	Eventually(ctx, func(g Gomega) {
+		jobs, err := GetJobList(cluster, CephClusterNamespace)
+		g.Expect(err).NotTo(HaveOccurred())
+		exist := slices.ContainsFunc(jobs.Items, func(job batchv1.Job) bool {
+			return strings.HasPrefix(job.GetName(), jobNamePrefix)
+		})
+		g.Expect(exist).To(BeFalse())
+	}).Should(Succeed())
+}
+
 func WaitTemporaryPrimaryJobsDeleted(ctx SpecContext, primaryMB *mantlev1.MantleBackup) {
 	GinkgoHelper()
-	WaitJobDeleted(ctx, PrimaryK8sCluster, CephClusterNamespace, controller.MakeExportJobName(primaryMB))
-	WaitJobDeleted(ctx, PrimaryK8sCluster, CephClusterNamespace, controller.MakeUploadJobName(primaryMB))
+	WaitJobsDeleted(ctx, PrimaryK8sCluster, CephClusterNamespace,
+		fmt.Sprintf("%s%s-", controller.MantleExportJobPrefix, string(primaryMB.GetUID())))
+	WaitJobsDeleted(ctx, PrimaryK8sCluster, CephClusterNamespace,
+		fmt.Sprintf("%s%s-", controller.MantleUploadJobPrefix, string(primaryMB.GetUID())))
 }
 
 func WaitTemporarySecondaryJobsDeleted(ctx SpecContext, secondaryMB *mantlev1.MantleBackup) {
 	GinkgoHelper()
-	WaitJobDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace, controller.MakeImportJobName(secondaryMB))
-	WaitJobDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace, controller.MakeDiscardJobName(secondaryMB))
+	WaitJobsDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace,
+		fmt.Sprintf("%s%s-", controller.MantleImportJobPrefix, string(secondaryMB.GetUID())))
+	WaitJobsDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace,
+		fmt.Sprintf("%s%s-", controller.MantleDiscardJobPrefix, string(secondaryMB.GetUID())))
 }
 
 func WaitTemporaryJobsDeleted(ctx SpecContext, primaryMB, secondaryMB *mantlev1.MantleBackup) {
@@ -767,9 +784,23 @@ func WaitPVCDeleted(ctx SpecContext, cluster int, namespace, pvcName string) {
 	}).Should(Succeed())
 }
 
+func WaitPVCsDeleted(ctx SpecContext, cluster int, namespace, pvcNamePrefix string) {
+	GinkgoHelper()
+	By("waiting for PVCs to be deleted")
+	Eventually(ctx, func(g Gomega) {
+		pvcs, err := GetPVCList(cluster, CephClusterNamespace)
+		g.Expect(err).NotTo(HaveOccurred())
+		exist := slices.ContainsFunc(pvcs.Items, func(pvc corev1.PersistentVolumeClaim) bool {
+			return strings.HasPrefix(pvc.GetName(), pvcNamePrefix)
+		})
+		g.Expect(exist).To(BeFalse())
+	}).Should(Succeed())
+}
+
 func WaitTemporaryPrimaryPVCsDeleted(ctx SpecContext, primaryMB *mantlev1.MantleBackup) {
 	GinkgoHelper()
-	WaitPVCDeleted(ctx, PrimaryK8sCluster, CephClusterNamespace, controller.MakeExportDataPVCName(primaryMB))
+	WaitPVCsDeleted(ctx, PrimaryK8sCluster, CephClusterNamespace,
+		fmt.Sprintf("%s%s-", controller.MantleExportDataPVCPrefix, string(primaryMB.GetUID())))
 }
 
 func WaitTemporarySecondaryPVCsDeleted(ctx SpecContext, secondaryMB *mantlev1.MantleBackup) {
@@ -801,11 +832,10 @@ func WaitTemporarySecondaryPVsDeleted(ctx SpecContext, secondaryMB *mantlev1.Man
 	WaitPVDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace, controller.MakeDiscardPVName(secondaryMB))
 }
 
-func WaitTemporaryS3ObjectDeleted(ctx SpecContext, primaryMB *mantlev1.MantleBackup) {
+func WaitTemporaryS3ObjectsDeleted(ctx SpecContext, primaryMB *mantlev1.MantleBackup) {
 	GinkgoHelper()
-	By("waiting for the temporary s3 object to be deleted")
-	expectedObjectName := controller.MakeObjectNameOfExportedData(
-		primaryMB.GetName(), string(primaryMB.GetUID()))
+	By("waiting for the temporary s3 objects to be deleted")
+	expectedObjectNamePrefix := fmt.Sprintf("%s-%s-", primaryMB.GetName(), string(primaryMB.GetUID()))
 	Eventually(ctx, func(g Gomega) {
 		objectStorageClient, err := CreateObjectStorageClient(ctx)
 		g.Expect(err).NotTo(HaveOccurred())
@@ -813,7 +843,7 @@ func WaitTemporaryS3ObjectDeleted(ctx SpecContext, primaryMB *mantlev1.MantleBac
 		g.Expect(err).NotTo(HaveOccurred())
 		for _, c := range listOutput.Contents {
 			g.Expect(c.Key).NotTo(BeNil())
-			g.Expect(*c.Key).NotTo(Equal(expectedObjectName))
+			g.Expect(strings.HasPrefix(*c.Key, expectedObjectNamePrefix)).To(BeFalse())
 		}
 	}).Should(Succeed())
 }
@@ -823,7 +853,7 @@ func WaitTemporaryResourcesDeleted(ctx SpecContext, primaryMB, secondaryMB *mant
 	WaitTemporaryJobsDeleted(ctx, primaryMB, secondaryMB)
 	WaitTemporaryPVCsDeleted(ctx, primaryMB, secondaryMB)
 	WaitTemporarySecondaryPVsDeleted(ctx, secondaryMB)
-	WaitTemporaryS3ObjectDeleted(ctx, primaryMB)
+	WaitTemporaryS3ObjectsDeleted(ctx, primaryMB)
 }
 
 func DeleteMantleBackup(cluster int, namespace, backupName string) {

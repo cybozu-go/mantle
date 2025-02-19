@@ -17,3 +17,4 @@ controller:
   env:
     - name: REQUEUE_RECONCILIATION_AFTER
       value: "1s"
+  backupTransferPartSize: {BACKUP_TRANSFER_PART_SIZE}
