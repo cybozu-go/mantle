@@ -14,6 +14,7 @@ import (
 	"github.com/cybozu-go/mantle/internal/controller/internal/objectstorage"
 	"github.com/cybozu-go/mantle/internal/controller/internal/testutil"
 	"github.com/cybozu-go/mantle/pkg/controller/proto"
+	"github.com/cybozu-go/mantle/test/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"go.uber.org/mock/gomock"
@@ -32,6 +33,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
+)
+
+const (
+	dummyPoolName  = "dummy"
+	dummyImageName = "dummy"
+	dummyPVCName   = "dummy"
 )
 
 func getEnvValue(envVarAry []corev1.EnvVar, name string) (string, error) {
@@ -147,6 +154,7 @@ var _ = Describe("MantleBackup controller", func() {
 				"",
 				nil,
 				nil,
+				resource.MustParse("1Gi"),
 			)
 			reconciler.ceph = testutil.NewFakeRBD()
 			err := reconciler.SetupWithManager(mgrUtil.GetManager())
@@ -407,6 +415,7 @@ var _ = Describe("MantleBackup controller", func() {
 					CACertKey:       nil,
 				},
 				proxySettings,
+				resource.MustParse("1Gi"),
 			)
 			reconciler.ceph = testutil.NewFakeRBD()
 
@@ -521,7 +530,7 @@ var _ = Describe("MantleBackup controller", func() {
 				err = k8sClient.Get(
 					ctx,
 					types.NamespacedName{
-						Name:      MakeExportDataPVCName(backup),
+						Name:      MakeExportDataPVCName(backup, 0),
 						Namespace: resMgr.ClusterID,
 					},
 					&pvcExport,
@@ -531,13 +540,13 @@ var _ = Describe("MantleBackup controller", func() {
 				g.Expect(pvcExport.GetLabels()["app.kubernetes.io/component"]).To(Equal(labelComponentExportData))
 				g.Expect(pvcExport.Spec.AccessModes[0]).To(Equal(corev1.ReadWriteOnce))
 				g.Expect(*pvcExport.Spec.StorageClassName).To(Equal(resMgr.StorageClassName))
-				g.Expect(pvcExport.Spec.Resources.Requests.Storage().String()).To(Equal("2Gi"))
+				g.Expect(pvcExport.Spec.Resources.Requests.Storage().String()).To(Equal("1288490188")) // floor(1Gi*1.2)
 
 				// Make sure export() creates a Job to export data.
 				err = k8sClient.Get(
 					ctx,
 					types.NamespacedName{
-						Name:      MakeExportJobName(backup),
+						Name:      MakeExportJobName(backup, 0),
 						Namespace: resMgr.ClusterID,
 					},
 					&jobExport,
@@ -568,7 +577,7 @@ var _ = Describe("MantleBackup controller", func() {
 				err = k8sClient.Get(
 					ctx,
 					types.NamespacedName{
-						Name:      MakeUploadJobName(backup),
+						Name:      MakeUploadJobName(backup, 0),
 						Namespace: resMgr.ClusterID,
 					},
 					&jobUpload,
@@ -581,13 +590,30 @@ var _ = Describe("MantleBackup controller", func() {
 			err = resMgr.ChangeJobCondition(ctx, &jobExport, batchv1.JobComplete, corev1.ConditionTrue)
 			Expect(err).NotTo(HaveOccurred())
 
+			// The snapshot size is 5GiB and transferPartSize is 1GiB. So the number of parts is 5.
+			for i := 1; i < 5; i++ {
+				var job batchv1.Job
+				Eventually(func(g Gomega, ctx SpecContext) error {
+					return k8sClient.Get(
+						ctx,
+						types.NamespacedName{
+							Name:      MakeExportJobName(backup, i),
+							Namespace: resMgr.ClusterID,
+						},
+						&job,
+					)
+				}).WithContext(ctx).Should(Succeed())
+				err = resMgr.ChangeJobCondition(ctx, &job, batchv1.JobComplete, corev1.ConditionTrue)
+				Expect(err).NotTo(HaveOccurred())
+			}
+
 			// Make sure the upload Job is created
 			Eventually(func(g Gomega, ctx context.Context) {
 				var jobUpload batchv1.Job
 				err = k8sClient.Get(
 					ctx,
 					types.NamespacedName{
-						Name:      MakeUploadJobName(backup),
+						Name:      MakeUploadJobName(backup, 0),
 						Namespace: resMgr.ClusterID,
 					},
 					&jobUpload,
@@ -658,7 +684,7 @@ var _ = Describe("MantleBackup controller", func() {
 				err = k8sClient.Get(
 					ctx,
 					types.NamespacedName{
-						Name:      MakeExportJobName(backup2),
+						Name:      MakeExportJobName(backup2, 0),
 						Namespace: resMgr.ClusterID,
 					},
 					&jobExport2,
@@ -863,7 +889,7 @@ var _ = Describe("prepareForDataSynchronization", func() {
 		}
 
 		mbr := NewMantleBackupReconciler(ctrlClient,
-			ctrlClient.Scheme(), "test", RolePrimary, nil, "dummy image", "", nil, nil)
+			ctrlClient.Scheme(), "test", RolePrimary, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"))
 
 		ret, err := mbr.prepareForDataSynchronization(context.Background(),
 			backup, grpcClient)
@@ -1231,8 +1257,8 @@ func createMantleBackupUsingDummyPVC(ctx context.Context, name, ns string) (*man
 			PersistentVolumeSource: corev1.PersistentVolumeSource{
 				CSI: &corev1.CSIPersistentVolumeSource{
 					VolumeAttributes: map[string]string{
-						"pool":      "dummy",
-						"imageName": "dummy",
+						"pool":      dummyPoolName,
+						"imageName": dummyImageName,
 					},
 				},
 			},
@@ -1249,7 +1275,7 @@ func createMantleBackupUsingDummyPVC(ctx context.Context, name, ns string) (*man
 			Namespace: ns,
 		},
 		Spec: mantlev1.MantleBackupSpec{
-			PVC:    "dummy",
+			PVC:    dummyPVCName,
 			Expire: "1d",
 		},
 	}
@@ -1267,6 +1293,38 @@ func createMantleBackupUsingDummyPVC(ctx context.Context, name, ns string) (*man
 	}
 
 	return target, nil
+}
+
+func createSnapshotForMantleBackupUsingDummyPVC(ctx context.Context, cephCmd ceph.CephCmd, backup *mantlev1.MantleBackup) error {
+	snapName := util.GetUniqueName("snap")
+	if err := cephCmd.RBDSnapCreate(dummyPoolName, dummyImageName, snapName); err != nil {
+		return err
+	}
+	snaps, err := cephCmd.RBDSnapLs(dummyPoolName, dummyImageName)
+	if err != nil {
+		return err
+	}
+	index := slices.IndexFunc(snaps, func(snap ceph.RBDSnapshot) bool { return snap.Name == snapName })
+	if index == -1 {
+		return errors.New("unreachable: not found")
+	}
+	if err := updateStatus(ctx, k8sClient, backup, func() error {
+		backup.Status.SnapID = &snaps[index].Id
+		backup.Status.SnapSize = &snaps[index].Size
+		return nil
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func setStatusTransferPartSize(ctx context.Context, backup *mantlev1.MantleBackup) error {
+	transferPartSize := resource.MustParse("1Gi")
+	backup.Status.TransferPartSize = &transferPartSize
+	if err := k8sClient.Status().Update(ctx, backup); err != nil {
+		return err
+	}
+	return nil
 }
 
 var _ = Describe("export", func() {
@@ -1300,7 +1358,9 @@ var _ = Describe("export", func() {
 				HttpsProxy: "",
 				NoProxy:    "",
 			},
+			resource.MustParse("1Gi"),
 		)
+		mbr.ceph = testutil.NewFakeRBD()
 
 		ns = resMgr.CreateNamespace()
 	})
@@ -1314,6 +1374,9 @@ var _ = Describe("export", func() {
 	It("should set correct annotations after export() is called", func(ctx SpecContext) {
 		// test a full backup
 		target, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
+		Expect(err).NotTo(HaveOccurred())
+
+		err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, target)
 		Expect(err).NotTo(HaveOccurred())
 
 		grpcClient.EXPECT().SetSynchronizing(gomock.Any(), gomock.Any()).
@@ -1380,6 +1443,9 @@ var _ = Describe("export", func() {
 			target, err := createMantleBackupUsingDummyPVC(ctx, name, ns)
 			Expect(err).NotTo(HaveOccurred())
 
+			err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, target)
+			Expect(err).NotTo(HaveOccurred())
+
 			grpcClient.EXPECT().SetSynchronizing(gomock.Any(), gomock.Any()).
 				Times(1).Return(&proto.SetSynchronizingResponse{}, nil)
 
@@ -1420,7 +1486,9 @@ var _ = Describe("export", func() {
 			"",
 			nil,
 			nil,
+			resource.MustParse("1Gi"),
 		)
+		mbr2.ceph = testutil.NewFakeRBD()
 		ns2 := resMgr.CreateNamespace()
 		createAndExportMantleBackup(mbr2, "target2", ns2)
 		Eventually(ctx, func(g Gomega) error {
@@ -1455,6 +1523,7 @@ var _ = Describe("import", func() {
 			"dummy-env-secret",
 			&ObjectStorageSettings{},
 			nil,
+			resource.MustParse("1Gi"),
 		)
 		mbr.objectStorageClient = mockObjectStorage
 		mbr.ceph = testutil.NewFakeRBD()
@@ -1469,37 +1538,39 @@ var _ = Describe("import", func() {
 	})
 
 	DescribeTable("isExportDataAlreadyUploaded: inputs and outputs",
-		func(ctx SpecContext, gotExist, gotError, expectRequeue, expectError bool) {
-			mockObjectStorage.EXPECT().Exists(gomock.Any(), gomock.Eq("name-uid.bin")).DoAndReturn(
+		func(ctx SpecContext, gotExist, gotError, expectUploaded, expectError bool) {
+			mockObjectStorage.EXPECT().Exists(gomock.Any(), gomock.Eq("name-uid-0.bin")).DoAndReturn(
 				func(_ context.Context, _ string) (bool, error) {
 					if gotError {
 						return gotExist, errors.New("error")
 					}
 					return gotExist, nil
 				})
-			res, err := mbr.isExportDataAlreadyUploaded(ctx, &mantlev1.MantleBackup{
+			uploaded, err := mbr.isExportDataAlreadyUploaded(ctx, &mantlev1.MantleBackup{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "name",
 					Annotations: map[string]string{
 						annotRemoteUID: "uid",
 					},
 				},
-			})
+			}, 0)
 			if expectError {
 				Expect(err).To(HaveOccurred())
 			} else {
 				Expect(err).NotTo(HaveOccurred())
 			}
-			Expect(res.Requeue).To(Equal(expectRequeue))
+			Expect(uploaded).To(Equal(expectUploaded))
 		},
-		Entry("exist", true, false, false, false),
-		Entry("not exist", false, false, true, false),
+		Entry("exist", true, false, true, false),
+		Entry("not exist", false, false, false, false),
 		Entry("error", false, true, false, true),
 	)
 
 	Context("reconcileImportJob", func() {
 		It("should work correctly", func(ctx SpecContext) {
 			backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
+			Expect(err).NotTo(HaveOccurred())
+			err = setStatusTransferPartSize(ctx, backup)
 			Expect(err).NotTo(HaveOccurred())
 
 			snapshotTarget := &snapshotTarget{
@@ -1519,6 +1590,11 @@ var _ = Describe("import", func() {
 				poolName:  "",
 			}
 
+			mockObjectStorage.EXPECT().Exists(gomock.Any(), gomock.Eq("target--0.bin")).DoAndReturn(
+				func(_ context.Context, _ string) (bool, error) {
+					return true, nil
+				}).MinTimes(1)
+
 			// The first call to reconcileImportJob should create an import Job
 			res, err := mbr.reconcileImportJob(ctx, backup, snapshotTarget)
 			Expect(err).NotTo(HaveOccurred())
@@ -1526,7 +1602,7 @@ var _ = Describe("import", func() {
 
 			var importJob batchv1.Job
 			err = k8sClient.Get(ctx, types.NamespacedName{
-				Name:      MakeImportJobName(backup),
+				Name:      MakeImportJobName(backup, 0),
 				Namespace: nsController,
 			}, &importJob)
 			Expect(err).NotTo(HaveOccurred())
@@ -1568,6 +1644,8 @@ var _ = Describe("import", func() {
 			})
 			err = k8sClient.Update(ctx, source)
 			Expect(err).NotTo(HaveOccurred())
+			err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, source)
+			Expect(err).NotTo(HaveOccurred())
 
 			// Create target MantleBackup
 			backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
@@ -1578,9 +1656,13 @@ var _ = Describe("import", func() {
 			})
 			err = k8sClient.Update(ctx, backup)
 			Expect(err).NotTo(HaveOccurred())
+			err = setStatusTransferPartSize(ctx, backup)
+			Expect(err).NotTo(HaveOccurred())
+			err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, backup)
+			Expect(err).NotTo(HaveOccurred())
 
 			// Create export and upload Jobs
-			for _, name := range []string{MakeExportJobName(backup), MakeUploadJobName(backup)} {
+			for _, name := range []string{MakeExportJobName(backup, 0), MakeUploadJobName(backup, 0)} {
 				var job batchv1.Job
 				job.SetName(name)
 				job.SetNamespace(nsController)
@@ -1592,7 +1674,7 @@ var _ = Describe("import", func() {
 
 			// Create export data PVC
 			var exportDataPVC corev1.PersistentVolumeClaim
-			exportDataPVC.SetName(MakeExportDataPVCName(backup))
+			exportDataPVC.SetName(MakeExportDataPVCName(backup, 0))
 			exportDataPVC.SetNamespace(nsController)
 			exportDataPVC.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
 			exportDataPVC.Spec.Resources.Requests = corev1.ResourceList(map[corev1.ResourceName]resource.Quantity{
@@ -1624,7 +1706,7 @@ var _ = Describe("import", func() {
 			Expect(meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionSyncedToRemote)).To(BeTrue())
 
 			// Check that the Jobs are deleted
-			for _, name := range []string{MakeExportJobName(backup), MakeUploadJobName(backup)} {
+			for _, name := range []string{MakeExportJobName(backup, 0), MakeUploadJobName(backup, 0)} {
 				var job batchv1.Job
 				err = k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: nsController}, &job)
 				Expect(err).To(HaveOccurred())
@@ -1632,13 +1714,17 @@ var _ = Describe("import", func() {
 			}
 
 			// Check that PVC has deletionTimestamp
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeExportDataPVCName(backup), Namespace: nsController}, &exportDataPVC)
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeExportDataPVCName(backup, 0), Namespace: nsController}, &exportDataPVC)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(exportDataPVC.GetDeletionTimestamp().IsZero()).To(BeFalse())
 		})
 
 		It("should work correctly if deletionTimestamp is set", func(ctx SpecContext) {
 			backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
+			Expect(err).NotTo(HaveOccurred())
+			err = setStatusTransferPartSize(ctx, backup)
+			Expect(err).NotTo(HaveOccurred())
+			err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, backup)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = k8sClient.Delete(ctx, backup)
@@ -1667,6 +1753,10 @@ var _ = Describe("import", func() {
 			})
 			err = k8sClient.Update(ctx, source)
 			Expect(err).NotTo(HaveOccurred())
+			err = setStatusTransferPartSize(ctx, source)
+			Expect(err).NotTo(HaveOccurred())
+			err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, source)
+			Expect(err).NotTo(HaveOccurred())
 
 			// Create target MantleBackup
 			backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
@@ -1678,9 +1768,13 @@ var _ = Describe("import", func() {
 			})
 			err = k8sClient.Update(ctx, backup)
 			Expect(err).NotTo(HaveOccurred())
+			err = setStatusTransferPartSize(ctx, backup)
+			Expect(err).NotTo(HaveOccurred())
+			err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, backup)
+			Expect(err).NotTo(HaveOccurred())
 
 			// Create discard and import Jobs
-			for _, name := range []string{MakeDiscardJobName(backup), MakeImportJobName(backup)} {
+			for _, name := range []string{MakeDiscardJobName(backup), MakeImportJobName(backup, 0)} {
 				var job batchv1.Job
 				job.SetName(name)
 				job.SetNamespace(nsController)
@@ -1715,11 +1809,11 @@ var _ = Describe("import", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Expect access to the mocked object storage
-			mockObjectStorage.EXPECT().Delete(gomock.Any(), gomock.Eq("target-uid.bin")).DoAndReturn(
-				func(_ context.Context, _ string) error {
-					return nil
-				},
-			)
+			mockObjectStorage.EXPECT().Delete(gomock.Any(), gomock.Eq("target-uid-0.bin")).Return(nil)
+			mockObjectStorage.EXPECT().Delete(gomock.Any(), gomock.Eq("target-uid-1.bin")).Return(nil)
+			mockObjectStorage.EXPECT().Delete(gomock.Any(), gomock.Eq("target-uid-2.bin")).Return(nil)
+			mockObjectStorage.EXPECT().Delete(gomock.Any(), gomock.Eq("target-uid-3.bin")).Return(nil)
+			mockObjectStorage.EXPECT().Delete(gomock.Any(), gomock.Eq("target-uid-4.bin")).Return(nil)
 
 			// Perform secondaryCleanup
 			res, err := mbr.secondaryCleanup(ctx, backup, true)
@@ -1741,7 +1835,7 @@ var _ = Describe("import", func() {
 			Expect(ok).To(BeFalse())
 
 			// Check that the Jobs are deleted
-			for _, name := range []string{MakeDiscardJobName(backup), MakeImportJobName(backup)} {
+			for _, name := range []string{MakeDiscardJobName(backup), MakeImportJobName(backup, 0)} {
 				var job batchv1.Job
 				err = k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: nsController}, &job)
 				Expect(err).To(HaveOccurred())
@@ -1766,6 +1860,10 @@ var _ = Describe("import", func() {
 				annotRemoteUID: "uid",
 			})
 			err = k8sClient.Update(ctx, backup)
+			Expect(err).NotTo(HaveOccurred())
+			err = setStatusTransferPartSize(ctx, backup)
+			Expect(err).NotTo(HaveOccurred())
+			err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, backup)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = k8sClient.Delete(ctx, backup)
