@@ -28,6 +28,17 @@ jobs:
           - changetostandalone
           - changetoprimary
           - changetosecondary
+        backup-transfer-part-size:
+          - 3Mi # smaller than the PVC size
+        ginkgo-flags:
+          - ""
+        include:
+          - package: replication
+            backup-transfer-part-size: 10Mi # equal to the PVC size
+            ginkgo-flags: --label-filter="various-transfer-part-size"
+          - package: replication
+            backup-transfer-part-size: 200Gi # greater than the PVC size
+            ginkgo-flags: --label-filter="various-transfer-part-size"
     #runs-on: "ubuntu-22.04"
     runs-on: mantle_large_runner_16core
     timeout-minutes: 60
@@ -39,4 +50,8 @@ jobs:
       - run: sudo apt-get update
       - uses: ./.github/actions/set-up-kvm-for-e2e-tests
       - run: make -C test/e2e setup
-      - run: make -C test/e2e test-multiple-k8s-clusters TEST_MULTIK8S_PACKAGES=${{ matrix.package }}
+      - run: |
+          make -C test/e2e test-multiple-k8s-clusters \
+            TEST_MULTIK8S_PACKAGES=${{ matrix.package }} \
+            BACKUP_TRANSFER_PART_SIZE=${{ matrix.backup-transfer-part-size }} \
+            GINKGO_FLAGS=${{ matrix.ginkgo-flags }}
