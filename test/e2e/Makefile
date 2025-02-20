@@ -26,6 +26,7 @@ MINIKUBE_PROFILE_PRIMARY=profile1
 MINIKUBE_PROFILE_SECONDARY=profile2
 TMPDIR := tmp
 TEST_MULTIK8S_PACKAGES := replication replicationfailure changetostandalone changetoprimary changetosecondary
+BACKUP_TRANSFER_PART_SIZE := 3Mi # smaller than the PVC size (10Mi)
 
 export MINIKUBE_HOME
 
@@ -81,6 +82,7 @@ test-multiple-k8s-clusters:
 		-e "s%{ENDPOINT}%$$($(MINIKUBE) service list -p $(MINIKUBE_PROFILE_SECONDARY) -o json | jq -r '.[] | select(.Name == "mantle" and .Namespace == "rook-ceph") | .URLs | select(. | length > 0)[]' | head -1 | sed -r 's/^http:\/\///')%" \
 		-e "s%{OBJECT_STORAGE_BUCKET_NAME}%$$(cat $(TMPDIR)/cm-export-data.json | jq -r .data.BUCKET_NAME)%" \
 		-e "s%{OBJECT_STORAGE_ENDPOINT}%$$($(MINIKUBE) service list -p $(MINIKUBE_PROFILE_SECONDARY) -o json | jq -r '.[] | select(.Name == "rook-ceph-rgw-ceph-object-store-node-port" and .Namespace == "rook-ceph") | .URLs | select(. | length > 0)[]' | head -1)%" \
+		-e "s%{BACKUP_TRANSFER_PART_SIZE}%$(BACKUP_TRANSFER_PART_SIZE)%" \
 		testdata/values-mantle-primary-template.yaml \
 		> testdata/values-mantle-primary.yaml
 	$(MAKE) install-mantle \
