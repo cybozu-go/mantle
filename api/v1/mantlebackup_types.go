@@ -55,7 +55,7 @@ type MantleBackupStatus struct {
 	TransferPartSize *resource.Quantity `json:"transferPartSize,omitempty"`
 
 	// largestCompletedExportPartNum indicates the largest part number
-	// that has been successfully exported (i.e., `rbd export-diff`).
+	// that has been successfully exported by `rbd export-diff`.
 	LargestCompletedExportPartNum *int `json:"largestCompletedExportPartNum,omitempty"`
 
 	// largestCompletedUploadPartNum indicates the largest part number that has
@@ -64,7 +64,7 @@ type MantleBackupStatus struct {
 	LargestCompletedUploadPartNum *int `json:"largestCompletedUploadPartNum,omitempty"`
 
 	// largestCompletedImportPartNum indicates the largest part number
-	// that has been successfully imported (i.e., `rbd import-diff`).
+	// that has been successfully imported by `rbd import-diff`.
 	LargestCompletedImportPartNum *int `json:"largestCompletedImportPartNum,omitempty"`
 }
 
