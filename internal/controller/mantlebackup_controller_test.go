@@ -49,7 +49,7 @@ var _ = Describe("MantleBackup controller", func() {
 	var ns string
 	var lastExpireQueuedBackups sync.Map
 
-	ensureReadyToUseNotTrue := func(ctx context.Context, backup *mantlev1.MantleBackup) {
+	ensureBackupNotReadyToUse := func(ctx context.Context, backup *mantlev1.MantleBackup) {
 		GinkgoHelper()
 		Consistently(ctx, func(g Gomega, ctx context.Context) {
 			namespacedName := types.NamespacedName{
@@ -58,26 +58,10 @@ var _ = Describe("MantleBackup controller", func() {
 			}
 			err := k8sClient.Get(ctx, namespacedName, backup)
 			g.Expect(err).NotTo(HaveOccurred())
-			condition := meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse)
-			if condition != nil {
-				g.Expect(condition.Status).NotTo(Equal(metav1.ConditionTrue))
-			}
+			g.Expect(
+				meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse),
+			).To(BeFalse())
 		}, "10s", "1s").Should(Succeed())
-	}
-
-	waitForBackupNotReady := func(ctx context.Context, backup *mantlev1.MantleBackup) {
-		EventuallyWithOffset(1, func(g Gomega, ctx context.Context) {
-			namespacedName := types.NamespacedName{
-				Namespace: backup.Namespace,
-				Name:      backup.Name,
-			}
-			err := k8sClient.Get(ctx, namespacedName, backup)
-			g.Expect(err).NotTo(HaveOccurred())
-			condition := meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse)
-			g.Expect(condition).NotTo(BeNil())
-			g.Expect(condition.Status).To(Equal(metav1.ConditionFalse))
-			g.Expect(condition.Reason).NotTo(Equal(mantlev1.BackupReasonNone))
-		}).WithContext(ctx).Should(Succeed())
 	}
 
 	waitForHavingFinalizer := func(ctx context.Context, backup *mantlev1.MantleBackup) {
@@ -327,7 +311,7 @@ var _ = Describe("MantleBackup controller", func() {
 			backup, err := resMgr.CreateUniqueBackupFor(ctx, pvc)
 			Expect(err).NotTo(HaveOccurred())
 
-			waitForBackupNotReady(ctx, backup)
+			ensureBackupNotReadyToUse(ctx, backup)
 		})
 
 		It("should not be ready to use if specified non-existent PVC name", func(ctx SpecContext) {
@@ -340,7 +324,7 @@ var _ = Describe("MantleBackup controller", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			waitForBackupNotReady(ctx, backup)
+			ensureBackupNotReadyToUse(ctx, backup)
 		})
 
 		It("should fail the resource creation the second time if the same MantleBackup is created twice", func(ctx SpecContext) {
@@ -360,7 +344,7 @@ var _ = Describe("MantleBackup controller", func() {
 
 			backup, err := resMgr.CreateUniqueBackupFor(ctx, pvc)
 			Expect(err).NotTo(HaveOccurred())
-			ensureReadyToUseNotTrue(ctx, backup)
+			ensureBackupNotReadyToUse(ctx, backup)
 		})
 
 		It("should fail to take a backup if the size of the taken snapshot is not equal to the PV size", func(ctx SpecContext) {
@@ -371,7 +355,7 @@ var _ = Describe("MantleBackup controller", func() {
 
 			backup, err := resMgr.CreateUniqueBackupFor(ctx, pvc)
 			Expect(err).NotTo(HaveOccurred())
-			ensureReadyToUseNotTrue(ctx, backup)
+			ensureBackupNotReadyToUse(ctx, backup)
 		})
 	})
 
@@ -702,13 +686,9 @@ var _ = Describe("searchDiffOriginMantleBackup", func() {
 	}
 	// Note that slices.Clone() does the shallow copy.
 	// ref. https://pkg.go.dev/slices#Clone
-	primaryBackupsWithConditionFalse := slices.Clone(basePrimaryBackups)
-	primaryBackupsWithConditionFalse[2] = *basePrimaryBackups[2].DeepCopy()
-	meta.SetStatusCondition(&primaryBackupsWithConditionFalse[2].Status.Conditions,
-		metav1.Condition{
-			Type:   mantlev1.BackupConditionReadyToUse,
-			Status: metav1.ConditionFalse,
-		})
+	primaryBackupsWithBlankCondition := slices.Clone(basePrimaryBackups)
+	primaryBackupsWithBlankCondition[2] = *basePrimaryBackups[2].DeepCopy()
+	meta.RemoveStatusCondition(&primaryBackupsWithBlankCondition[2].Status.Conditions, mantlev1.BackupConditionReadyToUse)
 	primaryBackupsWithDeletionTimestamp := slices.Clone(basePrimaryBackups)
 	primaryBackupsWithDeletionTimestamp[2] = *basePrimaryBackups[2].DeepCopy()
 	now := metav1.Now()
@@ -743,7 +723,7 @@ var _ = Describe("searchDiffOriginMantleBackup", func() {
 			testMantleBackup, basePrimaryBackups, testSecondaryMantleBackups,
 			true, "test3"),
 		Entry("should skip the not-ready MantleBackup",
-			testMantleBackup, primaryBackupsWithConditionFalse, testSecondaryMantleBackups,
+			testMantleBackup, primaryBackupsWithBlankCondition, testSecondaryMantleBackups,
 			true, "test1"),
 		Entry("should skip the MantleBackup with the deletion timestamp",
 			testMantleBackup, primaryBackupsWithDeletionTimestamp, testSecondaryMantleBackups,
@@ -1081,16 +1061,7 @@ var _ = Describe("SetSynchronizing", func() {
 	DescribeTable("call SetSynchronizing once", doTestCallOnce,
 		Entry(
 			"a full backup should succeed",
-			&mantlev1.MantleBackup{
-				Status: mantlev1.MantleBackupStatus{
-					Conditions: []metav1.Condition{
-						{
-							Type:   mantlev1.BackupConditionReadyToUse,
-							Status: metav1.ConditionFalse,
-						},
-					},
-				},
-			},
+			&mantlev1.MantleBackup{},
 			nil,
 			false,
 			func(target, source *mantlev1.MantleBackup) error {
@@ -1106,16 +1077,7 @@ var _ = Describe("SetSynchronizing", func() {
 		),
 		Entry(
 			"an incremental backup should succeed",
-			&mantlev1.MantleBackup{
-				Status: mantlev1.MantleBackupStatus{
-					Conditions: []metav1.Condition{
-						{
-							Type:   mantlev1.BackupConditionReadyToUse,
-							Status: metav1.ConditionFalse,
-						},
-					},
-				},
-			},
+			&mantlev1.MantleBackup{},
 			&mantlev1.MantleBackup{},
 			false,
 			func(target, source *mantlev1.MantleBackup) error {
@@ -1167,14 +1129,6 @@ var _ = Describe("SetSynchronizing", func() {
 			err = ctrlClient.Create(context.Background(), &mantlev1.MantleBackup{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: name,
-				},
-				Status: mantlev1.MantleBackupStatus{
-					Conditions: []metav1.Condition{
-						{
-							Type:   mantlev1.BackupConditionReadyToUse,
-							Status: metav1.ConditionFalse,
-						},
-					},
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
