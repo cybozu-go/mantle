@@ -1085,7 +1085,7 @@ func (r *MantleBackupReconciler) startExport(
 		return nil
 	}
 
-	if err := r.patchStatusTransferPartSizeIfEmpty(ctx, targetBackup); err != nil {
+	if err := r.addStatusTransferPartSizeIfEmpty(ctx, targetBackup); err != nil {
 		return fmt.Errorf("failed to patch .status.transferPartSize: %w", err)
 	}
 
@@ -1165,7 +1165,7 @@ func (r *MantleBackupReconciler) handleCompletedExportJobs(ctx context.Context, 
 		labelComponentExportJob,
 		MantleExportJobPrefix,
 		func(job *batchv1.Job, partNum int) error {
-			if backup.Status.LargestCompletedExportPartNum == nil || *backup.Status.LargestCompletedExportPartNum < partNum {
+			if backup.Status.LargestCompletedExportPartNum == nil || *backup.Status.LargestCompletedExportPartNum+1 == partNum {
 				// Use PATCH here in order not to update backup with stale values.
 				oldBackup := backup.DeepCopy()
 				backup.Status.LargestCompletedExportPartNum = &partNum
@@ -1224,7 +1224,7 @@ func (r *MantleBackupReconciler) canNewUploadJobBeCreated(ctx context.Context) (
 	return true, nil
 }
 
-func (r *MantleBackupReconciler) patchStatusTransferPartSizeIfEmpty(ctx context.Context, backup *mantlev1.MantleBackup) error {
+func (r *MantleBackupReconciler) addStatusTransferPartSizeIfEmpty(ctx context.Context, backup *mantlev1.MantleBackup) error {
 	if backup.Status.TransferPartSize != nil {
 		return nil
 	}
@@ -1247,7 +1247,7 @@ func (r *MantleBackupReconciler) getPoolAndImageFromStatusPVManifest(backup *man
 	return pv.Spec.CSI.VolumeAttributes["pool"], pv.Spec.CSI.VolumeAttributes["imageName"], nil
 }
 
-func (r *MantleBackupReconciler) getNumberOfParts(backup *mantlev1.MantleBackup) (int64, error) {
+func (r *MantleBackupReconciler) getNumberOfParts(backup *mantlev1.MantleBackup) (int, error) {
 	if backup.Status.SnapSize == nil {
 		return 0, fmt.Errorf("failed to get status.snapSize: %s/%s", backup.GetNamespace(), backup.GetName())
 	}
@@ -1265,7 +1265,7 @@ func (r *MantleBackupReconciler) getNumberOfParts(backup *mantlev1.MantleBackup)
 	if *backup.Status.SnapSize%transferPartSize != 0 {
 		numParts++
 	}
-	return numParts, nil
+	return int(numParts), nil
 }
 
 func (r *MantleBackupReconciler) haveAllExportJobsCompleted(backup *mantlev1.MantleBackup) (bool, error) {
@@ -1278,7 +1278,7 @@ func (r *MantleBackupReconciler) haveAllExportJobsCompleted(backup *mantlev1.Man
 	if backup.Status.LargestCompletedExportPartNum != nil {
 		partNum = *backup.Status.LargestCompletedExportPartNum
 	}
-	return partNum+1 >= int(limit), nil
+	return partNum+1 == limit, nil
 }
 
 func (r *MantleBackupReconciler) startUpload(ctx context.Context, targetBackup *mantlev1.MantleBackup) error {
@@ -2476,7 +2476,7 @@ func (r *MantleBackupReconciler) primaryCleanup(
 	return ctrl.Result{}, nil
 }
 
-func (r *MantleBackupReconciler) getNumberOfPartsForResourceDeletion(backup *mantlev1.MantleBackup) (int64, error) {
+func (r *MantleBackupReconciler) getNumberOfPartsForResourceDeletion(backup *mantlev1.MantleBackup) (int, error) {
 	if backup.Status.SnapSize == nil || backup.Status.TransferPartSize == nil {
 		return 0, nil
 	}
@@ -2495,7 +2495,7 @@ func (r *MantleBackupReconciler) deleteAllJobsOfComponent(
 
 	propagationPolicy := metav1.DeletePropagationBackground
 
-	for partNum := 0; partNum < int(numParts); partNum++ {
+	for partNum := 0; partNum < numParts; partNum++ {
 		var job batchv1.Job
 		job.SetName(makeJobName(backup, partNum))
 		job.SetNamespace(r.managedCephClusterID)
@@ -2525,7 +2525,7 @@ func (r *MantleBackupReconciler) deleteAllExportDataPVCs(ctx context.Context, ba
 
 	propagationPolicy := metav1.DeletePropagationBackground
 
-	for partNum := 0; partNum < int(numParts); partNum++ {
+	for partNum := 0; partNum < numParts; partNum++ {
 		pvc := corev1.PersistentVolumeClaim{}
 		pvc.SetName(MakeExportDataPVCName(backup, partNum))
 		pvc.SetNamespace(r.managedCephClusterID)
@@ -2618,7 +2618,7 @@ func (r *MantleBackupReconciler) deleteAllExportedData(ctx context.Context, back
 		return fmt.Errorf("failed to get the number of the parts of the exported data: %w", err)
 	}
 
-	for partNum := 0; partNum < int(numParts); partNum++ {
+	for partNum := 0; partNum < numParts; partNum++ {
 		key := MakeObjectNameOfExportedData(backup.GetName(), backup.GetAnnotations()[annotRemoteUID], partNum)
 		if err := r.objectStorageClient.Delete(ctx, key); err != nil {
 			return fmt.Errorf("failed to delete exported data in the object storage: %s: %w", key, err)
@@ -2658,7 +2658,7 @@ func (r *MantleBackupReconciler) deleteMiddleSnapshots(backup *mantlev1.MantleBa
 		return fmt.Errorf("failed to list snapshots: %s: %s: %w", pool, image, err)
 	}
 
-	for i := 0; i < int(numParts); i++ {
+	for i := 0; i < numParts; i++ {
 		snapIndex := slices.IndexFunc(snaps, func(snap ceph.RBDSnapshot) bool {
 			return snap.Name == MakeMiddleSnapshotName(backup, i*int(transferPartSize))
 		})
