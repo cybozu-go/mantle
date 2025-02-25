@@ -2161,7 +2161,7 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to calcuate num of export data parts: %w", err)
 	}
-	if partNum != int(finalPartNum) {
+	if partNum != finalPartNum {
 		return requeueReconciliation(), nil
 	}
 
