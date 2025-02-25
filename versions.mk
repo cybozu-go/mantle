@@ -3,7 +3,7 @@ CONTROLLER_TOOLS_VERSION := v0.16.4
 # https://github.com/helm/helm/releases
 HELM_VERSION := 3.16.2
 # It is set by CI using the environment variable, use conditional assignment.
-KUBERNETES_VERSION := 1.29.8
+KUBERNETES_VERSION := 1.31.1
 # https://github.com/kubernetes-sigs/kustomize/releases
 KUSTOMIZE_VERSION := v5.5.0
 # https://github.com/kubernetes/minikube/releases

@@ -455,7 +455,7 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 	return r.secondaryCleanup(ctx, backup, true)
 }
 
-func scheduleExpire(_ context.Context, evt event.GenericEvent, q workqueue.RateLimitingInterface) {
+func scheduleExpire(_ context.Context, evt event.TypedGenericEvent[client.Object], q workqueue.TypedRateLimitingInterface[ctrl.Request]) {
 	backup := evt.Object.(*mantlev1.MantleBackup)
 	// the parse never fails because expire method checked it.
 	expire, _ := strfmt.ParseDuration(backup.Spec.Expire)
@@ -475,8 +475,7 @@ func (r *MantleBackupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&mantlev1.MantleBackup{}).
 		WatchesRawSource(
-			&source.Channel{Source: r.expireQueueCh},
-			handler.Funcs{GenericFunc: scheduleExpire},
+			source.TypedChannel(r.expireQueueCh, handler.Funcs{GenericFunc: scheduleExpire}),
 		).
 		Complete(r)
 }

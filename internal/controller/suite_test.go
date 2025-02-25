@@ -55,7 +55,7 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 		// Note that you must have the required binaries setup under the bin directory to perform
 		// the tests directly. When we run make test it will be setup and used automatically.
 		BinaryAssetsDirectory: filepath.Join("..", "..", "bin", "k8s",
-			fmt.Sprintf("1.29.8-%s-%s", runtime.GOOS, runtime.GOARCH)),
+			fmt.Sprintf("1.31.1-%s-%s", runtime.GOOS, runtime.GOARCH)),
 	}
 
 	var err error

@@ -5,7 +5,9 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
@@ -24,9 +26,12 @@ type managerUtilImpl struct {
 	errCh  chan error
 }
 
-func NewManagerUtil(ctxRoot context.Context, config *rest.Config, schema *runtime.Scheme) ManagerUtil {
-	mgr, err := ctrl.NewManager(config, ctrl.Options{
+func NewManagerUtil(ctxRoot context.Context, restConfig *rest.Config, schema *runtime.Scheme) ManagerUtil {
+	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme: schema,
+		Controller: config.Controller{
+			SkipNameValidation: ptr.To(true),
+		},
 	})
 	if err != nil {
 		panic(err)
