@@ -133,19 +133,6 @@ func NewMantleBackupReconciler(
 	}
 }
 
-func (r *MantleBackupReconciler) updateStatusCondition(ctx context.Context, backup *mantlev1.MantleBackup, condition metav1.Condition) error {
-	logger := log.FromContext(ctx)
-	err := updateStatus(ctx, r.Client, backup, func() error {
-		meta.SetStatusCondition(&backup.Status.Conditions, condition)
-		return nil
-	})
-	if err != nil {
-		logger.Error(err, "failed to update status", "status", backup.Status)
-		return err
-	}
-	return nil
-}
-
 func (r *MantleBackupReconciler) removeRBDSnapshot(ctx context.Context, poolName, imageName, snapshotName string) error {
 	logger := log.FromContext(ctx)
 	rmErr := r.ceph.RBDSnapRm(poolName, imageName, snapshotName)
@@ -168,26 +155,16 @@ func (r *MantleBackupReconciler) createRBDSnapshot(ctx context.Context, poolName
 	snap, findErr := ceph.FindRBDSnapshot(r.ceph, poolName, imageName, backup.Name)
 	if findErr != nil {
 		logger.Error(errors.Join(createErr, findErr), "failed to find rbd snapshot")
-		updateStatusErr := r.updateStatusCondition(ctx, backup, metav1.Condition{
-			Type:   mantlev1.BackupConditionReadyToUse,
-			Status: metav1.ConditionFalse,
-			Reason: mantlev1.BackupReasonFailedToCreateBackup,
-		})
-		return nil, errors.Join(createErr, findErr, updateStatusErr)
+		return nil, errors.Join(createErr, findErr)
 	}
 	return snap, nil
 }
 
-func (r *MantleBackupReconciler) checkPVCInManagedCluster(ctx context.Context, backup *mantlev1.MantleBackup, pvc *corev1.PersistentVolumeClaim) error {
+func (r *MantleBackupReconciler) checkPVCInManagedCluster(ctx context.Context, pvc *corev1.PersistentVolumeClaim) error {
 	logger := log.FromContext(ctx)
 	clusterID, err := getCephClusterIDFromPVC(ctx, r.Client, pvc)
 	if err != nil {
 		logger.Error(err, "failed to get clusterID from PVC", "namespace", pvc.Namespace, "name", pvc.Name)
-		err2 := r.updateStatusCondition(ctx, backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionFalse, Reason: mantlev1.BackupReasonFailedToCreateBackup})
-		if err2 != nil {
-			return err2
-		}
-
 		return err
 	}
 	if clusterID != r.managedCephClusterID {
@@ -198,14 +175,9 @@ func (r *MantleBackupReconciler) checkPVCInManagedCluster(ctx context.Context, b
 	return nil
 }
 
-func (r *MantleBackupReconciler) isPVCBound(ctx context.Context, backup *mantlev1.MantleBackup, pvc *corev1.PersistentVolumeClaim) (bool, error) {
+func (r *MantleBackupReconciler) isPVCBound(ctx context.Context, pvc *corev1.PersistentVolumeClaim) (bool, error) {
 	logger := log.FromContext(ctx)
 	if pvc.Status.Phase != corev1.ClaimBound {
-		err := r.updateStatusCondition(ctx, backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionFalse, Reason: mantlev1.BackupReasonFailedToCreateBackup})
-		if err != nil {
-			return false, err
-		}
-
 		if pvc.Status.Phase == corev1.ClaimPending {
 			return false, nil
 		} else {
@@ -246,21 +218,17 @@ func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *
 	err := r.Get(ctx, types.NamespacedName{Namespace: pvcNamespace, Name: pvcName}, &pvc)
 	if err != nil {
 		logger.Error(err, "failed to get PVC", "namespace", pvcNamespace, "name", pvcName)
-		err2 := r.updateStatusCondition(ctx, backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionFalse, Reason: mantlev1.BackupReasonFailedToCreateBackup})
-		if err2 != nil {
-			return nil, ctrl.Result{}, err2
-		}
 		if aerrors.IsNotFound(err) {
 			return nil, ctrl.Result{}, errTargetPVCNotFound{err}
 		}
 		return nil, ctrl.Result{}, err
 	}
 
-	if err := r.checkPVCInManagedCluster(ctx, backup, &pvc); err != nil {
+	if err := r.checkPVCInManagedCluster(ctx, &pvc); err != nil {
 		return nil, ctrl.Result{}, err
 	}
 
-	ok, err := r.isPVCBound(ctx, backup, &pvc)
+	ok, err := r.isPVCBound(ctx, &pvc)
 	if err != nil {
 		return nil, ctrl.Result{}, err
 	}
@@ -274,11 +242,6 @@ func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *
 	err = r.Get(ctx, types.NamespacedName{Name: pvName}, &pv)
 	if err != nil {
 		logger.Error(err, "failed to get PV", "name", pvName)
-		err2 := r.updateStatusCondition(ctx, backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionFalse, Reason: mantlev1.BackupReasonFailedToCreateBackup})
-		if err2 != nil {
-			return nil, ctrl.Result{}, err2
-		}
-
 		return nil, ctrl.Result{}, err
 	}
 
@@ -413,10 +376,6 @@ func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, back
 
 		if err := r.Update(ctx, backup); err != nil {
 			logger.Error(err, "failed to add finalizer", "finalizer", MantleBackupFinalizerName)
-			return ctrl.Result{}, err
-		}
-		err := r.updateStatusCondition(ctx, backup, metav1.Condition{Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionFalse, Reason: mantlev1.BackupReasonNone})
-		if err != nil {
 			return ctrl.Result{}, err
 		}
 		return requeueReconciliation(), nil
@@ -859,13 +818,12 @@ func (r *MantleBackupReconciler) prepareForDataSynchronization(
 	}
 	secondaryBackupMap := convertToMap(secondaryBackups)
 
-	isSecondaryMantleBackupReadyToUse := false
 	secondaryBackup, ok := secondaryBackupMap[backup.GetName()]
 	if !ok {
 		return nil, fmt.Errorf("secondary MantleBackup not found: %s, %s",
 			backup.GetName(), backup.GetNamespace())
 	}
-	isSecondaryMantleBackupReadyToUse = meta.IsStatusConditionTrue(
+	isSecondaryMantleBackupReadyToUse := meta.IsStatusConditionTrue(
 		secondaryBackup.Status.Conditions,
 		mantlev1.BackupConditionReadyToUse,
 	)
@@ -2120,9 +2078,8 @@ func (r *MantleBackupReconciler) primaryCleanup(
 		return ctrl.Result{}, nil
 	}
 
-	// Update the status of the MantleBackup. Use Patch here because
-	// updateStatusCondition is likely to fail due to "the object has been
-	// modified" error.
+	// Update the status of the MantleBackup. Use Patch here because Update() is
+	// likely to fail due to "the object has been modified" error.
 	newTarget := target.DeepCopy()
 	meta.SetStatusCondition(&newTarget.Status.Conditions, metav1.Condition{
 		Type:   mantlev1.BackupConditionSyncedToRemote,
