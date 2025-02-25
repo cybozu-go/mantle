@@ -818,13 +818,12 @@ func (r *MantleBackupReconciler) prepareForDataSynchronization(
 	}
 	secondaryBackupMap := convertToMap(secondaryBackups)
 
-	isSecondaryMantleBackupReadyToUse := false
 	secondaryBackup, ok := secondaryBackupMap[backup.GetName()]
 	if !ok {
 		return nil, fmt.Errorf("secondary MantleBackup not found: %s, %s",
 			backup.GetName(), backup.GetNamespace())
 	}
-	isSecondaryMantleBackupReadyToUse = meta.IsStatusConditionTrue(
+	isSecondaryMantleBackupReadyToUse := meta.IsStatusConditionTrue(
 		secondaryBackup.Status.Conditions,
 		mantlev1.BackupConditionReadyToUse,
 	)
