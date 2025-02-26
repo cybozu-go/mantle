@@ -591,6 +591,7 @@ var _ = Describe("MantleBackup controller", func() {
 			err = resMgr.ChangeJobCondition(ctx, &jobExport, batchv1.JobComplete, corev1.ConditionTrue)
 			Expect(err).NotTo(HaveOccurred())
 
+			// The snapshot size is 5GiB and transferPartSize is 1GiB. So the number of parts is 5.
 			for i := 1; i < 5; i++ {
 				var job batchv1.Job
 				Eventually(func(g Gomega, ctx SpecContext) error {
