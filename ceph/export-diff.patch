@@ -11,7 +11,7 @@
  // encryption arguments
  static const std::string ENCRYPTION_FORMAT("encryption-format");
 diff --git a/src/tools/rbd/action/Export.cc b/src/tools/rbd/action/Export.cc
-index ddcf0f2c30c..2ba0be2ebb1 100644
+index ddcf0f2c30c..1b72db2bde8 100644
 --- a/src/tools/rbd/action/Export.cc
 +++ b/src/tools/rbd/action/Export.cc
 @@ -123,16 +123,27 @@ private:
@@ -112,8 +112,8 @@ index ddcf0f2c30c..2ba0be2ebb1 100644
       "snapshot starting point")
 -    (at::WHOLE_OBJECT.c_str(), po::bool_switch(), "compare whole object");
 +    (at::WHOLE_OBJECT.c_str(), po::bool_switch(), "compare whole object")
-+    (at::READ_OFFSET.c_str(), po::value<uint64_t>(), "offset in bytes")
-+    (at::READ_LENGTH.c_str(), po::value<uint64_t>(), "length in bytes")
++    (at::READ_OFFSET.c_str(), po::value<int64_t>(), "offset in bytes")
++    (at::READ_LENGTH.c_str(), po::value<int64_t>(), "length in bytes")
 +    (at::MID_SNAP_PREFIX.c_str(), po::value<std::string>(),
 +     "the prefix of snapshot name in output diff when specifying offset and length");
    at::add_no_progress_option(options);
@@ -159,7 +159,7 @@ index ddcf0f2c30c..2ba0be2ebb1 100644
  int execute_diff(const po::variables_map &vm,
                   const std::vector<std::string> &ceph_global_init_args) {
    size_t arg_index = 0;
-@@ -290,6 +345,26 @@ int execute_diff(const po::variables_map &vm,
+@@ -290,6 +345,45 @@ int execute_diff(const po::variables_map &vm,
      from_snap_name = vm[at::FROM_SNAPSHOT_NAME].as<std::string>();
    }
  
@@ -170,23 +170,42 @@ index ddcf0f2c30c..2ba0be2ebb1 100644
 +
 +  uint64_t offset = 0;
 +  if (vm.count(at::READ_OFFSET)) {
-+    offset = vm[at::READ_OFFSET].as<uint64_t>();
++    // When passing a negative value as an argument for uint64_t typed arg using boost::program_options,
++    // it is casted without causing an error, so check logic was necessary.
++    int64_t s_offset = vm[at::READ_OFFSET].as<int64_t>();
++    if (s_offset < 0) {
++      std::cerr << "rbd: offset must be greater than or equal to 0" << std::endl;
++      return -EINVAL;
++    }
++    offset = static_cast<uint64_t>(s_offset);
 +  }
 +
 +  uint64_t length = 0;
 +  if (vm.count(at::READ_LENGTH)) {
-+    length = vm[at::READ_LENGTH].as<uint64_t>();
++    // When passing a negative value as an argument for uint64_t typed arg using boost::program_options,
++    // it is casted without causing an error, so check logic was necessary.
++    int64_t s_length = vm[at::READ_LENGTH].as<int64_t>();
++    if (s_length < 0) {
++      std::cerr << "rbd: length must be greater than or equal to 0" << std::endl;
++      return -EINVAL;
++    }
++    length = static_cast<uint64_t>(s_length);
 +  }
 +
 +  std::string mid_snap_prefix("mid-snap");
 +  if (vm.count(at::MID_SNAP_PREFIX)) {
 +    mid_snap_prefix = vm[at::MID_SNAP_PREFIX].as<std::string>();
++    r = utils::validate_snapshot_name(at::ARGUMENT_MODIFIER_SOURCE, mid_snap_prefix,
++                                      utils::SNAPSHOT_PRESENCE_PERMITTED, utils::SPEC_VALIDATION_SNAP);
++    if (r < 0) {
++      return r;
++    }
 +  }
 +
    librados::Rados rados;
    librados::IoCtx io_ctx;
    librbd::Image image;
-@@ -299,9 +374,28 @@ int execute_diff(const po::variables_map &vm,
+@@ -299,9 +393,28 @@ int execute_diff(const po::variables_map &vm,
      return r;
    }
  
@@ -215,7 +234,7 @@ index ddcf0f2c30c..2ba0be2ebb1 100644
                       vm[at::WHOLE_OBJECT].as<bool>(), path.c_str(),
                       vm[at::NO_PROGRESS].as<bool>());
    if (r < 0) {
-@@ -501,7 +595,8 @@ static int do_export_v2(librbd::Image& image, librbd::image_info_t &info, int fd
+@@ -501,7 +614,8 @@ static int do_export_v2(librbd::Image& image, librbd::image_info_t &info, int fd
    const char *last_snap = NULL;
    for (size_t i = 0; i < snaps.size(); ++i) {
      utils::snap_set(image, snaps[i].name.c_str());
@@ -225,7 +244,7 @@ index ddcf0f2c30c..2ba0be2ebb1 100644
      if (r < 0) {
        return r;
      }
-@@ -509,7 +604,8 @@ static int do_export_v2(librbd::Image& image, librbd::image_info_t &info, int fd
+@@ -509,7 +623,8 @@ static int do_export_v2(librbd::Image& image, librbd::image_info_t &info, int fd
      last_snap = snaps[i].name.c_str();
    }
    utils::snap_set(image, std::string(""));

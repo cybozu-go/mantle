@@ -89,7 +89,9 @@ mock: mockgen
 .PHONY: test
 test: manifests generate fmt vet envtest mock ## Run tests.
 # adding -p 1 -v to stream logs. see https://github.com/golang/go/issues/46959
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_KUBERNETES_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./... -coverprofile cover.out -p 1 -v
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_KUBERNETES_VERSION) --bin-dir $(LOCALBIN) -p path)" \
+	SKIP_CEPH_CMD_TEST=1 \
+	go test ./... -coverprofile cover.out -p 1 -v
 
 GOLANGCI_LINT = $(shell pwd)/bin/golangci-lint
 golangci-lint:
