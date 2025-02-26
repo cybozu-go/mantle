@@ -15,8 +15,7 @@ make test
 
 ## Procedure to update
 ### Update ceph version
-
-Imports all of the contents from upstream git, including tags.
+**In the `cybozu/ceph` repository,** sync with the contents from upstream git (`ceph/ceph`),  including tags.
 
 ```sh
 git swtich main
@@ -29,9 +28,30 @@ git push origin --tags
 ```
 
 ### Update the patch
-TBD
+**In the `cybozu/ceph` repository,** you checkout the target branch (`rbd-export-vx.y.z`). If it doesn't exist yet, it's necessary to create it and apply the newest patch as follows.
+
+```sh
+# at working directory for https://github.com/cybozu/ceph.git
+VERSION=16.2.4
+git checkout -b rbd-export-v$VERSION tags/v$VERSION
+```
+
+You may be able to use the existing patch without editing. Or you should update if necessary.
+
+```sh
+git apply export-diff.patch
+```
+
+You modify code, commit the changes, and push to the branch in the same way as normal development. **You must not create a PR corresponding to this branch.**
+
+```sh
+git diff tags/v$VERSION > export-diff.patch
+```
+
+You store the up-to-date export-diff.patch as [`ceph/export-diff.patch`](https://github.com/cybozu-go/mantle/blob/main/ceph/export-diff.patch).
 
 ### Release
+**Works in the `cybozu-go/mantle` repository.**
 
 1. The version is determined. The patch version is the same as the base ceph version. The fourth field starts at 0 for each ceph version and increases by 1 for each release.
   ```sh
