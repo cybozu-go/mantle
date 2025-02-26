@@ -1726,10 +1726,6 @@ var _ = Describe("import", func() {
 				func(_ context.Context, _ string) (bool, error) {
 					return true, nil
 				}).Times(2)
-			mockObjectStorage.EXPECT().Exists(gomock.Any(), gomock.Eq("target--5.bin")).DoAndReturn(
-				func(_ context.Context, _ string) (bool, error) {
-					return false, nil
-				}).Times(1)
 
 			// The first call to reconcileImportJob should create an import Job
 			res, err := mbr.reconcileImportJob(ctx, backup, snapshotTarget)

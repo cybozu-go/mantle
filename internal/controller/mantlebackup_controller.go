@@ -2161,69 +2161,60 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 	backup *mantlev1.MantleBackup,
 	snapshotTarget *snapshotTarget,
 ) (ctrl.Result, error) {
+	// Get the largest part number of the completed import Jobs
 	partNum := 0
 	if backup.Status.LargestCompletedImportPartNum != nil {
 		partNum = *backup.Status.LargestCompletedImportPartNum + 1
 	}
 
-	if uploaded, err := r.isExportDataAlreadyUploaded(ctx, backup, partNum); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to check if part of export data is not already uploaded: %d: %w", partNum, err)
-	} else if uploaded {
-		var job batchv1.Job
-		if err := r.Client.Get(
-			ctx,
-			types.NamespacedName{
-				Name:      MakeImportJobName(backup, partNum),
-				Namespace: r.managedCephClusterID,
-			},
-			&job,
-		); err != nil {
-			if !aerrors.IsNotFound(err) {
-				return ctrl.Result{}, err
-			}
-			if err := r.createOrUpdateImportJob(ctx, backup, snapshotTarget); err != nil {
-				return ctrl.Result{}, err
-			}
-			return requeueReconciliation(), nil
-		}
-	}
-
-	// Make sure all of the import Jobs are completed.
+	// Check that all import Jobs are completed
 	finalPartNum, err := r.getNumberOfParts(backup)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to calcuate num of export data parts: %w", err)
 	}
-	if partNum != finalPartNum {
+	if partNum == finalPartNum {
+		// Make sure the (final) RBD snapshot is created.
+		snapshot, err := ceph.FindRBDSnapshot(
+			r.ceph,
+			snapshotTarget.poolName,
+			snapshotTarget.imageName,
+			backup.GetName(),
+		)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to find imported RBD snapshot: %w", err)
+		}
+
+		// Update the status of the MantleBackup to set True to the ReadyToUse condition.
+		if err := updateStatus(ctx, r.Client, backup, func() error {
+			backup.Status.SnapID = &snapshot.Id
+			meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
+				Type:   mantlev1.BackupConditionReadyToUse,
+				Status: metav1.ConditionTrue,
+				Reason: mantlev1.BackupReasonNone,
+			})
+			return nil
+		}); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		return ctrl.Result{}, nil
+	}
+
+	// Check that the export data is already uploaded.
+	uploaded, err := r.isExportDataAlreadyUploaded(ctx, backup, partNum)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to check if part of export data is not already uploaded: %d: %w", partNum, err)
+	}
+	if !uploaded {
 		return requeueReconciliation(), nil
 	}
 
-	// Make sure the (final) RBD snapshot is created.
-	snapshot, err := ceph.FindRBDSnapshot(
-		r.ceph,
-		snapshotTarget.poolName,
-		snapshotTarget.imageName,
-		backup.GetName(),
-	)
-	if err != nil {
-		if errors.Is(err, ceph.ErrSnapshotNotFound) {
-			return requeueReconciliation(), nil
-		}
-		return ctrl.Result{}, fmt.Errorf("failed to find imported RBD snapshot: %w", err)
-	}
-
-	if err := updateStatus(ctx, r.Client, backup, func() error {
-		backup.Status.SnapID = &snapshot.Id
-		meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
-			Type:   mantlev1.BackupConditionReadyToUse,
-			Status: metav1.ConditionTrue,
-			Reason: mantlev1.BackupReasonNone,
-		})
-		return nil
-	}); err != nil {
+	// create or update an import Job
+	if err := r.createOrUpdateImportJob(ctx, backup, snapshotTarget); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{}, nil
+	return requeueReconciliation(), nil
 }
 
 func (r *MantleBackupReconciler) createOrUpdateImportJob(
