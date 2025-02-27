@@ -127,12 +127,12 @@ spec:
               largestCompletedExportPartNum:
                 description: |-
                   largestCompletedExportPartNum indicates the largest part number
-                  that has been successfully exported (i.e., `rbd export-diff`).
+                  that has been successfully exported by `rbd export-diff`.
                 type: integer
               largestCompletedImportPartNum:
                 description: |-
                   largestCompletedImportPartNum indicates the largest part number
-                  that has been successfully imported (i.e., `rbd import-diff`).
+                  that has been successfully imported by `rbd import-diff`.
                 type: integer
               largestCompletedUploadPartNum:
                 description: |-
