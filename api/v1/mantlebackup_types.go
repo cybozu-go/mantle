@@ -53,19 +53,6 @@ type MantleBackupStatus struct {
 	// 'transferPartSize' indicates the size of each part of the data
 	// transferred from the primary to the secondary.
 	TransferPartSize *resource.Quantity `json:"transferPartSize,omitempty"`
-
-	// largestCompletedExportPartNum indicates the largest part number
-	// that has been successfully exported by `rbd export-diff`.
-	LargestCompletedExportPartNum *int `json:"largestCompletedExportPartNum,omitempty"`
-
-	// largestCompletedUploadPartNum indicates the largest part number that has
-	// been successfully uploaded from the primary cluster to the secondary
-	// cluster.
-	LargestCompletedUploadPartNum *int `json:"largestCompletedUploadPartNum,omitempty"`
-
-	// largestCompletedImportPartNum indicates the largest part number
-	// that has been successfully imported by `rbd import-diff`.
-	LargestCompletedImportPartNum *int `json:"largestCompletedImportPartNum,omitempty"`
 }
 
 const (
