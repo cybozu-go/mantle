@@ -1111,7 +1111,7 @@ func (r *MantleBackupReconciler) handleCompletedJobsOfComponent(
 	backup *mantlev1.MantleBackup,
 	componentLabel string,
 	componentPrefix string,
-	body func(job *batchv1.Job, partNum int) error,
+	body func(job *batchv1.Job, partNum int) (bool, error),
 ) error {
 	var jobList batchv1.JobList
 	if err := r.Client.List(ctx, &jobList, &client.ListOptions{
@@ -1139,8 +1139,12 @@ func (r *MantleBackupReconciler) handleCompletedJobsOfComponent(
 			return fmt.Errorf("failed to extract part number: %s: %w", partNumString, err)
 		}
 
-		if err := body(&job, partNum); err != nil {
+		skipped, err := body(&job, partNum)
+		if err != nil {
 			return fmt.Errorf("failed to run body: %w", err)
+		}
+		if skipped {
+			continue
 		}
 
 		propagationPolicy := metav1.DeletePropagationBackground
@@ -1164,16 +1168,20 @@ func (r *MantleBackupReconciler) handleCompletedExportJobs(ctx context.Context, 
 		backup,
 		labelComponentExportJob,
 		MantleExportJobPrefix,
-		func(job *batchv1.Job, partNum int) error {
-			if backup.Status.LargestCompletedExportPartNum == nil || *backup.Status.LargestCompletedExportPartNum+1 == partNum {
-				// Use PATCH here in order not to update backup with stale values.
-				oldBackup := backup.DeepCopy()
-				backup.Status.LargestCompletedExportPartNum = &partNum
-				if err := r.Client.Status().Patch(ctx, backup, client.MergeFrom(oldBackup)); err != nil {
-					return fmt.Errorf("failed to patch .status.largestCompletedExportPartNum to %d: %w", partNum, err)
-				}
+		func(job *batchv1.Job, partNum int) (bool, error) {
+			if (backup.Status.LargestCompletedExportPartNum == nil && partNum != 0) ||
+				(backup.Status.LargestCompletedExportPartNum != nil && partNum != *backup.Status.LargestCompletedExportPartNum+1) {
+				return true, nil // skip
 			}
-			return nil
+
+			// Use PATCH here in order not to update backup with stale values.
+			oldBackup := backup.DeepCopy()
+			backup.Status.LargestCompletedExportPartNum = &partNum
+			if err := r.Client.Status().Patch(ctx, backup, client.MergeFrom(oldBackup)); err != nil {
+				return false, fmt.Errorf("failed to patch .status.largestCompletedExportPartNum to %d: %w", partNum, err)
+			}
+
+			return false, nil
 		},
 	)
 }
@@ -1201,9 +1209,22 @@ func (r *MantleBackupReconciler) canNewExportJobBeCreated(ctx context.Context) (
 	return true, nil
 }
 
-func (r *MantleBackupReconciler) canNewUploadJobBeCreated(ctx context.Context) (bool, error) {
+func (r *MantleBackupReconciler) getPartNumRangeOfRunnableUploadJobs(
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
+) (int, int, error) {
+	uploadPartNum := -1
+	if backup.Status.LargestCompletedUploadPartNum != nil {
+		uploadPartNum = *backup.Status.LargestCompletedUploadPartNum
+	}
+
+	exportPartNum := -1
+	if backup.Status.LargestCompletedExportPartNum != nil {
+		exportPartNum = *backup.Status.LargestCompletedExportPartNum
+	}
+
 	if r.primarySettings.MaxUploadJobs == 0 {
-		return true, nil
+		return uploadPartNum + 1, exportPartNum, nil
 	}
 
 	var jobs batchv1.JobList
@@ -1214,14 +1235,22 @@ func (r *MantleBackupReconciler) canNewUploadJobBeCreated(ctx context.Context) (
 			"app.kubernetes.io/component": labelComponentUploadJob,
 		}),
 	}); err != nil {
-		return false, fmt.Errorf("failed to list upload Jobs: %w", err)
+		return 0, 0, fmt.Errorf("failed to list upload Jobs: %w", err)
 	}
 
-	if len(jobs.Items) >= r.primarySettings.MaxUploadJobs {
-		return false, nil
+	// Count upload Jobs that is NOT related to backup.
+	count := 0
+	prefix := fmt.Sprintf("%s%s-", MantleUploadJobPrefix, string(backup.GetUID()))
+	for _, job := range jobs.Items {
+		if strings.HasPrefix(job.GetName(), prefix) {
+			continue
+		}
+		count++
 	}
 
-	return true, nil
+	throttle := max(0, r.primarySettings.MaxUploadJobs-count)
+
+	return uploadPartNum + 1, min(exportPartNum, uploadPartNum+throttle), nil
 }
 
 func (r *MantleBackupReconciler) addStatusTransferPartSizeIfEmpty(ctx context.Context, backup *mantlev1.MantleBackup) error {
@@ -1287,13 +1316,6 @@ func (r *MantleBackupReconciler) startUpload(ctx context.Context, targetBackup *
 		return fmt.Errorf("failed to handle completed upload jobs: %w", err)
 	}
 
-	if ok, err := r.canNewUploadJobBeCreated(ctx); err != nil {
-		return fmt.Errorf("failed to check if a new upload Job can be created: %w", err)
-	} else if !ok {
-		// skip to create an upload Job
-		return nil
-	}
-
 	if err := r.createOrUpdateUploadJobs(ctx, targetBackup); err != nil {
 		return fmt.Errorf("failed to create or update upload jobs: %w", err)
 	}
@@ -1307,24 +1329,27 @@ func (r *MantleBackupReconciler) handleCompletedUploadJobs(ctx context.Context, 
 		backup,
 		labelComponentUploadJob,
 		MantleUploadJobPrefix,
-		func(job *batchv1.Job, partNum int) error {
-			if backup.Status.LargestCompletedUploadPartNum == nil || *backup.Status.LargestCompletedUploadPartNum < partNum {
-				// Use PATCH here in order not to update backup with stale values.
-				oldBackup := backup.DeepCopy()
-				backup.Status.LargestCompletedUploadPartNum = &partNum
-				if err := r.Client.Status().Patch(ctx, backup, client.MergeFrom(oldBackup)); err != nil {
-					return fmt.Errorf("failed to patch .status.largestCompletedUploadPartNum to %d: %w", partNum, err)
-				}
+		func(job *batchv1.Job, partNum int) (bool, error) {
+			if (backup.Status.LargestCompletedUploadPartNum == nil && partNum != 0) ||
+				(backup.Status.LargestCompletedUploadPartNum != nil && partNum != *backup.Status.LargestCompletedUploadPartNum+1) {
+				return true, nil // skip
+			}
+
+			// Use PATCH here in order not to update backup with stale values.
+			oldBackup := backup.DeepCopy()
+			backup.Status.LargestCompletedUploadPartNum = &partNum
+			if err := r.Client.Status().Patch(ctx, backup, client.MergeFrom(oldBackup)); err != nil {
+				return false, fmt.Errorf("failed to patch .status.largestCompletedUploadPartNum to %d: %w", partNum, err)
 			}
 
 			pvc := corev1.PersistentVolumeClaim{}
 			pvc.SetName(MakeExportDataPVCName(backup, partNum))
 			pvc.SetNamespace(r.managedCephClusterID)
 			if err := r.Client.Delete(ctx, &pvc); err != nil && !aerrors.IsNotFound(err) {
-				return fmt.Errorf("failed to delete export data PVC: %s/%s: %w", pvc.GetNamespace(), pvc.GetName(), err)
+				return false, fmt.Errorf("failed to delete export data PVC: %s/%s: %w", pvc.GetNamespace(), pvc.GetName(), err)
 			}
 
-			return nil
+			return false, nil
 		},
 	)
 }
@@ -1604,16 +1629,16 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(ctx context.Context, ta
 	return nil
 }
 
-func (r *MantleBackupReconciler) createOrUpdateUploadJobs(ctx context.Context, target *mantlev1.MantleBackup) error {
-	uploadPartNum := -1
-	if target.Status.LargestCompletedUploadPartNum != nil {
-		uploadPartNum = *target.Status.LargestCompletedUploadPartNum
+func (r *MantleBackupReconciler) createOrUpdateUploadJobs(
+	ctx context.Context,
+	target *mantlev1.MantleBackup,
+) error {
+	minPartNum, maxPartNum, err := r.getPartNumRangeOfRunnableUploadJobs(ctx, target)
+	if err != nil {
+		return fmt.Errorf("failed to get part num range of runnable upload jobs: %w", err)
 	}
-	exportPartNum := -1
-	if target.Status.LargestCompletedExportPartNum != nil {
-		exportPartNum = *target.Status.LargestCompletedExportPartNum
-	}
-	for partNum := uploadPartNum + 1; partNum <= exportPartNum; partNum++ {
+
+	for partNum := minPartNum; partNum <= maxPartNum; partNum++ {
 		var job batchv1.Job
 		job.SetName(MakeUploadJobName(target, partNum))
 		job.SetNamespace(r.managedCephClusterID)
@@ -1884,16 +1909,20 @@ func (r *MantleBackupReconciler) handleCompletedImportJobs(ctx context.Context, 
 		backup,
 		labelComponentImportJob,
 		MantleImportJobPrefix,
-		func(job *batchv1.Job, partNum int) error {
-			if backup.Status.LargestCompletedImportPartNum == nil || *backup.Status.LargestCompletedImportPartNum < partNum {
-				// Use PATCH here in order not to update backup with stale values.
-				oldBackup := backup.DeepCopy()
-				backup.Status.LargestCompletedImportPartNum = &partNum
-				if err := r.Client.Status().Patch(ctx, backup, client.MergeFrom(oldBackup)); err != nil {
-					return fmt.Errorf("failed to patch .status.largestCompletedImportPartNum to %d: %w", partNum, err)
-				}
+		func(job *batchv1.Job, partNum int) (bool, error) {
+			if (backup.Status.LargestCompletedImportPartNum == nil && partNum != 0) ||
+				(backup.Status.LargestCompletedImportPartNum != nil && partNum != *backup.Status.LargestCompletedImportPartNum+1) {
+				return true, nil // skip
 			}
-			return nil
+
+			// Use PATCH here in order not to update backup with stale values.
+			oldBackup := backup.DeepCopy()
+			backup.Status.LargestCompletedImportPartNum = &partNum
+			if err := r.Client.Status().Patch(ctx, backup, client.MergeFrom(oldBackup)); err != nil {
+				return false, fmt.Errorf("failed to patch .status.largestCompletedImportPartNum to %d: %w", partNum, err)
+			}
+
+			return false, nil
 		},
 	)
 }
