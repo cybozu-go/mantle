@@ -124,6 +124,22 @@ spec:
                 description: '''createdAt'' specifies the creation date and time'
                 format: date-time
                 type: string
+              largestCompletedExportPartNum:
+                description: |-
+                  largestCompletedExportPartNum indicates the largest part number
+                  that has been successfully exported by `rbd export-diff`.
+                type: integer
+              largestCompletedImportPartNum:
+                description: |-
+                  largestCompletedImportPartNum indicates the largest part number
+                  that has been successfully imported by `rbd import-diff`.
+                type: integer
+              largestCompletedUploadPartNum:
+                description: |-
+                  largestCompletedUploadPartNum indicates the largest part number that has
+                  been successfully uploaded from the primary cluster to the secondary
+                  cluster.
+                type: integer
               pvManifest:
                 description: '''pvManifest'' saving backup target PV manifest'
                 type: string
@@ -133,6 +149,19 @@ spec:
               snapID:
                 description: '''snapID'' indicates SNAPID of `rbd snap ls`'
                 type: integer
+              snapSize:
+                description: '''snapSize'' indicates SIZE of `rbd snap ls`'
+                format: int64
+                type: integer
+              transferPartSize:
+                anyOf:
+                - type: integer
+                - type: string
+                description: |-
+                  'transferPartSize' indicates the size of each part of the data
+                  transferred from the primary to the secondary.
+                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                x-kubernetes-int-or-string: true
             type: object
         type: object
     served: true

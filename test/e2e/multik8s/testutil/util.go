@@ -26,13 +26,15 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 const (
-	CephClusterNamespace = "rook-ceph"
-	PrimaryK8sCluster    = 1
-	SecondaryK8sCluster  = 2
-	RgwDeployName        = "rook-ceph-rgw-ceph-object-store-a"
+	CephClusterNamespace       = "rook-ceph"
+	PrimaryK8sCluster          = 1
+	SecondaryK8sCluster        = 2
+	RgwDeployName              = "rook-ceph-rgw-ceph-object-store-a"
+	MantleControllerDeployName = "mantle-controller"
 )
 
 var (
@@ -257,8 +259,7 @@ func GetPVList(clusterNo int) (*corev1.PersistentVolumeList, error) {
 }
 
 func ChangeClusterRole(clusterNo int, newRole string) error {
-	deployName := "mantle-controller"
-	deploy, err := GetDeploy(clusterNo, CephClusterNamespace, deployName)
+	deploy, err := GetDeploy(clusterNo, CephClusterNamespace, MantleControllerDeployName)
 	if err != nil {
 		return fmt.Errorf("failed to get mantle-controller deploy: %w", err)
 	}
@@ -272,7 +273,7 @@ func ChangeClusterRole(clusterNo int, newRole string) error {
 	}
 
 	_, _, err = Kubectl(
-		clusterNo, nil, "patch", "deploy", "-n", CephClusterNamespace, deployName, "--type=json",
+		clusterNo, nil, "patch", "deploy", "-n", CephClusterNamespace, MantleControllerDeployName, "--type=json",
 		fmt.Sprintf(
 			`-p=[{"op": "replace", "path": "/spec/template/spec/containers/0/args/%d", "value":"--role=%s"}]`,
 			roleIndex,
@@ -297,7 +298,7 @@ func ChangeClusterRole(clusterNo int, newRole string) error {
 		}
 		ready := true
 		for _, pod := range pods.Items {
-			if strings.HasPrefix(pod.GetName(), deployName) {
+			if strings.HasPrefix(pod.GetName(), MantleControllerDeployName) {
 				for _, container := range pod.Spec.Containers {
 					if !slices.Contains(container.Args, fmt.Sprintf("--role=%s", newRole)) {
 						ready = false
@@ -681,6 +682,19 @@ func ListRBDSnapshotsInPVC(cluster int, namespace, pvcName string) ([]ceph.RBDSn
 	return snaps, nil
 }
 
+func FindRBDSnapshotInPVC(cluster int, namespace, pvcName, snapName string) (*ceph.RBDSnapshot, error) {
+	snaps, err := ListRBDSnapshotsInPVC(SecondaryK8sCluster, namespace, pvcName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list RBD snapshots in PVC: %s/%s: %w",
+			namespace, pvcName, err)
+	}
+	index := slices.IndexFunc(snaps, func(snap ceph.RBDSnapshot) bool { return snap.Name == snapName })
+	if index == -1 {
+		return nil, fmt.Errorf("failed to find the RBD snapshot in PVC: %s/%s: %s: %w", namespace, pvcName, snapName, err)
+	}
+	return &snaps[index], nil
+}
+
 func EnsurePVCHasSnapshot(cluster int, namespace, pvcName, snapName string) {
 	GinkgoHelper()
 	By("checking the PVC has a snapshot")
@@ -708,7 +722,7 @@ func createCephCmd(cluster int) ceph.CephCmd {
 	return ceph.NewCephCmdWithToolsAndCustomKubectl(kubectl, CephClusterNamespace)
 }
 
-func WaitUploadJobCreated(ctx SpecContext, cluster int, namespace, backupName string) {
+func WaitUploadJobCreated(ctx SpecContext, cluster int, namespace, backupName string, partNum int) {
 	GinkgoHelper()
 	By("waiting for an upload job to be created")
 	Eventually(ctx, func(g Gomega) {
@@ -717,7 +731,7 @@ func WaitUploadJobCreated(ctx SpecContext, cluster int, namespace, backupName st
 		jobs, err := GetJobList(cluster, CephClusterNamespace)
 		g.Expect(err).NotTo(HaveOccurred())
 		exist := slices.ContainsFunc(jobs.Items, func(job batchv1.Job) bool {
-			return job.GetName() == controller.MakeUploadJobName(mb)
+			return job.GetName() == controller.MakeUploadJobName(mb, partNum)
 		})
 		g.Expect(exist).To(BeTrue())
 	}).Should(Succeed())
@@ -736,16 +750,33 @@ func WaitJobDeleted(ctx SpecContext, cluster int, namespace, jobName string) {
 	}).Should(Succeed())
 }
 
+func WaitJobsDeleted(ctx SpecContext, cluster int, namespace, jobNamePrefix string) {
+	GinkgoHelper()
+	By("waiting for jobs to be deleted")
+	Eventually(ctx, func(g Gomega) {
+		jobs, err := GetJobList(cluster, CephClusterNamespace)
+		g.Expect(err).NotTo(HaveOccurred())
+		exist := slices.ContainsFunc(jobs.Items, func(job batchv1.Job) bool {
+			return strings.HasPrefix(job.GetName(), jobNamePrefix)
+		})
+		g.Expect(exist).To(BeFalse())
+	}).Should(Succeed())
+}
+
 func WaitTemporaryPrimaryJobsDeleted(ctx SpecContext, primaryMB *mantlev1.MantleBackup) {
 	GinkgoHelper()
-	WaitJobDeleted(ctx, PrimaryK8sCluster, CephClusterNamespace, controller.MakeExportJobName(primaryMB))
-	WaitJobDeleted(ctx, PrimaryK8sCluster, CephClusterNamespace, controller.MakeUploadJobName(primaryMB))
+	WaitJobsDeleted(ctx, PrimaryK8sCluster, CephClusterNamespace,
+		fmt.Sprintf("%s%s-", controller.MantleExportJobPrefix, string(primaryMB.GetUID())))
+	WaitJobsDeleted(ctx, PrimaryK8sCluster, CephClusterNamespace,
+		fmt.Sprintf("%s%s-", controller.MantleUploadJobPrefix, string(primaryMB.GetUID())))
 }
 
 func WaitTemporarySecondaryJobsDeleted(ctx SpecContext, secondaryMB *mantlev1.MantleBackup) {
 	GinkgoHelper()
-	WaitJobDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace, controller.MakeImportJobName(secondaryMB))
-	WaitJobDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace, controller.MakeDiscardJobName(secondaryMB))
+	WaitJobsDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace,
+		fmt.Sprintf("%s%s-", controller.MantleImportJobPrefix, string(secondaryMB.GetUID())))
+	WaitJobsDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace,
+		fmt.Sprintf("%s%s-", controller.MantleDiscardJobPrefix, string(secondaryMB.GetUID())))
 }
 
 func WaitTemporaryJobsDeleted(ctx SpecContext, primaryMB, secondaryMB *mantlev1.MantleBackup) {
@@ -767,9 +798,23 @@ func WaitPVCDeleted(ctx SpecContext, cluster int, namespace, pvcName string) {
 	}).Should(Succeed())
 }
 
+func WaitPVCsDeleted(ctx SpecContext, cluster int, namespace, pvcNamePrefix string) {
+	GinkgoHelper()
+	By("waiting for PVCs to be deleted")
+	Eventually(ctx, func(g Gomega) {
+		pvcs, err := GetPVCList(cluster, CephClusterNamespace)
+		g.Expect(err).NotTo(HaveOccurred())
+		exist := slices.ContainsFunc(pvcs.Items, func(pvc corev1.PersistentVolumeClaim) bool {
+			return strings.HasPrefix(pvc.GetName(), pvcNamePrefix)
+		})
+		g.Expect(exist).To(BeFalse())
+	}).Should(Succeed())
+}
+
 func WaitTemporaryPrimaryPVCsDeleted(ctx SpecContext, primaryMB *mantlev1.MantleBackup) {
 	GinkgoHelper()
-	WaitPVCDeleted(ctx, PrimaryK8sCluster, CephClusterNamespace, controller.MakeExportDataPVCName(primaryMB))
+	WaitPVCsDeleted(ctx, PrimaryK8sCluster, CephClusterNamespace,
+		fmt.Sprintf("%s%s-", controller.MantleExportDataPVCPrefix, string(primaryMB.GetUID())))
 }
 
 func WaitTemporarySecondaryPVCsDeleted(ctx SpecContext, secondaryMB *mantlev1.MantleBackup) {
@@ -801,11 +846,10 @@ func WaitTemporarySecondaryPVsDeleted(ctx SpecContext, secondaryMB *mantlev1.Man
 	WaitPVDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace, controller.MakeDiscardPVName(secondaryMB))
 }
 
-func WaitTemporaryS3ObjectDeleted(ctx SpecContext, primaryMB *mantlev1.MantleBackup) {
+func WaitTemporaryS3ObjectsDeleted(ctx SpecContext, primaryMB *mantlev1.MantleBackup) {
 	GinkgoHelper()
-	By("waiting for the temporary s3 object to be deleted")
-	expectedObjectName := controller.MakeObjectNameOfExportedData(
-		primaryMB.GetName(), string(primaryMB.GetUID()))
+	By("waiting for the temporary s3 objects to be deleted")
+	expectedObjectNamePrefix := fmt.Sprintf("%s-%s-", primaryMB.GetName(), string(primaryMB.GetUID()))
 	Eventually(ctx, func(g Gomega) {
 		objectStorageClient, err := CreateObjectStorageClient(ctx)
 		g.Expect(err).NotTo(HaveOccurred())
@@ -813,7 +857,7 @@ func WaitTemporaryS3ObjectDeleted(ctx SpecContext, primaryMB *mantlev1.MantleBac
 		g.Expect(err).NotTo(HaveOccurred())
 		for _, c := range listOutput.Contents {
 			g.Expect(c.Key).NotTo(BeNil())
-			g.Expect(*c.Key).NotTo(Equal(expectedObjectName))
+			g.Expect(strings.HasPrefix(*c.Key, expectedObjectNamePrefix)).To(BeFalse())
 		}
 	}).Should(Succeed())
 }
@@ -823,12 +867,86 @@ func WaitTemporaryResourcesDeleted(ctx SpecContext, primaryMB, secondaryMB *mant
 	WaitTemporaryJobsDeleted(ctx, primaryMB, secondaryMB)
 	WaitTemporaryPVCsDeleted(ctx, primaryMB, secondaryMB)
 	WaitTemporarySecondaryPVsDeleted(ctx, secondaryMB)
-	WaitTemporaryS3ObjectDeleted(ctx, primaryMB)
+	WaitTemporaryS3ObjectsDeleted(ctx, primaryMB)
 }
 
 func DeleteMantleBackup(cluster int, namespace, backupName string) {
 	GinkgoHelper()
 	By("deleting MantleBackup")
 	_, _, err := Kubectl(cluster, nil, "delete", "-n", namespace, "mantlebackup", backupName, "--wait=false")
+	Expect(err).NotTo(HaveOccurred())
+}
+
+func GetBackupTransferPartSize() (*resource.Quantity, error) {
+	deployMC, err := GetDeploy(PrimaryK8sCluster, CephClusterNamespace, MantleControllerDeployName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get mantle-controller deploy: %w", err)
+	}
+	args := deployMC.Spec.Template.Spec.Containers[0].Args
+	backupTransferPartSizeIndex := slices.IndexFunc(
+		args,
+		func(arg string) bool { return strings.HasPrefix(arg, "--backup-transfer-part-size=") },
+	)
+	if backupTransferPartSizeIndex == -1 {
+		return nil, errors.New("failed to find --backup-transfer-part-size= argument")
+	}
+	qty, ok := strings.CutPrefix(args[backupTransferPartSizeIndex], "--backup-transfer-part-size=")
+	if !ok {
+		return nil, errors.New("failed to parse --backup-transfer-part-size= argument")
+	}
+	qtyParsed, err := resource.ParseQuantity(qty)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse --backup-transfer-part-size= argument: %w", err)
+	}
+
+	return &qtyParsed, nil
+}
+
+func GetNumberOfBackupParts(snapshotSize *resource.Quantity) (int, error) {
+	backupTransferPartSize, err := GetBackupTransferPartSize()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get backup transfer part size :%w", err)
+	}
+	var expectedNumOfParts int64 = 1
+	if snapshotSize.Cmp(*backupTransferPartSize) > 0 { // pvcSize > backupTransferPartSize
+		backupTransferPartSize, ok := backupTransferPartSize.AsInt64()
+		if !ok {
+			return 0, errors.New("failed to convert backup transfer part size to i64")
+		}
+		pvcSizeI64, ok := snapshotSize.AsInt64()
+		if !ok {
+			return 0, errors.New("failed to convert pvc size to i64")
+		}
+		expectedNumOfParts = pvcSizeI64 / backupTransferPartSize
+		if pvcSizeI64%backupTransferPartSize != 0 {
+			expectedNumOfParts++
+		}
+	}
+	return int(expectedNumOfParts), nil
+}
+
+func ChangeBackupTransferPartSize(size string) {
+	GinkgoHelper()
+
+	deployMC, err := GetDeploy(PrimaryK8sCluster, CephClusterNamespace, MantleControllerDeployName)
+	Expect(err).NotTo(HaveOccurred())
+
+	args := deployMC.Spec.Template.Spec.Containers[0].Args
+	backupTransferPartSizeIndex := slices.IndexFunc(
+		args,
+		func(arg string) bool { return strings.HasPrefix(arg, "--backup-transfer-part-size=") },
+	)
+	Expect(backupTransferPartSizeIndex).NotTo(Equal(-1))
+
+	_, _, err = Kubectl(
+		PrimaryK8sCluster, nil,
+		"patch", "deploy", "-n", CephClusterNamespace, MantleControllerDeployName, "--type=json",
+		fmt.Sprintf(
+			`-p=[{"op": "replace", "path": "/spec/template/spec/containers/0/args/%d", `+
+				`"value":"--backup-transfer-part-size=%s"}]`,
+			backupTransferPartSizeIndex,
+			size,
+		),
+	)
 	Expect(err).NotTo(HaveOccurred())
 }

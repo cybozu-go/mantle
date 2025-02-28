@@ -19,6 +19,7 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	"github.com/spf13/cobra"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -50,6 +51,7 @@ var (
 	role                    string
 	mantleServiceEndpoint   string
 	maxExportJobs           int
+	maxUploadJobs           int
 	exportDataStorageClass  string
 	envSecret               string
 	objectStorageBucketName string
@@ -60,6 +62,7 @@ var (
 	httpProxy               string
 	httpsProxy              string
 	noProxy                 string
+	backupTransferPartSize  string
 
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
@@ -86,6 +89,8 @@ func init() {
 			"this option is required and is interpreted as the address that the secondary mantle should listen to.")
 	flags.IntVar(&maxExportJobs, "max-export-jobs", 8,
 		"The maximum number of export jobs that can run simultaneously. If you set this to 0, there is no limit.")
+	flags.IntVar(&maxUploadJobs, "max-upload-jobs", 8,
+		"The maximum number of export jobs that can run simultaneously. If you set this to 0, there is no limit.")
 	flags.StringVar(&exportDataStorageClass, "export-data-storage-class", "",
 		"The storage class of PVCs used to store exported data temporarily.")
 	flags.StringVar(&envSecret, "env-secret", "",
@@ -107,6 +112,8 @@ func init() {
 		"The proxy URL for HTTPS requests to the object storage and the gRPC endpoint of secondary mantle.")
 	flags.StringVar(&noProxy, "no-proxy", "",
 		"A string that contains comma-separated values specifying hosts that should be excluded from proxying.")
+	flags.StringVar(&backupTransferPartSize, "backup-transfer-part-size", "200Gi",
+		"The size of each backup data chunk to be transferred at a time.")
 
 	goflags := flag.NewFlagSet("goflags", flag.ExitOnError)
 	zapOpts.Development = true
@@ -174,6 +181,12 @@ func setupReconcilers(mgr manager.Manager, primarySettings *controller.PrimarySe
 		return err
 	}
 
+	parsedBackupTransferPartSize, err := resource.ParseQuantity(backupTransferPartSize)
+	if err != nil {
+		setupLog.Error(err, "failed to parse backup-transfer-part-size", "value", backupTransferPartSize)
+		return fmt.Errorf("failed to parse backup-transfer-part-size: %w", err)
+	}
+
 	backupReconciler := controller.NewMantleBackupReconciler(
 		mgr.GetClient(),
 		mgr.GetScheme(),
@@ -193,6 +206,7 @@ func setupReconcilers(mgr manager.Manager, primarySettings *controller.PrimarySe
 			HttpsProxy: httpsProxy,
 			NoProxy:    noProxy,
 		},
+		parsedBackupTransferPartSize,
 	)
 	if err := backupReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MantleBackup")
@@ -287,6 +301,7 @@ func setupPrimary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup) 
 		Conn:                   conn,
 		Client:                 proto.NewMantleServiceClient(conn),
 		MaxExportJobs:          maxExportJobs,
+		MaxUploadJobs:          maxUploadJobs,
 		ExportDataStorageClass: exportDataStorageClass,
 	}
 
