@@ -1162,6 +1162,11 @@ func (r *MantleBackupReconciler) handleCompletedJobsOfComponent(
 	return nil
 }
 
+func IsPartNextToLargestCompletedPart(largestCompletedPartNum *int, partNum int) bool {
+	return (largestCompletedPartNum == nil && partNum != 0) ||
+		(largestCompletedPartNum != nil && partNum != *largestCompletedPartNum+1)
+}
+
 func (r *MantleBackupReconciler) handleCompletedExportJobs(ctx context.Context, backup *mantlev1.MantleBackup) error {
 	return r.handleCompletedJobsOfComponent(
 		ctx,
@@ -1169,8 +1174,7 @@ func (r *MantleBackupReconciler) handleCompletedExportJobs(ctx context.Context, 
 		labelComponentExportJob,
 		MantleExportJobPrefix,
 		func(job *batchv1.Job, partNum int) (bool, error) {
-			if (backup.Status.LargestCompletedExportPartNum == nil && partNum != 0) ||
-				(backup.Status.LargestCompletedExportPartNum != nil && partNum != *backup.Status.LargestCompletedExportPartNum+1) {
+			if IsPartNextToLargestCompletedPart(backup.Status.LargestCompletedExportPartNum, partNum) {
 				return true, nil // skip
 			}
 
@@ -1209,22 +1213,22 @@ func (r *MantleBackupReconciler) canNewExportJobBeCreated(ctx context.Context) (
 	return true, nil
 }
 
-func (r *MantleBackupReconciler) getPartNumRangeOfRunnableUploadJobs(
+func (r *MantleBackupReconciler) getPartNumRangeOfExpectedRunningUploadJobs(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
 ) (int, int, error) {
-	uploadPartNum := -1
+	uploadedPartNum := -1
 	if backup.Status.LargestCompletedUploadPartNum != nil {
-		uploadPartNum = *backup.Status.LargestCompletedUploadPartNum
+		uploadedPartNum = *backup.Status.LargestCompletedUploadPartNum
 	}
 
-	exportPartNum := -1
+	exportedPartNum := -1
 	if backup.Status.LargestCompletedExportPartNum != nil {
-		exportPartNum = *backup.Status.LargestCompletedExportPartNum
+		exportedPartNum = *backup.Status.LargestCompletedExportPartNum
 	}
 
 	if r.primarySettings.MaxUploadJobs == 0 {
-		return uploadPartNum + 1, exportPartNum, nil
+		return uploadedPartNum + 1, exportedPartNum, nil
 	}
 
 	var jobs batchv1.JobList
@@ -1250,7 +1254,7 @@ func (r *MantleBackupReconciler) getPartNumRangeOfRunnableUploadJobs(
 
 	throttle := max(0, r.primarySettings.MaxUploadJobs-count)
 
-	return uploadPartNum + 1, min(exportPartNum, uploadPartNum+throttle), nil
+	return uploadedPartNum + 1, min(exportedPartNum, uploadedPartNum+throttle), nil
 }
 
 func (r *MantleBackupReconciler) addStatusTransferPartSizeIfEmpty(ctx context.Context, backup *mantlev1.MantleBackup) error {
@@ -1633,7 +1637,7 @@ func (r *MantleBackupReconciler) createOrUpdateUploadJobs(
 	ctx context.Context,
 	target *mantlev1.MantleBackup,
 ) error {
-	minPartNum, maxPartNum, err := r.getPartNumRangeOfRunnableUploadJobs(ctx, target)
+	minPartNum, maxPartNum, err := r.getPartNumRangeOfExpectedRunningUploadJobs(ctx, target)
 	if err != nil {
 		return fmt.Errorf("failed to get part num range of runnable upload jobs: %w", err)
 	}
@@ -1910,8 +1914,7 @@ func (r *MantleBackupReconciler) handleCompletedImportJobs(ctx context.Context, 
 		labelComponentImportJob,
 		MantleImportJobPrefix,
 		func(job *batchv1.Job, partNum int) (bool, error) {
-			if (backup.Status.LargestCompletedImportPartNum == nil && partNum != 0) ||
-				(backup.Status.LargestCompletedImportPartNum != nil && partNum != *backup.Status.LargestCompletedImportPartNum+1) {
+			if IsPartNextToLargestCompletedPart(backup.Status.LargestCompletedImportPartNum, partNum) {
 				return true, nil // skip
 			}
 
