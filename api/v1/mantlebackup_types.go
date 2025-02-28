@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -45,6 +46,13 @@ type MantleBackupStatus struct {
 
 	// 'snapID' indicates SNAPID of `rbd snap ls`
 	SnapID *int `json:"snapID,omitempty"`
+
+	// 'snapSize' indicates SIZE of `rbd snap ls`
+	SnapSize *int64 `json:"snapSize,omitempty"`
+
+	// 'transferPartSize' indicates the size of each part of the data
+	// transferred from the primary to the secondary.
+	TransferPartSize *resource.Quantity `json:"transferPartSize,omitempty"`
 }
 
 const (

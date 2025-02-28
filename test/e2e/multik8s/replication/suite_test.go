@@ -2,6 +2,7 @@ package replication
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"reflect"
 	"slices"
@@ -38,96 +39,122 @@ var _ = Describe("Mantle", func() {
 	Context("replication test", replicationTestSuite)
 })
 
-func replicationTestSuite() {
+func replicationTestSuite() { //nolint:gocyclo
 	Describe("replication test", func() {
-		It("should correctly replicate PVC and MantleBackup resources", func(ctx SpecContext) {
-			namespace := util.GetUniqueName("ns-")
-			pvcName := util.GetUniqueName("pvc-")
-			backupName := util.GetUniqueName("mb-")
-			restoreName := util.GetUniqueName("mr-")
+		It("should correctly replicate PVC and MantleBackup resources",
+			// This test case is intended to be run with various backup transfer
+			// part size. This label is attached mainly for CI. See also
+			// e2e-multiple-k8s-clusters.yaml workflow.
+			Label("various-transfer-part-size"),
+			func(ctx SpecContext) {
+				namespace := util.GetUniqueName("ns-")
+				pvcName := util.GetUniqueName("pvc-")
+				backupName := util.GetUniqueName("mb-")
+				restoreName := util.GetUniqueName("mr-")
 
-			SetupEnvironment(namespace)
-			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
-			writtenDataHash := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
-			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
-			WaitMantleBackupSynced(namespace, backupName)
+				SetupEnvironment(namespace)
+				CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+				writtenDataHash := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
+				CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
+				WaitMantleBackupSynced(namespace, backupName)
 
-			By("checking PVC is replicated")
-			Eventually(func() error {
-				primaryPVC, err := GetPVC(PrimaryK8sCluster, namespace, pvcName)
-				if err != nil {
-					return err
-				}
+				By("checking PVC is replicated")
+				Eventually(func() error {
+					primaryPVC, err := GetPVC(PrimaryK8sCluster, namespace, pvcName)
+					if err != nil {
+						return err
+					}
 
-				pvc, err := GetPVC(SecondaryK8sCluster, namespace, pvcName)
-				if err != nil {
-					return err
-				}
-				if pvc.Annotations == nil ||
-					pvc.Annotations["mantle.cybozu.io/remote-uid"] != string(primaryPVC.GetUID()) {
-					return errors.New("invalid remote-uid annotation")
-				}
-				primaryPVC.Spec.VolumeName = ""
-				pvc.Spec.VolumeName = ""
-				if !reflect.DeepEqual(primaryPVC.Spec, pvc.Spec) {
-					return errors.New("spec not equal")
-				}
-				if pvc.Status.Phase != corev1.ClaimBound {
-					return errors.New("pvc not bound")
-				}
+					pvc, err := GetPVC(SecondaryK8sCluster, namespace, pvcName)
+					if err != nil {
+						return err
+					}
+					if pvc.Annotations == nil ||
+						pvc.Annotations["mantle.cybozu.io/remote-uid"] != string(primaryPVC.GetUID()) {
+						return errors.New("invalid remote-uid annotation")
+					}
+					primaryPVC.Spec.VolumeName = ""
+					pvc.Spec.VolumeName = ""
+					if !reflect.DeepEqual(primaryPVC.Spec, pvc.Spec) {
+						return errors.New("spec not equal")
+					}
+					if pvc.Status.Phase != corev1.ClaimBound {
+						return errors.New("pvc not bound")
+					}
 
-				return nil
-			}).Should(Succeed())
+					return nil
+				}).Should(Succeed())
 
-			By("checking MantleBackup is replicated")
-			var primaryMB, secondaryMB *mantlev1.MantleBackup
-			Eventually(func() error {
-				primaryPVC, err := GetPVC(PrimaryK8sCluster, namespace, pvcName)
-				if err != nil {
-					return err
-				}
-				secondaryPVC, err := GetPVC(SecondaryK8sCluster, namespace, pvcName)
-				if err != nil {
-					return err
-				}
-				primaryMB, err = GetMB(PrimaryK8sCluster, namespace, backupName)
-				if err != nil {
-					return err
-				}
+				By("checking MantleBackup is replicated")
+				var primaryMB, secondaryMB *mantlev1.MantleBackup
+				Eventually(func() error {
+					primaryPVC, err := GetPVC(PrimaryK8sCluster, namespace, pvcName)
+					if err != nil {
+						return err
+					}
+					secondaryPVC, err := GetPVC(SecondaryK8sCluster, namespace, pvcName)
+					if err != nil {
+						return err
+					}
+					primaryMB, err = GetMB(PrimaryK8sCluster, namespace, backupName)
+					if err != nil {
+						return err
+					}
 
-				secondaryMB, err = GetMB(SecondaryK8sCluster, namespace, backupName)
-				if err != nil {
-					return err
-				}
-				if !controllerutil.ContainsFinalizer(secondaryMB, "mantlebackup.mantle.cybozu.io/finalizer") {
-					return errors.New("finalizer not found")
-				}
-				if secondaryMB.Labels == nil ||
-					secondaryMB.Labels["mantle.cybozu.io/local-backup-target-pvc-uid"] != string(secondaryPVC.GetUID()) ||
-					secondaryMB.Labels["mantle.cybozu.io/remote-backup-target-pvc-uid"] != string(primaryPVC.GetUID()) {
-					return errors.New("local/remote-backup-target-pvc-uid label not matched")
-				}
-				if secondaryMB.Annotations == nil ||
-					secondaryMB.Annotations["mantle.cybozu.io/remote-uid"] != string(primaryMB.GetUID()) {
-					return errors.New("remote-uid not matched")
-				}
-				if !reflect.DeepEqual(primaryMB.Spec, secondaryMB.Spec) {
-					return errors.New("spec not equal")
-				}
-				if secondaryMB.Status.CreatedAt.IsZero() {
-					return errors.New(".Status.CreatedAt is zero")
-				}
-				if !meta.IsStatusConditionTrue(secondaryMB.Status.Conditions, "ReadyToUse") {
-					return errors.New("ReadyToUse of .Status.Conditions is not True")
-				}
+					secondaryMB, err = GetMB(SecondaryK8sCluster, namespace, backupName)
+					if err != nil {
+						return err
+					}
+					if !controllerutil.ContainsFinalizer(secondaryMB, "mantlebackup.mantle.cybozu.io/finalizer") {
+						return errors.New("finalizer not found")
+					}
+					if secondaryMB.Labels == nil ||
+						secondaryMB.Labels["mantle.cybozu.io/local-backup-target-pvc-uid"] != string(secondaryPVC.GetUID()) ||
+						secondaryMB.Labels["mantle.cybozu.io/remote-backup-target-pvc-uid"] != string(primaryPVC.GetUID()) {
+						return errors.New("local/remote-backup-target-pvc-uid label not matched")
+					}
+					if secondaryMB.Annotations == nil ||
+						secondaryMB.Annotations["mantle.cybozu.io/remote-uid"] != string(primaryMB.GetUID()) {
+						return errors.New("remote-uid not matched")
+					}
+					if !reflect.DeepEqual(primaryMB.Spec, secondaryMB.Spec) {
+						return errors.New("spec not equal")
+					}
+					if secondaryMB.Status.CreatedAt.IsZero() {
+						return errors.New(".Status.CreatedAt is zero")
+					}
+					if !meta.IsStatusConditionTrue(secondaryMB.Status.Conditions, "ReadyToUse") {
+						return errors.New("ReadyToUse of .Status.Conditions is not True")
+					}
 
-				return nil
-			}).Should(Succeed())
+					// Check if snapshots are created correctly in the secondary Rook/Ceph cluster
+					snap, err := FindRBDSnapshotInPVC(SecondaryK8sCluster,
+						secondaryPVC.GetNamespace(), secondaryPVC.GetName(), secondaryMB.GetName())
+					if err != nil {
+						return fmt.Errorf("failed to find snapshot in PVC: %w", err)
+					}
+					if secondaryMB.Status.SnapID == nil || snap.Id != *secondaryMB.Status.SnapID {
+						return errors.New("invalid .status.snapID of secondary MB")
+					}
 
-			WaitTemporaryResourcesDeleted(ctx, primaryMB, secondaryMB)
-			EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
-			EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
-		})
+					return nil
+				}).Should(Succeed())
+
+				// Make sure snapshots are correctly created.
+				primarySnaps, err := ListRBDSnapshotsInPVC(PrimaryK8sCluster, namespace, pvcName)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(len(primarySnaps)).To(Equal(1))
+				Expect(primarySnaps[0].Name).To(Equal(backupName))
+				secondarySnaps, err := ListRBDSnapshotsInPVC(SecondaryK8sCluster, namespace, pvcName)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(len(secondarySnaps)).To(Equal(1)) // middle snapshots should be deleted.
+				Expect(secondarySnaps[0].Name).To(Equal(backupName))
+
+				WaitTemporaryResourcesDeleted(ctx, primaryMB, secondaryMB)
+				EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
+				EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
+			},
+		)
 
 		//nolint:dupl
 		It("should back up correctly if previous MB is deleted in the secondary cluster", func(ctx SpecContext) {
@@ -356,6 +383,106 @@ func replicationTestSuite() {
 			// Make sure M0 and M0' have the same contents.
 			EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName0, restoreName0, writtenDataHash0)
 			EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName0, restoreName0, writtenDataHash0)
+		})
+
+		It("should succeed to back up if backup-transfer-part-size is changed during uploading", func(ctx SpecContext) {
+			namespace := util.GetUniqueName("ns-")
+			pvcName := util.GetUniqueName("pvc-")
+			backupName := util.GetUniqueName("mb-")
+			restoreName := util.GetUniqueName("mr-")
+
+			SetupEnvironment(namespace)
+
+			// Pause the object storage to make upload Jobs fail.
+			PauseObjectStorage(ctx)
+			defer ResumeObjectStorage(ctx)
+
+			// Create MantleBackup M0.
+			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+			writtenDataHash := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
+			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
+
+			// Wait until an upload Job is created.
+			WaitUploadJobCreated(ctx, PrimaryK8sCluster, namespace, backupName, 0)
+
+			// Get the expected number of the backup parts before changing backup-transfer-part-size.
+			pvc, err := GetPVC(PrimaryK8sCluster, namespace, pvcName)
+			Expect(err).NotTo(HaveOccurred())
+			numParts, err := GetNumberOfBackupParts(pvc.Spec.Resources.Requests.Storage())
+			Expect(err).NotTo(HaveOccurred())
+
+			// Change backup-transfer-part-size
+			originalBackupTransferPartSize, err := GetBackupTransferPartSize()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(originalBackupTransferPartSize.String()).To(Equal("3Mi"))
+			ChangeBackupTransferPartSize("7Mi")
+			defer ChangeBackupTransferPartSize(originalBackupTransferPartSize.String())
+			newNumParts, err := GetNumberOfBackupParts(pvc.Spec.Resources.Requests.Storage())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(newNumParts).NotTo(Equal(numParts))
+
+			// Resume the process.
+			ResumeObjectStorage(ctx)
+
+			// Wait for MB to be synced.
+			WaitMantleBackupSynced(namespace, backupName)
+
+			// Make sure backups are correct.
+			EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
+			EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
+		})
+
+		It("should succeed to back up two MantleBackups in parallel", func(ctx SpecContext) {
+			namespace := util.GetUniqueName("ns-")
+			pvcName1 := util.GetUniqueName("pvc-")
+			pvcName2 := util.GetUniqueName("pvc-")
+			backupName1 := util.GetUniqueName("mb-")
+			backupName2 := util.GetUniqueName("mb-")
+			restoreName1 := util.GetUniqueName("mr-")
+			restoreName2 := util.GetUniqueName("mr-")
+
+			SetupEnvironment(namespace)
+
+			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName1)
+			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName2)
+			writtenDataHash1 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName1)
+			writtenDataHash2 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName2)
+			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName1, backupName1)
+			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName2, backupName2)
+			WaitMantleBackupSynced(namespace, backupName1)
+			WaitMantleBackupSynced(namespace, backupName2)
+
+			primaryMB1, err := GetMB(PrimaryK8sCluster, namespace, backupName1)
+			Expect(err).NotTo(HaveOccurred())
+			secondaryMB1, err := GetMB(SecondaryK8sCluster, namespace, backupName1)
+			Expect(err).NotTo(HaveOccurred())
+			WaitTemporaryResourcesDeleted(ctx, primaryMB1, secondaryMB1)
+
+			primaryMB2, err := GetMB(PrimaryK8sCluster, namespace, backupName2)
+			Expect(err).NotTo(HaveOccurred())
+			secondaryMB2, err := GetMB(SecondaryK8sCluster, namespace, backupName2)
+			Expect(err).NotTo(HaveOccurred())
+			WaitTemporaryResourcesDeleted(ctx, primaryMB2, secondaryMB2)
+
+			Expect(meta.IsStatusConditionTrue(secondaryMB1.Status.Conditions, "ReadyToUse")).To(BeTrue())
+			Expect(meta.IsStatusConditionTrue(secondaryMB2.Status.Conditions, "ReadyToUse")).To(BeTrue())
+
+			snap, err := FindRBDSnapshotInPVC(SecondaryK8sCluster, namespace, pvcName1, backupName1)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(secondaryMB1.Status.SnapID).NotTo(BeNil())
+			Expect(*secondaryMB1.Status.SnapID).To(Equal(snap.Id))
+			Expect(snap.Name).To(Equal(secondaryMB1.Name))
+
+			snap, err = FindRBDSnapshotInPVC(SecondaryK8sCluster, namespace, pvcName2, backupName2)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(secondaryMB2.Status.SnapID).NotTo(BeNil())
+			Expect(*secondaryMB2.Status.SnapID).To(Equal(snap.Id))
+			Expect(snap.Name).To(Equal(secondaryMB2.Name))
+
+			EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName1, restoreName1, writtenDataHash1)
+			EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName2, restoreName2, writtenDataHash2)
+			EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName1, restoreName1, writtenDataHash1)
+			EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName2, restoreName2, writtenDataHash2)
 		})
 
 		It("should get metrics from the controller pod in the primary cluster", func(ctx SpecContext) {

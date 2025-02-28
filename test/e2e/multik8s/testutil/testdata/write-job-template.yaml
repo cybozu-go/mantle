@@ -13,7 +13,7 @@ spec:
         - bash
         - -c
         - |
-          dd if=/dev/urandom of=/volume/data bs=1K count=1 >&/dev/null
+          dd if=/dev/urandom of=/volume/data bs=1M count=10 >&/dev/null
           sha256sum /volume/data | awk '{print $1}'
         volumeMounts:
         - name: volume
