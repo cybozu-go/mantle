@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	_ "embed"
@@ -93,17 +95,18 @@ type ProxySettings struct {
 // MantleBackupReconciler reconciles a MantleBackup object
 type MantleBackupReconciler struct {
 	client.Client
-	Scheme                *runtime.Scheme
-	ceph                  ceph.CephCmd
-	managedCephClusterID  string
-	role                  string
-	primarySettings       *PrimarySettings // This should be non-nil if and only if role equals 'primary'.
-	expireQueueCh         chan event.GenericEvent
-	podImage              string
-	envSecret             string
-	objectStorageSettings *ObjectStorageSettings // This should be non-nil if and only if role equals 'primary' or 'secondary'.
-	objectStorageClient   objectstorage.Bucket
-	proxySettings         *ProxySettings
+	Scheme                 *runtime.Scheme
+	ceph                   ceph.CephCmd
+	managedCephClusterID   string
+	role                   string
+	primarySettings        *PrimarySettings // This should be non-nil if and only if role equals 'primary'.
+	expireQueueCh          chan event.GenericEvent
+	podImage               string
+	envSecret              string
+	objectStorageSettings  *ObjectStorageSettings // This should be non-nil if and only if role equals 'primary' or 'secondary'.
+	objectStorageClient    objectstorage.Bucket
+	proxySettings          *ProxySettings
+	backupTransferPartSize resource.Quantity
 }
 
 // NewMantleBackupReconciler returns NodeReconciler.
@@ -117,19 +120,21 @@ func NewMantleBackupReconciler(
 	envSecret string,
 	objectStorageSettings *ObjectStorageSettings,
 	proxySettings *ProxySettings,
+	backupTransferPartSize resource.Quantity,
 ) *MantleBackupReconciler {
 	return &MantleBackupReconciler{
-		Client:                client,
-		Scheme:                scheme,
-		ceph:                  ceph.NewCephCmd(),
-		managedCephClusterID:  managedCephClusterID,
-		role:                  role,
-		primarySettings:       primarySettings,
-		expireQueueCh:         make(chan event.GenericEvent),
-		podImage:              podImage,
-		envSecret:             envSecret,
-		objectStorageSettings: objectStorageSettings,
-		proxySettings:         proxySettings,
+		Client:                 client,
+		Scheme:                 scheme,
+		ceph:                   ceph.NewCephCmd(),
+		managedCephClusterID:   managedCephClusterID,
+		role:                   role,
+		primarySettings:        primarySettings,
+		expireQueueCh:          make(chan event.GenericEvent),
+		podImage:               podImage,
+		envSecret:              envSecret,
+		objectStorageSettings:  objectStorageSettings,
+		proxySettings:          proxySettings,
+		backupTransferPartSize: backupTransferPartSize,
 	}
 }
 
@@ -497,7 +502,7 @@ func (r *MantleBackupReconciler) replicate(
 	if prepareResult.isSecondaryMantleBackupReadyToUse {
 		return r.primaryCleanup(ctx, backup)
 	}
-	return r.export(ctx, backup, prepareResult)
+	return r.startExportAndUpload(ctx, backup, prepareResult)
 }
 
 func (r *MantleBackupReconciler) replicateManifests(
@@ -570,6 +575,8 @@ func (r *MantleBackupReconciler) replicateManifests(
 	backupSent.SetFinalizers([]string{MantleBackupFinalizerName})
 	backupSent.Spec = backup.Spec
 	backupSent.Status.CreatedAt = backup.Status.CreatedAt
+	backupSent.Status.SnapSize = backup.Status.SnapSize
+	backupSent.Status.TransferPartSize = backup.Status.TransferPartSize
 	backupSentJson, err := json.Marshal(backupSent)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -693,6 +700,7 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 
 		backup.Status.SnapID = &snapshot.Id
 		backup.Status.CreatedAt = metav1.NewTime(snapshot.Timestamp.Time)
+		backup.Status.SnapSize = &snapshot.Size
 
 		meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
 			Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionTrue, Reason: mantlev1.BackupReasonNone})
@@ -926,7 +934,7 @@ func searchForDiffOriginMantleBackup(
 	return diffOrigin
 }
 
-func (r *MantleBackupReconciler) export(
+func (r *MantleBackupReconciler) startExportAndUpload(
 	ctx context.Context,
 	targetBackup *mantlev1.MantleBackup,
 	prepareResult *dataSyncPrepareResult,
@@ -961,24 +969,12 @@ func (r *MantleBackupReconciler) export(
 		return ctrl.Result{}, err
 	}
 
-	if result, err := r.checkIfNewJobCanBeCreated(ctx); err != nil || !result.IsZero() {
-		return result, err
+	if err := r.startExport(ctx, targetBackup, sourceBackupName); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to export: %w", err)
 	}
 
-	if err := r.createOrUpdateExportDataPVC(ctx, targetBackup); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	if err := r.createOrUpdateExportJob(ctx, targetBackup, sourceBackupName); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	if result, err := r.checkIfExportJobIsCompleted(ctx, targetBackup); err != nil || !result.IsZero() {
-		return result, err
-	}
-
-	if err := r.createOrUpdateExportDataUploadJob(ctx, targetBackup); err != nil {
-		return ctrl.Result{}, err
+	if err := r.startUpload(ctx, targetBackup); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to upload MantleBackup: %w", err)
 	}
 
 	return requeueReconciliation(), nil
@@ -1024,9 +1020,137 @@ func (r *MantleBackupReconciler) annotateExportSourceMantleBackup(
 	return err
 }
 
-func (r *MantleBackupReconciler) checkIfNewJobCanBeCreated(ctx context.Context) (ctrl.Result, error) {
+// startExport reconciles export Jobs and PVCs. Note that it might update
+// `targetBackup`. Because of this, the values you get from r.Client.Get could
+// be outdated due to its stale cache. Therefore, after we call this function,
+// we MUST use `targetBackup` directly and MUST NOT use r.Client.Get (nor
+// functions like ctrl.CreateOrUpdate which use Get inside) to fetch its values,
+// as they might not be current.
+func (r *MantleBackupReconciler) startExport(
+	ctx context.Context,
+	targetBackup *mantlev1.MantleBackup,
+	sourceBackupName *string,
+) error {
+	// NOTE: `handleCompletedExportJob` might update `targetBackup`.
+	if err := r.handleCompletedExportJobs(ctx, targetBackup); err != nil {
+		return fmt.Errorf("failed to handle completed export jobs: %w", err)
+	}
+
+	if ok, err := r.canNewExportJobBeCreated(ctx); err != nil {
+		return fmt.Errorf("failed to check if a new export Job can be created: %w", err)
+	} else if !ok {
+		// skip to create an export Job
+		return nil
+	}
+
+	if err := r.addStatusTransferPartSizeIfEmpty(ctx, targetBackup); err != nil {
+		return fmt.Errorf("failed to patch .status.transferPartSize: %w", err)
+	}
+
+	if ok, err := r.haveAllExportJobsCompleted(targetBackup); err != nil {
+		return fmt.Errorf("failed to check if all export Jobs are completed: %w", err)
+	} else if ok {
+		return nil
+	}
+
+	if err := r.createOrUpdateExportDataPVC(ctx, targetBackup); err != nil {
+		return fmt.Errorf("failed to create or update export data PVC: %w", err)
+	}
+
+	if err := r.createOrUpdateExportJob(ctx, targetBackup, sourceBackupName); err != nil {
+		return fmt.Errorf("failed to create or update export Job: %w", err)
+	}
+
+	return nil
+}
+
+func (r *MantleBackupReconciler) handleCompletedJobsOfComponent(
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
+	componentLabel string,
+	componentPrefix string,
+	body func(job *batchv1.Job, partNum int) (bool, error),
+) error {
+	var jobList batchv1.JobList
+	if err := r.Client.List(ctx, &jobList, &client.ListOptions{
+		Namespace: r.managedCephClusterID,
+		LabelSelector: labels.SelectorFromSet(map[string]string{
+			"app.kubernetes.io/name":      labelAppNameValue,
+			"app.kubernetes.io/component": componentLabel,
+		}),
+	}); err != nil {
+		return fmt.Errorf("failed to list Jobs: %w", err)
+	}
+
+	prefix := fmt.Sprintf("%s%s-", componentPrefix, string(backup.GetUID()))
+	for _, job := range jobList.Items {
+		if !IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete) {
+			continue
+		}
+
+		partNumString, ok := strings.CutPrefix(job.GetName(), prefix)
+		if !ok {
+			continue
+		}
+		partNum, err := strconv.Atoi(partNumString)
+		if err != nil {
+			return fmt.Errorf("failed to extract part number: %s: %w", partNumString, err)
+		}
+
+		skipped, err := body(&job, partNum)
+		if err != nil {
+			return fmt.Errorf("failed to run body: %w", err)
+		}
+		if skipped {
+			continue
+		}
+
+		propagationPolicy := metav1.DeletePropagationBackground
+		if err := r.Client.Delete(ctx, &job, &client.DeleteOptions{
+			Preconditions: &metav1.Preconditions{
+				UID:             &job.UID,
+				ResourceVersion: &job.ResourceVersion,
+			},
+			PropagationPolicy: &propagationPolicy,
+		}); err != nil {
+			return fmt.Errorf("failed to delete Job: %s: %w", job.GetName(), err)
+		}
+	}
+
+	return nil
+}
+
+func IsPartNextToLargestCompletedPart(largestCompletedPartNum *int, partNum int) bool {
+	return (largestCompletedPartNum == nil && partNum != 0) ||
+		(largestCompletedPartNum != nil && partNum != *largestCompletedPartNum+1)
+}
+
+func (r *MantleBackupReconciler) handleCompletedExportJobs(ctx context.Context, backup *mantlev1.MantleBackup) error {
+	return r.handleCompletedJobsOfComponent(
+		ctx,
+		backup,
+		labelComponentExportJob,
+		MantleExportJobPrefix,
+		func(job *batchv1.Job, partNum int) (bool, error) {
+			if IsPartNextToLargestCompletedPart(backup.Status.LargestCompletedExportPartNum, partNum) {
+				return true, nil // skip
+			}
+
+			// Use PATCH here in order not to update backup with stale values.
+			oldBackup := backup.DeepCopy()
+			backup.Status.LargestCompletedExportPartNum = &partNum
+			if err := r.Client.Status().Patch(ctx, backup, client.MergeFrom(oldBackup)); err != nil {
+				return false, fmt.Errorf("failed to patch .status.largestCompletedExportPartNum to %d: %w", partNum, err)
+			}
+
+			return false, nil
+		},
+	)
+}
+
+func (r *MantleBackupReconciler) canNewExportJobBeCreated(ctx context.Context) (bool, error) {
 	if r.primarySettings.MaxExportJobs == 0 {
-		return ctrl.Result{}, nil
+		return true, nil
 	}
 
 	var jobs batchv1.JobList
@@ -1037,14 +1161,182 @@ func (r *MantleBackupReconciler) checkIfNewJobCanBeCreated(ctx context.Context) 
 			"app.kubernetes.io/component": labelComponentExportJob,
 		}),
 	}); err != nil {
-		return ctrl.Result{}, err
+		return false, fmt.Errorf("failed to list export Jobs: %w", err)
 	}
 
 	if len(jobs.Items) >= r.primarySettings.MaxExportJobs {
-		return requeueReconciliation(), nil
+		return false, nil
 	}
 
-	return ctrl.Result{}, nil
+	return true, nil
+}
+
+func (r *MantleBackupReconciler) getPartNumRangeOfExpectedRunningUploadJobs(
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
+) (int, int, error) {
+	uploadedPartNum := -1
+	if backup.Status.LargestCompletedUploadPartNum != nil {
+		uploadedPartNum = *backup.Status.LargestCompletedUploadPartNum
+	}
+
+	exportedPartNum := -1
+	if backup.Status.LargestCompletedExportPartNum != nil {
+		exportedPartNum = *backup.Status.LargestCompletedExportPartNum
+	}
+
+	if r.primarySettings.MaxUploadJobs == 0 {
+		return uploadedPartNum + 1, exportedPartNum, nil
+	}
+
+	var jobs batchv1.JobList
+	if err := r.Client.List(ctx, &jobs, &client.ListOptions{
+		Namespace: r.managedCephClusterID,
+		LabelSelector: labels.SelectorFromSet(map[string]string{
+			"app.kubernetes.io/name":      labelAppNameValue,
+			"app.kubernetes.io/component": labelComponentUploadJob,
+		}),
+	}); err != nil {
+		return 0, 0, fmt.Errorf("failed to list upload Jobs: %w", err)
+	}
+
+	// Count upload Jobs that is NOT related to backup.
+	count := 0
+	prefix := fmt.Sprintf("%s%s-", MantleUploadJobPrefix, string(backup.GetUID()))
+	for _, job := range jobs.Items {
+		if strings.HasPrefix(job.GetName(), prefix) {
+			continue
+		}
+		count++
+	}
+
+	throttle := max(0, r.primarySettings.MaxUploadJobs-count)
+
+	return uploadedPartNum + 1, min(exportedPartNum, uploadedPartNum+throttle), nil
+}
+
+func (r *MantleBackupReconciler) addStatusTransferPartSizeIfEmpty(ctx context.Context, backup *mantlev1.MantleBackup) error {
+	if backup.Status.TransferPartSize != nil {
+		return nil
+	}
+
+	// Use PATCH here in order not to update backup with stale values.
+	oldBackup := backup.DeepCopy()
+	backup.Status.TransferPartSize = &r.backupTransferPartSize
+	if err := r.Client.Status().Patch(ctx, backup, client.MergeFrom(oldBackup)); err != nil {
+		return fmt.Errorf("failed to patch .status.transferPartSize: %s: %w", r.backupTransferPartSize.String(), err)
+	}
+
+	return nil
+}
+
+func (r *MantleBackupReconciler) getPoolAndImageFromStatusPVManifest(backup *mantlev1.MantleBackup) (string, string, error) {
+	var pv corev1.PersistentVolume
+	if err := json.Unmarshal([]byte(backup.Status.PVManifest), &pv); err != nil {
+		return "", "", fmt.Errorf("failed to unmarshal status.PVManifest: %w", err)
+	}
+	return pv.Spec.CSI.VolumeAttributes["pool"], pv.Spec.CSI.VolumeAttributes["imageName"], nil
+}
+
+func (r *MantleBackupReconciler) getNumberOfParts(backup *mantlev1.MantleBackup) (int, error) {
+	if backup.Status.SnapSize == nil {
+		return 0, fmt.Errorf("failed to get status.snapSize: %s/%s", backup.GetNamespace(), backup.GetName())
+	}
+	if backup.Status.TransferPartSize == nil {
+		return 0, fmt.Errorf("failed to get status.transferPartSize: %s/%s", backup.GetNamespace(), backup.GetName())
+	}
+
+	transferPartSize, ok := backup.Status.TransferPartSize.AsInt64()
+	if !ok {
+		return 0, fmt.Errorf("failed to convert transferPartSize to int64: %s/%s: %s",
+			backup.GetNamespace(), backup.GetName(), backup.Status.TransferPartSize.String())
+	}
+
+	numParts := *backup.Status.SnapSize / transferPartSize
+	if *backup.Status.SnapSize%transferPartSize != 0 {
+		numParts++
+	}
+	return int(numParts), nil
+}
+
+func (r *MantleBackupReconciler) haveAllExportJobsCompleted(backup *mantlev1.MantleBackup) (bool, error) {
+	limit, err := r.getNumberOfParts(backup)
+	if err != nil {
+		return false, fmt.Errorf("failed to get the number of the parts of the exported data: %w", err)
+	}
+
+	partNum := -1
+	if backup.Status.LargestCompletedExportPartNum != nil {
+		partNum = *backup.Status.LargestCompletedExportPartNum
+	}
+	return partNum+1 == limit, nil
+}
+
+func (r *MantleBackupReconciler) startUpload(ctx context.Context, targetBackup *mantlev1.MantleBackup) error {
+	// NOTE: `handleCompletedUploadJob` might update `targetBackup`.
+	if err := r.handleCompletedUploadJobs(ctx, targetBackup); err != nil {
+		return fmt.Errorf("failed to handle completed upload jobs: %w", err)
+	}
+
+	if err := r.createOrUpdateUploadJobs(ctx, targetBackup); err != nil {
+		return fmt.Errorf("failed to create or update upload jobs: %w", err)
+	}
+
+	return nil
+}
+
+func (r *MantleBackupReconciler) handleCompletedUploadJobs(ctx context.Context, backup *mantlev1.MantleBackup) error {
+	return r.handleCompletedJobsOfComponent(
+		ctx,
+		backup,
+		labelComponentUploadJob,
+		MantleUploadJobPrefix,
+		func(job *batchv1.Job, partNum int) (bool, error) {
+			if (backup.Status.LargestCompletedUploadPartNum == nil && partNum != 0) ||
+				(backup.Status.LargestCompletedUploadPartNum != nil && partNum != *backup.Status.LargestCompletedUploadPartNum+1) {
+				return true, nil // skip
+			}
+
+			// Use PATCH here in order not to update backup with stale values.
+			oldBackup := backup.DeepCopy()
+			backup.Status.LargestCompletedUploadPartNum = &partNum
+			if err := r.Client.Status().Patch(ctx, backup, client.MergeFrom(oldBackup)); err != nil {
+				return false, fmt.Errorf("failed to patch .status.largestCompletedUploadPartNum to %d: %w", partNum, err)
+			}
+
+			pvc := corev1.PersistentVolumeClaim{}
+			pvc.SetName(MakeExportDataPVCName(backup, partNum))
+			pvc.SetNamespace(r.managedCephClusterID)
+			if err := r.Client.Delete(ctx, &pvc); err != nil && !aerrors.IsNotFound(err) {
+				return false, fmt.Errorf("failed to delete export data PVC: %s/%s: %w", pvc.GetNamespace(), pvc.GetName(), err)
+			}
+
+			return false, nil
+		},
+	)
+}
+
+func calculateExportDataPVCSize(transferPartSize *resource.Quantity) (*resource.Quantity, error) {
+	if transferPartSize == nil {
+		return nil, errors.New("transferPartSize cannot be nil")
+	}
+
+	pvcSizeI64, ok := transferPartSize.AsInt64()
+	if !ok {
+		return nil, fmt.Errorf("failed to convert status.transferPartSize to int64: %s", transferPartSize.String())
+	}
+
+	if pvcSizeI64 < 512*1024*1024 {
+		pvcSizeI64 = 512 * 1024 * 1024
+	}
+	pvcSizeI64 = int64(float64(pvcSizeI64) * 1.2)
+
+	pvcSize := resource.NewQuantity(pvcSizeI64, transferPartSize.Format)
+	if pvcSize == nil {
+		return nil, fmt.Errorf("resource.NewQuantity failed: %d %s", pvcSizeI64, string(transferPartSize.Format))
+	}
+
+	return pvcSize, nil
 }
 
 func (r *MantleBackupReconciler) createOrUpdateExportDataPVC(ctx context.Context, target *mantlev1.MantleBackup) error {
@@ -1053,14 +1345,21 @@ func (r *MantleBackupReconciler) createOrUpdateExportDataPVC(ctx context.Context
 		return err
 	}
 
-	pvcSize := targetPVC.Spec.Resources.Requests[corev1.ResourceStorage].DeepCopy()
-	// We assume that any diff data will not exceed twice the size of the target PVC.
-	pvcSize.Mul(2)
+	pvcSize, err := calculateExportDataPVCSize(target.Status.TransferPartSize)
+	if err != nil {
+		return fmt.Errorf("failed to calculate export data PVC size: %s/%s: %w",
+			target.GetNamespace(), target.GetName(), err)
+	}
+
+	partNum := 0
+	if target.Status.LargestCompletedExportPartNum != nil {
+		partNum = *target.Status.LargestCompletedExportPartNum + 1
+	}
 
 	var pvc corev1.PersistentVolumeClaim
-	pvc.SetName(MakeExportDataPVCName(target))
+	pvc.SetName(MakeExportDataPVCName(target, partNum))
 	pvc.SetNamespace(r.managedCephClusterID)
-	_, err := ctrl.CreateOrUpdate(ctx, r.Client, &pvc, func() error {
+	_, err = ctrl.CreateOrUpdate(ctx, r.Client, &pvc, func() error {
 		labels := pvc.GetLabels()
 		if labels == nil {
 			labels = make(map[string]string)
@@ -1072,7 +1371,7 @@ func (r *MantleBackupReconciler) createOrUpdateExportDataPVC(ctx context.Context
 		if pvc.Spec.Resources.Requests == nil {
 			pvc.Spec.Resources.Requests = map[corev1.ResourceName]resource.Quantity{}
 		}
-		pvc.Spec.Resources.Requests[corev1.ResourceStorage] = pvcSize
+		pvc.Spec.Resources.Requests[corev1.ResourceStorage] = *pvcSize
 
 		pvc.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
 		pvc.Spec.StorageClassName = &r.primarySettings.ExportDataStorageClass
@@ -1083,24 +1382,28 @@ func (r *MantleBackupReconciler) createOrUpdateExportDataPVC(ctx context.Context
 	return err
 }
 
-func MakeExportJobName(target *mantlev1.MantleBackup) string {
-	return MantleExportJobPrefix + string(target.GetUID())
+func MakeExportJobName(target *mantlev1.MantleBackup, index int) string {
+	return fmt.Sprintf("%s%s-%d", MantleExportJobPrefix, string(target.GetUID()), index)
 }
 
-func MakeUploadJobName(target *mantlev1.MantleBackup) string {
-	return MantleUploadJobPrefix + string(target.GetUID())
+func MakeUploadJobName(target *mantlev1.MantleBackup, index int) string {
+	return fmt.Sprintf("%s%s-%d", MantleUploadJobPrefix, string(target.GetUID()), index)
 }
 
-func MakeExportDataPVCName(target *mantlev1.MantleBackup) string {
-	return MantleExportDataPVCPrefix + string(target.GetUID())
+func MakeExportDataPVCName(target *mantlev1.MantleBackup, index int) string {
+	return fmt.Sprintf("%s%s-%d", MantleExportDataPVCPrefix, string(target.GetUID()), index)
 }
 
-func MakeObjectNameOfExportedData(name, uid string) string {
-	return fmt.Sprintf("%s-%s.bin", name, uid)
+func MakeObjectNameOfExportedData(name, uid string, index int) string {
+	return fmt.Sprintf("%s-%s-%d.bin", name, uid, index)
 }
 
-func MakeImportJobName(target *mantlev1.MantleBackup) string {
-	return MantleImportJobPrefix + string(target.GetUID())
+func MakeImportJobName(target *mantlev1.MantleBackup, index int) string {
+	return fmt.Sprintf("%s%s-%d", MantleImportJobPrefix, string(target.GetUID()), index)
+}
+
+func MakeMiddleSnapshotName(backup *mantlev1.MantleBackup, offset int) string {
+	return fmt.Sprintf("%s-offset-%d", backup.GetAnnotations()[annotRemoteUID], offset)
 }
 
 func MakeDiscardJobName(target *mantlev1.MantleBackup) string {
@@ -1121,13 +1424,23 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(ctx context.Context, ta
 		sourceBackupName = *sourceBackupNamePtr
 	}
 
-	var pv corev1.PersistentVolume
-	if err := json.Unmarshal([]byte(target.Status.PVManifest), &pv); err != nil {
-		return err
+	poolName, imageName, err := r.getPoolAndImageFromStatusPVManifest(target)
+	if err != nil {
+		return fmt.Errorf("failed to get pool and image from .status.PVManifest: %w", err)
+	}
+
+	partNum := 0
+	if target.Status.LargestCompletedExportPartNum != nil {
+		partNum = *target.Status.LargestCompletedExportPartNum + 1
+	}
+
+	transferPartSize, ok := target.Status.TransferPartSize.AsInt64()
+	if !ok {
+		return fmt.Errorf("failed to convert transferPartSize to int64: %d", transferPartSize)
 	}
 
 	var job batchv1.Job
-	job.SetName(MakeExportJobName(target))
+	job.SetName(MakeExportJobName(target, partNum))
 	job.SetNamespace(r.managedCephClusterID)
 	if _, err := ctrl.CreateOrUpdate(ctx, r.Client, &job, func() error {
 		labels := job.GetLabels()
@@ -1172,11 +1485,11 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(ctx context.Context, ta
 					},
 					{
 						Name:  "POOL_NAME",
-						Value: pv.Spec.CSI.VolumeAttributes["pool"],
+						Value: poolName,
 					},
 					{
 						Name:  "SRC_IMAGE_NAME",
-						Value: pv.Spec.CSI.VolumeAttributes["imageName"],
+						Value: imageName,
 					},
 					{
 						Name:  "FROM_SNAP_NAME",
@@ -1185,6 +1498,18 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(ctx context.Context, ta
 					{
 						Name:  "SRC_SNAP_NAME",
 						Value: target.GetName(),
+					},
+					{
+						Name:  "PART_NUM",
+						Value: strconv.Itoa(partNum),
+					},
+					{
+						Name:  "TRANSFER_PART_SIZE_IN_BYTES",
+						Value: strconv.FormatInt(transferPartSize, 10),
+					},
+					{
+						Name:  "EXPORT_TARGET_MANTLE_BACKUP_UID",
+						Value: string(target.GetUID()),
 					},
 				},
 				Image:           r.podImage,
@@ -1217,7 +1542,7 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(ctx context.Context, ta
 				Name: "volume-to-store",
 				VolumeSource: corev1.VolumeSource{
 					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-						ClaimName: MakeExportDataPVCName(target),
+						ClaimName: MakeExportDataPVCName(target, partNum),
 					},
 				},
 			},
@@ -1266,169 +1591,156 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(ctx context.Context, ta
 	return nil
 }
 
-func (r *MantleBackupReconciler) checkIfExportJobIsCompleted(
+func (r *MantleBackupReconciler) createOrUpdateUploadJobs(
 	ctx context.Context,
 	target *mantlev1.MantleBackup,
-) (ctrl.Result, error) {
-	var job batchv1.Job
-	if err := r.Client.Get(
-		ctx,
-		types.NamespacedName{
-			Name:      MakeExportJobName(target),
-			Namespace: r.managedCephClusterID,
-		},
-		&job,
-	); err != nil {
-		if aerrors.IsNotFound(err) { // the cache may be stale.
-			return requeueReconciliation(), nil
-		}
-		return ctrl.Result{}, err
+) error {
+	minPartNum, maxPartNum, err := r.getPartNumRangeOfExpectedRunningUploadJobs(ctx, target)
+	if err != nil {
+		return fmt.Errorf("failed to get part num range of runnable upload jobs: %w", err)
 	}
 
-	// Check if the export Job is completed or not
-	if IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete) {
-		return ctrl.Result{}, nil
-	}
+	for partNum := minPartNum; partNum <= maxPartNum; partNum++ {
+		var job batchv1.Job
+		job.SetName(MakeUploadJobName(target, partNum))
+		job.SetNamespace(r.managedCephClusterID)
+		if _, err := ctrl.CreateOrUpdate(ctx, r.Client, &job, func() error {
+			labels := job.GetLabels()
+			if labels == nil {
+				labels = map[string]string{}
+			}
+			labels["app.kubernetes.io/name"] = labelAppNameValue
+			labels["app.kubernetes.io/component"] = labelComponentUploadJob
+			job.SetLabels(labels)
 
-	return requeueReconciliation(), nil
-}
+			var backoffLimit int32 = 65535
+			job.Spec.BackoffLimit = &backoffLimit
 
-func (r *MantleBackupReconciler) createOrUpdateExportDataUploadJob(ctx context.Context, target *mantlev1.MantleBackup) error {
-	var job batchv1.Job
-	job.SetName(MakeUploadJobName(target))
-	job.SetNamespace(r.managedCephClusterID)
-	if _, err := ctrl.CreateOrUpdate(ctx, r.Client, &job, func() error {
-		labels := job.GetLabels()
-		if labels == nil {
-			labels = map[string]string{}
-		}
-		labels["app.kubernetes.io/name"] = labelAppNameValue
-		labels["app.kubernetes.io/component"] = labelComponentUploadJob
-		job.SetLabels(labels)
+			var fsGroup int64 = 10000
+			var runAsGroup int64 = 10000
+			runAsNonRoot := true
+			var runAsUser int64 = 10000
+			job.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
+				FSGroup:      &fsGroup,
+				RunAsGroup:   &runAsGroup,
+				RunAsNonRoot: &runAsNonRoot,
+				RunAsUser:    &runAsUser,
+			}
 
-		var backoffLimit int32 = 65535
-		job.Spec.BackoffLimit = &backoffLimit
+			job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
 
-		var fsGroup int64 = 10000
-		var runAsGroup int64 = 10000
-		runAsNonRoot := true
-		var runAsUser int64 = 10000
-		job.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
-			FSGroup:      &fsGroup,
-			RunAsGroup:   &runAsGroup,
-			RunAsNonRoot: &runAsNonRoot,
-			RunAsUser:    &runAsUser,
-		}
-
-		job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
-
-		job.Spec.Template.Spec.Containers = []corev1.Container{
-			{
-				Name:    "upload",
-				Command: []string{"/bin/bash", "-c", embedJobUploadScript},
-				Env: []corev1.EnvVar{
-					{
-						Name:  "OBJ_NAME",
-						Value: MakeObjectNameOfExportedData(target.GetName(), string(target.GetUID())),
-					},
-					{
-						Name:  "BUCKET_NAME",
-						Value: r.objectStorageSettings.BucketName,
-					},
-					{
-						Name:  "OBJECT_STORAGE_ENDPOINT",
-						Value: r.objectStorageSettings.Endpoint,
-					},
-					{
-						Name: "AWS_ACCESS_KEY_ID",
-						ValueFrom: &corev1.EnvVarSource{
-							SecretKeyRef: &corev1.SecretKeySelector{
-								LocalObjectReference: corev1.LocalObjectReference{
-									Name: r.envSecret,
+			job.Spec.Template.Spec.Containers = []corev1.Container{
+				{
+					Name:    "upload",
+					Command: []string{"/bin/bash", "-c", embedJobUploadScript},
+					Env: []corev1.EnvVar{
+						{
+							Name:  "OBJ_NAME",
+							Value: MakeObjectNameOfExportedData(target.GetName(), string(target.GetUID()), partNum),
+						},
+						{
+							Name:  "BUCKET_NAME",
+							Value: r.objectStorageSettings.BucketName,
+						},
+						{
+							Name:  "OBJECT_STORAGE_ENDPOINT",
+							Value: r.objectStorageSettings.Endpoint,
+						},
+						{
+							Name: "AWS_ACCESS_KEY_ID",
+							ValueFrom: &corev1.EnvVarSource{
+								SecretKeyRef: &corev1.SecretKeySelector{
+									LocalObjectReference: corev1.LocalObjectReference{
+										Name: r.envSecret,
+									},
+									Key: "AWS_ACCESS_KEY_ID",
 								},
-								Key: "AWS_ACCESS_KEY_ID",
 							},
 						},
-					},
-					{
-						Name: "AWS_SECRET_ACCESS_KEY",
-						ValueFrom: &corev1.EnvVarSource{
-							SecretKeyRef: &corev1.SecretKeySelector{
-								LocalObjectReference: corev1.LocalObjectReference{
-									Name: r.envSecret,
+						{
+							Name: "AWS_SECRET_ACCESS_KEY",
+							ValueFrom: &corev1.EnvVarSource{
+								SecretKeyRef: &corev1.SecretKeySelector{
+									LocalObjectReference: corev1.LocalObjectReference{
+										Name: r.envSecret,
+									},
+									Key: "AWS_SECRET_ACCESS_KEY",
 								},
-								Key: "AWS_SECRET_ACCESS_KEY",
 							},
 						},
+						{
+							Name:  "HTTP_PROXY",
+							Value: r.proxySettings.HttpProxy,
+						},
+						{
+							Name:  "HTTPS_PROXY",
+							Value: r.proxySettings.HttpsProxy,
+						},
+						{
+							Name:  "NO_PROXY",
+							Value: r.proxySettings.NoProxy,
+						},
+						{
+							Name:  "PART_NUM",
+							Value: strconv.Itoa(partNum),
+						},
 					},
-					{
-						Name:  "HTTP_PROXY",
-						Value: r.proxySettings.HttpProxy,
-					},
-					{
-						Name:  "HTTPS_PROXY",
-						Value: r.proxySettings.HttpsProxy,
-					},
-					{
-						Name:  "NO_PROXY",
-						Value: r.proxySettings.NoProxy,
+					Image:           r.podImage,
+					ImagePullPolicy: corev1.PullIfNotPresent,
+					VolumeMounts: []corev1.VolumeMount{
+						{
+							MountPath: "/mantle",
+							Name:      "volume-to-store",
+						},
 					},
 				},
-				Image:           r.podImage,
-				ImagePullPolicy: corev1.PullIfNotPresent,
-				VolumeMounts: []corev1.VolumeMount{
-					{
-						MountPath: "/mantle",
-						Name:      "volume-to-store",
-					},
-				},
-			},
-		}
+			}
 
-		job.Spec.Template.Spec.Volumes = []corev1.Volume{
-			{
-				Name: "volume-to-store",
-				VolumeSource: corev1.VolumeSource{
-					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-						ClaimName: MakeExportDataPVCName(target),
-					},
-				},
-			},
-		}
-
-		if r.objectStorageSettings.CACertConfigMap != nil {
-			container := job.Spec.Template.Spec.Containers[0]
-			container.Env = append(
-				container.Env,
-				corev1.EnvVar{
-					Name:  "CERT_FILE",
-					Value: fmt.Sprintf("/mantle_ca_cert/%s", *r.objectStorageSettings.CACertKey),
-				},
-			)
-			container.VolumeMounts = append(
-				container.VolumeMounts,
-				corev1.VolumeMount{
-					MountPath: "/mantle_ca_cert",
-					Name:      "ca-cert",
-				},
-			)
-			job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes,
-				corev1.Volume{
-					Name: "ca-cert",
+			job.Spec.Template.Spec.Volumes = []corev1.Volume{
+				{
+					Name: "volume-to-store",
 					VolumeSource: corev1.VolumeSource{
-						ConfigMap: &corev1.ConfigMapVolumeSource{
-							LocalObjectReference: corev1.LocalObjectReference{
-								Name: *r.objectStorageSettings.CACertConfigMap,
-							},
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+							ClaimName: MakeExportDataPVCName(target, partNum),
 						},
 					},
 				},
-			)
-		}
+			}
 
-		return nil
-	}); err != nil {
-		return err
+			if r.objectStorageSettings.CACertConfigMap != nil {
+				container := job.Spec.Template.Spec.Containers[0]
+				container.Env = append(
+					container.Env,
+					corev1.EnvVar{
+						Name:  "CERT_FILE",
+						Value: fmt.Sprintf("/mantle_ca_cert/%s", *r.objectStorageSettings.CACertKey),
+					},
+				)
+				container.VolumeMounts = append(
+					container.VolumeMounts,
+					corev1.VolumeMount{
+						MountPath: "/mantle_ca_cert",
+						Name:      "ca-cert",
+					},
+				)
+				job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes,
+					corev1.Volume{
+						Name: "ca-cert",
+						VolumeSource: corev1.VolumeSource{
+							ConfigMap: &corev1.ConfigMapVolumeSource{
+								LocalObjectReference: corev1.LocalObjectReference{
+									Name: *r.objectStorageSettings.CACertConfigMap,
+								},
+							},
+						},
+					},
+				)
+			}
+
+			return nil
+		}); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -1444,8 +1756,15 @@ func (r *MantleBackupReconciler) startImport(
 		return requeueReconciliation(), nil
 	}
 
-	if result, err := r.isExportDataAlreadyUploaded(ctx, backup); err != nil || !result.IsZero() {
-		return result, err
+	if uploaded, err := r.isExportDataAlreadyUploaded(ctx, backup, 0); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to check if export data part 0 is already uploaded: %w", err)
+	} else if !uploaded {
+		return requeueReconciliation(), nil
+	}
+
+	// NOTE: `handleCompletedImportJobs` may update `backup`.
+	if err := r.handleCompletedImportJobs(ctx, backup); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to handle completed import jobs: %w", err)
 	}
 
 	// Requeue if the PV is smaller than the PVC. (This may be the case if pvc-autoresizer is used.)
@@ -1536,18 +1855,37 @@ func (r *MantleBackupReconciler) prepareObjectStorageClient(ctx context.Context)
 func (r *MantleBackupReconciler) isExportDataAlreadyUploaded(
 	ctx context.Context,
 	target *mantlev1.MantleBackup,
-) (ctrl.Result, error) {
-	uploaded, err := r.objectStorageClient.Exists(
-		ctx,
-		MakeObjectNameOfExportedData(target.GetName(), target.GetAnnotations()[annotRemoteUID]),
-	)
+	index int,
+) (bool, error) {
+	key := MakeObjectNameOfExportedData(target.GetName(), target.GetAnnotations()[annotRemoteUID], index)
+	uploaded, err := r.objectStorageClient.Exists(ctx, key)
 	if err != nil {
-		return ctrl.Result{}, err
+		return false, fmt.Errorf("failed to check if an object exists in the object storage: %s: %w", key, err)
 	}
-	if uploaded {
-		return ctrl.Result{}, nil
-	}
-	return requeueReconciliation(), nil
+	return uploaded, nil
+}
+
+func (r *MantleBackupReconciler) handleCompletedImportJobs(ctx context.Context, backup *mantlev1.MantleBackup) error {
+	return r.handleCompletedJobsOfComponent(
+		ctx,
+		backup,
+		labelComponentImportJob,
+		MantleImportJobPrefix,
+		func(job *batchv1.Job, partNum int) (bool, error) {
+			if IsPartNextToLargestCompletedPart(backup.Status.LargestCompletedImportPartNum, partNum) {
+				return true, nil // skip
+			}
+
+			// Use PATCH here in order not to update backup with stale values.
+			oldBackup := backup.DeepCopy()
+			backup.Status.LargestCompletedImportPartNum = &partNum
+			if err := r.Client.Status().Patch(ctx, backup, client.MergeFrom(oldBackup)); err != nil {
+				return false, fmt.Errorf("failed to patch .status.largestCompletedImportPartNum to %d: %w", partNum, err)
+			}
+
+			return false, nil
+		},
+	)
 }
 
 func isPVSmallerThanPVC(
@@ -1781,51 +2119,60 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 	backup *mantlev1.MantleBackup,
 	snapshotTarget *snapshotTarget,
 ) (ctrl.Result, error) {
-	var job batchv1.Job
-	if err := r.Client.Get(
-		ctx,
-		types.NamespacedName{
-			Name:      MakeImportJobName(backup),
-			Namespace: r.managedCephClusterID,
-		},
-		&job,
-	); err != nil {
-		if !aerrors.IsNotFound(err) {
-			return ctrl.Result{}, err
-		}
-		if err := r.createOrUpdateImportJob(ctx, backup, snapshotTarget); err != nil {
-			return ctrl.Result{}, err
-		}
-		return requeueReconciliation(), nil
+	// Get the largest part number of the completed import Jobs
+	partNum := 0
+	if backup.Status.LargestCompletedImportPartNum != nil {
+		partNum = *backup.Status.LargestCompletedImportPartNum + 1
 	}
 
-	if !IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete) {
-		return requeueReconciliation(), nil
-	}
-
-	snapshot, err := ceph.FindRBDSnapshot(
-		r.ceph,
-		snapshotTarget.poolName,
-		snapshotTarget.imageName,
-		backup.GetName(),
-	)
+	// Check that all import Jobs are completed
+	finalPartNum, err := r.getNumberOfParts(backup)
 	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to calcuate num of export data parts: %w", err)
+	}
+	if partNum == finalPartNum {
+		// Make sure the (final) RBD snapshot is created.
+		snapshot, err := ceph.FindRBDSnapshot(
+			r.ceph,
+			snapshotTarget.poolName,
+			snapshotTarget.imageName,
+			backup.GetName(),
+		)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to find imported RBD snapshot: %w", err)
+		}
+
+		// Update the status of the MantleBackup to set True to the ReadyToUse condition.
+		if err := updateStatus(ctx, r.Client, backup, func() error {
+			backup.Status.SnapID = &snapshot.Id
+			meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
+				Type:   mantlev1.BackupConditionReadyToUse,
+				Status: metav1.ConditionTrue,
+				Reason: mantlev1.BackupReasonNone,
+			})
+			return nil
+		}); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		return ctrl.Result{}, nil
+	}
+
+	// Check that the export data is already uploaded.
+	uploaded, err := r.isExportDataAlreadyUploaded(ctx, backup, partNum)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to check if part of export data is not already uploaded: %d: %w", partNum, err)
+	}
+	if !uploaded {
+		return requeueReconciliation(), nil
+	}
+
+	// create or update an import Job
+	if err := r.createOrUpdateImportJob(ctx, backup, snapshotTarget); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	if err := updateStatus(ctx, r.Client, backup, func() error {
-		backup.Status.SnapID = &snapshot.Id
-		meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
-			Type:   mantlev1.BackupConditionReadyToUse,
-			Status: metav1.ConditionTrue,
-			Reason: mantlev1.BackupReasonNone,
-		})
-		return nil
-	}); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	return ctrl.Result{}, nil
+	return requeueReconciliation(), nil
 }
 
 func (r *MantleBackupReconciler) createOrUpdateImportJob(
@@ -1833,9 +2180,22 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 	backup *mantlev1.MantleBackup,
 	snapshotTarget *snapshotTarget,
 ) error {
+	partNum := 0
+	if backup.Status.LargestCompletedImportPartNum != nil {
+		partNum = *backup.Status.LargestCompletedImportPartNum + 1
+	}
+
+	if backup.Status.TransferPartSize == nil {
+		return errors.New("status.transferPartSize is nil")
+	}
+	transferPartSize, ok := backup.Status.TransferPartSize.AsInt64()
+	if !ok {
+		return errors.New("status.transferPartSize can't be converted to int64")
+	}
+
 	var job batchv1.Job
 
-	job.SetName(MakeImportJobName(backup))
+	job.SetName(MakeImportJobName(backup, partNum))
 	job.SetNamespace(r.managedCephClusterID)
 
 	_, err := ctrl.CreateOrUpdate(ctx, r.Client, &job, func() error {
@@ -1862,6 +2222,9 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 		job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
 
 		sourceBackupName := backup.GetAnnotations()[annotDiffFrom]
+		if partNum != 0 {
+			sourceBackupName = MakeMiddleSnapshotName(backup, partNum*int(transferPartSize))
+		}
 
 		container := corev1.Container{
 			Name:    "import",
@@ -1892,7 +2255,7 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 				},
 				{
 					Name:  "OBJ_NAME",
-					Value: MakeObjectNameOfExportedData(backup.GetName(), backup.GetAnnotations()[annotRemoteUID]),
+					Value: MakeObjectNameOfExportedData(backup.GetName(), backup.GetAnnotations()[annotRemoteUID], partNum),
 				},
 				{
 					Name:  "BUCKET_NAME",
@@ -2041,31 +2404,16 @@ func (r *MantleBackupReconciler) primaryCleanup(
 		}
 	}
 
-	propagationPolicy := metav1.DeletePropagationBackground
-
-	var exportJob batchv1.Job
-	exportJob.SetName(MakeExportJobName(target))
-	exportJob.SetNamespace(r.managedCephClusterID)
-	if err := r.Client.Delete(ctx, &exportJob, &client.DeleteOptions{
-		PropagationPolicy: &propagationPolicy,
-	}); err != nil && !aerrors.IsNotFound(err) {
-		return ctrl.Result{}, fmt.Errorf("failed to delete export Job: %w", err)
+	if err := r.deleteAllExportJobs(ctx, target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete export Jobs: %w", err)
 	}
 
-	var uploadJob batchv1.Job
-	uploadJob.SetName(MakeUploadJobName(target))
-	uploadJob.SetNamespace(r.managedCephClusterID)
-	if err := r.Client.Delete(ctx, &uploadJob, &client.DeleteOptions{
-		PropagationPolicy: &propagationPolicy,
-	}); err != nil && !aerrors.IsNotFound(err) {
-		return ctrl.Result{}, fmt.Errorf("failed to delete upload Job: %w", err)
+	if err := r.deleteAllUploadJobs(ctx, target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete upload Jobs: %w", err)
 	}
 
-	var exportDataPVC corev1.PersistentVolumeClaim
-	exportDataPVC.SetName(MakeExportDataPVCName(target))
-	exportDataPVC.SetNamespace(r.managedCephClusterID)
-	if err := r.Client.Delete(ctx, &exportDataPVC); err != nil && !aerrors.IsNotFound(err) {
-		return ctrl.Result{}, fmt.Errorf("failed to delete export data PVC: %w", err)
+	if err := r.deleteAllExportDataPVCs(ctx, target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete export data PVCs: %w", err)
 	}
 
 	delete(target.GetAnnotations(), annotDiffFrom)
@@ -2108,6 +2456,69 @@ func (r *MantleBackupReconciler) primaryCleanup(
 	return ctrl.Result{}, nil
 }
 
+func (r *MantleBackupReconciler) getNumberOfPartsForResourceDeletion(backup *mantlev1.MantleBackup) (int, error) {
+	if backup.Status.SnapSize == nil || backup.Status.TransferPartSize == nil {
+		return 0, nil
+	}
+	return r.getNumberOfParts(backup)
+}
+
+func (r *MantleBackupReconciler) deleteAllJobsOfComponent(
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
+	makeJobName func(*mantlev1.MantleBackup, int) string,
+) error {
+	numParts, err := r.getNumberOfPartsForResourceDeletion(backup)
+	if err != nil {
+		return fmt.Errorf("failed to get the number of the parts of the exported data: %w", err)
+	}
+
+	propagationPolicy := metav1.DeletePropagationBackground
+
+	for partNum := 0; partNum < numParts; partNum++ {
+		var job batchv1.Job
+		job.SetName(makeJobName(backup, partNum))
+		job.SetNamespace(r.managedCephClusterID)
+		if err := r.Client.Delete(ctx, &job, &client.DeleteOptions{
+			PropagationPolicy: &propagationPolicy,
+		}); err != nil && !aerrors.IsNotFound(err) {
+			return fmt.Errorf("failed to delete Job: %s/%s: %w", job.GetNamespace(), job.GetName(), err)
+		}
+	}
+
+	return nil
+}
+
+func (r *MantleBackupReconciler) deleteAllExportJobs(ctx context.Context, backup *mantlev1.MantleBackup) error {
+	return r.deleteAllJobsOfComponent(ctx, backup, MakeExportJobName)
+}
+
+func (r *MantleBackupReconciler) deleteAllUploadJobs(ctx context.Context, backup *mantlev1.MantleBackup) error {
+	return r.deleteAllJobsOfComponent(ctx, backup, MakeUploadJobName)
+}
+
+func (r *MantleBackupReconciler) deleteAllExportDataPVCs(ctx context.Context, backup *mantlev1.MantleBackup) error {
+	numParts, err := r.getNumberOfPartsForResourceDeletion(backup)
+	if err != nil {
+		return fmt.Errorf("failed to get the number of the parts of the exported data: %w", err)
+	}
+
+	propagationPolicy := metav1.DeletePropagationBackground
+
+	for partNum := 0; partNum < numParts; partNum++ {
+		pvc := corev1.PersistentVolumeClaim{}
+		pvc.SetName(MakeExportDataPVCName(backup, partNum))
+		pvc.SetNamespace(r.managedCephClusterID)
+		if err := r.Client.Delete(ctx, &pvc, &client.DeleteOptions{
+			PropagationPolicy: &propagationPolicy,
+		}); err != nil && !aerrors.IsNotFound(err) {
+			return fmt.Errorf("failed to delete PVC: %s/%s: %w", pvc.GetNamespace(), pvc.GetName(), err)
+		}
+	}
+
+	return nil
+}
+
 func (r *MantleBackupReconciler) secondaryCleanup(
 	ctx context.Context,
 	target *mantlev1.MantleBackup,
@@ -2131,6 +2542,10 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 
 	propagationPolicy := metav1.DeletePropagationBackground
 
+	if err := r.deleteAllImportJobs(ctx, target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete import Jobs: %w", err)
+	}
+
 	var discardJob batchv1.Job
 	discardJob.SetName(MakeDiscardJobName(target))
 	discardJob.SetNamespace(r.managedCephClusterID)
@@ -2138,15 +2553,6 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 		PropagationPolicy: &propagationPolicy,
 	}); err != nil && !aerrors.IsNotFound(err) {
 		return ctrl.Result{}, fmt.Errorf("failed to delete discard Job: %w", err)
-	}
-
-	var importJob batchv1.Job
-	importJob.SetName(MakeImportJobName(target))
-	importJob.SetNamespace(r.managedCephClusterID)
-	if err := r.Client.Delete(ctx, &importJob, &client.DeleteOptions{
-		PropagationPolicy: &propagationPolicy,
-	}); err != nil && !aerrors.IsNotFound(err) {
-		return ctrl.Result{}, fmt.Errorf("failed to delete import Job: %w", err)
 	}
 
 	var discardPVC corev1.PersistentVolumeClaim
@@ -2164,10 +2570,7 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 	}
 
 	if deleteExportData {
-		if err := r.objectStorageClient.Delete(
-			ctx,
-			MakeObjectNameOfExportedData(target.GetName(), target.GetAnnotations()[annotRemoteUID]),
-		); err != nil {
+		if err := r.deleteAllExportedData(ctx, target); err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to delete exported data in the object storage: %w", err)
 		}
 	}
@@ -2178,5 +2581,74 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 		return ctrl.Result{}, fmt.Errorf("failed to update target MantleBackup: %w", err)
 	}
 
+	if err := r.deleteMiddleSnapshots(target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete middle snapshots: %w", err)
+	}
+
 	return ctrl.Result{}, nil
+}
+
+func (r *MantleBackupReconciler) deleteAllImportJobs(ctx context.Context, backup *mantlev1.MantleBackup) error {
+	return r.deleteAllJobsOfComponent(ctx, backup, MakeImportJobName)
+}
+
+func (r *MantleBackupReconciler) deleteAllExportedData(ctx context.Context, backup *mantlev1.MantleBackup) error {
+	numParts, err := r.getNumberOfPartsForResourceDeletion(backup)
+	if err != nil {
+		return fmt.Errorf("failed to get the number of the parts of the exported data: %w", err)
+	}
+
+	for partNum := 0; partNum < numParts; partNum++ {
+		key := MakeObjectNameOfExportedData(backup.GetName(), backup.GetAnnotations()[annotRemoteUID], partNum)
+		if err := r.objectStorageClient.Delete(ctx, key); err != nil {
+			return fmt.Errorf("failed to delete exported data in the object storage: %s: %w", key, err)
+		}
+	}
+
+	return nil
+}
+
+func (r *MantleBackupReconciler) deleteMiddleSnapshots(backup *mantlev1.MantleBackup) error {
+	// Check that middle snapshots can exist
+	_, ok := backup.GetAnnotations()[annotRemoteUID]
+	if !ok {
+		return nil
+	}
+	if backup.Status.PVManifest == "" || backup.Status.TransferPartSize == nil || backup.Status.SnapSize == nil {
+		return nil
+	}
+
+	numParts, err := r.getNumberOfPartsForResourceDeletion(backup)
+	if err != nil {
+		return fmt.Errorf("failed to get number of parts: %s/%s: %w", backup.GetNamespace(), backup.GetName(), err)
+	}
+
+	transferPartSize, ok := backup.Status.TransferPartSize.AsInt64()
+	if !ok {
+		return fmt.Errorf("failed to get transferPartSize as int64: %s/%s", backup.GetNamespace(), backup.GetName())
+	}
+
+	pool, image, err := r.getPoolAndImageFromStatusPVManifest(backup)
+	if err != nil {
+		return fmt.Errorf("failed to get pool and image from status.PVManifest: %w", err)
+	}
+
+	snaps, err := r.ceph.RBDSnapLs(pool, image)
+	if err != nil {
+		return fmt.Errorf("failed to list snapshots: %s: %s: %w", pool, image, err)
+	}
+
+	for i := 0; i < numParts; i++ {
+		snapIndex := slices.IndexFunc(snaps, func(snap ceph.RBDSnapshot) bool {
+			return snap.Name == MakeMiddleSnapshotName(backup, i*int(transferPartSize))
+		})
+		if snapIndex == -1 {
+			continue
+		}
+		if err := r.ceph.RBDSnapRm(pool, image, snaps[snapIndex].Name); err != nil {
+			return fmt.Errorf("failed to remove snapshot: %s: %s: %w", pool, image, err)
+		}
+	}
+
+	return nil
 }

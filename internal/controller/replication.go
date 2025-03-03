@@ -28,6 +28,7 @@ type PrimarySettings struct {
 	Conn                   *grpc.ClientConn
 	Client                 proto.MantleServiceClient
 	MaxExportJobs          int
+	MaxUploadJobs          int
 	ExportDataStorageClass string
 }
 
@@ -186,6 +187,8 @@ func (s *SecondaryServer) CreateOrUpdateMantleBackup(
 	// Use Patch here because updateStatus is likely to fail due to "the object has been modified" error.
 	newBackup := backup.DeepCopy()
 	newBackup.Status.CreatedAt = backupReceived.Status.CreatedAt
+	newBackup.Status.SnapSize = backupReceived.Status.SnapSize
+	newBackup.Status.TransferPartSize = backupReceived.Status.TransferPartSize
 	if err := s.client.Status().Patch(ctx, newBackup, client.MergeFrom(&backup)); err != nil {
 		return nil, fmt.Errorf("status patch failed: %w", err)
 	}

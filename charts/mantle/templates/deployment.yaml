@@ -99,6 +99,9 @@ spec:
             {{- with .Values.controller.noProxy }}
             - --no-proxy={{ . }}
             {{- end }}
+            {{- with .Values.controller.backupTransferPartSize }}
+            - --backup-transfer-part-size={{ . }}
+            {{- end }}
           env:
             - name: POD_NAME
               valueFrom:

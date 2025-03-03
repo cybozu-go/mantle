@@ -41,7 +41,7 @@ RUN apt-get update && \
         libstdc++-11-dev jq kmod lvm2 gdisk ca-certificates e2fsprogs attr udev libgflags2.2 \
         curl unzip &&\
     cd /tmp && \
-    curl -L -o packages.zip https://github.com/cybozu-go/mantle/releases/download/ceph-export-diff-v16.2.4.2/packages.zip && \
+    curl -L -o packages.zip https://github.com/cybozu-go/mantle/releases/download/ceph-export-diff-v16.2.4.3/packages.zip && \
     unzip packages.zip && \
     mkdir -p /usr/local/share/doc/ceph && \
     cp /tmp/COPYING* /usr/local/share/doc/ceph && \
