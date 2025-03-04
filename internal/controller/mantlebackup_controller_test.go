@@ -1704,7 +1704,6 @@ var _ = Describe("import", func() {
 			// Create discard data PV
 			var discardDataPV corev1.PersistentVolume
 			discardDataPV.SetName(MakeDiscardPVName(backup))
-			discardDataPV.SetNamespace(nsController)
 			discardDataPV.Spec.HostPath = &corev1.HostPathVolumeSource{Path: "/dummy"}
 			discardDataPV.Spec.StorageClassName = "manual"
 			discardDataPV.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
@@ -1754,7 +1753,7 @@ var _ = Describe("import", func() {
 			Expect(discardDataPVC.GetDeletionTimestamp().IsZero()).To(BeFalse())
 
 			// Check that PV has deletionTimestamp
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeDiscardPVName(backup), Namespace: nsController}, &discardDataPV)
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeDiscardPVName(backup)}, &discardDataPV)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(discardDataPV.GetDeletionTimestamp().IsZero()).To(BeFalse())
 		})
@@ -1798,7 +1797,7 @@ var _ = Describe("import", func() {
 			Expect(result.Requeue).To(BeFalse())
 
 			var pv corev1.PersistentVolume
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeDiscardPVName(backup), Namespace: nsController}, &pv)
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeDiscardPVName(backup)}, &pv)
 			Expect(err).To(HaveOccurred())
 			Expect(aerrors.IsNotFound(err)).To(BeTrue())
 
@@ -1879,7 +1878,7 @@ var _ = Describe("import", func() {
 			Expect(result.Requeue).To(BeTrue())
 
 			var pv corev1.PersistentVolume
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeDiscardPVName(backup), Namespace: nsController}, &pv)
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeDiscardPVName(backup)}, &pv)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(pv.GetLabels()["app.kubernetes.io/name"]).To(Equal(labelAppNameValue))
 			Expect(pv.GetLabels()["app.kubernetes.io/component"]).To(Equal(labelComponentDiscardVolume))

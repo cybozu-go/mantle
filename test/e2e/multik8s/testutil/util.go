@@ -783,7 +783,7 @@ func WaitTemporaryPVCsDeleted(ctx SpecContext, primaryMB, secondaryMB *mantlev1.
 	WaitTemporarySecondaryPVCsDeleted(ctx, secondaryMB)
 }
 
-func WaitPVDeleted(ctx SpecContext, cluster int, namespace, pvName string) {
+func WaitPVDeleted(ctx SpecContext, cluster int, pvName string) {
 	GinkgoHelper()
 	By("waiting for a PV to be deleted")
 	Eventually(ctx, func(g Gomega) {
@@ -798,7 +798,7 @@ func WaitPVDeleted(ctx SpecContext, cluster int, namespace, pvName string) {
 
 func WaitTemporarySecondaryPVsDeleted(ctx SpecContext, secondaryMB *mantlev1.MantleBackup) {
 	GinkgoHelper()
-	WaitPVDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace, controller.MakeDiscardPVName(secondaryMB))
+	WaitPVDeleted(ctx, SecondaryK8sCluster, controller.MakeDiscardPVName(secondaryMB))
 }
 
 func WaitTemporaryS3ObjectDeleted(ctx SpecContext, primaryMB *mantlev1.MantleBackup) {
