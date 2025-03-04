@@ -1947,7 +1947,6 @@ var _ = Describe("import", func() {
 			GinkgoHelper()
 			var discardDataPV corev1.PersistentVolume
 			discardDataPV.SetName(MakeDiscardPVName(backup))
-			discardDataPV.SetNamespace(nsController)
 			discardDataPV.Spec.HostPath = &corev1.HostPathVolumeSource{Path: "/dummy"}
 			discardDataPV.Spec.StorageClassName = "manual"
 			discardDataPV.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
@@ -1972,7 +1971,7 @@ var _ = Describe("import", func() {
 			var pv corev1.PersistentVolume
 			err := k8sClient.Get(
 				ctx,
-				types.NamespacedName{Name: MakeDiscardPVName(backup), Namespace: nsController},
+				types.NamespacedName{Name: MakeDiscardPVName(backup)},
 				&pv,
 			)
 			Expect(err).NotTo(HaveOccurred())
@@ -2101,7 +2100,7 @@ var _ = Describe("import", func() {
 			var pv corev1.PersistentVolume
 			err = k8sClient.Get(
 				ctx,
-				types.NamespacedName{Name: MakeDiscardPVName(backup2), Namespace: nsController},
+				types.NamespacedName{Name: MakeDiscardPVName(backup2)},
 				&pv,
 			)
 			Expect(err).NotTo(HaveOccurred())
@@ -2134,7 +2133,7 @@ var _ = Describe("import", func() {
 			Expect(result.Requeue).To(BeFalse())
 
 			var pv corev1.PersistentVolume
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeDiscardPVName(backup), Namespace: nsController}, &pv)
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeDiscardPVName(backup)}, &pv)
 			Expect(err).To(HaveOccurred())
 			Expect(aerrors.IsNotFound(err)).To(BeTrue())
 
