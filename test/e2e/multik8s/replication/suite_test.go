@@ -137,49 +137,6 @@ func replicationTestSuite() { //nolint:gocyclo
 						return errors.New("invalid .status.snapID of secondary MB")
 					}
 
-					// Check if .status.LargestCompleted{Export,Import,Upload}PartNum are correct
-					expectedNumOfParts, err := GetNumberOfBackupParts(primaryPVC.Spec.Resources.Requests.Storage())
-					Expect(err).NotTo(HaveOccurred())
-
-					if primaryMB.Status.LargestCompletedExportPartNum == nil {
-						return fmt.Errorf(
-							".status.largestCompletedExportPartNum of the primary MB is not correct: expected %d: got nil",
-							expectedNumOfParts,
-						)
-					} else if *primaryMB.Status.LargestCompletedExportPartNum != expectedNumOfParts-1 {
-						return fmt.Errorf(
-							".status.largestCompletedExportPartNum of the primary MB is not correct: expected %d: got %d",
-							expectedNumOfParts,
-							*primaryMB.Status.LargestCompletedExportPartNum,
-						)
-					}
-
-					if primaryMB.Status.LargestCompletedUploadPartNum == nil {
-						return fmt.Errorf(
-							".status.largestCompletedUploadPartNum of the primary MB is not correct: expected %d: got nil",
-							expectedNumOfParts,
-						)
-					} else if *primaryMB.Status.LargestCompletedUploadPartNum != expectedNumOfParts-1 {
-						return fmt.Errorf(
-							".status.largestCompletedUploadPartNum of the primary MB is not correct: expected %d: got %d",
-							expectedNumOfParts,
-							*primaryMB.Status.LargestCompletedUploadPartNum,
-						)
-					}
-
-					if secondaryMB.Status.LargestCompletedImportPartNum == nil {
-						return fmt.Errorf(
-							".status.largestCompletedImportPartNum of the secondary MB is not correct: expected %d: got nil",
-							expectedNumOfParts,
-						)
-					} else if *secondaryMB.Status.LargestCompletedImportPartNum != expectedNumOfParts-1 {
-						return fmt.Errorf(
-							".status.largestCompletedImportPartNum of the secondary MB is not correct: expected %d: got %d",
-							expectedNumOfParts,
-							*secondaryMB.Status.LargestCompletedImportPartNum,
-						)
-					}
-
 					return nil
 				}).Should(Succeed())
 
@@ -470,21 +427,6 @@ func replicationTestSuite() { //nolint:gocyclo
 			// Wait for MB to be synced.
 			WaitMantleBackupSynced(namespace, backupName)
 
-			// .status.LargestCompleted{Export,Upload,Import}PartNum should be correct.
-			Eventually(ctx, func(g Gomega) {
-				primaryMB, err := GetMB(PrimaryK8sCluster, namespace, backupName)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(primaryMB.Status.LargestCompletedExportPartNum).NotTo(BeNil())
-				g.Expect(primaryMB.Status.LargestCompletedUploadPartNum).NotTo(BeNil())
-				g.Expect(*primaryMB.Status.LargestCompletedExportPartNum).To(Equal(numParts - 1))
-				g.Expect(*primaryMB.Status.LargestCompletedUploadPartNum).To(Equal(numParts - 1))
-
-				secondaryMB, err := GetMB(SecondaryK8sCluster, namespace, backupName)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(secondaryMB.Status.LargestCompletedImportPartNum).NotTo(BeNil())
-				g.Expect(*secondaryMB.Status.LargestCompletedImportPartNum).To(Equal(numParts - 1))
-			}).Should(Succeed())
-
 			// Make sure backups are correct.
 			EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
 			EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
@@ -524,20 +466,6 @@ func replicationTestSuite() { //nolint:gocyclo
 
 			Expect(meta.IsStatusConditionTrue(secondaryMB1.Status.Conditions, "ReadyToUse")).To(BeTrue())
 			Expect(meta.IsStatusConditionTrue(secondaryMB2.Status.Conditions, "ReadyToUse")).To(BeTrue())
-
-			primaryPVC1, err := GetPVC(PrimaryK8sCluster, namespace, pvcName1)
-			Expect(err).NotTo(HaveOccurred())
-			expectedNumOfParts1, err := GetNumberOfBackupParts(primaryPVC1.Spec.Resources.Requests.Storage())
-			Expect(err).NotTo(HaveOccurred())
-			Expect(secondaryMB1.Status.LargestCompletedImportPartNum).NotTo(BeNil())
-			Expect(*secondaryMB1.Status.LargestCompletedImportPartNum).To(Equal(expectedNumOfParts1 - 1))
-
-			primaryPVC2, err := GetPVC(PrimaryK8sCluster, namespace, pvcName2)
-			Expect(err).NotTo(HaveOccurred())
-			expectedNumOfParts2, err := GetNumberOfBackupParts(primaryPVC2.Spec.Resources.Requests.Storage())
-			Expect(err).NotTo(HaveOccurred())
-			Expect(secondaryMB2.Status.LargestCompletedImportPartNum).NotTo(BeNil())
-			Expect(*secondaryMB2.Status.LargestCompletedImportPartNum).To(Equal(expectedNumOfParts2 - 1))
 
 			snap, err := FindRBDSnapshotInPVC(SecondaryK8sCluster, namespace, pvcName1, backupName1)
 			Expect(err).NotTo(HaveOccurred())

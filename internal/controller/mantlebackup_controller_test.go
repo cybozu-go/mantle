@@ -1501,7 +1501,9 @@ var _ = Describe("export and upload", func() {
 					runStartExportAndUpload(ctx, target2)
 
 					// Make sure the export Job for target 1 is deleted.
-					waitJobDeleted(ctx, MakeExportJobName(target1, partNum))
+					if partNum > 0 {
+						waitJobDeleted(ctx, MakeExportJobName(target1, partNum-1))
+					}
 				}
 
 				// Make sure the export Job of part 0 for target 2 is NOT deleted.
@@ -1532,11 +1534,6 @@ var _ = Describe("export and upload", func() {
 			runStartExportAndUpload(ctx, backup)
 			completeJob(ctx, MakeExportJobName(backup, 1))
 			runStartExportAndUpload(ctx, backup)
-
-			err := k8sClient.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(backup.Status.LargestCompletedExportPartNum).NotTo(BeNil())
-			Expect(*backup.Status.LargestCompletedExportPartNum).To(Equal(1))
 		})
 	})
 
@@ -1565,7 +1562,9 @@ var _ = Describe("export and upload", func() {
 					runStartExportAndUpload(ctx, target2)
 
 					// Make sure the upload Job for target 1 is deleted.
-					waitJobDeleted(ctx, MakeUploadJobName(target1, partNum))
+					if partNum != 0 {
+						waitJobDeleted(ctx, MakeUploadJobName(target1, partNum-1))
+					}
 				}
 
 				// Make sure the upload Job of part 0 for target 2 is NOT deleted.
@@ -1682,7 +1681,7 @@ var _ = Describe("import", func() {
 				}).Times(2)
 
 			// The first call to reconcileImportJob should create an import Job
-			res, err := mbr.reconcileImportJob(ctx, backup, snapshotTarget)
+			res, err := mbr.reconcileImportJob(ctx, backup, snapshotTarget, -1)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.Requeue).To(BeTrue())
 
@@ -1694,7 +1693,7 @@ var _ = Describe("import", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// The successive calls should return ctrl.Result{Requeue: true} until the import Job is completed.
-			res, err = mbr.reconcileImportJob(ctx, backup, snapshotTarget)
+			res, err = mbr.reconcileImportJob(ctx, backup, snapshotTarget, -1)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.Requeue).To(BeTrue())
 
@@ -1708,16 +1707,9 @@ var _ = Describe("import", func() {
 			dummySnapshot, err := ceph.FindRBDSnapshot(mbr.ceph, "", "", backup.GetName())
 			Expect(err).NotTo(HaveOccurred())
 
-			// Update .status.largestCompletedImportPartNum
-			err = updateStatus(ctx, k8sClient, backup, func() error {
-				i := int(testutil.FakeRBDSnapshotSize/backup.Status.TransferPartSize.Value() - 1)
-				backup.Status.LargestCompletedImportPartNum = &i
-				return nil
-			})
-			Expect(err).NotTo(HaveOccurred())
-
 			// The call should update the status of the MantleBackup resource.
-			res, err = mbr.reconcileImportJob(ctx, backup, snapshotTarget)
+			largestCompletedPartNum := int(testutil.FakeRBDSnapshotSize/backup.Status.TransferPartSize.Value() - 1)
+			res, err = mbr.reconcileImportJob(ctx, backup, snapshotTarget, largestCompletedPartNum)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.IsZero()).To(BeTrue())
 
@@ -2287,11 +2279,10 @@ var _ = Describe("import", func() {
 		DescribeTable(
 			"Deletion of completed import Jobs",
 			func(ctx SpecContext, backupTransferPartSize int64, numOfParts int) {
-				// Arrange
-				createImportJob := func(backup *mantlev1.MantleBackup) *batchv1.Job {
+				createImportJob := func(backup *mantlev1.MantleBackup, partNum int) *batchv1.Job {
 					job := batchv1.Job{
 						ObjectMeta: metav1.ObjectMeta{
-							Name:      MakeImportJobName(backup, 0),
+							Name:      MakeImportJobName(backup, partNum),
 							Namespace: nsController,
 							Labels: map[string]string{
 								"app.kubernetes.io/name":      labelAppNameValue,
@@ -2316,24 +2307,44 @@ var _ = Describe("import", func() {
 					Expect(err).NotTo(HaveOccurred())
 					return &job
 				}
+
+				// Create two MantleBackups
 				backup1, err := createMantleBackupUsingDummyPVC(ctx, "target1", ns)
 				Expect(err).NotTo(HaveOccurred())
-				job1 := createImportJob(backup1)
+				backup2, err := createMantleBackupUsingDummyPVC(ctx, "target2", ns)
+				Expect(err).NotTo(HaveOccurred())
+
+				// Emulate the reconciler; create an import Job for each MantleBackup.
+				job1 := createImportJob(backup1, 0)
+				_ = createImportJob(backup2, 0)
+
+				// Make the import Job for MantleBackup1 Completed.
 				err = resMgr.ChangeJobCondition(ctx, job1, batchv1.JobComplete, corev1.ConditionTrue)
 				Expect(err).NotTo(HaveOccurred())
 
-				backup2, err := createMantleBackupUsingDummyPVC(ctx, "target2", ns)
+				// Call handleCompletedImportJobs for MantleBackup1.
+				largestCompletedPartNum, err := mbr.handleCompletedImportJobs(ctx, backup1)
 				Expect(err).NotTo(HaveOccurred())
-				_ = createImportJob(backup2)
+				Expect(largestCompletedPartNum).To(Equal(0))
 
-				// Act
-				err = mbr.handleCompletedImportJobs(ctx, backup1)
-				Expect(err).NotTo(HaveOccurred())
-				err = mbr.handleCompletedImportJobs(ctx, backup2)
+				// The import Job for MantleBackup1 should NOT be deleted because it's the latest.
+				Consistently(ctx, func(g Gomega, ctx SpecContext) {
+					var job batchv1.Job
+					err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeImportJobName(backup1, 0), Namespace: nsController}, &job)
+					Expect(err).NotTo(HaveOccurred())
+				}, "3s", "1s").Should(Succeed())
+
+				// Create a new import Job for part number 2 of MantleBackup1, and make it Completed.
+				job2 := createImportJob(backup1, 1)
+				err = resMgr.ChangeJobCondition(ctx, job2, batchv1.JobComplete, corev1.ConditionTrue)
 				Expect(err).NotTo(HaveOccurred())
 
-				// Assert
-				// job1 should be deleted.
+				// Call handleCompletedImportJobs for MantleBackup1.
+				largestCompletedPartNum, err = mbr.handleCompletedImportJobs(ctx, backup1)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(largestCompletedPartNum).To(Equal(1))
+
+				// Now the import Job for part number 1 of MantleBackup1 should be deleted.
 				Eventually(ctx, func(g Gomega, ctx SpecContext) {
 					var job batchv1.Job
 					err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeImportJobName(backup1, 0), Namespace: nsController}, &job)
@@ -2341,12 +2352,12 @@ var _ = Describe("import", func() {
 					Expect(aerrors.IsNotFound(err)).To(BeTrue())
 				}).Should(Succeed())
 
-				// job2 should NOT be deleted.
-				Eventually(ctx, func(g Gomega, ctx SpecContext) {
+				// The import Job for MantleBackup2 should NOT be deleted.
+				Consistently(ctx, func(g Gomega, ctx SpecContext) {
 					var job batchv1.Job
 					err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeImportJobName(backup2, 0), Namespace: nsController}, &job)
 					Expect(err).NotTo(HaveOccurred())
-				}).Should(Succeed())
+				}, "3s", "1s").Should(Succeed())
 			},
 			Entry("snap size < transfer part size", int64(testutil.FakeRBDSnapshotSize)+1, 1),
 			Entry("snap size = transfer part size", int64(testutil.FakeRBDSnapshotSize), 1),
