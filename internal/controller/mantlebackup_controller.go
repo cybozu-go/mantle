@@ -2564,7 +2564,6 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 
 	var discardPV corev1.PersistentVolume
 	discardPV.SetName(MakeDiscardPVName(target))
-	discardPV.SetNamespace(r.managedCephClusterID)
 	if err := r.Client.Delete(ctx, &discardPV); err != nil && !aerrors.IsNotFound(err) {
 		return ctrl.Result{}, fmt.Errorf("failed to delete discard PV: %w", err)
 	}
