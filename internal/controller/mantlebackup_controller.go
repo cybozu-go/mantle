@@ -969,11 +969,12 @@ func (r *MantleBackupReconciler) startExportAndUpload(
 		return ctrl.Result{}, err
 	}
 
-	if err := r.startExport(ctx, targetBackup, sourceBackupName); err != nil {
+	largestCompletedExportPartNum, err := r.startExport(ctx, targetBackup, sourceBackupName)
+	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to export: %w", err)
 	}
 
-	if err := r.startUpload(ctx, targetBackup); err != nil {
+	if err := r.startUpload(ctx, targetBackup, largestCompletedExportPartNum); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to upload MantleBackup: %w", err)
 	}
 
@@ -1030,47 +1031,51 @@ func (r *MantleBackupReconciler) startExport(
 	ctx context.Context,
 	targetBackup *mantlev1.MantleBackup,
 	sourceBackupName *string,
-) error {
-	// NOTE: `handleCompletedExportJob` might update `targetBackup`.
-	if err := r.handleCompletedExportJobs(ctx, targetBackup); err != nil {
-		return fmt.Errorf("failed to handle completed export jobs: %w", err)
+) (int, error) {
+	largestCompletedPartNum, err := r.handleCompletedExportJobs(ctx, targetBackup)
+	if err != nil {
+		return -1, fmt.Errorf("failed to handle completed export jobs: %w", err)
 	}
 
 	if ok, err := r.canNewExportJobBeCreated(ctx); err != nil {
-		return fmt.Errorf("failed to check if a new export Job can be created: %w", err)
+		return -1, fmt.Errorf("failed to check if a new export Job can be created: %w", err)
 	} else if !ok {
 		// skip to create an export Job
-		return nil
+		return largestCompletedPartNum, nil
 	}
 
 	if err := r.addStatusTransferPartSizeIfEmpty(ctx, targetBackup); err != nil {
-		return fmt.Errorf("failed to patch .status.transferPartSize: %w", err)
+		return -1, fmt.Errorf("failed to patch .status.transferPartSize: %w", err)
 	}
 
-	if ok, err := r.haveAllExportJobsCompleted(targetBackup); err != nil {
-		return fmt.Errorf("failed to check if all export Jobs are completed: %w", err)
+	if ok, err := r.haveAllExportJobsCompleted(targetBackup, largestCompletedPartNum); err != nil {
+		return -1, fmt.Errorf("failed to check if all export Jobs are completed: %w", err)
 	} else if ok {
-		return nil
+		return largestCompletedPartNum, nil
 	}
 
-	if err := r.createOrUpdateExportDataPVC(ctx, targetBackup); err != nil {
-		return fmt.Errorf("failed to create or update export data PVC: %w", err)
+	if err := r.createOrUpdateExportDataPVC(ctx, targetBackup, largestCompletedPartNum); err != nil {
+		return -1, fmt.Errorf("failed to create or update export data PVC: %w", err)
 	}
 
-	if err := r.createOrUpdateExportJob(ctx, targetBackup, sourceBackupName); err != nil {
-		return fmt.Errorf("failed to create or update export Job: %w", err)
+	if err := r.createOrUpdateExportJob(ctx, targetBackup, sourceBackupName, largestCompletedPartNum); err != nil {
+		return -1, fmt.Errorf("failed to create or update export Job: %w", err)
 	}
 
-	return nil
+	return largestCompletedPartNum, nil
 }
 
+// handleCompletedJobsOfComponent checks completed {export,upload,import} Jobs and
+// returns the latest completed part number. It also deletes the completed Jobs
+// other than the latest one.
 func (r *MantleBackupReconciler) handleCompletedJobsOfComponent(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
 	componentLabel string,
 	componentPrefix string,
-	body func(job *batchv1.Job, partNum int) (bool, error),
-) error {
+	hookPostJobDeletion *func(partNum int) error,
+) (int, error) {
+	// List all the Jobs
 	var jobList batchv1.JobList
 	if err := r.Client.List(ctx, &jobList, &client.ListOptions{
 		Namespace: r.managedCephClusterID,
@@ -1079,10 +1084,17 @@ func (r *MantleBackupReconciler) handleCompletedJobsOfComponent(
 			"app.kubernetes.io/component": componentLabel,
 		}),
 	}); err != nil {
-		return fmt.Errorf("failed to list Jobs: %w", err)
+		return -1, fmt.Errorf("failed to list Jobs: %w", err)
 	}
 
+	// Collect the completed Jobs having the correct prefix.
+	type CompletedJob struct {
+		job     batchv1.Job
+		partNum int
+	}
+	completedJobs := []*CompletedJob{}
 	prefix := fmt.Sprintf("%s%s-", componentPrefix, string(backup.GetUID()))
+	largestPartNum := -1
 	for _, job := range jobList.Items {
 		if !IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete) {
 			continue
@@ -1094,30 +1106,42 @@ func (r *MantleBackupReconciler) handleCompletedJobsOfComponent(
 		}
 		partNum, err := strconv.Atoi(partNumString)
 		if err != nil {
-			return fmt.Errorf("failed to extract part number: %s: %w", partNumString, err)
+			return -1, fmt.Errorf("failed to extract part number: %s: %w", partNumString, err)
 		}
 
-		skipped, err := body(&job, partNum)
-		if err != nil {
-			return fmt.Errorf("failed to run body: %w", err)
-		}
-		if skipped {
+		completedJobs = append(completedJobs, &CompletedJob{
+			job:     job,
+			partNum: partNum,
+		})
+
+		largestPartNum = max(largestPartNum, partNum)
+	}
+
+	// Delete the completed Jobs other than the latest one
+	for _, job := range completedJobs {
+		if job.partNum == largestPartNum {
 			continue
 		}
 
 		propagationPolicy := metav1.DeletePropagationBackground
-		if err := r.Client.Delete(ctx, &job, &client.DeleteOptions{
+		if err := r.Client.Delete(ctx, &job.job, &client.DeleteOptions{
 			Preconditions: &metav1.Preconditions{
-				UID:             &job.UID,
-				ResourceVersion: &job.ResourceVersion,
+				UID:             &job.job.UID,
+				ResourceVersion: &job.job.ResourceVersion,
 			},
 			PropagationPolicy: &propagationPolicy,
 		}); err != nil {
-			return fmt.Errorf("failed to delete Job: %s: %w", job.GetName(), err)
+			return -1, fmt.Errorf("failed to delete Job: %s: %w", job.job.GetName(), err)
+		}
+
+		if hookPostJobDeletion != nil {
+			if err := (*hookPostJobDeletion)(job.partNum); err != nil {
+				return -1, fmt.Errorf("hookPostJobDeletion failed: %w", err)
+			}
 		}
 	}
 
-	return nil
+	return largestPartNum, nil
 }
 
 func IsPartNextToLargestCompletedPart(largestCompletedPartNum *int, partNum int) bool {
@@ -1125,27 +1149,8 @@ func IsPartNextToLargestCompletedPart(largestCompletedPartNum *int, partNum int)
 		(largestCompletedPartNum != nil && partNum != *largestCompletedPartNum+1)
 }
 
-func (r *MantleBackupReconciler) handleCompletedExportJobs(ctx context.Context, backup *mantlev1.MantleBackup) error {
-	return r.handleCompletedJobsOfComponent(
-		ctx,
-		backup,
-		labelComponentExportJob,
-		MantleExportJobPrefix,
-		func(job *batchv1.Job, partNum int) (bool, error) {
-			if IsPartNextToLargestCompletedPart(backup.Status.LargestCompletedExportPartNum, partNum) {
-				return true, nil // skip
-			}
-
-			// Use PATCH here in order not to update backup with stale values.
-			oldBackup := backup.DeepCopy()
-			backup.Status.LargestCompletedExportPartNum = &partNum
-			if err := r.Client.Status().Patch(ctx, backup, client.MergeFrom(oldBackup)); err != nil {
-				return false, fmt.Errorf("failed to patch .status.largestCompletedExportPartNum to %d: %w", partNum, err)
-			}
-
-			return false, nil
-		},
-	)
+func (r *MantleBackupReconciler) handleCompletedExportJobs(ctx context.Context, backup *mantlev1.MantleBackup) (int, error) {
+	return r.handleCompletedJobsOfComponent(ctx, backup, labelComponentExportJob, MantleExportJobPrefix, nil)
 }
 
 func (r *MantleBackupReconciler) canNewExportJobBeCreated(ctx context.Context) (bool, error) {
@@ -1164,7 +1169,15 @@ func (r *MantleBackupReconciler) canNewExportJobBeCreated(ctx context.Context) (
 		return false, fmt.Errorf("failed to list export Jobs: %w", err)
 	}
 
-	if len(jobs.Items) >= r.primarySettings.MaxExportJobs {
+	// exclude completed jobs
+	count := 0
+	for _, job := range jobs.Items {
+		if !IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete) {
+			count++
+		}
+	}
+
+	if count >= r.primarySettings.MaxExportJobs {
 		return false, nil
 	}
 
@@ -1174,17 +1187,9 @@ func (r *MantleBackupReconciler) canNewExportJobBeCreated(ctx context.Context) (
 func (r *MantleBackupReconciler) getPartNumRangeOfExpectedRunningUploadJobs(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
+	exportedPartNum,
+	uploadedPartNum int,
 ) (int, int, error) {
-	uploadedPartNum := -1
-	if backup.Status.LargestCompletedUploadPartNum != nil {
-		uploadedPartNum = *backup.Status.LargestCompletedUploadPartNum
-	}
-
-	exportedPartNum := -1
-	if backup.Status.LargestCompletedExportPartNum != nil {
-		exportedPartNum = *backup.Status.LargestCompletedExportPartNum
-	}
-
 	if r.primarySettings.MaxUploadJobs == 0 {
 		return uploadedPartNum + 1, exportedPartNum, nil
 	}
@@ -1200,10 +1205,13 @@ func (r *MantleBackupReconciler) getPartNumRangeOfExpectedRunningUploadJobs(
 		return 0, 0, fmt.Errorf("failed to list upload Jobs: %w", err)
 	}
 
-	// Count upload Jobs that is NOT related to backup.
+	// Count not completed upload Jobs that is NOT related to the backup.
 	count := 0
 	prefix := fmt.Sprintf("%s%s-", MantleUploadJobPrefix, string(backup.GetUID()))
 	for _, job := range jobs.Items {
+		if IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete) {
+			continue
+		}
 		if strings.HasPrefix(job.GetName(), prefix) {
 			continue
 		}
@@ -1259,60 +1267,49 @@ func (r *MantleBackupReconciler) getNumberOfParts(backup *mantlev1.MantleBackup)
 	return int(numParts), nil
 }
 
-func (r *MantleBackupReconciler) haveAllExportJobsCompleted(backup *mantlev1.MantleBackup) (bool, error) {
+func (r *MantleBackupReconciler) haveAllExportJobsCompleted(backup *mantlev1.MantleBackup, largestCompletedPartNum int) (bool, error) {
 	limit, err := r.getNumberOfParts(backup)
 	if err != nil {
 		return false, fmt.Errorf("failed to get the number of the parts of the exported data: %w", err)
 	}
-
-	partNum := -1
-	if backup.Status.LargestCompletedExportPartNum != nil {
-		partNum = *backup.Status.LargestCompletedExportPartNum
-	}
-	return partNum+1 == limit, nil
+	return largestCompletedPartNum+1 == limit, nil
 }
 
-func (r *MantleBackupReconciler) startUpload(ctx context.Context, targetBackup *mantlev1.MantleBackup) error {
+func (r *MantleBackupReconciler) startUpload(ctx context.Context, targetBackup *mantlev1.MantleBackup, largestCompletedExportPartNum int) error {
 	// NOTE: `handleCompletedUploadJob` might update `targetBackup`.
-	if err := r.handleCompletedUploadJobs(ctx, targetBackup); err != nil {
+	largestCompletedUploadPartNum, err := r.handleCompletedUploadJobs(ctx, targetBackup)
+	if err != nil {
 		return fmt.Errorf("failed to handle completed upload jobs: %w", err)
 	}
 
-	if err := r.createOrUpdateUploadJobs(ctx, targetBackup); err != nil {
+	if err := r.createOrUpdateUploadJobs(
+		ctx,
+		targetBackup,
+		largestCompletedExportPartNum,
+		largestCompletedUploadPartNum,
+	); err != nil {
 		return fmt.Errorf("failed to create or update upload jobs: %w", err)
 	}
 
 	return nil
 }
 
-func (r *MantleBackupReconciler) handleCompletedUploadJobs(ctx context.Context, backup *mantlev1.MantleBackup) error {
+func (r *MantleBackupReconciler) handleCompletedUploadJobs(ctx context.Context, backup *mantlev1.MantleBackup) (int, error) {
+	hook := func(partNum int) error {
+		pvc := corev1.PersistentVolumeClaim{}
+		pvc.SetName(MakeExportDataPVCName(backup, partNum))
+		pvc.SetNamespace(r.managedCephClusterID)
+		if err := r.Client.Delete(ctx, &pvc); err != nil && !aerrors.IsNotFound(err) {
+			return fmt.Errorf("failed to delete export data PVC: %s/%s: %w", pvc.GetNamespace(), pvc.GetName(), err)
+		}
+		return nil
+	}
 	return r.handleCompletedJobsOfComponent(
 		ctx,
 		backup,
 		labelComponentUploadJob,
 		MantleUploadJobPrefix,
-		func(job *batchv1.Job, partNum int) (bool, error) {
-			if (backup.Status.LargestCompletedUploadPartNum == nil && partNum != 0) ||
-				(backup.Status.LargestCompletedUploadPartNum != nil && partNum != *backup.Status.LargestCompletedUploadPartNum+1) {
-				return true, nil // skip
-			}
-
-			// Use PATCH here in order not to update backup with stale values.
-			oldBackup := backup.DeepCopy()
-			backup.Status.LargestCompletedUploadPartNum = &partNum
-			if err := r.Client.Status().Patch(ctx, backup, client.MergeFrom(oldBackup)); err != nil {
-				return false, fmt.Errorf("failed to patch .status.largestCompletedUploadPartNum to %d: %w", partNum, err)
-			}
-
-			pvc := corev1.PersistentVolumeClaim{}
-			pvc.SetName(MakeExportDataPVCName(backup, partNum))
-			pvc.SetNamespace(r.managedCephClusterID)
-			if err := r.Client.Delete(ctx, &pvc); err != nil && !aerrors.IsNotFound(err) {
-				return false, fmt.Errorf("failed to delete export data PVC: %s/%s: %w", pvc.GetNamespace(), pvc.GetName(), err)
-			}
-
-			return false, nil
-		},
+		&hook,
 	)
 }
 
@@ -1339,7 +1336,11 @@ func calculateExportDataPVCSize(transferPartSize *resource.Quantity) (*resource.
 	return pvcSize, nil
 }
 
-func (r *MantleBackupReconciler) createOrUpdateExportDataPVC(ctx context.Context, target *mantlev1.MantleBackup) error {
+func (r *MantleBackupReconciler) createOrUpdateExportDataPVC(
+	ctx context.Context,
+	target *mantlev1.MantleBackup,
+	largestCompletedPartNum int,
+) error {
 	var targetPVC corev1.PersistentVolumeClaim
 	if err := json.Unmarshal([]byte(target.Status.PVCManifest), &targetPVC); err != nil {
 		return err
@@ -1351,13 +1352,8 @@ func (r *MantleBackupReconciler) createOrUpdateExportDataPVC(ctx context.Context
 			target.GetNamespace(), target.GetName(), err)
 	}
 
-	partNum := 0
-	if target.Status.LargestCompletedExportPartNum != nil {
-		partNum = *target.Status.LargestCompletedExportPartNum + 1
-	}
-
 	var pvc corev1.PersistentVolumeClaim
-	pvc.SetName(MakeExportDataPVCName(target, partNum))
+	pvc.SetName(MakeExportDataPVCName(target, largestCompletedPartNum+1))
 	pvc.SetNamespace(r.managedCephClusterID)
 	_, err = ctrl.CreateOrUpdate(ctx, r.Client, &pvc, func() error {
 		labels := pvc.GetLabels()
@@ -1418,7 +1414,12 @@ func MakeDiscardPVName(target *mantlev1.MantleBackup) string {
 	return MantleDiscardPVPrefix + string(target.GetUID())
 }
 
-func (r *MantleBackupReconciler) createOrUpdateExportJob(ctx context.Context, target *mantlev1.MantleBackup, sourceBackupNamePtr *string) error {
+func (r *MantleBackupReconciler) createOrUpdateExportJob(
+	ctx context.Context,
+	target *mantlev1.MantleBackup,
+	sourceBackupNamePtr *string,
+	largestCompletedPartNum int,
+) error {
 	sourceBackupName := ""
 	if sourceBackupNamePtr != nil {
 		sourceBackupName = *sourceBackupNamePtr
@@ -1429,10 +1430,7 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(ctx context.Context, ta
 		return fmt.Errorf("failed to get pool and image from .status.PVManifest: %w", err)
 	}
 
-	partNum := 0
-	if target.Status.LargestCompletedExportPartNum != nil {
-		partNum = *target.Status.LargestCompletedExportPartNum + 1
-	}
+	partNum := largestCompletedPartNum + 1
 
 	transferPartSize, ok := target.Status.TransferPartSize.AsInt64()
 	if !ok {
@@ -1594,8 +1592,15 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(ctx context.Context, ta
 func (r *MantleBackupReconciler) createOrUpdateUploadJobs(
 	ctx context.Context,
 	target *mantlev1.MantleBackup,
+	largestCompletedExportPartNum,
+	largestCompletedUploadPartNum int,
 ) error {
-	minPartNum, maxPartNum, err := r.getPartNumRangeOfExpectedRunningUploadJobs(ctx, target)
+	minPartNum, maxPartNum, err := r.getPartNumRangeOfExpectedRunningUploadJobs(
+		ctx,
+		target,
+		largestCompletedExportPartNum,
+		largestCompletedUploadPartNum,
+	)
 	if err != nil {
 		return fmt.Errorf("failed to get part num range of runnable upload jobs: %w", err)
 	}
@@ -1762,8 +1767,8 @@ func (r *MantleBackupReconciler) startImport(
 		return requeueReconciliation(), nil
 	}
 
-	// NOTE: `handleCompletedImportJobs` may update `backup`.
-	if err := r.handleCompletedImportJobs(ctx, backup); err != nil {
+	largestCompletedPartNum, err := r.handleCompletedImportJobs(ctx, backup)
+	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to handle completed import jobs: %w", err)
 	}
 
@@ -1780,7 +1785,7 @@ func (r *MantleBackupReconciler) startImport(
 		return result, err
 	}
 
-	if result, err := r.reconcileImportJob(ctx, backup, target); err != nil || !result.IsZero() {
+	if result, err := r.reconcileImportJob(ctx, backup, target, largestCompletedPartNum); err != nil || !result.IsZero() {
 		return result, err
 	}
 
@@ -1865,27 +1870,8 @@ func (r *MantleBackupReconciler) isExportDataAlreadyUploaded(
 	return uploaded, nil
 }
 
-func (r *MantleBackupReconciler) handleCompletedImportJobs(ctx context.Context, backup *mantlev1.MantleBackup) error {
-	return r.handleCompletedJobsOfComponent(
-		ctx,
-		backup,
-		labelComponentImportJob,
-		MantleImportJobPrefix,
-		func(job *batchv1.Job, partNum int) (bool, error) {
-			if IsPartNextToLargestCompletedPart(backup.Status.LargestCompletedImportPartNum, partNum) {
-				return true, nil // skip
-			}
-
-			// Use PATCH here in order not to update backup with stale values.
-			oldBackup := backup.DeepCopy()
-			backup.Status.LargestCompletedImportPartNum = &partNum
-			if err := r.Client.Status().Patch(ctx, backup, client.MergeFrom(oldBackup)); err != nil {
-				return false, fmt.Errorf("failed to patch .status.largestCompletedImportPartNum to %d: %w", partNum, err)
-			}
-
-			return false, nil
-		},
-	)
+func (r *MantleBackupReconciler) handleCompletedImportJobs(ctx context.Context, backup *mantlev1.MantleBackup) (int, error) {
+	return r.handleCompletedJobsOfComponent(ctx, backup, labelComponentImportJob, MantleImportJobPrefix, nil)
 }
 
 func isPVSmallerThanPVC(
@@ -2118,12 +2104,9 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
 	snapshotTarget *snapshotTarget,
+	largestCompletedPartNum int,
 ) (ctrl.Result, error) {
-	// Get the largest part number of the completed import Jobs
-	partNum := 0
-	if backup.Status.LargestCompletedImportPartNum != nil {
-		partNum = *backup.Status.LargestCompletedImportPartNum + 1
-	}
+	partNum := largestCompletedPartNum + 1
 
 	// Check that all import Jobs are completed
 	finalPartNum, err := r.getNumberOfParts(backup)
@@ -2168,7 +2151,7 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 	}
 
 	// create or update an import Job
-	if err := r.createOrUpdateImportJob(ctx, backup, snapshotTarget); err != nil {
+	if err := r.createOrUpdateImportJob(ctx, backup, snapshotTarget, partNum); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -2179,12 +2162,8 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
 	snapshotTarget *snapshotTarget,
+	partNum int,
 ) error {
-	partNum := 0
-	if backup.Status.LargestCompletedImportPartNum != nil {
-		partNum = *backup.Status.LargestCompletedImportPartNum + 1
-	}
-
 	if backup.Status.TransferPartSize == nil {
 		return errors.New("status.transferPartSize is nil")
 	}

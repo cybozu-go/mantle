@@ -124,22 +124,6 @@ spec:
                 description: '''createdAt'' specifies the creation date and time'
                 format: date-time
                 type: string
-              largestCompletedExportPartNum:
-                description: |-
-                  largestCompletedExportPartNum indicates the largest part number
-                  that has been successfully exported by `rbd export-diff`.
-                type: integer
-              largestCompletedImportPartNum:
-                description: |-
-                  largestCompletedImportPartNum indicates the largest part number
-                  that has been successfully imported by `rbd import-diff`.
-                type: integer
-              largestCompletedUploadPartNum:
-                description: |-
-                  largestCompletedUploadPartNum indicates the largest part number that has
-                  been successfully uploaded from the primary cluster to the secondary
-                  cluster.
-                type: integer
               pvManifest:
                 description: '''pvManifest'' saving backup target PV manifest'
                 type: string
