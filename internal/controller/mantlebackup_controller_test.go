@@ -1562,7 +1562,7 @@ var _ = Describe("export and upload", func() {
 					runStartExportAndUpload(ctx, target2)
 
 					// Make sure the upload Job for target 1 is deleted.
-					if partNum != 0 {
+					if partNum > 0 {
 						waitJobDeleted(ctx, MakeUploadJobName(target1, partNum-1))
 					}
 				}
