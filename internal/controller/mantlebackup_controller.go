@@ -1205,7 +1205,7 @@ func (r *MantleBackupReconciler) getPartNumRangeOfExpectedRunningUploadJobs(
 		return 0, 0, fmt.Errorf("failed to list upload Jobs: %w", err)
 	}
 
-	// Count not completed upload Jobs that is NOT related to the backup.
+	// Count not completed upload Jobs that are NOT related to the backup.
 	count := 0
 	prefix := fmt.Sprintf("%s%s-", MantleUploadJobPrefix, string(backup.GetUID()))
 	for _, job := range jobs.Items {
