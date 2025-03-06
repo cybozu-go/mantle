@@ -950,3 +950,69 @@ func ChangeBackupTransferPartSize(size string) {
 	)
 	Expect(err).NotTo(HaveOccurred())
 }
+
+func ChangeExportJobScript(ctx context.Context, namespace, backupName string, partNum int, script *string) {
+	GinkgoHelper()
+
+	deployMC, err := GetDeploy(PrimaryK8sCluster, CephClusterNamespace, MantleControllerDeployName)
+	Expect(err).NotTo(HaveOccurred())
+
+	env := deployMC.Spec.Template.Spec.Containers[0].Env
+	envIndex := slices.IndexFunc(
+		env,
+		func(e corev1.EnvVar) bool { return e.Name == "EXPORT_JOB_SCRIPT" },
+	)
+
+	type jsonPatch struct {
+		OP    string          `json:"op"`
+		Path  string          `json:"path"`
+		Value []corev1.EnvVar `json:"value"`
+	}
+	var patch []jsonPatch
+
+	switch {
+	case envIndex == -1 && script == nil:
+		// nothing to do
+		return
+
+	case envIndex == -1 && script != nil:
+		patch = append(patch, jsonPatch{
+			OP:   "add",
+			Path: "/spec/template/spec/containers/0/env/-",
+			Value: []corev1.EnvVar{
+				{
+					Name:  "EXPORT_JOB_SCRIPT",
+					Value: *script,
+				},
+			},
+		})
+
+	case envIndex != -1 && script == nil:
+		patch = append(patch, jsonPatch{
+			OP:   "remove",
+			Path: fmt.Sprintf("/spec/template/spec/containers/0/env/%d", envIndex),
+		})
+
+	case envIndex != -1 && script != nil:
+		patch = append(patch, jsonPatch{
+			OP:   "replace",
+			Path: fmt.Sprintf("/spec/template/spec/containers/0/env/%d", envIndex),
+			Value: []corev1.EnvVar{
+				{
+					Name:  "EXPORT_JOB_SCRIPT",
+					Value: *script,
+				},
+			},
+		})
+	}
+
+	marshalledPatch, err := json.Marshal(patch)
+	Expect(err).NotTo(HaveOccurred())
+
+	_, _, err = Kubectl(
+		PrimaryK8sCluster, nil,
+		"patch", "deploy", "-n", CephClusterNamespace, MantleControllerDeployName, "--type=json",
+		string(marshalledPatch),
+	)
+	Expect(err).NotTo(HaveOccurred())
+}
