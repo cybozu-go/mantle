@@ -487,7 +487,7 @@ func replicationTestSuite() { //nolint:gocyclo
 			EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName2, restoreName2, writtenDataHash2)
 		})
 
-		It("should succeed in backup even when some of export Jobs temporarily fail", func(ctx SpecContext) {
+		It("should succeed in backup even when some of export Jobs temporarily fail", Label("thisone"), func(ctx SpecContext) {
 			namespace := util.GetUniqueName("ns-")
 			pvcName := util.GetUniqueName("pvc-")
 			backupName := util.GetUniqueName("mb-")
@@ -497,27 +497,42 @@ func replicationTestSuite() { //nolint:gocyclo
 			SetupEnvironment(namespace)
 
 			script := fmt.Sprintf(`#!/bin/bash
+rbd_path=$(which rbd)
 rbd(){
-	return 1
+	if [ ${PART_NUM} -eq %d ]; then
+		return 1
+	else
+		${rbd_path} "$@"
+	fi
 }
-%s`, controller.EmbedJobExportScript)
+%s`, partNumFailed, controller.EmbedJobExportScript)
 			ChangeExportJobScript(ctx, namespace, backupName, partNumFailed, &script)
 
 			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
 			//writtenDataHash := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
 
+			By("waiting for the part=1 export Job to fail")
+			jobName := ""
 			Eventually(ctx, func(g Gomega) {
 				backup, err := GetMB(PrimaryK8sCluster, namespace, backupName)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionSyncedToRemote)).
 					To(BeFalse())
-				job, err := GetJob(PrimaryK8sCluster, namespace, controller.MakeExportJobName(backup, partNumFailed))
+				jobName = controller.MakeExportJobName(backup, partNumFailed)
+				job, err := GetJob(PrimaryK8sCluster, CephClusterNamespace, jobName)
 				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(IsJobConditionTrue(job.Status.Conditions, batchv1.JobFailed)).To(BeTrue())
+				g.Expect(IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete)).To(BeFalse())
 			}).Should(Succeed())
+			Consistently(ctx, func(g Gomega) {
+				job, err := GetJob(PrimaryK8sCluster, CephClusterNamespace, jobName)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete)).To(BeFalse())
+			}, "10s", "1s").Should(Succeed())
 
 			ChangeExportJobScript(ctx, namespace, backupName, partNumFailed, nil)
+			_, _, err := Kubectl(PrimaryK8sCluster, nil, "delete", "-n", CephClusterNamespace, "job", jobName)
+			Expect(err).NotTo(HaveOccurred())
 
 			WaitMantleBackupSynced(namespace, backupName)
 

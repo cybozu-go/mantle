@@ -964,9 +964,9 @@ func ChangeExportJobScript(ctx context.Context, namespace, backupName string, pa
 	)
 
 	type jsonPatch struct {
-		OP    string          `json:"op"`
-		Path  string          `json:"path"`
-		Value []corev1.EnvVar `json:"value"`
+		OP    string        `json:"op"`
+		Path  string        `json:"path"`
+		Value corev1.EnvVar `json:"value"`
 	}
 	var patch []jsonPatch
 
@@ -979,11 +979,9 @@ func ChangeExportJobScript(ctx context.Context, namespace, backupName string, pa
 		patch = append(patch, jsonPatch{
 			OP:   "add",
 			Path: "/spec/template/spec/containers/0/env/-",
-			Value: []corev1.EnvVar{
-				{
-					Name:  "EXPORT_JOB_SCRIPT",
-					Value: *script,
-				},
+			Value: corev1.EnvVar{
+				Name:  "EXPORT_JOB_SCRIPT",
+				Value: *script,
 			},
 		})
 
@@ -997,11 +995,9 @@ func ChangeExportJobScript(ctx context.Context, namespace, backupName string, pa
 		patch = append(patch, jsonPatch{
 			OP:   "replace",
 			Path: fmt.Sprintf("/spec/template/spec/containers/0/env/%d", envIndex),
-			Value: []corev1.EnvVar{
-				{
-					Name:  "EXPORT_JOB_SCRIPT",
-					Value: *script,
-				},
+			Value: corev1.EnvVar{
+				Name:  "EXPORT_JOB_SCRIPT",
+				Value: *script,
 			},
 		})
 	}
@@ -1012,7 +1008,31 @@ func ChangeExportJobScript(ctx context.Context, namespace, backupName string, pa
 	_, _, err = Kubectl(
 		PrimaryK8sCluster, nil,
 		"patch", "deploy", "-n", CephClusterNamespace, MantleControllerDeployName, "--type=json",
-		string(marshalledPatch),
+		fmt.Sprintf("--patch=%s", marshalledPatch),
 	)
 	Expect(err).NotTo(HaveOccurred())
+
+	// wait until the Pods start running
+	Eventually(ctx, func(g Gomega) {
+		stdout, _, err := Kubectl(PrimaryK8sCluster, nil, "get", "pod", "-n", CephClusterNamespace, "-o", "json")
+		g.Expect(err).NotTo(HaveOccurred())
+		var pods corev1.PodList
+		err = json.Unmarshal(stdout, &pods)
+		g.Expect(err).NotTo(HaveOccurred())
+
+		for _, pod := range pods.Items {
+			if !strings.HasPrefix(pod.GetName(), MantleControllerDeployName) {
+				continue
+			}
+			index := slices.IndexFunc(pod.Spec.Containers[0].Env, func(e corev1.EnvVar) bool {
+				return e.Name == "EXPORT_JOB_SCRIPT"
+			})
+			if script == nil {
+				g.Expect(index).To(Equal(-1))
+			} else {
+				g.Expect(index).NotTo(Equal(-1))
+				g.Expect(pod.Spec.Containers[0].Env[index].Value).To(Equal(*script))
+			}
+		}
+	}).Should(Succeed())
 }
