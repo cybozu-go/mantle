@@ -951,7 +951,7 @@ func ChangeBackupTransferPartSize(size string) {
 	Expect(err).NotTo(HaveOccurred())
 }
 
-func ChangeExportJobScript(ctx context.Context, namespace, backupName string, partNum int, script *string) {
+func ChangeComponentJobScript(ctx SpecContext, envName, namespace, backupName string, partNum int, script *string) {
 	GinkgoHelper()
 
 	deployMC, err := GetDeploy(PrimaryK8sCluster, CephClusterNamespace, MantleControllerDeployName)
@@ -960,7 +960,7 @@ func ChangeExportJobScript(ctx context.Context, namespace, backupName string, pa
 	env := deployMC.Spec.Template.Spec.Containers[0].Env
 	envIndex := slices.IndexFunc(
 		env,
-		func(e corev1.EnvVar) bool { return e.Name == "EXPORT_JOB_SCRIPT" },
+		func(e corev1.EnvVar) bool { return e.Name == envName },
 	)
 
 	type jsonPatch struct {
@@ -980,7 +980,7 @@ func ChangeExportJobScript(ctx context.Context, namespace, backupName string, pa
 			OP:   "add",
 			Path: "/spec/template/spec/containers/0/env/-",
 			Value: corev1.EnvVar{
-				Name:  "EXPORT_JOB_SCRIPT",
+				Name:  envName,
 				Value: *script,
 			},
 		})
@@ -996,7 +996,7 @@ func ChangeExportJobScript(ctx context.Context, namespace, backupName string, pa
 			OP:   "replace",
 			Path: fmt.Sprintf("/spec/template/spec/containers/0/env/%d", envIndex),
 			Value: corev1.EnvVar{
-				Name:  "EXPORT_JOB_SCRIPT",
+				Name:  envName,
 				Value: *script,
 			},
 		})
@@ -1005,7 +1005,7 @@ func ChangeExportJobScript(ctx context.Context, namespace, backupName string, pa
 	marshalledPatch, err := json.Marshal(patch)
 	Expect(err).NotTo(HaveOccurred())
 
-	By("patching the controller manifest for EXPORT_JOB_SCRIPT")
+	By("patching the controller manifest for " + envName)
 	_, _, err = Kubectl(
 		PrimaryK8sCluster, nil,
 		"patch", "deploy", "-n", CephClusterNamespace, MantleControllerDeployName, "--type=json",
@@ -1026,7 +1026,7 @@ func ChangeExportJobScript(ctx context.Context, namespace, backupName string, pa
 				continue
 			}
 			index := slices.IndexFunc(pod.Spec.Containers[0].Env, func(e corev1.EnvVar) bool {
-				return e.Name == "EXPORT_JOB_SCRIPT"
+				return e.Name == envName
 			})
 			if script == nil {
 				g.Expect(index).To(Equal(-1))

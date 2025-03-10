@@ -1611,6 +1611,11 @@ func (r *MantleBackupReconciler) createOrUpdateUploadJobs(
 		return fmt.Errorf("failed to get part num range of runnable upload jobs: %w", err)
 	}
 
+	script := os.Getenv("UPLOAD_JOB_SCRIPT")
+	if script == "" {
+		script = EmbedJobUploadScript
+	}
+
 	for partNum := minPartNum; partNum <= maxPartNum; partNum++ {
 		var job batchv1.Job
 		job.SetName(MakeUploadJobName(target, partNum))
@@ -1643,7 +1648,7 @@ func (r *MantleBackupReconciler) createOrUpdateUploadJobs(
 			job.Spec.Template.Spec.Containers = []corev1.Container{
 				{
 					Name:    "upload",
-					Command: []string{"/bin/bash", "-c", EmbedJobUploadScript},
+					Command: []string{"/bin/bash", "-c", script},
 					Env: []corev1.EnvVar{
 						{
 							Name:  "OBJ_NAME",
