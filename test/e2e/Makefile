@@ -148,6 +148,7 @@ do-minikube-start:
 					--extra-config=kubeadm.node-name=$(NODE_NAME) \
 					--extra-config=kubelet.hostname-override=$(NODE_NAME) \
 					--network mantle-test \
+					--disk-size=30g \
 					-p $(MINIKUBE_PROFILE) ; \
 				if [ "$$?" -eq 0 ]; then \
 					ok=1; \

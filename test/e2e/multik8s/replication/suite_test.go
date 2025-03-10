@@ -490,9 +490,11 @@ func replicationTestSuite() { //nolint:gocyclo
 		DescribeTable("Backups should succeed even if component Jobs temporarily fail", Label("thisone"),
 			func(
 				ctx SpecContext,
+				clusterOfJob int,
 				envName,
 				originalScript string,
 				makeJobName func(backup *mantlev1.MantleBackup, partNum int) string,
+				extractPartNumFromJobName func(jobName string, backup *mantlev1.MantleBackup) (int, bool),
 			) {
 				namespace := util.GetUniqueName("ns-")
 				pvcName := util.GetUniqueName("pvc-")
@@ -517,11 +519,11 @@ s5cmd(){
 	if [ ${PART_NUM} -eq %d ]; then
 		return 1
 	else
-		${s5cmd} "$@"
+		${s5cmd_path} "$@"
 	fi
 }
 %s`, partNumFailed, partNumFailed, originalScript)
-				ChangeComponentJobScript(ctx, envName, namespace, backupName, partNumFailed, &script)
+				ChangeComponentJobScript(ctx, clusterOfJob, envName, namespace, backupName, partNumFailed, &script)
 
 				CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
 				writtenDataHash := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
@@ -530,36 +532,73 @@ s5cmd(){
 				By("waiting for the part=1 Job to fail")
 				jobName := ""
 				Eventually(ctx, func(g Gomega) {
-					backup, err := GetMB(PrimaryK8sCluster, namespace, backupName)
+					primaryMB, err := GetMB(PrimaryK8sCluster, namespace, backupName)
 					g.Expect(err).NotTo(HaveOccurred())
-					g.Expect(meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionSyncedToRemote)).
+					g.Expect(meta.IsStatusConditionTrue(primaryMB.Status.Conditions, mantlev1.BackupConditionSyncedToRemote)).
 						To(BeFalse())
+
+					backup, err := GetMB(clusterOfJob, namespace, backupName)
+					g.Expect(err).NotTo(HaveOccurred())
 					jobName = makeJobName(backup, partNumFailed)
-					job, err := GetJob(PrimaryK8sCluster, CephClusterNamespace, jobName)
+
+					job, err := GetJob(clusterOfJob, CephClusterNamespace, jobName)
 					g.Expect(err).NotTo(HaveOccurred())
 					g.Expect(IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete)).To(BeFalse())
 				}).Should(Succeed())
 				Consistently(ctx, func(g Gomega) {
-					job, err := GetJob(PrimaryK8sCluster, CephClusterNamespace, jobName)
+					job, err := GetJob(clusterOfJob, CephClusterNamespace, jobName)
 					g.Expect(err).NotTo(HaveOccurred())
 					g.Expect(IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete)).To(BeFalse())
 				}, "10s", "1s").Should(Succeed())
 
-				ChangeComponentJobScript(ctx, envName, namespace, backupName, partNumFailed, nil)
+				ChangeComponentJobScript(ctx, clusterOfJob, envName, namespace, backupName, partNumFailed, nil)
 
-				By("deleting the failing Job")
-				_, _, err := Kubectl(PrimaryK8sCluster, nil, "delete", "-n", CephClusterNamespace, "job", jobName)
+				By(fmt.Sprintf("deleting Jobs having part number larger than %d to proceed reconciliation", partNumFailed))
+				backup, err := GetMB(clusterOfJob, namespace, backupName)
 				Expect(err).NotTo(HaveOccurred())
+				jobList, err := GetJobList(clusterOfJob, CephClusterNamespace)
+				Expect(err).NotTo(HaveOccurred())
+				for _, job := range jobList.Items {
+					partNum, ok := extractPartNumFromJobName(job.GetName(), backup)
+					if !ok || partNum < partNumFailed {
+						continue
+					}
+					_, _, err = Kubectl(clusterOfJob, nil, "delete", "-n", CephClusterNamespace, "job", job.GetName())
+					Expect(err).NotTo(HaveOccurred())
+				}
 
 				WaitMantleBackupSynced(namespace, backupName)
 
 				EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
 				EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
-
 			},
 
-			Entry("export Job", "EXPORT_JOB_SCRIPT", controller.EmbedJobExportScript, controller.MakeExportJobName),
-			Entry("upload Job", "UPLOAD_JOB_SCRIPT", controller.EmbedJobUploadScript, controller.MakeUploadJobName),
+			Entry(
+				"export Job",
+				PrimaryK8sCluster,
+				"EXPORT_JOB_SCRIPT",
+				controller.EmbedJobExportScript,
+				controller.MakeExportJobName,
+				controller.ExtractPartNumFromExportJobName,
+			),
+
+			Entry(
+				"upload Job",
+				PrimaryK8sCluster,
+				"UPLOAD_JOB_SCRIPT",
+				controller.EmbedJobUploadScript,
+				controller.MakeUploadJobName,
+				controller.ExtractPartNumFromUploadJobName,
+			),
+
+			Entry(
+				"import Job",
+				SecondaryK8sCluster,
+				"IMPORT_JOB_SCRIPT",
+				controller.EmbedJobImportScript,
+				controller.MakeImportJobName,
+				controller.ExtractPartNumFromImportJobName,
+			),
 		)
 
 		It("should get metrics from the controller pod in the primary cluster", func(ctx SpecContext) {

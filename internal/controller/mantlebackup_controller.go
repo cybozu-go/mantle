@@ -1094,20 +1094,15 @@ func (r *MantleBackupReconciler) handleCompletedJobsOfComponent(
 		partNum int
 	}
 	completedJobs := []*CompletedJob{}
-	prefix := fmt.Sprintf("%s%s-", componentPrefix, string(backup.GetUID()))
 	largestPartNum := -1
 	for _, job := range jobList.Items {
 		if !IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete) {
 			continue
 		}
 
-		partNumString, ok := strings.CutPrefix(job.GetName(), prefix)
+		partNum, ok := ExtractPartNumFromComponentJobName(componentPrefix, job.GetName(), backup)
 		if !ok {
 			continue
-		}
-		partNum, err := strconv.Atoi(partNumString)
-		if err != nil {
-			return -1, fmt.Errorf("failed to extract part number: %s: %w", partNumString, err)
 		}
 
 		completedJobs = append(completedJobs, &CompletedJob{
@@ -1208,12 +1203,12 @@ func (r *MantleBackupReconciler) getPartNumRangeOfExpectedRunningUploadJobs(
 
 	// Count not completed upload Jobs that are NOT related to the backup.
 	count := 0
-	prefix := fmt.Sprintf("%s%s-", MantleUploadJobPrefix, string(backup.GetUID()))
 	for _, job := range jobs.Items {
 		if IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete) {
 			continue
 		}
-		if strings.HasPrefix(job.GetName(), prefix) {
+		_, ok := ExtractPartNumFromUploadJobName(job.GetName(), backup)
+		if ok {
 			continue
 		}
 		count++
@@ -1277,7 +1272,6 @@ func (r *MantleBackupReconciler) haveAllExportJobsCompleted(backup *mantlev1.Man
 }
 
 func (r *MantleBackupReconciler) startUpload(ctx context.Context, targetBackup *mantlev1.MantleBackup, largestCompletedExportPartNum int) error {
-	// NOTE: `handleCompletedUploadJob` might update `targetBackup`.
 	largestCompletedUploadPartNum, err := r.handleCompletedUploadJobs(ctx, targetBackup)
 	if err != nil {
 		return fmt.Errorf("failed to handle completed upload jobs: %w", err)
@@ -1413,6 +1407,31 @@ func MakeDiscardPVCName(target *mantlev1.MantleBackup) string {
 
 func MakeDiscardPVName(target *mantlev1.MantleBackup) string {
 	return MantleDiscardPVPrefix + string(target.GetUID())
+}
+
+func ExtractPartNumFromComponentJobName(componentPrefix string, jobName string, backup *mantlev1.MantleBackup) (int, bool) {
+	prefix := fmt.Sprintf("%s%s-", componentPrefix, string(backup.GetUID()))
+	partNumString, ok := strings.CutPrefix(jobName, prefix)
+	if !ok {
+		return 0, false
+	}
+	partNum, err := strconv.Atoi(partNumString)
+	if err != nil {
+		return 0, false
+	}
+	return partNum, true
+}
+
+func ExtractPartNumFromExportJobName(jobName string, backup *mantlev1.MantleBackup) (int, bool) {
+	return ExtractPartNumFromComponentJobName(MantleExportJobPrefix, jobName, backup)
+}
+
+func ExtractPartNumFromUploadJobName(jobName string, backup *mantlev1.MantleBackup) (int, bool) {
+	return ExtractPartNumFromComponentJobName(MantleUploadJobPrefix, jobName, backup)
+}
+
+func ExtractPartNumFromImportJobName(jobName string, backup *mantlev1.MantleBackup) (int, bool) {
+	return ExtractPartNumFromComponentJobName(MantleImportJobPrefix, jobName, backup)
 }
 
 func (r *MantleBackupReconciler) createOrUpdateExportJob(
@@ -2183,6 +2202,11 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 		return errors.New("status.transferPartSize can't be converted to int64")
 	}
 
+	script := os.Getenv("IMPORT_JOB_SCRIPT")
+	if script == "" {
+		script = EmbedJobImportScript
+	}
+
 	var job batchv1.Job
 
 	job.SetName(MakeImportJobName(backup, partNum))
@@ -2218,7 +2242,7 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 
 		container := corev1.Container{
 			Name:    "import",
-			Command: []string{"/bin/bash", "-c", EmbedJobImportScript},
+			Command: []string{"/bin/bash", "-c", script},
 			Env: []corev1.EnvVar{
 				{
 					Name: "ROOK_CEPH_USERNAME",
@@ -2276,6 +2300,10 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 							Key: "AWS_SECRET_ACCESS_KEY",
 						},
 					},
+				},
+				{
+					Name:  "PART_NUM",
+					Value: strconv.Itoa(partNum),
 				},
 			},
 			Image:           r.podImage,

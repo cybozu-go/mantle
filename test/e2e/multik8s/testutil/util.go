@@ -750,14 +750,15 @@ func WaitJobDeleted(ctx SpecContext, cluster int, namespace, jobName string) {
 	}).Should(Succeed())
 }
 
-func WaitJobsDeleted(ctx SpecContext, cluster int, namespace, jobNamePrefix string) {
+func WaitComponentJobsDeleted(ctx SpecContext, cluster int, namespace, componentPrefix string, backup *mantlev1.MantleBackup) {
 	GinkgoHelper()
 	By("waiting for jobs to be deleted")
 	Eventually(ctx, func(g Gomega) {
 		jobs, err := GetJobList(cluster, CephClusterNamespace)
 		g.Expect(err).NotTo(HaveOccurred())
 		exist := slices.ContainsFunc(jobs.Items, func(job batchv1.Job) bool {
-			return strings.HasPrefix(job.GetName(), jobNamePrefix)
+			_, ok := controller.ExtractPartNumFromComponentJobName(componentPrefix, job.GetName(), backup)
+			return ok
 		})
 		g.Expect(exist).To(BeFalse())
 	}).Should(Succeed())
@@ -765,18 +766,18 @@ func WaitJobsDeleted(ctx SpecContext, cluster int, namespace, jobNamePrefix stri
 
 func WaitTemporaryPrimaryJobsDeleted(ctx SpecContext, primaryMB *mantlev1.MantleBackup) {
 	GinkgoHelper()
-	WaitJobsDeleted(ctx, PrimaryK8sCluster, CephClusterNamespace,
-		fmt.Sprintf("%s%s-", controller.MantleExportJobPrefix, string(primaryMB.GetUID())))
-	WaitJobsDeleted(ctx, PrimaryK8sCluster, CephClusterNamespace,
-		fmt.Sprintf("%s%s-", controller.MantleUploadJobPrefix, string(primaryMB.GetUID())))
+	WaitComponentJobsDeleted(ctx, PrimaryK8sCluster, CephClusterNamespace,
+		controller.MantleExportJobPrefix, primaryMB)
+	WaitComponentJobsDeleted(ctx, PrimaryK8sCluster, CephClusterNamespace,
+		controller.MantleUploadJobPrefix, primaryMB)
 }
 
 func WaitTemporarySecondaryJobsDeleted(ctx SpecContext, secondaryMB *mantlev1.MantleBackup) {
 	GinkgoHelper()
-	WaitJobsDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace,
-		fmt.Sprintf("%s%s-", controller.MantleImportJobPrefix, string(secondaryMB.GetUID())))
-	WaitJobsDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace,
-		fmt.Sprintf("%s%s-", controller.MantleDiscardJobPrefix, string(secondaryMB.GetUID())))
+	WaitComponentJobsDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace,
+		controller.MantleImportJobPrefix, secondaryMB)
+	WaitComponentJobsDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace,
+		controller.MantleDiscardJobPrefix, secondaryMB)
 }
 
 func WaitTemporaryJobsDeleted(ctx SpecContext, primaryMB, secondaryMB *mantlev1.MantleBackup) {
@@ -951,10 +952,10 @@ func ChangeBackupTransferPartSize(size string) {
 	Expect(err).NotTo(HaveOccurred())
 }
 
-func ChangeComponentJobScript(ctx SpecContext, envName, namespace, backupName string, partNum int, script *string) {
+func ChangeComponentJobScript(ctx SpecContext, cluster int, envName, namespace, backupName string, partNum int, script *string) {
 	GinkgoHelper()
 
-	deployMC, err := GetDeploy(PrimaryK8sCluster, CephClusterNamespace, MantleControllerDeployName)
+	deployMC, err := GetDeploy(cluster, CephClusterNamespace, MantleControllerDeployName)
 	Expect(err).NotTo(HaveOccurred())
 
 	env := deployMC.Spec.Template.Spec.Containers[0].Env
@@ -1007,7 +1008,7 @@ func ChangeComponentJobScript(ctx SpecContext, envName, namespace, backupName st
 
 	By("patching the controller manifest for " + envName)
 	_, _, err = Kubectl(
-		PrimaryK8sCluster, nil,
+		cluster, nil,
 		"patch", "deploy", "-n", CephClusterNamespace, MantleControllerDeployName, "--type=json",
 		fmt.Sprintf("--patch=%s", marshalledPatch),
 	)
@@ -1015,7 +1016,7 @@ func ChangeComponentJobScript(ctx SpecContext, envName, namespace, backupName st
 
 	By("waiting until the controller Pod starts running")
 	Eventually(ctx, func(g Gomega) {
-		stdout, _, err := Kubectl(PrimaryK8sCluster, nil, "get", "pod", "-n", CephClusterNamespace, "-o", "json")
+		stdout, _, err := Kubectl(cluster, nil, "get", "pod", "-n", CephClusterNamespace, "-o", "json")
 		g.Expect(err).NotTo(HaveOccurred())
 		var pods corev1.PodList
 		err = json.Unmarshal(stdout, &pods)
