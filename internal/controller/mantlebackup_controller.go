@@ -1092,20 +1092,15 @@ func (r *MantleBackupReconciler) handleCompletedJobsOfComponent(
 		partNum int
 	}
 	completedJobs := []*CompletedJob{}
-	prefix := fmt.Sprintf("%s%s-", componentPrefix, string(backup.GetUID()))
 	largestPartNum := -1
 	for _, job := range jobList.Items {
 		if !IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete) {
 			continue
 		}
 
-		partNumString, ok := strings.CutPrefix(job.GetName(), prefix)
+		partNum, ok := ExtractPartNumFromComponentJobName(componentPrefix, job.GetName(), backup)
 		if !ok {
 			continue
-		}
-		partNum, err := strconv.Atoi(partNumString)
-		if err != nil {
-			return -1, fmt.Errorf("failed to extract part number: %s: %w", partNumString, err)
 		}
 
 		completedJobs = append(completedJobs, &CompletedJob{
@@ -1206,12 +1201,12 @@ func (r *MantleBackupReconciler) getPartNumRangeOfExpectedRunningUploadJobs(
 
 	// Count not completed upload Jobs that are NOT related to the backup.
 	count := 0
-	prefix := fmt.Sprintf("%s%s-", MantleUploadJobPrefix, string(backup.GetUID()))
 	for _, job := range jobs.Items {
 		if IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete) {
 			continue
 		}
-		if strings.HasPrefix(job.GetName(), prefix) {
+		_, ok := ExtractPartNumFromUploadJobName(job.GetName(), backup)
+		if ok {
 			continue
 		}
 		count++
@@ -1411,6 +1406,31 @@ func MakeDiscardPVCName(target *mantlev1.MantleBackup) string {
 
 func MakeDiscardPVName(target *mantlev1.MantleBackup) string {
 	return MantleDiscardPVPrefix + string(target.GetUID())
+}
+
+func ExtractPartNumFromComponentJobName(componentPrefix string, jobName string, backup *mantlev1.MantleBackup) (int, bool) {
+	prefix := fmt.Sprintf("%s%s-", componentPrefix, string(backup.GetUID()))
+	partNumString, ok := strings.CutPrefix(jobName, prefix)
+	if !ok {
+		return 0, false
+	}
+	partNum, err := strconv.Atoi(partNumString)
+	if err != nil {
+		return 0, false
+	}
+	return partNum, true
+}
+
+func ExtractPartNumFromExportJobName(jobName string, backup *mantlev1.MantleBackup) (int, bool) {
+	return ExtractPartNumFromComponentJobName(MantleExportJobPrefix, jobName, backup)
+}
+
+func ExtractPartNumFromUploadJobName(jobName string, backup *mantlev1.MantleBackup) (int, bool) {
+	return ExtractPartNumFromComponentJobName(MantleUploadJobPrefix, jobName, backup)
+}
+
+func ExtractPartNumFromImportJobName(jobName string, backup *mantlev1.MantleBackup) (int, bool) {
+	return ExtractPartNumFromComponentJobName(MantleImportJobPrefix, jobName, backup)
 }
 
 func (r *MantleBackupReconciler) createOrUpdateExportJob(

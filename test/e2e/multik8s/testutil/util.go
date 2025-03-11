@@ -750,14 +750,21 @@ func WaitJobDeleted(ctx SpecContext, cluster int, namespace, jobName string) {
 	}).Should(Succeed())
 }
 
-func WaitJobsDeleted(ctx SpecContext, cluster int, namespace, jobNamePrefix string) {
+func WaitComponentJobsDeleted(
+	ctx SpecContext,
+	cluster int,
+	namespace,
+	componentPrefix string,
+	backup *mantlev1.MantleBackup,
+) {
 	GinkgoHelper()
 	By("waiting for jobs to be deleted")
 	Eventually(ctx, func(g Gomega) {
 		jobs, err := GetJobList(cluster, CephClusterNamespace)
 		g.Expect(err).NotTo(HaveOccurred())
 		exist := slices.ContainsFunc(jobs.Items, func(job batchv1.Job) bool {
-			return strings.HasPrefix(job.GetName(), jobNamePrefix)
+			_, ok := controller.ExtractPartNumFromComponentJobName(componentPrefix, job.GetName(), backup)
+			return ok
 		})
 		g.Expect(exist).To(BeFalse())
 	}).Should(Succeed())
@@ -765,18 +772,18 @@ func WaitJobsDeleted(ctx SpecContext, cluster int, namespace, jobNamePrefix stri
 
 func WaitTemporaryPrimaryJobsDeleted(ctx SpecContext, primaryMB *mantlev1.MantleBackup) {
 	GinkgoHelper()
-	WaitJobsDeleted(ctx, PrimaryK8sCluster, CephClusterNamespace,
-		fmt.Sprintf("%s%s-", controller.MantleExportJobPrefix, string(primaryMB.GetUID())))
-	WaitJobsDeleted(ctx, PrimaryK8sCluster, CephClusterNamespace,
-		fmt.Sprintf("%s%s-", controller.MantleUploadJobPrefix, string(primaryMB.GetUID())))
+	WaitComponentJobsDeleted(ctx, PrimaryK8sCluster, CephClusterNamespace,
+		controller.MantleExportJobPrefix, primaryMB)
+	WaitComponentJobsDeleted(ctx, PrimaryK8sCluster, CephClusterNamespace,
+		controller.MantleUploadJobPrefix, primaryMB)
 }
 
 func WaitTemporarySecondaryJobsDeleted(ctx SpecContext, secondaryMB *mantlev1.MantleBackup) {
 	GinkgoHelper()
-	WaitJobsDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace,
-		fmt.Sprintf("%s%s-", controller.MantleImportJobPrefix, string(secondaryMB.GetUID())))
-	WaitJobsDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace,
-		fmt.Sprintf("%s%s-", controller.MantleDiscardJobPrefix, string(secondaryMB.GetUID())))
+	WaitComponentJobsDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace,
+		controller.MantleImportJobPrefix, secondaryMB)
+	WaitComponentJobsDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace,
+		controller.MantleDiscardJobPrefix, secondaryMB)
 }
 
 func WaitTemporaryJobsDeleted(ctx SpecContext, primaryMB, secondaryMB *mantlev1.MantleBackup) {
