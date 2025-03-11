@@ -42,5 +42,6 @@ var _ = Describe("Mantle", func() {
 	Context("backup failure", Label("backup-failure"), testBackupFailure)
 	Context("change to primary", Label("change-to-primary"), testChangeToPrimary)
 	Context("change to secondary", Label("change-to-secondary"), testChangeToSecondary)
+	Context("change to standalone", Label("change-to-standalone"), testChangeToStandalone)
 	Context("misc", Label("misc"), testMisc)
 })
