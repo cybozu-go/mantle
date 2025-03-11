@@ -31,7 +31,7 @@ jobs:
           - --label-filter="change-to-primary"
           - --label-filter="change-to-secondary"
           - --label-filter="change-to-standalone"
-          - --label-filter="misc"
+          - --label-filter="!(full-backup || incremental-backup || backup-failure || change-to-primary || change-to-secondary || change-to-standalone)"
         include:
           - backup-transfer-part-size: 10Mi # equal to the PVC size
             ginkgo-flags: --label-filter="various-transfer-part-size"
