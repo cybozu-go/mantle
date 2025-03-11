@@ -2265,6 +2265,10 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 						},
 					},
 				},
+				{
+					Name:  "PART_NUM",
+					Value: strconv.Itoa(partNum),
+				},
 			},
 			Image:           r.podImage,
 			ImagePullPolicy: corev1.PullIfNotPresent,
