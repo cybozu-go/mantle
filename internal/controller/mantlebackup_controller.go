@@ -1270,7 +1270,6 @@ func (r *MantleBackupReconciler) haveAllExportJobsCompleted(backup *mantlev1.Man
 }
 
 func (r *MantleBackupReconciler) startUpload(ctx context.Context, targetBackup *mantlev1.MantleBackup, largestCompletedExportPartNum int) error {
-	// NOTE: `handleCompletedUploadJob` might update `targetBackup`.
 	largestCompletedUploadPartNum, err := r.handleCompletedUploadJobs(ctx, targetBackup)
 	if err != nil {
 		return fmt.Errorf("failed to handle completed upload jobs: %w", err)
