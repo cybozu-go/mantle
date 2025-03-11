@@ -72,11 +72,11 @@ const (
 
 var (
 	//go:embed script/job-export.sh
-	embedJobExportScript string
+	EmbedJobExportScript string
 	//go:embed script/job-upload.sh
-	embedJobUploadScript string
+	EmbedJobUploadScript string
 	//go:embed script/job-import.sh
-	embedJobImportScript string
+	EmbedJobImportScript string
 )
 
 type ObjectStorageSettings struct {
@@ -1467,7 +1467,7 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(
 		job.Spec.Template.Spec.Containers = []corev1.Container{
 			{
 				Name:    "export",
-				Command: []string{"/bin/bash", "-c", embedJobExportScript},
+				Command: []string{"/bin/bash", "-c", EmbedJobExportScript},
 				Env: []corev1.EnvVar{
 					{
 						Name: "ROOK_CEPH_USERNAME",
@@ -1636,7 +1636,7 @@ func (r *MantleBackupReconciler) createOrUpdateUploadJobs(
 			job.Spec.Template.Spec.Containers = []corev1.Container{
 				{
 					Name:    "upload",
-					Command: []string{"/bin/bash", "-c", embedJobUploadScript},
+					Command: []string{"/bin/bash", "-c", EmbedJobUploadScript},
 					Env: []corev1.EnvVar{
 						{
 							Name:  "OBJ_NAME",
@@ -2206,7 +2206,7 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 
 		container := corev1.Container{
 			Name:    "import",
-			Command: []string{"/bin/bash", "-c", embedJobImportScript},
+			Command: []string{"/bin/bash", "-c", EmbedJobImportScript},
 			Env: []corev1.EnvVar{
 				{
 					Name: "ROOK_CEPH_USERNAME",
