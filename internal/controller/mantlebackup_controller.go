@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -68,6 +69,10 @@ const (
 
 	syncModeFull        = "full"
 	syncModeIncremental = "incremental"
+
+	EnvExportJobScript = "EXPORT_JOB_SCRIPT"
+	EnvUploadJobScript = "UPLOAD_JOB_SCRIPT"
+	EnvImportJobScript = "IMPORT_JOB_SCRIPT"
 )
 
 var (
@@ -1455,6 +1460,11 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(
 		return fmt.Errorf("failed to convert transferPartSize to int64: %d", transferPartSize)
 	}
 
+	script := os.Getenv(EnvExportJobScript)
+	if script == "" {
+		script = EmbedJobExportScript
+	}
+
 	var job batchv1.Job
 	job.SetName(MakeExportJobName(target, partNum))
 	job.SetNamespace(r.managedCephClusterID)
@@ -1486,7 +1496,7 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(
 		job.Spec.Template.Spec.Containers = []corev1.Container{
 			{
 				Name:    "export",
-				Command: []string{"/bin/bash", "-c", EmbedJobExportScript},
+				Command: []string{"/bin/bash", "-c", script},
 				Env: []corev1.EnvVar{
 					{
 						Name: "ROOK_CEPH_USERNAME",
@@ -1623,6 +1633,11 @@ func (r *MantleBackupReconciler) createOrUpdateUploadJobs(
 		return fmt.Errorf("failed to get part num range of runnable upload jobs: %w", err)
 	}
 
+	script := os.Getenv(EnvUploadJobScript)
+	if script == "" {
+		script = EmbedJobUploadScript
+	}
+
 	for partNum := minPartNum; partNum <= maxPartNum; partNum++ {
 		var job batchv1.Job
 		job.SetName(MakeUploadJobName(target, partNum))
@@ -1655,7 +1670,7 @@ func (r *MantleBackupReconciler) createOrUpdateUploadJobs(
 			job.Spec.Template.Spec.Containers = []corev1.Container{
 				{
 					Name:    "upload",
-					Command: []string{"/bin/bash", "-c", EmbedJobUploadScript},
+					Command: []string{"/bin/bash", "-c", script},
 					Env: []corev1.EnvVar{
 						{
 							Name:  "OBJ_NAME",
@@ -2190,6 +2205,11 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 		return errors.New("status.transferPartSize can't be converted to int64")
 	}
 
+	script := os.Getenv(EnvImportJobScript)
+	if script == "" {
+		script = EmbedJobImportScript
+	}
+
 	var job batchv1.Job
 
 	job.SetName(MakeImportJobName(backup, partNum))
@@ -2225,7 +2245,7 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 
 		container := corev1.Container{
 			Name:    "import",
-			Command: []string{"/bin/bash", "-c", EmbedJobImportScript},
+			Command: []string{"/bin/bash", "-c", script},
 			Env: []corev1.EnvVar{
 				{
 					Name: "ROOK_CEPH_USERNAME",
