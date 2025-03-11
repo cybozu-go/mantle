@@ -11,10 +11,12 @@ import (
 	"time"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
+	"github.com/cybozu-go/mantle/internal/controller"
 	. "github.com/cybozu-go/mantle/test/e2e/multik8s/testutil"
 	"github.com/cybozu-go/mantle/test/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -484,6 +486,130 @@ func replicationTestSuite() { //nolint:gocyclo
 			EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName1, restoreName1, writtenDataHash1)
 			EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName2, restoreName2, writtenDataHash2)
 		})
+
+		DescribeTable("Backups should succeed even if component Jobs temporarily fail",
+			func(
+				ctx SpecContext,
+				clusterOfJob int,
+				envName,
+				originalScript string,
+				makeJobName func(backup *mantlev1.MantleBackup, partNum int) string,
+				extractPartNumFromJobName func(jobName string, backup *mantlev1.MantleBackup) (int, bool),
+			) {
+				namespace := util.GetUniqueName("ns-")
+				pvcName := util.GetUniqueName("pvc-")
+				backupName := util.GetUniqueName("mb-")
+				restoreName := util.GetUniqueName("mr-")
+				partNumFailed := 1
+
+				SetupEnvironment(namespace)
+
+				// Make part=1 Job fail
+				script := fmt.Sprintf(`#!/bin/bash
+rbd_path=$(which rbd)
+rbd(){
+	if [ ${PART_NUM} -eq %d ]; then
+		return 1
+	else
+		${rbd_path} "$@"
+	fi
+}
+
+s5cmd_path=$(which s5cmd)
+s5cmd(){
+	if [ ${PART_NUM} -eq %d ]; then
+		return 1
+	else
+		${s5cmd_path} "$@"
+	fi
+}
+%s`, partNumFailed, partNumFailed, originalScript)
+				ChangeComponentJobScript(ctx, clusterOfJob, envName, namespace, backupName, partNumFailed, &script)
+
+				CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+				writtenDataHash := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
+				CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
+
+				By("waiting for the part=1 Job to fail")
+				jobName := ""
+				Eventually(ctx, func(g Gomega) {
+					primaryMB, err := GetMB(PrimaryK8sCluster, namespace, backupName)
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(meta.IsStatusConditionTrue(primaryMB.Status.Conditions, mantlev1.BackupConditionSyncedToRemote)).
+						To(BeFalse())
+
+					backup, err := GetMB(clusterOfJob, namespace, backupName)
+					g.Expect(err).NotTo(HaveOccurred())
+					jobName = makeJobName(backup, partNumFailed)
+
+					job, err := GetJob(clusterOfJob, CephClusterNamespace, jobName)
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete)).To(BeFalse())
+				}).Should(Succeed())
+
+				By("ensuring the part=1 Job continues to fail")
+				Consistently(ctx, func(g Gomega) {
+					job, err := GetJob(clusterOfJob, CephClusterNamespace, jobName)
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete)).To(BeFalse())
+				}, "10s", "1s").Should(Succeed())
+
+				// Make part=1 Job succeed
+				ChangeComponentJobScript(ctx, clusterOfJob, envName, namespace, backupName, partNumFailed, nil)
+
+				By(fmt.Sprintf("deleting Jobs having part number larger than %d to proceed reconciliation", partNumFailed))
+				backup, err := GetMB(clusterOfJob, namespace, backupName)
+				Expect(err).NotTo(HaveOccurred())
+				jobList, err := GetJobList(clusterOfJob, CephClusterNamespace)
+				Expect(err).NotTo(HaveOccurred())
+				for _, job := range jobList.Items {
+					partNum, ok := extractPartNumFromJobName(job.GetName(), backup)
+					if !ok || partNum < partNumFailed {
+						continue
+					}
+					_, _, err = Kubectl(clusterOfJob, nil, "delete", "-n", CephClusterNamespace, "job", job.GetName())
+					Expect(err).NotTo(HaveOccurred())
+				}
+
+				WaitMantleBackupSynced(namespace, backupName)
+
+				primaryMB, err := GetMB(PrimaryK8sCluster, namespace, backupName)
+				Expect(err).NotTo(HaveOccurred())
+				secondaryMB, err := GetMB(SecondaryK8sCluster, namespace, backupName)
+				Expect(err).NotTo(HaveOccurred())
+				WaitTemporaryResourcesDeleted(ctx, primaryMB, secondaryMB)
+
+				EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
+				EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
+			},
+
+			Entry(
+				"export Job",
+				PrimaryK8sCluster,
+				controller.EnvExportJobScript,
+				controller.EmbedJobExportScript,
+				controller.MakeExportJobName,
+				controller.ExtractPartNumFromExportJobName,
+			),
+
+			Entry(
+				"upload Job",
+				PrimaryK8sCluster,
+				controller.EnvUploadJobScript,
+				controller.EmbedJobUploadScript,
+				controller.MakeUploadJobName,
+				controller.ExtractPartNumFromUploadJobName,
+			),
+
+			Entry(
+				"import Job",
+				SecondaryK8sCluster,
+				controller.EnvImportJobScript,
+				controller.EmbedJobImportScript,
+				controller.MakeImportJobName,
+				controller.ExtractPartNumFromImportJobName,
+			),
+		)
 
 		It("should get metrics from the controller pod in the primary cluster", func(ctx SpecContext) {
 			metrics := []string{

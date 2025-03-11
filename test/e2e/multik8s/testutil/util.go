@@ -957,3 +957,98 @@ func ChangeBackupTransferPartSize(size string) {
 	)
 	Expect(err).NotTo(HaveOccurred())
 }
+
+func ChangeComponentJobScript(
+	ctx SpecContext,
+	cluster int,
+	envName,
+	namespace,
+	backupName string,
+	partNum int,
+	script *string,
+) {
+	GinkgoHelper()
+
+	deployMC, err := GetDeploy(cluster, CephClusterNamespace, MantleControllerDeployName)
+	Expect(err).NotTo(HaveOccurred())
+
+	env := deployMC.Spec.Template.Spec.Containers[0].Env
+	envIndex := slices.IndexFunc(
+		env,
+		func(e corev1.EnvVar) bool { return e.Name == envName },
+	)
+
+	type jsonPatch struct {
+		OP    string        `json:"op"`
+		Path  string        `json:"path"`
+		Value corev1.EnvVar `json:"value"`
+	}
+	var patch []jsonPatch
+
+	switch {
+	case envIndex == -1 && script == nil:
+		// nothing to do
+		return
+
+	case envIndex == -1 && script != nil:
+		patch = append(patch, jsonPatch{
+			OP:   "add",
+			Path: "/spec/template/spec/containers/0/env/-",
+			Value: corev1.EnvVar{
+				Name:  envName,
+				Value: *script,
+			},
+		})
+
+	case envIndex != -1 && script == nil:
+		patch = append(patch, jsonPatch{
+			OP:   "remove",
+			Path: fmt.Sprintf("/spec/template/spec/containers/0/env/%d", envIndex),
+		})
+
+	case envIndex != -1 && script != nil:
+		patch = append(patch, jsonPatch{
+			OP:   "replace",
+			Path: fmt.Sprintf("/spec/template/spec/containers/0/env/%d", envIndex),
+			Value: corev1.EnvVar{
+				Name:  envName,
+				Value: *script,
+			},
+		})
+	}
+
+	marshalledPatch, err := json.Marshal(patch)
+	Expect(err).NotTo(HaveOccurred())
+
+	By("patching the controller manifest for " + envName)
+	_, _, err = Kubectl(
+		cluster, nil,
+		"patch", "deploy", "-n", CephClusterNamespace, MantleControllerDeployName, "--type=json",
+		fmt.Sprintf("--patch=%s", marshalledPatch),
+	)
+	Expect(err).NotTo(HaveOccurred())
+
+	By("waiting until the controller Pod starts running")
+	Eventually(ctx, func(g Gomega) {
+		stdout, _, err := Kubectl(cluster, nil, "get", "pod", "-n", CephClusterNamespace, "-o", "json")
+		g.Expect(err).NotTo(HaveOccurred())
+		var pods corev1.PodList
+		err = json.Unmarshal(stdout, &pods)
+		g.Expect(err).NotTo(HaveOccurred())
+
+		for _, pod := range pods.Items {
+			if !strings.HasPrefix(pod.GetName(), MantleControllerDeployName) {
+				continue
+			}
+			index := slices.IndexFunc(pod.Spec.Containers[0].Env, func(e corev1.EnvVar) bool {
+				return e.Name == envName
+			})
+			if script == nil {
+				g.Expect(index).To(Equal(-1))
+			} else {
+				g.Expect(index).NotTo(Equal(-1))
+				g.Expect(pod.Spec.Containers[0].Env[index].Value).To(Equal(*script))
+			}
+		}
+	}).Should(Succeed())
+}
