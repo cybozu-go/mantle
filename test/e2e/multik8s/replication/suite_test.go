@@ -487,6 +487,72 @@ func replicationTestSuite() { //nolint:gocyclo
 			EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName2, restoreName2, writtenDataHash2)
 		})
 
+		It("should succeed in backup even if part=0 upload Job completes after part=1 upload Job does",
+			func(ctx SpecContext) {
+				namespace := util.GetUniqueName("ns-")
+				pvcName := util.GetUniqueName("pvc-")
+				backupName := util.GetUniqueName("mb-")
+				restoreName := util.GetUniqueName("mr-")
+				partNumSlow := 0
+				partNumFast := 1
+
+				SetupEnvironment(namespace)
+
+				script := fmt.Sprintf(`#!/bin/bash
+s5cmd_path=$(which s5cmd)
+s5cmd(){
+	if [ ${PART_NUM} -eq %d ]; then
+		sleep 60
+	fi
+	${s5cmd_path} "$@"
+}
+%s`, partNumSlow, controller.EmbedJobUploadScript)
+				ChangeComponentJobScript(
+					ctx,
+					PrimaryK8sCluster,
+					controller.EnvUploadJobScript,
+					namespace,
+					backupName,
+					partNumSlow,
+					&script,
+				)
+
+				CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+				writtenDataHash := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
+				CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
+
+				By(fmt.Sprintf("waiting the situation where part=%d upload Job has not yet completed but "+
+					"part=%d upload Job has already completed", partNumSlow, partNumFast))
+				Eventually(ctx, func(g Gomega) {
+					primaryMB, err := GetMB(PrimaryK8sCluster, namespace, backupName)
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(meta.IsStatusConditionTrue(primaryMB.Status.Conditions, mantlev1.BackupConditionSyncedToRemote)).
+						To(BeFalse())
+
+					jobSlow, err := GetJob(PrimaryK8sCluster, CephClusterNamespace,
+						controller.MakeUploadJobName(primaryMB, partNumSlow))
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(IsJobConditionTrue(jobSlow.Status.Conditions, batchv1.JobComplete)).To(BeFalse())
+
+					jobFast, err := GetJob(PrimaryK8sCluster, CephClusterNamespace,
+						controller.MakeUploadJobName(primaryMB, partNumFast))
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(IsJobConditionTrue(jobFast.Status.Conditions, batchv1.JobComplete)).To(BeTrue())
+				}).Should(Succeed())
+
+				WaitMantleBackupSynced(namespace, backupName)
+
+				primaryMB, err := GetMB(PrimaryK8sCluster, namespace, backupName)
+				Expect(err).NotTo(HaveOccurred())
+				secondaryMB, err := GetMB(SecondaryK8sCluster, namespace, backupName)
+				Expect(err).NotTo(HaveOccurred())
+				WaitTemporaryResourcesDeleted(ctx, primaryMB, secondaryMB)
+
+				EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
+				EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
+			},
+		)
+
 		DescribeTable("Backups should succeed even if component Jobs temporarily fail",
 			func(
 				ctx SpecContext,
