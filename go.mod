@@ -1,6 +1,7 @@
 module github.com/cybozu-go/mantle
 
-go 1.23
+go 1.23.7
+
 require (
 	github.com/aws/aws-sdk-go-v2 v1.32.4
 	github.com/aws/aws-sdk-go-v2/config v1.28.3
