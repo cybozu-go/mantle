@@ -34,14 +34,13 @@ type PrimarySettings struct {
 
 type SecondaryServer struct {
 	client client.Client
-	reader client.Reader // reader should not have cache.
 	proto.UnimplementedMantleServiceServer
 }
 
 var _ proto.MantleServiceServer = &SecondaryServer{}
 
-func NewSecondaryServer(client client.Client, reader client.Reader) *SecondaryServer {
-	return &SecondaryServer{client: client, reader: reader}
+func NewSecondaryServer(client client.Client) *SecondaryServer {
+	return &SecondaryServer{client: client}
 }
 
 func (s *SecondaryServer) CreateOrUpdatePVC(
@@ -98,8 +97,7 @@ func (s *SecondaryServer) CreateOrUpdatePVC(
 	}
 
 	// Get the created or updated PVC to fetch its UID.
-	// The client's cache may not be updated, so use the reader without cache instead.
-	if err := s.reader.Get(
+	if err := s.client.Get(
 		ctx, types.NamespacedName{Name: pvcReceived.GetName(), Namespace: pvcReceived.GetNamespace()}, &pvc,
 	); err != nil {
 		return nil, fmt.Errorf("failed to get PVC that should exist: %w", err)
@@ -201,7 +199,7 @@ func (s *SecondaryServer) ListMantleBackup(
 	req *proto.ListMantleBackupRequest,
 ) (*proto.ListMantleBackupResponse, error) {
 	var backupList mantlev1.MantleBackupList
-	err := s.reader.List(ctx, &backupList, &client.ListOptions{
+	err := s.client.List(ctx, &backupList, &client.ListOptions{
 		LabelSelector: labels.SelectorFromSet(map[string]string{labelRemoteBackupTargetPVCUID: req.PvcUID}),
 		Namespace:     req.Namespace,
 	})

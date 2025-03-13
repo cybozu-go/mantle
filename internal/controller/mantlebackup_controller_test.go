@@ -1056,7 +1056,7 @@ var _ = Describe("SetSynchronizing", func() {
 			diffFrom = &sourceName
 		}
 
-		secondaryServer := NewSecondaryServer(ctrlClient, ctrlClient)
+		secondaryServer := NewSecondaryServer(ctrlClient)
 		_, err = secondaryServer.SetSynchronizing(context.Background(), &proto.SetSynchronizingRequest{
 			Name:      targetName,
 			Namespace: backupNamespace,
@@ -1161,7 +1161,7 @@ var _ = Describe("SetSynchronizing", func() {
 			Expect(err).NotTo(HaveOccurred())
 		}
 
-		secondaryServer := NewSecondaryServer(ctrlClient, ctrlClient)
+		secondaryServer := NewSecondaryServer(ctrlClient)
 		_, err = secondaryServer.SetSynchronizing(context.Background(), &proto.SetSynchronizingRequest{
 			Name:      name1,
 			Namespace: "",
