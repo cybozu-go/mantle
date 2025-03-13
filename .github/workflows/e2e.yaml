@@ -13,7 +13,8 @@ on:
 
 jobs:
   build:
-    runs-on: "ubuntu-22.04"
+    runs-on: mantle_large_runner_16core
+    #runs-on: "ubuntu-22.04"
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
