@@ -547,7 +547,16 @@ func (r *MantleBackupReconciler) replicateManifests(
 	pvcSent.SetAnnotations(map[string]string{
 		annotRemoteUID: string(pvc.GetUID()),
 	})
-	pvcSent.Spec = pvc.Spec
+	pvcSent.Spec = *pvc.Spec.DeepCopy()
+	capacity, err := resource.ParseQuantity(fmt.Sprintf("%d", *backup.Status.SnapSize))
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to parse quantity: %w", err)
+	}
+	pvcSent.Spec.Resources = corev1.VolumeResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceStorage: capacity,
+		},
+	}
 	pvcSentJson, err := json.Marshal(pvcSent)
 	if err != nil {
 		return ctrl.Result{}, err
