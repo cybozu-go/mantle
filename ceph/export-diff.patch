@@ -1,3 +1,5 @@
+diff --git a/src/tools/rbd/ArgumentTypes.h b/src/tools/rbd/ArgumentTypes.h
+index cc7c4813636..ac3e040e22a 100644
 --- a/src/tools/rbd/ArgumentTypes.h
 +++ b/src/tools/rbd/ArgumentTypes.h
 @@ -55,6 +55,9 @@ static const std::string DEST_SNAPSHOT_NAME("dest-snap");
@@ -11,7 +13,7 @@
  // encryption arguments
  static const std::string ENCRYPTION_FORMAT("encryption-format");
 diff --git a/src/tools/rbd/action/Export.cc b/src/tools/rbd/action/Export.cc
-index ddcf0f2c30c..1b72db2bde8 100644
+index ddcf0f2c30c..7ba5a4939fe 100644
 --- a/src/tools/rbd/action/Export.cc
 +++ b/src/tools/rbd/action/Export.cc
 @@ -123,16 +123,27 @@ private:
@@ -131,13 +133,13 @@ index ddcf0f2c30c..1b72db2bde8 100644
 +  r = image.stat(info, sizeof(info));
 +  if (r < 0)
 +    return r;
-+  
++
 +  if (*offset >= info.size) {
 +    std::cerr << "rbd: offset " << *offset << " exceeds image size "
 +              << info.size << std::endl;
 +    return -EINVAL;
 +  }
-+  
++
 +  if (*offset > 0) {
 +    *from_snap_name = mid_snap_prefix + "-offset-" + std::to_string(*offset);
 +  }
