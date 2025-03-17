@@ -2,7 +2,7 @@ FROM ghcr.io/cybozu/ubuntu:22.04 AS build-ceph
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
-ENV CEPH_TAG=v18.2.4
+ENV CEPH_TAG=v19.2.1
 ENV WORKSPACE=/workspace
 
 RUN apt-get update && \
@@ -22,19 +22,15 @@ RUN git clone -b ${CEPH_TAG} --depth=1 --recurse-submodules --shallow-submodules
 COPY *.patch ./
 WORKDIR ${WORKSPACE}/ceph
 
-# Ceph v18.2.4 has a bug that causes the ceph-volume command to fail on the OSD prepare pod.
-# This bug was caused by the wrong way of installing the Python package.
-# As a workaround, the following patch is applied ahead of upstream.
-# https://github.com/ceph/ceph/commit/729fd8e25ff2bfbcf99790d6cd08489d1c4e2ede
-# Apply the packing-1.patch(Commit 80edcd4) simply because the changes depend on it.
-RUN patch -p1 < ${WORKSPACE}/packing-1.patch && \
-    patch -p1 < ${WORKSPACE}/packing-2.patch
-
 RUN ./install-deps.sh && \
     apt install --no-install-recommends -y python3-routes
 
+# Addition of debian pkg in ceph exporter was omitted in squid.
+# https://github.com/ceph/ceph/pull/56541
+RUN patch -p1 < ${WORKSPACE}/exporter.patch
+
 # This patch customizes the ceph rbd export-diff command. 
-RUN  patch -p1 < ${WORKSPACE}/export-diff.patch
+RUN patch -p1 < ${WORKSPACE}/export-diff.patch
 
 # Prebuild ceph source to generate files in `src/pybind/mgr/dashboard/frontend/dist` needed by CMake
 RUN ./make-dist
@@ -42,10 +38,6 @@ RUN ./make-dist
 # Build Ceph packages
 RUN sed -i -e 's/WITH_CEPHFS_JAVA=ON/WITH_CEPHFS_JAVA=OFF/' debian/rules && \
     sed -i -e 's@usr/share/java/libcephfs-test.jar@@' debian/ceph-test.install
-# CMake in the self-build environment did not allow space-separated URLs.
-# As a workaround, the following patch is applied ahead of upstream.
-# https://github.com/ceph/ceph/commit/35435420781f84e9b71f72b10e6842a89c06de7f
-RUN patch -p1 < ${WORKSPACE}/boost-url.patch
 RUN rm debian/libcephfs-java.jlibs debian/libcephfs-jni.install debian/ceph-mgr-dashboard*
 RUN dpkg-buildpackage --build=binary -uc -us -j10
 RUN rm ${WORKSPACE}/*-dbg_*.deb ${WORKSPACE}/ceph-test_*.deb
