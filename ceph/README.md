@@ -27,6 +27,11 @@ git push origin --all
 git push origin --tags
 ```
 
+### Update Dockerfile
+
+1. Update `CEPH_TAG` to the desired version.
+2. If [`neco-containers/ceph/Dockerfile`](https://github.com/cybozu/neco-containers/blob/main/ceph/Dockerfile) or [`neco-containers/ceph/build.sh`](https://github.com/cybozu/neco-containers/blob/main/ceph/build.sh) is updated, update the Dockerfile in the same way.
+
 ### Update the patch
 **In the `cybozu/ceph` repository,** you checkout the target branch (`rbd-export-vx.y.z`). If it doesn't exist yet, it's necessary to create it and apply the newest patch as follows.
 
