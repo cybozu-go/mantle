@@ -2,10 +2,13 @@ package controller
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"flag"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"sync"
 	"time"
@@ -14,6 +17,7 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/logging"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -63,6 +67,12 @@ var (
 	httpsProxy              string
 	noProxy                 string
 	backupTransferPartSize  string
+	grpcTLSClientCertPath   string
+	grpcTLSClientKeyPath    string
+	grpcTLSClientCAPath     string
+	grpcTLSServerCertPath   string
+	grpcTLSServerKeyPath    string
+	grpcTLSServerCAPath     string
 
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
@@ -114,6 +124,18 @@ func init() {
 		"A string that contains comma-separated values specifying hosts that should be excluded from proxying.")
 	flags.StringVar(&backupTransferPartSize, "backup-transfer-part-size", "200Gi",
 		"The size of each backup data chunk to be transferred at a time.")
+	flags.StringVar(&grpcTLSClientCertPath, "grpc-tls-client-cert-path", "",
+		"The file path of a TLS certificate used for client authentication of gRPC.")
+	flags.StringVar(&grpcTLSClientKeyPath, "grpc-tls-client-key-path", "",
+		"The file path of a TLS key used for client authentication of gRPC.")
+	flags.StringVar(&grpcTLSClientCAPath, "grpc-tls-client-ca-path", "",
+		"The file path of a TLS CA certificate that issues a certificate used for client authentication of gRPC.")
+	flags.StringVar(&grpcTLSServerCertPath, "grpc-tls-server-cert-path", "",
+		"The file path of a TLS certificate used for server authentication of gRPC.")
+	flags.StringVar(&grpcTLSServerKeyPath, "grpc-tls-server-key-path", "",
+		"The file path of a TLS key used for server authentication of gRPC.")
+	flags.StringVar(&grpcTLSServerCAPath, "grpc-tls-server-ca-path", "",
+		"The file path of a TLS CA certificate that issues a certificate used for server authentication of gRPC.")
 
 	goflags := flag.NewFlagSet("goflags", flag.ExitOnError)
 	zapOpts.Development = true
@@ -126,29 +148,86 @@ func init() {
 	//+kubebuilder:scaffold:scheme
 }
 
+func loadTLSCredentials(certPath, keyPath, caPath string) ([]tls.Certificate, *x509.CertPool, error) {
+	var certs []tls.Certificate
+	if certPath != "" || keyPath != "" {
+		cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to load X509 key pair: %w", err)
+		}
+		certs = []tls.Certificate{cert}
+	}
+
+	var ca *x509.CertPool
+	if caPath != "" {
+		ca = x509.NewCertPool()
+		caBytes, err := os.ReadFile(caPath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to read server ca certificate: %s: %w", caPath, err)
+		}
+		if ok := ca.AppendCertsFromPEM(caBytes); !ok {
+			return nil, nil, fmt.Errorf("faield to parse: %s", caPath)
+		}
+	}
+
+	return certs, ca, nil
+}
+
 func checkCommandlineArgs() error {
 	switch role {
 	case controller.RoleStandalone:
 		// nothing to do
+		return nil
+
 	case controller.RolePrimary:
-		fallthrough
+		// checks specific to primary
+		if (grpcTLSClientCertPath == "" && grpcTLSClientKeyPath != "") ||
+			(grpcTLSClientCertPath != "" && grpcTLSClientKeyPath == "") {
+			return errors.New("--grpc-tls-client-cert-path and --grpc-tls-client-key-path must be specified together")
+		}
+		if grpcTLSClientCertPath != "" && grpcTLSServerCAPath == "" {
+			return errors.New("--grpc-tls-client-cert-path and --grpc-tls-client-key-path must be specified with " +
+				"--grpc-tls-server-ca-path")
+		}
+		if grpcTLSServerCertPath != "" || grpcTLSServerKeyPath != "" || grpcTLSClientCAPath != "" {
+			return errors.New("--grpc-tls-server-cert-path, --grpc-tls-server-key-path, or --grpc-tls-client-ca-path " +
+				"must not be specified if --role is 'primary'")
+		}
+
 	case controller.RoleSecondary:
-		if mantleServiceEndpoint == "" {
-			return errors.New("--mantle-service-endpoint must be specified if --role is 'primary' or 'secondary'")
+		// checks specific to secondary
+		if (grpcTLSServerCertPath == "" && grpcTLSServerKeyPath != "") ||
+			(grpcTLSServerCertPath != "" && grpcTLSServerKeyPath == "") {
+			return errors.New("--grpc-tls-server-cert-path and --grpc-tls-server-key-path must be specified together")
 		}
-		if caCertConfigMapSrc != "" && caCertKeySrc == "" {
-			return errors.New("--ca-cert-key must be specified if --role is 'primary' or 'secondary', " +
-				"and --ca-cert-configmap is specified")
+		if grpcTLSClientCAPath != "" && grpcTLSServerCertPath == "" {
+			return errors.New("--grpc-tls-client-ca-path must be specified with " +
+				"--grpc-tls-server-cert-path and --grpc-tls-server-key-path")
 		}
-		if objectStorageBucketName == "" {
-			return errors.New("--object-storage-bucket-name must be specified if --role is 'primary' or 'secondary'")
+		if grpcTLSClientCertPath != "" || grpcTLSClientKeyPath != "" || grpcTLSServerCAPath != "" {
+			return errors.New("--grpc-tls-client-cert-path, --grpc-tls-client-key-path, or --grpc-tls-server-ca-path " +
+				"must not be specified if --role is 'secondary'")
 		}
-		if objectStorageEndpoint == "" {
-			return errors.New("--object-storage-endpoint must be specified if --role is 'primary' or 'secondary'")
-		}
+
 	default:
 		return fmt.Errorf("role should be one of 'standalone', 'primary', or 'secondary': %s", role)
 	}
+
+	// checks common to primary and secondary
+	if mantleServiceEndpoint == "" {
+		return errors.New("--mantle-service-endpoint must be specified if --role is 'primary' or 'secondary'")
+	}
+	if caCertConfigMapSrc != "" && caCertKeySrc == "" {
+		return errors.New("--ca-cert-key must be specified if --role is 'primary' or 'secondary', " +
+			"and --ca-cert-configmap is specified")
+	}
+	if objectStorageBucketName == "" {
+		return errors.New("--object-storage-bucket-name must be specified if --role is 'primary' or 'secondary'")
+	}
+	if objectStorageEndpoint == "" {
+		return errors.New("--object-storage-endpoint must be specified if --role is 'primary' or 'secondary'")
+	}
+
 	return nil
 }
 
@@ -277,9 +356,27 @@ func setupPrimary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup) 
 		return err
 	}
 
+	// Construct a gRPC client.
+	clientCerts, serverCACertPool, err := loadTLSCredentials(
+		grpcTLSClientCertPath, grpcTLSClientKeyPath, grpcTLSServerCAPath)
+	if err != nil {
+		return fmt.Errorf("failed to load TLS credentials for gRPC client: %w", err)
+	}
+	creds := insecure.NewCredentials()
+	if clientCerts != nil || serverCACertPool != nil {
+		url, err := url.ParseRequestURI("http://" + mantleServiceEndpoint)
+		if err != nil {
+			return fmt.Errorf("failed to parse mantle service endpoint: %s: %w", mantleServiceEndpoint, err)
+		}
+		creds = credentials.NewTLS(&tls.Config{
+			ServerName:   url.Hostname(),
+			Certificates: clientCerts,
+			RootCAs:      serverCACertPool,
+		})
+	}
 	conn, err := grpc.NewClient(
 		mantleServiceEndpoint,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(creds),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time: 1 * time.Minute,
 		}),
@@ -311,14 +408,33 @@ func setupPrimary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup) 
 func setupSecondary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup, cancel context.CancelFunc) error {
 	logger := ctrl.Log.WithName("grpc")
 
-	serv := grpc.NewServer(grpc.ChainUnaryInterceptor(
-		logging.UnaryServerInterceptor(
-			logging.LoggerFunc(func(_ context.Context, _ logging.Level, msg string, fields ...any) {
-				logger.Info(msg, fields...)
-			}),
-			logging.WithLogOnEvents(logging.StartCall, logging.FinishCall),
+	// Construct a gRPC server.
+	grpcArgs := []grpc.ServerOption{
+		grpc.ChainUnaryInterceptor(
+			logging.UnaryServerInterceptor(
+				logging.LoggerFunc(func(_ context.Context, _ logging.Level, msg string, fields ...any) {
+					logger.Info(msg, fields...)
+				}),
+				logging.WithLogOnEvents(logging.StartCall, logging.FinishCall),
+			),
 		),
-	))
+	}
+	serverCerts, clientCACertPool, err := loadTLSCredentials(
+		grpcTLSServerCertPath, grpcTLSServerKeyPath, grpcTLSClientCAPath)
+	if err != nil {
+		return fmt.Errorf("failed to load TLS credentials for gRPC server: %w", err)
+	}
+	if serverCerts != nil || clientCACertPool != nil {
+		tlsConfig := &tls.Config{
+			ClientCAs:    clientCACertPool,
+			Certificates: serverCerts,
+		}
+		if clientCACertPool != nil {
+			tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+		}
+		grpcArgs = append(grpcArgs, grpc.Creds(credentials.NewTLS(tlsConfig)))
+	}
+	serv := grpc.NewServer(grpcArgs...)
 
 	proto.RegisterMantleServiceServer(serv, controller.NewSecondaryServer(mgr.GetClient()))
 
