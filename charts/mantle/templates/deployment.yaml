@@ -102,6 +102,24 @@ spec:
             {{- with .Values.controller.backupTransferPartSize }}
             - --backup-transfer-part-size={{ . }}
             {{- end }}
+            {{- with .Values.controller.grpcTLSClientCertPath }}
+            - --grpc-tls-client-cert-path={{ . }}
+            {{- end }}
+            {{- with .Values.controller.grpcTLSClientKeyPath }}
+            - --grpc-tls-client-key-path={{ . }}
+            {{- end }}
+            {{- with .Values.controller.grpcTLSClientCAPath }}
+            - --grpc-tls-client-ca-path={{ . }}
+            {{- end }}
+            {{- with .Values.controller.grpcTLSServerCertPath }}
+            - --grpc-tls-server-cert-path={{ . }}
+            {{- end }}
+            {{- with .Values.controller.grpcTLSServerKeyPath }}
+            - --grpc-tls-server-key-path={{ . }}
+            {{- end }}
+            {{- with .Values.controller.grpcTLSServerCAPath }}
+            - --grpc-tls-server-ca-path={{ . }}
+            {{- end }}
           env:
             - name: POD_NAME
               valueFrom:
