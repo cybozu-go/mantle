@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -283,6 +284,11 @@ func (r *MantleRestoreReconciler) createOrUpdateRestoringPV(ctx context.Context,
 		pv.Labels[labelRestoringPVKey] = labelRestoringPVValue
 
 		pv.Spec = *srcPV.Spec.DeepCopy()
+		capacity, err := resource.ParseQuantity(fmt.Sprintf("%d", *backup.Status.SnapSize))
+		if err != nil {
+			return fmt.Errorf("failed to parse quantity: %w", err)
+		}
+		pv.Spec.Capacity[corev1.ResourceStorage] = capacity
 		pv.Spec.ClaimRef = nil
 		pv.Spec.CSI.VolumeAttributes = map[string]string{
 			"clusterID":     srcPV.Spec.CSI.VolumeAttributes["clusterID"],
@@ -329,6 +335,15 @@ func (r *MantleRestoreReconciler) createOrUpdateRestoringPVC(ctx context.Context
 		}
 
 		pvc.Spec = *srcPVC.Spec.DeepCopy()
+		capacity, err := resource.ParseQuantity(fmt.Sprintf("%d", *backup.Status.SnapSize))
+		if err != nil {
+			return fmt.Errorf("failed to parse quantity: %w", err)
+		}
+		pvc.Spec.Resources = corev1.VolumeResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceStorage: capacity,
+			},
+		}
 		pvc.Spec.VolumeName = r.restoringPVName(restore)
 
 		if err := controllerutil.SetControllerReference(restore, &pvc, r.Scheme); err != nil {
