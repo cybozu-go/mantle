@@ -81,8 +81,13 @@ func (r *ResourceManager) CreateStorageClass(ctx context.Context) error {
 // CreateUniquePVAndPVC creates a unique named PV and PVC. The PV is bound to the PVC.
 func (r *ResourceManager) CreateUniquePVAndPVC(ctx context.Context, ns string) (
 	*corev1.PersistentVolume, *corev1.PersistentVolumeClaim, error) {
+	// The PV/PVC sizes are intentionally different from the fake RBD's volume size(5Gi).
+	// It's to test the following cases:
+	//
+	// * `PV size < volume size`: csi-driver is allowed to provision volume larger than requested PV size.
+	// * `PVC size < PV size` case: It's true under volume resizing (expansion).
 	return r.createPVAndPVC(ctx, ns, util.GetUniqueName("pv-"), util.GetUniqueName("pvc-"),
-		resource.MustParse("5Gi"), resource.MustParse("1Gi"))
+		resource.MustParse("3Gi"), resource.MustParse("1Gi"))
 }
 
 func (r *ResourceManager) CreateUniquePVAndPVCSized(ctx context.Context, ns string, pvSize, pvcSize resource.Quantity) (

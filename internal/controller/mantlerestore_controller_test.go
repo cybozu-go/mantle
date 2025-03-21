@@ -156,7 +156,10 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPV() {
 		Expect(pv1.UID).NotTo(BeEmpty())
 		Expect(pv1.Annotations[PVAnnotationRestoredBy]).To(Equal(string(restore.UID)))
 		Expect(pv1.Spec.AccessModes).To(Equal(test.srcPV.Spec.AccessModes))
-		Expect(pv1.Spec.Capacity).To(Equal(test.srcPV.Spec.Capacity))
+		// CSATEST-1490
+		pvCapacity, ok := pv1.Spec.Capacity.Storage().AsInt64()
+		Expect(ok).To(BeTrue())
+		Expect(pvCapacity).To(Equal(int64(testutil.FakeRBDSnapshotSize)))
 		Expect(pv1.Spec.ClaimRef).To(BeNil())
 		Expect(pv1.Spec.PersistentVolumeSource.CSI.Driver).To(Equal(test.srcPV.Spec.PersistentVolumeSource.CSI.Driver))
 		Expect(pv1.Spec.PersistentVolumeSource.CSI.VolumeAttributes).To(HaveLen(4))
@@ -258,7 +261,10 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPVC() {
 		Expect(pvc1.UID).NotTo(BeEmpty())
 		Expect(pvc1.Annotations[PVCAnnotationRestoredBy]).To(Equal(string(restore.UID)))
 		Expect(pvc1.Spec.AccessModes).To(Equal(test.srcPVC.Spec.AccessModes))
-		Expect(pvc1.Spec.Resources.Requests).To(Equal(test.srcPVC.Spec.Resources.Requests))
+		// CSATEST-1489
+		pvcCapacity, ok := pvc1.Spec.Resources.Requests.Storage().AsInt64()
+		Expect(ok).To(BeTrue())
+		Expect(pvcCapacity).To(Equal(int64(testutil.FakeRBDSnapshotSize)))
 		Expect(pvc1.Spec.StorageClassName).To(Equal(test.srcPVC.Spec.StorageClassName))
 		Expect(pvc1.Spec.VolumeMode).To(Equal(test.srcPVC.Spec.VolumeMode))
 		Expect(pvc1.Spec.VolumeName).To(Equal(fmt.Sprintf("mr-%s-%s", test.tenantNamespace, restore.Name)))

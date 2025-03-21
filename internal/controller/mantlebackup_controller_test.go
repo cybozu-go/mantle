@@ -42,6 +42,22 @@ const (
 	dummyPVCName   = "dummy"
 )
 
+// customMatcherHelper is a helper for implementing custom gomock.Matcher instantly.
+type customMatcherHelper struct {
+	matcher  func(x any) bool
+	describe string
+}
+
+var _ gomock.Matcher = &customMatcherHelper{}
+
+func (c *customMatcherHelper) Matches(x any) bool {
+	return c.matcher(x)
+}
+
+func (c *customMatcherHelper) String() string {
+	return c.describe
+}
+
 func getEnvValue(envVarAry []corev1.EnvVar, name string) (string, error) {
 	for _, env := range envVarAry {
 		if env.Name == name {
@@ -404,7 +420,21 @@ var _ = Describe("MantleBackup controller", func() {
 		})
 
 		It("should be synced to remote", func(ctx SpecContext) {
-			grpcClient.EXPECT().CreateOrUpdatePVC(gomock.Any(), gomock.Any()).
+			// CSATEST-1491
+			grpcClient.EXPECT().CreateOrUpdatePVC(gomock.Any(), &customMatcherHelper{
+				// check if the PVC has the capacity equal to the fake RBD snapshot size
+				matcher: func(x any) bool {
+					req := x.(*proto.CreateOrUpdatePVCRequest)
+					pvc := &corev1.PersistentVolumeClaim{}
+					err := json.Unmarshal(req.GetPvc(), pvc)
+					if err != nil {
+						panic(err)
+					}
+					capacity, _ := pvc.Spec.Resources.Requests.Storage().AsInt64()
+					return capacity == testutil.FakeRBDSnapshotSize
+				},
+				describe: fmt.Sprintf("CreateOrUpdatePVCRequest contains PVC with spec capacity %d", testutil.FakeRBDSnapshotSize),
+			}).
 				MinTimes(1).Return(
 				&proto.CreateOrUpdatePVCResponse{
 					Uid: "a7c9d5e2-4b8f-4e2a-9d3f-1b6a7c8e9f2b",
