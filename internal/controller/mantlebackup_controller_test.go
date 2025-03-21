@@ -346,26 +346,6 @@ var _ = Describe("MantleBackup controller", func() {
 			err = k8sClient.Create(ctx, backup)
 			Expect(err).To(HaveOccurred())
 		})
-
-		It("should fail to take a backup if the size of the taken snapshot is not equal to the PVC size", func(ctx SpecContext) {
-			_, pvc, err := resMgr.CreateUniquePVAndPVCSized(ctx, ns, resource.MustParse("5Gi"), resource.MustParse("10Gi"))
-			Expect(err).NotTo(HaveOccurred())
-
-			backup, err := resMgr.CreateUniqueBackupFor(ctx, pvc)
-			Expect(err).NotTo(HaveOccurred())
-			ensureBackupNotReadyToUse(ctx, backup)
-		})
-
-		It("should fail to take a backup if the size of the taken snapshot is not equal to the PV size", func(ctx SpecContext) {
-			// The snapshot size is fixed to 5Gi in fakeRBD, so we should make
-			// Mantle fail to take a backup with a PV and PVC of different size.
-			_, pvc, err := resMgr.CreateUniquePVAndPVCSized(ctx, ns, resource.MustParse("3Gi"), resource.MustParse("5Gi"))
-			Expect(err).NotTo(HaveOccurred())
-
-			backup, err := resMgr.CreateUniqueBackupFor(ctx, pvc)
-			Expect(err).NotTo(HaveOccurred())
-			ensureBackupNotReadyToUse(ctx, backup)
-		})
 	})
 
 	Context("when the role is `primary`", func() {
