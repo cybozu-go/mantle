@@ -15,6 +15,16 @@ controller:
   env:
     - name: REQUEUE_RECONCILIATION_IMMEDIATELY
       value: "1"
+  grpcTLSServerCertPath: "/mnt/grpc-tls-server-cert/tls.crt"
+  grpcTLSServerKeyPath: "/mnt/grpc-tls-server-cert/tls.key"
+  #grpcTLSClientCAPath: ""
+  volumeMounts:
+    - name: grpc-tls-server-cert
+      mountPath: /mnt/grpc-tls-server-cert
+  volumes:
+    - name: grpc-tls-server-cert
+      secret:
+        secretName: cert-mantle
 
 secondaryService:
   type: NodePort
