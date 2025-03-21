@@ -18,3 +18,18 @@ controller:
     - name: REQUEUE_RECONCILIATION_AFTER
       value: "1s"
   backupTransferPartSize: {BACKUP_TRANSFER_PART_SIZE}
+  grpcTLSClientCertPath: "/mnt/grpc-tls-client-cert/tls.crt"
+  grpcTLSClientKeyPath: "/mnt/grpc-tls-client-cert/tls.key"
+  grpcTLSServerCAPath: "/mnt/grpc-tls-server-cert/ca.crt"
+  volumeMounts:
+    - name: grpc-tls-server-cert
+      mountPath: /mnt/grpc-tls-server-cert
+    - name: grpc-tls-client-cert
+      mountPath: /mnt/grpc-tls-client-cert
+  volumes:
+    - name: grpc-tls-server-cert
+      configMap:
+        name: mantle-secondary-ca-crt
+    - name: grpc-tls-client-cert
+      secret:
+        secretName: cert-mantle
