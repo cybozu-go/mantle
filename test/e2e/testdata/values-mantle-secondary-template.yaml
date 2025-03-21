@@ -17,14 +17,19 @@ controller:
       value: "1"
   grpcTLSServerCertPath: "/mnt/grpc-tls-server-cert/tls.crt"
   grpcTLSServerKeyPath: "/mnt/grpc-tls-server-cert/tls.key"
-  #grpcTLSClientCAPath: ""
+  grpcTLSClientCAPath: "/mnt/grpc-tls-client-cert/ca.crt"
   volumeMounts:
     - name: grpc-tls-server-cert
       mountPath: /mnt/grpc-tls-server-cert
+    - name: grpc-tls-client-cert
+      mountPath: /mnt/grpc-tls-client-cert
   volumes:
     - name: grpc-tls-server-cert
       secret:
         secretName: cert-mantle
+    - name: grpc-tls-client-cert
+      configMap:
+        name: mantle-primary-ca-crt
 
 secondaryService:
   type: NodePort
