@@ -57,6 +57,9 @@ spec:
           volumeMounts:
             - mountPath: /etc/ceph
               name: ceph-config
+            {{- with .Values.controller.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           command:
             - /manager
           args:
@@ -240,6 +243,9 @@ spec:
           name: mon-endpoint-volume
         - emptyDir: {}
           name: ceph-config
+        {{- with .Values.controller.volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       terminationGracePeriodSeconds: 10
       {{- with .Values.nodeSelector }}
       nodeSelector:
