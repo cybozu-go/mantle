@@ -16,6 +16,8 @@ PROTOC_VERSION := 29.3
 ROOK_CHART_VERSION := v1.16.4
 # https://github.com/golangci/golangci-lint/releases
 GOLANGCI_LINT_VERSION := v1.64.5
+# https://github.com/cert-manager/cert-manager/releases
+CERT_MANAGER_VERSION := v1.17.1
 
 # Tools versions which are defined in go.mod
 SELF_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
