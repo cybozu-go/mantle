@@ -2,6 +2,16 @@ apiVersion: v1
 entries:
   mantle:
   - apiVersion: v2
+    appVersion: 0.4.0
+    created: "2025-03-24T07:55:25.893455163Z"
+    description: A Helm chart for Kubernetes
+    digest: 162b6dc0482848786bec05ba9d5493586be00342935738044bf8b5f0e64159a3
+    name: mantle
+    type: application
+    urls:
+    - https://github.com/cybozu-go/mantle/releases/download/mantle-chart-v0.2.5/mantle-0.2.5.tgz
+    version: 0.2.5
+  - apiVersion: v2
     appVersion: 0.3.2
     created: "2025-02-27T01:31:27.326591432Z"
     description: A Helm chart for Kubernetes
@@ -64,6 +74,16 @@ entries:
   mantle-cluster-wide:
   - apiVersion: v2
     appVersion: 0.3.0
+    created: "2025-03-24T07:55:26.001075669Z"
+    description: A Helm chart for Kubernetes
+    digest: 4a53e381a2b37f53b3480e9d11762be73159c991da8459bcd3fe9e7928dee150
+    name: mantle-cluster-wide
+    type: application
+    urls:
+    - https://github.com/cybozu-go/mantle/releases/download/mantle-cluster-wide-chart-v0.2.3/mantle-cluster-wide-0.2.3.tgz
+    version: 0.2.3
+  - apiVersion: v2
+    appVersion: 0.3.0
     created: "2025-01-15T02:04:35.172888181Z"
     description: A Helm chart for Kubernetes
     digest: cbd946c8b2bc3503b3bd3eded2f34fce2b44a690b6585931268b81df3d83fb7e
@@ -102,4 +122,4 @@ entries:
     urls:
     - https://github.com/cybozu-go/mantle/releases/download/mantle-cluster-wide-chart-v0.1.0/mantle-cluster-wide-0.1.0.tgz
     version: 0.1.0
-generated: "2025-02-27T01:31:27.326640814Z"
+generated: "2025-03-24T07:55:26.001146581Z"
