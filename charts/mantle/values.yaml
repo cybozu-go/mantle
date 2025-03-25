@@ -16,6 +16,7 @@ serviceAccount:
   name: "mantle-controller"
 
 annotations: {}
+labels: {}
 podAnnotations: {}
 podLabels: {}
 resources: {}
