@@ -73,3 +73,7 @@ You store the up-to-date export-diff.patch as [`ceph/export-diff.patch`](https:/
 4. Go to the [rule setting page](https://github.com/cybozu-go/mantle/settings/rules/3334068) and change the value of "Enforcement status" to Disabled.
 5. Once a new tag is pushed, [GitHub Actions](https://github.com/cybozu-go/mantle/actions) automatically creates a draft release note for the tagged version, builds a tar archive for the new release, and attaches it to the release note.
   Visit [https://github.com/cybozu-go/mantle/releases] to check the result.
+
+### Apply new export-diff for mantle
+
+Update the `EXPORT_DIFF_VERSION` in the `Dockerfile` at the project root directory. Also, update `custom-ceph` stage if necessary by referring to the [Dockerfile in neco-containers](https://github.com/cybozu/neco-containers/blob/main/ceph/Dockerfile).
