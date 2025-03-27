@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - "ceph/**"
+      - "!ceph/README.md"
 jobs:
   test:
     runs-on: mantle_large_runner_16core
