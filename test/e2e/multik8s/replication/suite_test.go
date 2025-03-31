@@ -66,6 +66,10 @@ func replicationTestSuite() { //nolint:gocyclo
 					if err != nil {
 						return err
 					}
+					primaryMB, err := GetMB(PrimaryK8sCluster, namespace, backupName)
+					if err != nil {
+						return err
+					}
 
 					pvc, err := GetPVC(SecondaryK8sCluster, namespace, pvcName)
 					if err != nil {
@@ -75,8 +79,17 @@ func replicationTestSuite() { //nolint:gocyclo
 						pvc.Annotations["mantle.cybozu.io/remote-uid"] != string(primaryPVC.GetUID()) {
 						return errors.New("invalid remote-uid annotation")
 					}
+					pvcSize, ok := pvc.Spec.Resources.Requests.Storage().AsInt64()
+					if !ok {
+						return errors.New("storage size is not set")
+					}
+					if pvcSize != *primaryMB.Status.SnapSize {
+						return errors.New("storage size not equal to the snapshot size")
+					}
 					primaryPVC.Spec.VolumeName = ""
+					delete(primaryPVC.Spec.Resources.Requests, corev1.ResourceStorage)
 					pvc.Spec.VolumeName = ""
+					delete(pvc.Spec.Resources.Requests, corev1.ResourceStorage)
 					if !reflect.DeepEqual(primaryPVC.Spec, pvc.Spec) {
 						return errors.New("spec not equal")
 					}
