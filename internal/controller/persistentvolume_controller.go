@@ -89,7 +89,7 @@ func (r *PersistentVolumeReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 	// Wait until the PV's status becomes Released.
 	if pv.Status.Phase != corev1.VolumeReleased {
-		return requeueReconciliation(), nil
+		return ctrl.Result{}, nil
 	}
 
 	// Delete the RBD clone image.

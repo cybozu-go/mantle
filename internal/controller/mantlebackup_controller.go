@@ -388,7 +388,7 @@ func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, back
 			logger.Error(err, "failed to add finalizer", "finalizer", MantleBackupFinalizerName)
 			return ctrl.Result{}, err
 		}
-		return requeueReconciliation(), nil
+		return ctrl.Result{}, nil
 	}
 
 	if err := r.expire(ctx, backup); err != nil {
@@ -450,14 +450,11 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 		return ctrl.Result{}, err
 	}
 
-	if !meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse) {
-		result, err := r.startImport(ctx, backup, target)
-		if err != nil || !result.IsZero() {
-			return result, err
-		}
+	if meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse) {
+		return r.secondaryCleanup(ctx, backup, true)
 	}
 
-	return r.secondaryCleanup(ctx, backup, true)
+	return r.startImport(ctx, backup, target)
 }
 
 func scheduleExpire(_ context.Context, evt event.TypedGenericEvent[client.Object], q workqueue.TypedRateLimitingInterface[ctrl.Request]) {
@@ -687,7 +684,7 @@ func (r *MantleBackupReconciler) finalizeStandalone(
 ) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	if _, ok := backup.GetAnnotations()[annotDiffTo]; ok {
-		return requeueReconciliation(), nil
+		return ctrl.Result{}, nil
 	}
 
 	if !controllerutil.ContainsFinalizer(backup, MantleBackupFinalizerName) {
@@ -725,7 +722,7 @@ func (r *MantleBackupReconciler) finalizeSecondary(
 ) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	if _, ok := backup.GetAnnotations()[annotDiffTo]; ok {
-		return requeueReconciliation(), nil
+		return ctrl.Result{}, nil
 	}
 
 	if !controllerutil.ContainsFinalizer(backup, MantleBackupFinalizerName) {
@@ -1745,8 +1742,8 @@ func (r *MantleBackupReconciler) startImport(
 	target *snapshotTarget,
 ) (ctrl.Result, error) {
 	if !r.doesMantleBackupHaveSyncModeAnnot(backup) {
-		// SetSynchronizingg is not called yet or the cache is stale.
-		return requeueReconciliation(), nil
+		// SetSynchronizing is not called yet or the cache is stale.
+		return ctrl.Result{}, nil
 	}
 
 	if uploaded, err := r.isExportDataAlreadyUploaded(ctx, backup, 0); err != nil {
