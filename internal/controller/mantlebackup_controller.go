@@ -21,6 +21,7 @@ import (
 	"github.com/cybozu-go/mantle/internal/controller/metrics"
 	"github.com/cybozu-go/mantle/pkg/controller/proto"
 	"github.com/prometheus/client_golang/prometheus"
+	"golang.org/x/time/rate"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	aerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -34,10 +35,12 @@ import (
 	"k8s.io/kube-openapi/pkg/validation/strfmt"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
@@ -472,9 +475,22 @@ func scheduleExpire(_ context.Context, evt event.TypedGenericEvent[client.Object
 	)
 }
 
+func newMantleBackupReconcilerRateLimiter[T comparable]() workqueue.TypedRateLimiter[T] {
+	// Use 3 minutes as the max delay for the exponential backoff to speed backups up.
+	// The rest is the same as the default rate limiter.
+	// cf. https://github.com/kubernetes/client-go/blob/18a1faa115ed571de5af3e8f0f9c02973769ceb3/util/workqueue/default_rate_limiters.go#L50-L56
+	return workqueue.NewTypedMaxOfRateLimiter(
+		workqueue.NewTypedItemExponentialFailureRateLimiter[T](5*time.Millisecond, 3*time.Minute),
+		&workqueue.TypedBucketRateLimiter[T]{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
+	)
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *MantleBackupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
+		WithOptions(controller.TypedOptions[reconcile.Request]{
+			RateLimiter: newMantleBackupReconcilerRateLimiter[reconcile.Request](),
+		}).
 		For(&mantlev1.MantleBackup{}).
 		WatchesRawSource(
 			source.TypedChannel(r.expireQueueCh, handler.Funcs{GenericFunc: scheduleExpire}),
