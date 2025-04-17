@@ -8,8 +8,6 @@ KUBERNETES_VERSION := 1.31.1
 KUSTOMIZE_VERSION := v5.6.0
 # https://github.com/kubernetes/minikube/releases
 MINIKUBE_VERSION := v1.35.0
-# https://github.com/uber-go/mock/releases
-MOCKGEN_VERSION := v0.5.0
 # https://github.com/protocolbuffers/protobuf/releases
 PROTOC_VERSION := 29.3
 # https://github.com/rook/rook/releases
@@ -26,6 +24,7 @@ GINKGO_VERSION := $(shell awk '$$1 == "github.com/onsi/ginkgo/v2" {print $$2}' $
 PROTOC_GEN_DOC_VERSION := $(shell awk '$$1 == "github.com/pseudomuto/protoc-gen-doc" {print substr($$2, 2)}' $(SELF_DIR)/go.mod)
 PROTOC_GEN_GO_GRPC_VERSION := $(shell awk '$$1 == "google.golang.org/grpc/cmd/protoc-gen-go-grpc" {print substr($$2, 2)}' $(SELF_DIR)/go.mod)
 PROTOC_GEN_GO_VERSION := $(shell awk '$$1 == "google.golang.org/protobuf" {print substr($$2, 2)}' $(SELF_DIR)/go.mod)
+MOCKGEN_VERSION := $(shell awk '$$1 == "go.uber.org/mock" {print $$2}' $(SELF_DIR)/go.mod)
 
 ENVTEST_BRANCH := release-$(shell echo $(CONTROLLER_RUNTIME_VERSION) | cut -d "." -f 1-2)
 ENVTEST_KUBERNETES_VERSION := $(shell echo $(KUBERNETES_VERSION) | cut -d "." -f 1-2)
