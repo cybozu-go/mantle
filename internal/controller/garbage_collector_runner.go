@@ -82,7 +82,7 @@ func (r *GarbageCollectorRunner) deleteOrphanedPVs(ctx context.Context) error {
 			continue
 		}
 		if err := r.client.Delete(ctx, &pv, &client.DeleteOptions{
-			Preconditions: &metav1.Preconditions{UID: &pv.ObjectMeta.UID, ResourceVersion: &pv.ObjectMeta.ResourceVersion},
+			Preconditions: &metav1.Preconditions{UID: &pv.UID, ResourceVersion: &pv.ResourceVersion},
 		}); err != nil {
 			return fmt.Errorf("failed to delete PV: %w", err)
 		}

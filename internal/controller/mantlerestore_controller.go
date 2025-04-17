@@ -77,7 +77,7 @@ func (r *MantleRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 
-	if restore.ObjectMeta.DeletionTimestamp.IsZero() {
+	if restore.DeletionTimestamp.IsZero() {
 		return r.restore(ctx, &restore)
 	} else {
 		return r.cleanup(ctx, &restore)
