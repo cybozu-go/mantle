@@ -67,6 +67,52 @@ func getEnvValue(envVarAry []corev1.EnvVar, name string) (string, error) {
 	return "", errors.New("name not found")
 }
 
+func setJobCondition(job *batchv1.Job, condition batchv1.JobConditionType, status corev1.ConditionStatus) {
+	if job.Status.Conditions == nil {
+		job.Status.Conditions = []batchv1.JobCondition{}
+	}
+	updated := false
+	for i := range job.Status.Conditions {
+		if job.Status.Conditions[i].Type == condition {
+			job.Status.Conditions[i].Status = status
+			updated = true
+			break
+		}
+	}
+	if !updated {
+		job.Status.Conditions = append(job.Status.Conditions, batchv1.JobCondition{
+			Type:   condition,
+			Status: status,
+		})
+	}
+}
+
+func completeJob(ctx SpecContext, jobNamespace, jobName string) {
+	GinkgoHelper()
+
+	// Get Job
+	var job batchv1.Job
+	Eventually(ctx, func(g Gomega, ctx SpecContext) {
+		err := k8sClient.Get(ctx,
+			types.NamespacedName{Name: jobName, Namespace: jobNamespace}, &job)
+		g.Expect(err).NotTo(HaveOccurred())
+	}).Should(Succeed())
+
+	// Make the Job complete
+	setJobCondition(&job, batchv1.JobComplete, corev1.ConditionTrue)
+	setJobCondition(&job, batchv1.JobSuccessCriteriaMet, corev1.ConditionTrue)
+	if job.Status.StartTime == nil {
+		job.Status.StartTime = &metav1.Time{
+			Time: time.Now(),
+		}
+	}
+	job.Status.CompletionTime = &metav1.Time{
+		Time: time.Now(),
+	}
+	err := k8sClient.Status().Update(ctx, &job)
+	Expect(err).NotTo(HaveOccurred())
+}
+
 var _ = Describe("MantleBackup controller", func() {
 	var mgrUtil testutil.ManagerUtil
 	var reconciler *MantleBackupReconciler
@@ -582,8 +628,7 @@ var _ = Describe("MantleBackup controller", func() {
 			}, "1s").Should(Succeed())
 
 			// Make the export Job completed to proceed the reconciliation for backup.
-			err = resMgr.ChangeJobCondition(ctx, &jobExport, batchv1.JobComplete, corev1.ConditionTrue)
-			Expect(err).NotTo(HaveOccurred())
+			completeJob(ctx, jobExport.GetNamespace(), jobExport.GetName())
 
 			// The snapshot size is 5GiB and transferPartSize is 1GiB. So the number of parts is 5.
 			for i := 1; i < 5; i++ {
@@ -598,8 +643,7 @@ var _ = Describe("MantleBackup controller", func() {
 						&job,
 					)
 				}).WithContext(ctx).Should(Succeed())
-				err = resMgr.ChangeJobCondition(ctx, &job, batchv1.JobComplete, corev1.ConditionTrue)
-				Expect(err).NotTo(HaveOccurred())
+				completeJob(ctx, job.GetNamespace(), job.GetName())
 			}
 
 			// Make sure the upload Job is created
@@ -1340,19 +1384,7 @@ var _ = Describe("export and upload", func() {
 	}
 
 	completeJob := func(ctx SpecContext, jobName string) {
-		GinkgoHelper()
-
-		// Get export Job for target1
-		var job batchv1.Job
-		Eventually(ctx, func(g Gomega, ctx SpecContext) {
-			err := k8sClient.Get(ctx,
-				types.NamespacedName{Name: jobName, Namespace: nsController}, &job)
-			g.Expect(err).NotTo(HaveOccurred())
-		}).Should(Succeed())
-
-		// Make export Job for target 1 Completed.
-		err := resMgr.ChangeJobCondition(ctx, &job, batchv1.JobComplete, corev1.ConditionTrue)
-		Expect(err).NotTo(HaveOccurred())
+		completeJob(ctx, nsController, jobName)
 	}
 
 	waitJobDeleted := func(ctx SpecContext, jobName string) {
@@ -1708,8 +1740,7 @@ var _ = Describe("import", func() {
 			Expect(res.Requeue).To(BeTrue())
 
 			// Make the import Job completed.
-			err = resMgr.ChangeJobCondition(ctx, &importJob, batchv1.JobComplete, corev1.ConditionTrue)
-			Expect(err).NotTo(HaveOccurred())
+			completeJob(ctx, importJob.GetNamespace(), importJob.GetName())
 
 			// Make dummy snapshot.
 			err = mbr.ceph.RBDSnapCreate("", "", backup.GetName())
@@ -2275,8 +2306,7 @@ var _ = Describe("import", func() {
 			}))
 
 			// Make the Job completed
-			err = resMgr.ChangeJobCondition(ctx, &job, batchv1.JobComplete, corev1.ConditionTrue)
-			Expect(err).NotTo(HaveOccurred())
+			completeJob(ctx, job.GetNamespace(), job.GetName())
 
 			// A call to reconcileDiscardJob should NOT requeue after the Job completed
 			result, err = mbr.reconcileDiscardJob(ctx, backup, snapshotTarget)
@@ -2329,8 +2359,7 @@ var _ = Describe("import", func() {
 				_ = createImportJob(backup2, 0)
 
 				// Make the import Job for MantleBackup1 Completed.
-				err = resMgr.ChangeJobCondition(ctx, job1, batchv1.JobComplete, corev1.ConditionTrue)
-				Expect(err).NotTo(HaveOccurred())
+				completeJob(ctx, job1.GetNamespace(), job1.GetName())
 
 				// Call handleCompletedImportJobs for MantleBackup1.
 				largestCompletedPartNum, err := mbr.handleCompletedImportJobs(ctx, backup1)
@@ -2346,8 +2375,7 @@ var _ = Describe("import", func() {
 
 				// Create a new import Job for part number 2 of MantleBackup1, and make it Completed.
 				job2 := createImportJob(backup1, 1)
-				err = resMgr.ChangeJobCondition(ctx, job2, batchv1.JobComplete, corev1.ConditionTrue)
-				Expect(err).NotTo(HaveOccurred())
+				completeJob(ctx, job2.GetNamespace(), job2.GetName())
 
 				// Call handleCompletedImportJobs for MantleBackup1.
 				largestCompletedPartNum, err = mbr.handleCompletedImportJobs(ctx, backup1)
