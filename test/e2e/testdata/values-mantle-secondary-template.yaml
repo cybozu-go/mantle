@@ -32,6 +32,7 @@ replicationService:
   type: NodePort
   port: 58080
   targetPort: 58080
+  nodePort: 30007
 
 webhook:
   enabled: true

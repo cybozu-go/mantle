@@ -11,6 +11,9 @@ spec:
     targetPort: {{ .Values.replicationService.targetPort }}
     protocol: TCP
     name: replication
+    {{- with .Values.replicationService.nodePort }}
+    nodePort: {{ . }}
+    {{- end }}
   selector:
     {{- include "mantle.selectorLabels" . | nindent 4 }}
 {{- if .Values.webhook.enabled }}
