@@ -27,8 +27,10 @@ MINIKUBE_PROFILE_SECONDARY=profile2
 TMPDIR := tmp
 TEST_MULTIK8S_PACKAGES := replication replicationfailure changetostandalone changetoprimary changetosecondary
 BACKUP_TRANSFER_PART_SIZE := 3Mi # smaller than the PVC size (10Mi)
+MAKEFILE_DIR := $(shell pwd)
 
 export MINIKUBE_HOME
+export MAKEFILE_DIR
 
 .PHONY: setup
 setup:
