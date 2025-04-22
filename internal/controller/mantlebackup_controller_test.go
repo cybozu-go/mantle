@@ -27,6 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/kube-openapi/pkg/validation/strfmt"
 	"k8s.io/utils/ptr"
@@ -167,6 +168,23 @@ var _ = Describe("MantleBackup controller", func() {
 			time.Sleep(100 * time.Millisecond)
 
 			ns = resMgr.CreateNamespace()
+		})
+
+		It("should fail when PVC UID does not match the stored UID", func(ctx SpecContext) {
+			_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+
+			backup, err := resMgr.CreateUniqueBackupFor(ctx, pvc)
+			Expect(err).NotTo(HaveOccurred())
+
+			// check the PVC UID is stored in the MantleBackup
+			resMgr.WaitForBackupReady(ctx, backup)
+			Expect(backup.GetLabels()[labelLocalBackupTargetPVCUID]).To(Equal(string(pvc.GetUID())))
+
+			// simulate the PVC UID mismatch
+			backup.SetLabels(map[string]string{labelLocalBackupTargetPVCUID: string(uuid.NewUUID())})
+			_, _, err = reconciler.getSnapshotTarget(ctx, backup)
+			Expect(err).To(HaveOccurred())
 		})
 
 		It("should be ready to use", func(ctx SpecContext) {
