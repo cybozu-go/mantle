@@ -32,8 +32,8 @@ var (
 	testMantleBackupTemplate string
 	//go:embed testdata/mantlerestore-template.yaml
 	testMantleRestoreTemplate string
-	//go:embed testdata/pod-volume-mount-template.yaml
-	testPodVolumeMountTemplate string
+	//go:embed testdata/pod-mount-volume-template.yaml
+	testPodMountVolumeTemplate string
 	//go:embed testdata/mantlebackupconfig-template.yaml
 	testMantleBackupConfigTemplate string
 
@@ -141,8 +141,8 @@ func applyMantleRestoreTemplate(namespace, restoreName, backupName string) error
 	return nil
 }
 
-func applyPodVolumeMountTemplate(namespace, podName, pvcName string) error {
-	manifest := fmt.Sprintf(testPodVolumeMountTemplate, podName, namespace, pvcName)
+func applyPodMountVolumeTemplate(namespace, podName, pvcName string) error {
+	manifest := fmt.Sprintf(testPodMountVolumeTemplate, podName, namespace, pvcName)
 	_, _, err := kubectlWithInput([]byte(manifest), "apply", "-n", namespace, "-f", "-")
 	if err != nil {
 		return fmt.Errorf("kubectl apply pod failed. err: %w", err)
@@ -419,7 +419,7 @@ func isMantleRestoreReady(namespace, name string) bool {
 func writeTestData(namespace, pvc string, data []byte) error {
 	podName := testutil.GetUniqueName("pod-")
 
-	if err := applyPodVolumeMountTemplate(namespace, podName, pvc); err != nil {
+	if err := applyPodMountVolumeTemplate(namespace, podName, pvc); err != nil {
 		return err
 	}
 
@@ -444,7 +444,7 @@ func writeTestData(namespace, pvc string, data []byte) error {
 func readTestData(namespace, pvc string) ([]byte, error) {
 	podName := testutil.GetUniqueName("pod-")
 
-	if err := applyPodVolumeMountTemplate(namespace, podName, pvc); err != nil {
+	if err := applyPodMountVolumeTemplate(namespace, podName, pvc); err != nil {
 		return nil, err
 	}
 

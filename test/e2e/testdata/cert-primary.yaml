@@ -36,7 +36,7 @@ metadata:
   name: mantle
   namespace: rook-ceph
 spec:
-  secretName: cert-mantle
+  secretName: cert-mantle-replication
   dnsNames:
     - mantle-primary.example.com
   issuerRef:

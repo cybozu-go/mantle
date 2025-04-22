@@ -290,7 +290,7 @@ func (test *restoreTest) testCleanup() {
 		}).Should(BeTrue())
 
 		By("creating a pod with the restored PVC")
-		err = applyPodVolumeMountTemplate(test.tenantNamespace, podName, test.mantleRestoreName1)
+		err = applyPodMountVolumeTemplate(test.tenantNamespace, podName, test.mantleRestoreName1)
 		Expect(err).NotTo(HaveOccurred())
 		_, _, err = kubectl("wait", "--for=condition=Ready", "pod", podName, "-n", test.tenantNamespace, "--timeout=1m")
 		Expect(err).NotTo(HaveOccurred())

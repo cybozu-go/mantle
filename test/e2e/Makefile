@@ -90,7 +90,7 @@ test-multiple-k8s-clusters:
 # start mantle-controller in the primary cluster
 	$(MAKE) minikube-profile-primary
 	sed \
-		-e "s%{ENDPOINT}%$$($(MINIKUBE) service list -p $(MINIKUBE_PROFILE_SECONDARY) -o json | jq -r '.[] | select(.Name == "mantle" and .Namespace == "rook-ceph") | .URLs | select(. | length > 0)[]' | head -1 | sed -r 's/^http:\/\///')%" \
+		-e "s%{ENDPOINT}%$$($(MINIKUBE) service list -p $(MINIKUBE_PROFILE_SECONDARY) -o json | jq -r '.[] | select(.Name == "mantle-replication" and .Namespace == "rook-ceph") | .URLs | select(. | length > 0)[]' | head -1 | sed -r 's/^http:\/\///')%" \
 		-e "s%{OBJECT_STORAGE_BUCKET_NAME}%$$(cat $(TMPDIR)/cm-export-data.json | jq -r .data.BUCKET_NAME)%" \
 		-e "s%{OBJECT_STORAGE_ENDPOINT}%$$($(MINIKUBE) service list -p $(MINIKUBE_PROFILE_SECONDARY) -o json | jq -r '.[] | select(.Name == "rook-ceph-rgw-ceph-object-store-node-port" and .Namespace == "rook-ceph") | .URLs | select(. | length > 0)[]' | head -1)%" \
 		-e "s%{BACKUP_TRANSFER_PART_SIZE}%$(BACKUP_TRANSFER_PART_SIZE)%" \
@@ -243,11 +243,11 @@ install-tls-certificates:
 	$(MAKE) minikube-profile-primary
 	$(KUBECTL) apply -f testdata/cert-primary.yaml
 # In order to get the regenerated Secret for sure, delete the existing secret if any.
-	kubectl delete secret -n $(NAMESPACE) cert-mantle || true
+	kubectl delete secret -n $(NAMESPACE) cert-mantle-replication || true
 # Wait until a Secret for the certificates is created.
-	until kubectl get secret -n $(NAMESPACE) cert-mantle >/dev/null ; do sleep 1; done
+	until kubectl get secret -n $(NAMESPACE) cert-mantle-replication >/dev/null ; do sleep 1; done
 # Dump ca.crt in the secret to import it to the secondary cluster.
-	kubectl get secret -n $(NAMESPACE) cert-mantle -o json | jq -r '.data."ca.crt"' | base64 -d > $(TMPDIR)/primary-ca.crt
+	kubectl get secret -n $(NAMESPACE) cert-mantle-replication -o json | jq -r '.data."ca.crt"' | base64 -d > $(TMPDIR)/primary-ca.crt
 	$(MAKE) minikube-profile-secondary
 	kubectl create cm mantle-primary-ca-crt -n $(NAMESPACE) --from-file=ca.crt=$(TMPDIR)/primary-ca.crt \
 		--output yaml --dry-run=client | kubectl apply -f -
@@ -261,17 +261,17 @@ install-tls-certificates:
 # just erase the placeholder.
 	sed \
 		-e "s%{ENDPOINT}%$$(\
-			IPADDR=$$($(MINIKUBE) service list -p $(MINIKUBE_PROFILE_SECONDARY) -o json | jq -r '.[] | select(.Name == "mantle" and .Namespace == "rook-ceph") | .URLs | select(. | length > 0)[]' | head -1 | sed -r 's/^http:\/\/([^:]+).*$$/\1/'); \
-			if [ "$$IPADDR" = "" ]; then echo -n ""; else echo -n "\"$${IPADDR}\""; fi)%" \
+			IPADDR=$$($(MINIKUBE) service list -p $(MINIKUBE_PROFILE_SECONDARY) -o json | jq -r '.[] | select(.Name == "mantle-replication" and .Namespace == "rook-ceph") | .URLs | select(. | length > 0)[]' | head -1 | sed -r 's/^http:\/\/([^:]+).*$$/\1/'); \
+			if [ "$$IPADDR" = "" ]; then echo -n ""; else echo -n "\"$${IPADDR}\""; fi)%g" \
 		testdata/cert-secondary-template.yaml \
 		> $(TMPDIR)/cert-secondary.yaml
 	$(KUBECTL) apply -f $(TMPDIR)/cert-secondary.yaml
 # In order to get the regenerated Secret for sure, delete the existing secret if any.
-	kubectl delete secret -n $(NAMESPACE) cert-mantle || true
+	kubectl delete secret -n $(NAMESPACE) cert-mantle-replication || true
 # Wait until a Secret for the certificates is created.
-	until kubectl get secret -n $(NAMESPACE) cert-mantle >/dev/null ; do sleep 1; done
+	until kubectl get secret -n $(NAMESPACE) cert-mantle-replication >/dev/null ; do sleep 1; done
 # Dump ca.crt in the secret to import it to the primary cluster.
-	kubectl get secret -n $(NAMESPACE) cert-mantle -o json | jq -r '.data."ca.crt"' | base64 -d > $(TMPDIR)/secondary-ca.crt
+	kubectl get secret -n $(NAMESPACE) cert-mantle-replication -o json | jq -r '.data."ca.crt"' | base64 -d > $(TMPDIR)/secondary-ca.crt
 	$(MAKE) minikube-profile-primary
 	kubectl create cm mantle-secondary-ca-crt -n $(NAMESPACE) --from-file=ca.crt=$(TMPDIR)/secondary-ca.crt \
 		--output yaml --dry-run=client | kubectl apply -f -

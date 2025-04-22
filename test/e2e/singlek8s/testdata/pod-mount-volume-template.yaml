@@ -1,8 +1,8 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: %s
-  namespace: %s
+  name: "%s"
+  namespace: "%s"
 spec:
   containers:
     - name: ubuntu
@@ -14,4 +14,4 @@ spec:
   volumes:
     - name: my-volume
       persistentVolumeClaim:
-        claimName: %s
+        claimName: "%s"

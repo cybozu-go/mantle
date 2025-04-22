@@ -19,6 +19,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/kubernetes/pkg/kubelet/events"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
@@ -50,6 +51,7 @@ func replicationTestSuite() { //nolint:gocyclo
 			Label("various-transfer-part-size"),
 			func(ctx SpecContext) {
 				namespace := util.GetUniqueName("ns-")
+				podName := util.GetUniqueName("pod-")
 				pvcName := util.GetUniqueName("pvc-")
 				backupName := util.GetUniqueName("mb-")
 				restoreName := util.GetUniqueName("mr-")
@@ -164,6 +166,38 @@ func replicationTestSuite() { //nolint:gocyclo
 				Expect(err).NotTo(HaveOccurred())
 				Expect(len(secondarySnaps)).To(Equal(1)) // middle snapshots should be deleted.
 				Expect(secondarySnaps[0].Name).To(Equal(backupName))
+
+				By("ensuring the PVC can be attached to the pod in the primary cluster")
+				CreatePod(PrimaryK8sCluster, namespace, podName, pvcName)
+				Eventually(func() error {
+					pods, err := GetPodList(PrimaryK8sCluster, namespace)
+					if err != nil {
+						return err
+					}
+					for _, pod := range pods.Items {
+						if pod.Name == podName && pod.Status.Phase == corev1.PodRunning {
+							return nil
+						}
+					}
+					return errors.New("pod not found or not running")
+				}).Should(Succeed())
+
+				By("ensuring the PVC can not be attached to any pods in the secondary cluster")
+				CreatePod(SecondaryK8sCluster, namespace, podName, pvcName)
+				Eventually(func() error {
+					eventList, err := GetEventList(SecondaryK8sCluster, namespace)
+					if err != nil {
+						return err
+					}
+					for _, event := range eventList.Items {
+						if event.InvolvedObject.Namespace == namespace && event.InvolvedObject.Name == podName {
+							if event.Reason == events.FailedAttachVolume {
+								return nil
+							}
+						}
+					}
+					return errors.New("expected event not found")
+				}).Should(Succeed())
 
 				WaitTemporaryResourcesDeleted(ctx, primaryMB, secondaryMB)
 				EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)

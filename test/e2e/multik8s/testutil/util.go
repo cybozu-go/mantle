@@ -40,6 +40,8 @@ const (
 var (
 	//go:embed testdata/pvc-template.yaml
 	testPVCTemplate string
+	//go:embed testdata/pod-mount-volume-template.yaml
+	testPodMountVolumeTemplate string
 	//go:embed testdata/rbd-pool-sc-template.yaml
 	testRBDPoolSCTemplate string
 	//go:embed testdata/mantlebackup-template.yaml
@@ -124,6 +126,15 @@ func ApplyMantleRestoreTemplate(clusterNo int, namespace, restoreName, backupNam
 	_, _, err := Kubectl(clusterNo, []byte(manifest), "apply", "-f", "-")
 	if err != nil {
 		return fmt.Errorf("kubectl apply mantlerestore failed. err: %w", err)
+	}
+	return nil
+}
+
+func applyPodMountVolumeTemplate(clusterNo int, namespace, podName, pvcName string) error {
+	manifest := fmt.Sprintf(testPodMountVolumeTemplate, podName, namespace, pvcName)
+	_, _, err := Kubectl(clusterNo, []byte(manifest), "apply", "-n", namespace, "-f", "-")
+	if err != nil {
+		return fmt.Errorf("kubectl apply failed. err: %w", err)
 	}
 	return nil
 }
@@ -256,6 +267,10 @@ func GetPVCList(clusterNo int, namespace string) (*corev1.PersistentVolumeClaimL
 
 func GetPVList(clusterNo int) (*corev1.PersistentVolumeList, error) {
 	return GetObjectList[corev1.PersistentVolumeList](clusterNo, "pv", "")
+}
+
+func GetEventList(clusterNo int, namespace string) (*corev1.EventList, error) {
+	return GetObjectList[corev1.EventList](clusterNo, "event", namespace)
 }
 
 func ChangeClusterRole(clusterNo int, newRole string) error {
@@ -444,6 +459,12 @@ func SetupEnvironment(namespace string) {
 	Eventually(func() error {
 		return ApplyRBDPoolAndSCTemplate(SecondaryK8sCluster, CephClusterNamespace)
 	}).Should(Succeed())
+}
+
+func CreatePod(cluster int, namespace, podName, pvcName string) {
+	GinkgoHelper()
+	err := applyPodMountVolumeTemplate(cluster, namespace, podName, pvcName)
+	Expect(err).NotTo(HaveOccurred())
 }
 
 func CreatePVC(ctx SpecContext, cluster int, namespace, name string) {
