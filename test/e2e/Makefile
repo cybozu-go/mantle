@@ -243,14 +243,14 @@ install-tls-certificates:
 	$(MAKE) minikube-profile-primary
 	$(KUBECTL) apply -f testdata/cert-primary.yaml
 # In order to get the regenerated Secret for sure, delete the existing secret if any.
-	kubectl delete secret -n $(NAMESPACE) cert-mantle-replication || true
+	$(KUBECTL) delete secret -n $(NAMESPACE) cert-mantle-replication || true
 # Wait until a Secret for the certificates is created.
-	until kubectl get secret -n $(NAMESPACE) cert-mantle-replication >/dev/null ; do sleep 1; done
+	until $(KUBECTL) get secret -n $(NAMESPACE) cert-mantle-replication >/dev/null ; do sleep 1; done
 # Dump ca.crt in the secret to import it to the secondary cluster.
-	kubectl get secret -n $(NAMESPACE) cert-mantle-replication -o json | jq -r '.data."ca.crt"' | base64 -d > $(TMPDIR)/primary-ca.crt
+	$(KUBECTL) get secret -n $(NAMESPACE) cert-mantle-replication -o json | jq -r '.data."ca.crt"' | base64 -d > $(TMPDIR)/primary-ca.crt
 	$(MAKE) minikube-profile-secondary
-	kubectl create cm mantle-primary-ca-crt -n $(NAMESPACE) --from-file=ca.crt=$(TMPDIR)/primary-ca.crt \
-		--output yaml --dry-run=client | kubectl apply -f -
+	$(KUBECTL) create cm mantle-primary-ca-crt -n $(NAMESPACE) --from-file=ca.crt=$(TMPDIR)/primary-ca.crt \
+		--output yaml --dry-run=client | $(KUBECTL) apply -f -
 # Create a TLS certificate in the secondary cluster.
 #
 # Before creating a Certificate resource, we need to replace the {ENDPOINT} placeholder
@@ -267,14 +267,14 @@ install-tls-certificates:
 		> $(TMPDIR)/cert-secondary.yaml
 	$(KUBECTL) apply -f $(TMPDIR)/cert-secondary.yaml
 # In order to get the regenerated Secret for sure, delete the existing secret if any.
-	kubectl delete secret -n $(NAMESPACE) cert-mantle-replication || true
+	$(KUBECTL) delete secret -n $(NAMESPACE) cert-mantle-replication || true
 # Wait until a Secret for the certificates is created.
-	until kubectl get secret -n $(NAMESPACE) cert-mantle-replication >/dev/null ; do sleep 1; done
+	until $(KUBECTL) get secret -n $(NAMESPACE) cert-mantle-replication >/dev/null ; do sleep 1; done
 # Dump ca.crt in the secret to import it to the primary cluster.
-	kubectl get secret -n $(NAMESPACE) cert-mantle-replication -o json | jq -r '.data."ca.crt"' | base64 -d > $(TMPDIR)/secondary-ca.crt
+	$(KUBECTL) get secret -n $(NAMESPACE) cert-mantle-replication -o json | jq -r '.data."ca.crt"' | base64 -d > $(TMPDIR)/secondary-ca.crt
 	$(MAKE) minikube-profile-primary
-	kubectl create cm mantle-secondary-ca-crt -n $(NAMESPACE) --from-file=ca.crt=$(TMPDIR)/secondary-ca.crt \
-		--output yaml --dry-run=client | kubectl apply -f -
+	$(KUBECTL) create cm mantle-secondary-ca-crt -n $(NAMESPACE) --from-file=ca.crt=$(TMPDIR)/secondary-ca.crt \
+		--output yaml --dry-run=client | $(KUBECTL) apply -f -
 
 .PHONY: minikube-profile-primary
 minikube-profile-primary:
