@@ -1,19 +1,19 @@
 # https://github.com/kubernetes-sigs/controller-tools/releases
 CONTROLLER_TOOLS_VERSION := v0.16.4
 # https://github.com/helm/helm/releases
-HELM_VERSION := 3.17.1
+HELM_VERSION := 3.17.3
 # It is set by CI using the environment variable, use conditional assignment.
-KUBERNETES_VERSION := 1.31.1
+KUBERNETES_VERSION := 1.32.3
 # https://github.com/kubernetes-sigs/kustomize/releases
 KUSTOMIZE_VERSION := v5.6.0
 # https://github.com/kubernetes/minikube/releases
 MINIKUBE_VERSION := v1.35.0
 # https://github.com/protocolbuffers/protobuf/releases
-PROTOC_VERSION := 29.3
+PROTOC_VERSION := 30.2
 # https://github.com/rook/rook/releases
-ROOK_CHART_VERSION := v1.16.4
+ROOK_CHART_VERSION := v1.17.0
 # https://github.com/golangci/golangci-lint/releases
-GOLANGCI_LINT_VERSION := v1.64.5
+GOLANGCI_LINT_VERSION := v2.1.2
 # https://github.com/cert-manager/cert-manager/releases
 CERT_MANAGER_VERSION := v1.17.1
 

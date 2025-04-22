@@ -376,7 +376,7 @@ func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, back
 		return result, nil
 	}
 
-	if !backup.ObjectMeta.DeletionTimestamp.IsZero() {
+	if !backup.DeletionTimestamp.IsZero() {
 		return r.finalizeStandalone(ctx, backup, target, isErrTargetPVCNotFound(getSnapshotTargetErr))
 	}
 
@@ -441,7 +441,7 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 		return result, nil
 	}
 
-	if !backup.ObjectMeta.DeletionTimestamp.IsZero() {
+	if !backup.DeletionTimestamp.IsZero() {
 		return r.finalizeSecondary(ctx, backup, target, isErrTargetPVCNotFound(getSnapshotTargetErr))
 	}
 
@@ -539,7 +539,7 @@ func (r *MantleBackupReconciler) replicateManifests(
 
 	// Make sure all of the preceding backups for the same PVC have already been replicated.
 	var backupList mantlev1.MantleBackupList
-	if err := r.Client.List(ctx, &backupList, &client.ListOptions{
+	if err := r.List(ctx, &backupList, &client.ListOptions{
 		LabelSelector: labels.SelectorFromSet(map[string]string{labelLocalBackupTargetPVCUID: string(pvc.GetUID())}),
 	}); err != nil {
 		return ctrl.Result{}, err
@@ -547,7 +547,7 @@ func (r *MantleBackupReconciler) replicateManifests(
 	for _, backup1 := range backupList.Items {
 		if backup1.Status.SnapID == nil ||
 			*backup1.Status.SnapID < *backup.Status.SnapID &&
-				backup1.ObjectMeta.DeletionTimestamp.IsZero() &&
+				backup1.DeletionTimestamp.IsZero() &&
 				!meta.IsStatusConditionTrue(backup1.Status.Conditions, mantlev1.BackupConditionSyncedToRemote) {
 			return requeueReconciliation(), nil
 		}
@@ -831,7 +831,7 @@ func (r *MantleBackupReconciler) prepareForDataSynchronization(
 			}
 
 			var diffFrom mantlev1.MantleBackup
-			err = r.Client.Get(ctx, types.NamespacedName{
+			err = r.Get(ctx, types.NamespacedName{
 				Name:      diffFromName,
 				Namespace: backup.GetNamespace(),
 			}, &diffFrom)
@@ -851,7 +851,7 @@ func (r *MantleBackupReconciler) prepareForDataSynchronization(
 
 	var primaryBackupList mantlev1.MantleBackupList
 	// TODO: Perhaps, we may have to use the client without cache.
-	err = r.Client.List(ctx, &primaryBackupList, &client.ListOptions{
+	err = r.List(ctx, &primaryBackupList, &client.ListOptions{
 		LabelSelector: labels.SelectorFromSet(map[string]string{labelLocalBackupTargetPVCUID: exportTargetPVCUID}),
 		Namespace:     backup.GetNamespace(),
 	})
@@ -1049,7 +1049,7 @@ func (r *MantleBackupReconciler) handleCompletedJobsOfComponent(
 ) (int, error) {
 	// List all the Jobs
 	var jobList batchv1.JobList
-	if err := r.Client.List(ctx, &jobList, &client.ListOptions{
+	if err := r.List(ctx, &jobList, &client.ListOptions{
 		Namespace: r.managedCephClusterID,
 		LabelSelector: labels.SelectorFromSet(map[string]string{
 			"app.kubernetes.io/name":      labelAppNameValue,
@@ -1091,7 +1091,7 @@ func (r *MantleBackupReconciler) handleCompletedJobsOfComponent(
 		}
 
 		propagationPolicy := metav1.DeletePropagationBackground
-		if err := r.Client.Delete(ctx, &job.job, &client.DeleteOptions{
+		if err := r.Delete(ctx, &job.job, &client.DeleteOptions{
 			Preconditions: &metav1.Preconditions{
 				UID:             &job.job.UID,
 				ResourceVersion: &job.job.ResourceVersion,
@@ -1126,7 +1126,7 @@ func (r *MantleBackupReconciler) canNewExportJobBeCreated(ctx context.Context) (
 	}
 
 	var jobs batchv1.JobList
-	if err := r.Client.List(ctx, &jobs, &client.ListOptions{
+	if err := r.List(ctx, &jobs, &client.ListOptions{
 		Namespace: r.managedCephClusterID,
 		LabelSelector: labels.SelectorFromSet(map[string]string{
 			"app.kubernetes.io/name":      labelAppNameValue,
@@ -1162,7 +1162,7 @@ func (r *MantleBackupReconciler) getPartNumRangeOfExpectedRunningUploadJobs(
 	}
 
 	var jobs batchv1.JobList
-	if err := r.Client.List(ctx, &jobs, &client.ListOptions{
+	if err := r.List(ctx, &jobs, &client.ListOptions{
 		Namespace: r.managedCephClusterID,
 		LabelSelector: labels.SelectorFromSet(map[string]string{
 			"app.kubernetes.io/name":      labelAppNameValue,
@@ -1265,7 +1265,7 @@ func (r *MantleBackupReconciler) handleCompletedUploadJobs(ctx context.Context, 
 		pvc := corev1.PersistentVolumeClaim{}
 		pvc.SetName(MakeExportDataPVCName(backup, partNum))
 		pvc.SetNamespace(r.managedCephClusterID)
-		if err := r.Client.Delete(ctx, &pvc); err != nil && !aerrors.IsNotFound(err) {
+		if err := r.Delete(ctx, &pvc); err != nil && !aerrors.IsNotFound(err) {
 			return fmt.Errorf("failed to delete export data PVC: %s/%s: %w", pvc.GetNamespace(), pvc.GetName(), err)
 		}
 		return nil
@@ -1808,7 +1808,7 @@ func (r *MantleBackupReconciler) prepareObjectStorageClient(ctx context.Context)
 
 	if r.objectStorageSettings.CACertConfigMap != nil {
 		var cm corev1.ConfigMap
-		if err := r.Client.Get(
+		if err := r.Get(
 			ctx, types.NamespacedName{
 				Name:      *r.objectStorageSettings.CACertConfigMap,
 				Namespace: r.managedCephClusterID,
@@ -1826,7 +1826,7 @@ func (r *MantleBackupReconciler) prepareObjectStorageClient(ctx context.Context)
 	}
 
 	var envSecret corev1.Secret
-	if err := r.Client.Get(
+	if err := r.Get(
 		ctx,
 		types.NamespacedName{Name: r.envSecret, Namespace: r.managedCephClusterID},
 		&envSecret,
@@ -2084,7 +2084,7 @@ blkdiscard /dev/discard-rbd
 
 func (r *MantleBackupReconciler) hasDiscardJobCompleted(ctx context.Context, backup *mantlev1.MantleBackup) (bool, error) {
 	var job batchv1.Job
-	if err := r.Client.Get(
+	if err := r.Get(
 		ctx,
 		types.NamespacedName{Name: MakeDiscardJobName(backup), Namespace: r.managedCephClusterID},
 		&job,
@@ -2380,7 +2380,7 @@ func (r *MantleBackupReconciler) primaryCleanup(
 	diffFrom, ok := target.GetAnnotations()[annotDiffFrom]
 	if ok {
 		var source mantlev1.MantleBackup
-		if err := r.Client.Get(
+		if err := r.Get(
 			ctx,
 			types.NamespacedName{Name: diffFrom, Namespace: target.GetNamespace()},
 			&source,
@@ -2388,7 +2388,7 @@ func (r *MantleBackupReconciler) primaryCleanup(
 			return ctrl.Result{}, fmt.Errorf("failed to get source MantleBackup: %w", err)
 		}
 		delete(source.GetAnnotations(), annotDiffTo)
-		if err := r.Client.Update(ctx, &source); err != nil {
+		if err := r.Update(ctx, &source); err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to update source MantleBackup: %w", err)
 		}
 	}
@@ -2407,7 +2407,7 @@ func (r *MantleBackupReconciler) primaryCleanup(
 
 	delete(target.GetAnnotations(), annotDiffFrom)
 	delete(target.GetAnnotations(), annotSyncMode)
-	if err := r.Client.Update(ctx, target); err != nil {
+	if err := r.Update(ctx, target); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to delete annotations of diff-from and sync-mode: %w", err)
 	}
 
@@ -2468,7 +2468,7 @@ func (r *MantleBackupReconciler) deleteAllJobsOfComponent(
 		var job batchv1.Job
 		job.SetName(makeJobName(backup, partNum))
 		job.SetNamespace(r.managedCephClusterID)
-		if err := r.Client.Delete(ctx, &job, &client.DeleteOptions{
+		if err := r.Delete(ctx, &job, &client.DeleteOptions{
 			PropagationPolicy: &propagationPolicy,
 		}); err != nil && !aerrors.IsNotFound(err) {
 			return fmt.Errorf("failed to delete Job: %s/%s: %w", job.GetNamespace(), job.GetName(), err)
@@ -2498,7 +2498,7 @@ func (r *MantleBackupReconciler) deleteAllExportDataPVCs(ctx context.Context, ba
 		pvc := corev1.PersistentVolumeClaim{}
 		pvc.SetName(MakeExportDataPVCName(backup, partNum))
 		pvc.SetNamespace(r.managedCephClusterID)
-		if err := r.Client.Delete(ctx, &pvc, &client.DeleteOptions{
+		if err := r.Delete(ctx, &pvc, &client.DeleteOptions{
 			PropagationPolicy: &propagationPolicy,
 		}); err != nil && !aerrors.IsNotFound(err) {
 			return fmt.Errorf("failed to delete PVC: %s/%s: %w", pvc.GetNamespace(), pvc.GetName(), err)
@@ -2516,7 +2516,7 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 	diffFrom, ok := target.GetAnnotations()[annotDiffFrom]
 	if ok {
 		var source mantlev1.MantleBackup
-		if err := r.Client.Get(
+		if err := r.Get(
 			ctx,
 			types.NamespacedName{Name: diffFrom, Namespace: target.GetNamespace()},
 			&source,
@@ -2524,7 +2524,7 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 			return ctrl.Result{}, fmt.Errorf("failed to get source MantleBackup: %w", err)
 		}
 		delete(source.GetAnnotations(), annotDiffTo)
-		if err := r.Client.Update(ctx, &source); err != nil {
+		if err := r.Update(ctx, &source); err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to update source MantleBackup: %w", err)
 		}
 	}
@@ -2538,7 +2538,7 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 	var discardJob batchv1.Job
 	discardJob.SetName(MakeDiscardJobName(target))
 	discardJob.SetNamespace(r.managedCephClusterID)
-	if err := r.Client.Delete(ctx, &discardJob, &client.DeleteOptions{
+	if err := r.Delete(ctx, &discardJob, &client.DeleteOptions{
 		PropagationPolicy: &propagationPolicy,
 	}); err != nil && !aerrors.IsNotFound(err) {
 		return ctrl.Result{}, fmt.Errorf("failed to delete discard Job: %w", err)
@@ -2547,13 +2547,13 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 	var discardPVC corev1.PersistentVolumeClaim
 	discardPVC.SetName(MakeDiscardPVCName(target))
 	discardPVC.SetNamespace(r.managedCephClusterID)
-	if err := r.Client.Delete(ctx, &discardPVC); err != nil && !aerrors.IsNotFound(err) {
+	if err := r.Delete(ctx, &discardPVC); err != nil && !aerrors.IsNotFound(err) {
 		return ctrl.Result{}, fmt.Errorf("failed to delete discard PVC: %w", err)
 	}
 
 	var discardPV corev1.PersistentVolume
 	discardPV.SetName(MakeDiscardPVName(target))
-	if err := r.Client.Delete(ctx, &discardPV); err != nil && !aerrors.IsNotFound(err) {
+	if err := r.Delete(ctx, &discardPV); err != nil && !aerrors.IsNotFound(err) {
 		return ctrl.Result{}, fmt.Errorf("failed to delete discard PV: %w", err)
 	}
 
@@ -2565,7 +2565,7 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 
 	delete(target.GetAnnotations(), annotDiffFrom)
 	delete(target.GetAnnotations(), annotSyncMode)
-	if err := r.Client.Update(ctx, target); err != nil {
+	if err := r.Update(ctx, target); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to update target MantleBackup: %w", err)
 	}
 

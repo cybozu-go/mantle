@@ -86,8 +86,8 @@ func (s *SecondaryServer) CreateOrUpdatePVC(
 			}
 		}
 
-		pvc.ObjectMeta.Annotations = pvcReceived.Annotations
-		pvc.ObjectMeta.Labels = pvcReceived.Labels
+		pvc.Annotations = pvcReceived.Annotations
+		pvc.Labels = pvcReceived.Labels
 
 		// We should NOT use pvcReceived.Spec.VolumeName. It's a PV name in the primary k8s server.
 		volumeName := pvc.Spec.VolumeName
@@ -178,9 +178,9 @@ func (s *SecondaryServer) CreateOrUpdateMantleBackup(
 			}
 		}
 
-		backup.ObjectMeta.Finalizers = backupReceived.Finalizers
-		backup.ObjectMeta.Annotations = backupReceived.Annotations
-		backup.ObjectMeta.Labels = backupReceived.Labels
+		backup.Finalizers = backupReceived.Finalizers
+		backup.Annotations = backupReceived.Annotations
+		backup.Labels = backupReceived.Labels
 		backup.Spec = backupReceived.Spec
 		return nil
 	}); err != nil {

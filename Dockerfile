@@ -25,10 +25,10 @@ COPY pkg/ pkg/
 RUN CGO_ENABLED=0 go build -o manager main.go
 
 # Build s5cmd
-FROM golang:1.22 AS s5cmd-builder
+FROM golang:1.23 AS s5cmd-builder
 WORKDIR /workspace
 ## https://github.com/peak/s5cmd/releases
-## use v2.2.2
+## use v2.3.0
 RUN go install github.com/peak/s5cmd/v2@48f7e59e2d02954e218d2ddb947566d57e495fd8
 
 # Download and install custom RBD command

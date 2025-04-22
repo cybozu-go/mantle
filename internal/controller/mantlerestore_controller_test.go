@@ -161,11 +161,11 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPV() {
 		Expect(ok).To(BeTrue())
 		Expect(pvCapacity).To(Equal(int64(testutil.FakeRBDSnapshotSize)))
 		Expect(pv1.Spec.ClaimRef).To(BeNil())
-		Expect(pv1.Spec.PersistentVolumeSource.CSI.Driver).To(Equal(test.srcPV.Spec.PersistentVolumeSource.CSI.Driver))
+		Expect(pv1.Spec.PersistentVolumeSource.CSI.Driver).To(Equal(test.srcPV.Spec.CSI.Driver))
 		Expect(pv1.Spec.PersistentVolumeSource.CSI.VolumeAttributes).To(HaveLen(4))
-		Expect(pv1.Spec.PersistentVolumeSource.CSI.VolumeAttributes["clusterID"]).To(Equal(test.srcPV.Spec.PersistentVolumeSource.CSI.VolumeAttributes["clusterID"]))
-		Expect(pv1.Spec.PersistentVolumeSource.CSI.VolumeAttributes["imageFeatures"]).To(Equal(test.srcPV.Spec.PersistentVolumeSource.CSI.VolumeAttributes["imageFeatures"] + ",deep-flatten"))
-		Expect(pv1.Spec.PersistentVolumeSource.CSI.VolumeAttributes["pool"]).To(Equal(test.srcPV.Spec.PersistentVolumeSource.CSI.VolumeAttributes["pool"]))
+		Expect(pv1.Spec.PersistentVolumeSource.CSI.VolumeAttributes["clusterID"]).To(Equal(test.srcPV.Spec.CSI.VolumeAttributes["clusterID"]))
+		Expect(pv1.Spec.PersistentVolumeSource.CSI.VolumeAttributes["imageFeatures"]).To(Equal(test.srcPV.Spec.CSI.VolumeAttributes["imageFeatures"] + ",deep-flatten"))
+		Expect(pv1.Spec.PersistentVolumeSource.CSI.VolumeAttributes["pool"]).To(Equal(test.srcPV.Spec.CSI.VolumeAttributes["pool"]))
 		Expect(pv1.Spec.PersistentVolumeSource.CSI.VolumeAttributes["staticVolume"]).To(Equal("true"))
 		Expect(pv1.Spec.PersistentVolumeSource.CSI.VolumeHandle).To(Equal(fmt.Sprintf("mantle-%s-%s", restore.Namespace, restore.Name)))
 		Expect(pv1.Spec.StorageClassName).To(Equal(test.srcPV.Spec.StorageClassName))
@@ -242,7 +242,7 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPVC() {
 		Expect(pvc).To(Equal(updatedPVC))
 
 		// delete pvc0 for the following tests
-		pvc.ObjectMeta.Finalizers = []string{}
+		pvc.Finalizers = []string{}
 		err = k8sClient.Update(ctx, &pvc)
 		Expect(err).NotTo(HaveOccurred())
 		err = k8sClient.Delete(ctx, &pvc)

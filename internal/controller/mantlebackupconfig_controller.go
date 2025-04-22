@@ -87,7 +87,7 @@ func (r *MantleBackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	// When the deletionTimestamp is set, remove the finalizer and finish reconciling.
-	if !mbc.ObjectMeta.DeletionTimestamp.IsZero() {
+	if !mbc.DeletionTimestamp.IsZero() {
 		if controllerutil.ContainsFinalizer(&mbc, MantleBackupConfigFinalizerName) {
 			// Delete the CronJob. If we failed to delete it because it's not found, ignore the error.
 			logger.Info("start deleting cronjobs")
@@ -290,7 +290,7 @@ func (r *MantleBackupConfigReconciler) deleteCronJob(ctx context.Context, mbc *m
 }
 
 func getMBCCronJobName(mbc *mantlev1.MantleBackupConfig) string {
-	return MantleBackupConfigCronJobNamePrefix + string(mbc.ObjectMeta.UID)
+	return MantleBackupConfigCronJobNamePrefix + string(mbc.UID)
 }
 
 var getRunningPod func(ctx context.Context, client client.Client) (*corev1.Pod, error) = getRunningPodImpl

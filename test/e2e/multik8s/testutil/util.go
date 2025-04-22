@@ -80,7 +80,7 @@ func getKubectlInvocation(clusterNo int) ([]string, error) {
 		return nil, fmt.Errorf("invalid clusterNo: %d", clusterNo)
 	}
 	if len(kubectlPrefix) == 0 {
-		return nil, errors.New("Either KUBECTL_PRIMARY or KUBECTL_SECONDARY environment variable is not set")
+		return nil, errors.New("either KUBECTL_PRIMARY or KUBECTL_SECONDARY environment variable is not set")
 	}
 	return strings.Fields(kubectlPrefix), nil
 }
