@@ -61,12 +61,6 @@ spec:
             periodSeconds: 10
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          volumeMounts:
-            - mountPath: /etc/ceph
-              name: ceph-config
-            {{- with .Values.controller.volumeMounts }}
-            {{- toYaml . | nindent 12 }}
-            {{- end }}
           command:
             - /manager
           args:
@@ -112,23 +106,31 @@ spec:
             {{- with .Values.controller.backupTransferPartSize }}
             - --backup-transfer-part-size={{ . }}
             {{- end }}
-            {{- with .Values.controller.grpcTLSClientCertPath }}
-            - --grpc-tls-client-cert-path={{ . }}
+
+            {{- if eq .Values.controller.role "primary" }}
+            {{-   with .Values.controller.replicationTLSClientCertPath }}
+            - --replication-tls-client-cert-path={{ . }}
+            {{-   end }}
+            {{-   with .Values.controller.replicationTLSClientKeyPath }}
+            - --replication-tls-client-key-path={{ . }}
+            {{-   end }}
+            {{-   with .Values.controller.replicationTLSServerCAPath }}
+            - --replication-tls-server-ca-path={{ . }}
+            {{-   end }}
             {{- end }}
-            {{- with .Values.controller.grpcTLSClientKeyPath }}
-            - --grpc-tls-client-key-path={{ . }}
-            {{- end }}
-            {{- with .Values.controller.grpcTLSClientCAPath }}
-            - --grpc-tls-client-ca-path={{ . }}
-            {{- end }}
-            {{- with .Values.controller.grpcTLSServerCertPath }}
-            - --grpc-tls-server-cert-path={{ . }}
-            {{- end }}
-            {{- with .Values.controller.grpcTLSServerKeyPath }}
-            - --grpc-tls-server-key-path={{ . }}
-            {{- end }}
-            {{- with .Values.controller.grpcTLSServerCAPath }}
-            - --grpc-tls-server-ca-path={{ . }}
+
+            {{- if eq .Values.controller.role "secondary" }}
+            {{-   with .Values.controller.replicationTLSServerCertPath }}
+            - --replication-tls-server-cert-path={{ . }}
+            {{-   end }}
+            {{-   with .Values.controller.replicationTLSServerKeyPath }}
+            - --replication-tls-server-key-path={{ . }}
+            {{-   end }}
+            {{-   with .Values.controller.replicationTLSClientCAPath }}
+            - --replication-tls-client-ca-path={{ . }}
+            {{-   end }}
+            - --webhook-cert-path=/mnt/webhook-tls-cert/tls.crt
+            - --webhook-key-path=/mnt/webhook-tls-cert/tls.key
             {{- end }}
           env:
             - name: POD_NAME
@@ -146,6 +148,16 @@ spec:
             {{- end }}
           ports:
             {{- toYaml .Values.controller.ports | nindent 12 }}
+          volumeMounts:
+            - name: ceph-config
+              mountPath: /etc/ceph
+            {{- if eq .Values.controller.role "secondary" }}
+            - name: webhook-tls-cert
+              mountPath: /mnt/webhook-tls-cert
+            {{- end }}
+            {{- with .Values.controller.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
         - command:
             - /bin/bash
             - -c
@@ -250,6 +262,11 @@ spec:
           name: mon-endpoint-volume
         - emptyDir: {}
           name: ceph-config
+        {{- if eq .Values.controller.role "secondary" }}
+        - name: webhook-tls-cert
+          secret:
+            secretName: {{ template "mantle.fullname" . }}-webhook
+        {{- end }}
         {{- with .Values.controller.volumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
