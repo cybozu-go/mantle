@@ -28,13 +28,16 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/controller"
+	webhookv1 "github.com/cybozu-go/mantle/internal/webhook/v1"
 	"github.com/cybozu-go/mantle/pkg/controller/proto"
 	//+kubebuilder:scaffold:imports
 )
@@ -47,32 +50,34 @@ var ControllerCmd = &cobra.Command{
 }
 
 var (
-	metricsAddr             string
-	enableLeaderElection    bool
-	probeAddr               string
-	zapOpts                 zap.Options
-	overwriteMBCSchedule    string
-	role                    string
-	mantleServiceEndpoint   string
-	maxExportJobs           int
-	maxUploadJobs           int
-	exportDataStorageClass  string
-	envSecret               string
-	objectStorageBucketName string
-	objectStorageEndpoint   string
-	caCertConfigMapSrc      string
-	caCertKeySrc            string
-	gcInterval              string
-	httpProxy               string
-	httpsProxy              string
-	noProxy                 string
-	backupTransferPartSize  string
-	grpcTLSClientCertPath   string
-	grpcTLSClientKeyPath    string
-	grpcTLSClientCAPath     string
-	grpcTLSServerCertPath   string
-	grpcTLSServerKeyPath    string
-	grpcTLSServerCAPath     string
+	metricsAddr                  string
+	enableLeaderElection         bool
+	probeAddr                    string
+	zapOpts                      zap.Options
+	overwriteMBCSchedule         string
+	role                         string
+	mantleServiceEndpoint        string
+	maxExportJobs                int
+	maxUploadJobs                int
+	exportDataStorageClass       string
+	envSecret                    string
+	objectStorageBucketName      string
+	objectStorageEndpoint        string
+	caCertConfigMapSrc           string
+	caCertKeySrc                 string
+	gcInterval                   string
+	httpProxy                    string
+	httpsProxy                   string
+	noProxy                      string
+	backupTransferPartSize       string
+	replicationTLSClientCertPath string
+	replicationTLSClientKeyPath  string
+	replicationTLSClientCAPath   string
+	replicationTLSServerCertPath string
+	replicationTLSServerKeyPath  string
+	replicationTLSServerCAPath   string
+	webhookCertPath              string
+	webhookKeyPath               string
 
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
@@ -124,18 +129,22 @@ func init() {
 		"A string that contains comma-separated values specifying hosts that should be excluded from proxying.")
 	flags.StringVar(&backupTransferPartSize, "backup-transfer-part-size", "200Gi",
 		"The size of each backup data chunk to be transferred at a time.")
-	flags.StringVar(&grpcTLSClientCertPath, "grpc-tls-client-cert-path", "",
+	flags.StringVar(&replicationTLSClientCertPath, "replication-tls-client-cert-path", "",
 		"The file path of a TLS certificate used for client authentication of gRPC.")
-	flags.StringVar(&grpcTLSClientKeyPath, "grpc-tls-client-key-path", "",
+	flags.StringVar(&replicationTLSClientKeyPath, "replication-tls-client-key-path", "",
 		"The file path of a TLS key used for client authentication of gRPC.")
-	flags.StringVar(&grpcTLSClientCAPath, "grpc-tls-client-ca-path", "",
+	flags.StringVar(&replicationTLSClientCAPath, "replication-tls-client-ca-path", "",
 		"The file path of a TLS CA certificate that issues a certificate used for client authentication of gRPC.")
-	flags.StringVar(&grpcTLSServerCertPath, "grpc-tls-server-cert-path", "",
+	flags.StringVar(&replicationTLSServerCertPath, "replication-tls-server-cert-path", "",
 		"The file path of a TLS certificate used for server authentication of gRPC.")
-	flags.StringVar(&grpcTLSServerKeyPath, "grpc-tls-server-key-path", "",
+	flags.StringVar(&replicationTLSServerKeyPath, "replication-tls-server-key-path", "",
 		"The file path of a TLS key used for server authentication of gRPC.")
-	flags.StringVar(&grpcTLSServerCAPath, "grpc-tls-server-ca-path", "",
+	flags.StringVar(&replicationTLSServerCAPath, "replication-tls-server-ca-path", "",
 		"The file path of a TLS CA certificate that issues a certificate used for server authentication of gRPC.")
+	flags.StringVar(&webhookCertPath, "webhook-cert-path", "",
+		"The file path of the webhook certificate file.")
+	flags.StringVar(&webhookKeyPath, "webhook-key-path", "",
+		"The file path of the webhook key file.")
 
 	goflags := flag.NewFlagSet("goflags", flag.ExitOnError)
 	zapOpts.Development = true
@@ -181,36 +190,44 @@ func checkCommandlineArgs() error {
 
 	case controller.RolePrimary:
 		// checks specific to primary
-		if (grpcTLSClientCertPath == "" && grpcTLSClientKeyPath != "") ||
-			(grpcTLSClientCertPath != "" && grpcTLSClientKeyPath == "") {
-			return errors.New("--grpc-tls-client-cert-path and --grpc-tls-client-key-path must be specified together")
+		if (replicationTLSClientCertPath == "" && replicationTLSClientKeyPath != "") ||
+			(replicationTLSClientCertPath != "" && replicationTLSClientKeyPath == "") {
+			return errors.New("--replication-tls-client-cert-path and --replication-tls-client-key-path " +
+				"must be specified together")
 		}
-		if grpcTLSClientCertPath != "" && grpcTLSServerCAPath == "" {
-			return errors.New("--grpc-tls-client-cert-path and --grpc-tls-client-key-path must be specified with " +
-				"--grpc-tls-server-ca-path")
+		if replicationTLSClientCertPath != "" && replicationTLSServerCAPath == "" {
+			return errors.New("--replication-tls-client-cert-path and --replication-tls-client-key-path " +
+				"must be specified with --replication-tls-server-ca-path")
 		}
-		if grpcTLSServerCertPath != "" || grpcTLSServerKeyPath != "" || grpcTLSClientCAPath != "" {
-			return errors.New("--grpc-tls-server-cert-path, --grpc-tls-server-key-path, or --grpc-tls-client-ca-path " +
-				"must not be specified if --role is 'primary'")
+		if replicationTLSServerCertPath != "" || replicationTLSServerKeyPath != "" || replicationTLSClientCAPath != "" {
+			return errors.New("--replication-tls-server-cert-path, --replication-tls-server-key-path, " +
+				"or --replication-tls-client-ca-path must not be specified if --role is 'primary'")
 		}
 
 	case controller.RoleSecondary:
 		// checks specific to secondary
-		if (grpcTLSServerCertPath == "" && grpcTLSServerKeyPath != "") ||
-			(grpcTLSServerCertPath != "" && grpcTLSServerKeyPath == "") {
-			return errors.New("--grpc-tls-server-cert-path and --grpc-tls-server-key-path must be specified together")
+		if (replicationTLSServerCertPath == "" && replicationTLSServerKeyPath != "") ||
+			(replicationTLSServerCertPath != "" && replicationTLSServerKeyPath == "") {
+			return errors.New("--replication-tls-server-cert-path and --replication-tls-server-key-path " +
+				"must be specified together")
 		}
-		if grpcTLSClientCAPath != "" && grpcTLSServerCertPath == "" {
-			return errors.New("--grpc-tls-client-ca-path must be specified with " +
-				"--grpc-tls-server-cert-path and --grpc-tls-server-key-path")
+		if replicationTLSClientCAPath != "" && replicationTLSServerCertPath == "" {
+			return errors.New("--replication-tls-client-ca-path must be specified with " +
+				"--replication-tls-server-cert-path and --replication-tls-server-key-path")
 		}
-		if grpcTLSClientCertPath != "" || grpcTLSClientKeyPath != "" || grpcTLSServerCAPath != "" {
-			return errors.New("--grpc-tls-client-cert-path, --grpc-tls-client-key-path, or --grpc-tls-server-ca-path " +
-				"must not be specified if --role is 'secondary'")
+		if replicationTLSClientCertPath != "" || replicationTLSClientKeyPath != "" || replicationTLSServerCAPath != "" {
+			return errors.New("--replication-tls-client-cert-path, --replication-tls-client-key-path, " +
+				"or --replication-tls-server-ca-path must not be specified if --role is 'secondary'")
+		}
+		if webhookCertPath == "" {
+			return errors.New("--webhook-cert-path must be specified if --role is 'secondary'")
+		}
+		if webhookKeyPath == "" {
+			return errors.New("--webhook-key-path must be specified if --role is 'secondary'")
 		}
 
 	default:
-		return fmt.Errorf("role should be one of 'standalone', 'primary', or 'secondary': %s", role)
+		return fmt.Errorf("role must be one of 'standalone', 'primary', or 'secondary': %s", role)
 	}
 
 	// checks common to primary and secondary
@@ -358,7 +375,7 @@ func setupPrimary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup) 
 
 	// Construct a gRPC client.
 	clientCerts, serverCACertPool, err := loadTLSCredentials(
-		grpcTLSClientCertPath, grpcTLSClientKeyPath, grpcTLSServerCAPath)
+		replicationTLSClientCertPath, replicationTLSClientKeyPath, replicationTLSServerCAPath)
 	if err != nil {
 		return fmt.Errorf("failed to load TLS credentials for gRPC client: %w", err)
 	}
@@ -420,7 +437,7 @@ func setupSecondary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup
 		),
 	}
 	serverCerts, clientCACertPool, err := loadTLSCredentials(
-		grpcTLSServerCertPath, grpcTLSServerKeyPath, grpcTLSClientCAPath)
+		replicationTLSServerCertPath, replicationTLSServerKeyPath, replicationTLSClientCAPath)
 	if err != nil {
 		return fmt.Errorf("failed to load TLS credentials for gRPC server: %w", err)
 	}
@@ -460,6 +477,10 @@ func setupSecondary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup
 		serv.GracefulStop()
 	}()
 
+	err = webhookv1.SetupVolumeAttachmentWebhookWithManager(mgr)
+	if err != nil {
+		return fmt.Errorf("failed to setup VolumeAttachment webhook: %w", err)
+	}
 	return setupReconcilers(mgr, nil)
 }
 
@@ -471,7 +492,7 @@ func subMain() error {
 		return err
 	}
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	mgrOptions := ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
 		HealthProbeBindAddress: probeAddr,
@@ -488,10 +509,6 @@ func subMain() error {
 		// if you are doing or is intended to do any operation such as perform cleanups
 		// after the manager stops then its usage might be unsafe.
 		// LeaderElectionReleaseOnCancel: true,
-	})
-	if err != nil {
-		setupLog.Error(err, "unable to start manager")
-		return err
 	}
 
 	var wg sync.WaitGroup
@@ -500,17 +517,57 @@ func subMain() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	var mgr manager.Manager
+	var err error
 	switch role {
 	case controller.RoleStandalone:
+		mgr, err = ctrl.NewManager(ctrl.GetConfigOrDie(), mgrOptions)
+		if err != nil {
+			setupLog.Error(err, "unable to start manager")
+			return err
+		}
+
 		if err := setupStandalone(mgr); err != nil {
 			return err
 		}
 	case controller.RolePrimary:
+		mgr, err = ctrl.NewManager(ctrl.GetConfigOrDie(), mgrOptions)
+		if err != nil {
+			setupLog.Error(err, "unable to start manager")
+			return err
+		}
+
 		if err := setupPrimary(ctx, mgr, &wg); err != nil {
 			return err
 		}
 	case controller.RoleSecondary:
+		webhookTLSOpts := []func(*tls.Config){}
+		setupLog.Info("Initializing webhook certificate watcher using provided certificates",
+			"webhook-cert-path", webhookCertPath, "webhook-key-path", webhookKeyPath)
+
+		webhookCertWatcher, err := certwatcher.New(webhookCertPath, webhookKeyPath)
+		if err != nil {
+			setupLog.Error(err, "Failed to initialize webhook certificate watcher")
+			return err
+		}
+
+		webhookTLSOpts = append(webhookTLSOpts, func(config *tls.Config) {
+			config.GetCertificate = webhookCertWatcher.GetCertificate
+		})
+		mgrOptions.WebhookServer = webhook.NewServer(webhook.Options{
+			TLSOpts: webhookTLSOpts,
+		})
+		mgr, err = ctrl.NewManager(ctrl.GetConfigOrDie(), mgrOptions)
+		if err != nil {
+			setupLog.Error(err, "unable to start manager")
+			return err
+		}
 		if err := setupSecondary(ctx, mgr, &wg, cancel); err != nil {
+			return err
+		}
+		setupLog.Info("Adding webhook certificate watcher to manager")
+		if err := mgr.Add(webhookCertWatcher); err != nil {
+			setupLog.Error(err, "unable to add webhook certificate watcher to manager")
 			return err
 		}
 	}
