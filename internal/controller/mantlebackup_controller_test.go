@@ -418,11 +418,14 @@ var _ = Describe("MantleBackup controller", func() {
 			HttpsProxy: "dummy https proxy",
 			NoProxy:    "no proxy",
 		}
-		BeforeEach(func() {
+
+		It("should be synced to remote", func(ctx SpecContext) {
+			// CSATEST-1491
 			mgrUtil = testutil.NewManagerUtil(context.Background(), cfg, scheme.Scheme)
 
 			var t reporter
 			mockCtrl = gomock.NewController(t)
+			defer mockCtrl.Finish()
 			grpcClient = proto.NewMockMantleServiceClient(mockCtrl)
 			reconciler = NewMantleBackupReconciler(
 				mgrUtil.GetManager().GetClient(),
@@ -454,19 +457,6 @@ var _ = Describe("MantleBackup controller", func() {
 
 			setupExpireQueueSniffer()
 
-			mgrUtil.Start()
-			time.Sleep(100 * time.Millisecond)
-
-			ns = resMgr.CreateNamespace()
-		})
-		AfterEach(func() {
-			if mockCtrl != nil {
-				mockCtrl.Finish()
-			}
-		})
-
-		It("should be synced to remote", func(ctx SpecContext) {
-			// CSATEST-1491
 			grpcClient.EXPECT().CreateOrUpdatePVC(gomock.Any(), &customMatcherHelper{
 				// check if the PVC has the capacity equal to the fake RBD snapshot size
 				matcher: func(x any) bool {
@@ -528,6 +518,12 @@ var _ = Describe("MantleBackup controller", func() {
 					) (*proto.SetSynchronizingResponse, error) {
 						return &proto.SetSynchronizingResponse{}, nil
 					})
+
+			// Manager should be started after the mock is set up to avoid race condition.
+			mgrUtil.Start()
+			time.Sleep(100 * time.Millisecond)
+
+			ns = resMgr.CreateNamespace()
 
 			pv, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 			Expect(err).NotTo(HaveOccurred())
