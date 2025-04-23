@@ -12,7 +12,7 @@ import (
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/ceph"
 	"github.com/cybozu-go/mantle/internal/controller/internal/objectstorage"
-	"github.com/cybozu-go/mantle/internal/controller/internal/testutil"
+	"github.com/cybozu-go/mantle/internal/testutil"
 	"github.com/cybozu-go/mantle/pkg/controller/proto"
 	"github.com/cybozu-go/mantle/test/util"
 	. "github.com/onsi/ginkgo/v2"

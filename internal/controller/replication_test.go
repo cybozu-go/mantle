@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"net"
 
-	"github.com/cybozu-go/mantle/internal/controller/internal/testutil"
+	"github.com/cybozu-go/mantle/internal/testutil"
 	"github.com/cybozu-go/mantle/pkg/controller/proto"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"

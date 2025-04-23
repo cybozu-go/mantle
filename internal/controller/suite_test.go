@@ -17,7 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
-	"github.com/cybozu-go/mantle/internal/controller/internal/testutil"
+	"github.com/cybozu-go/mantle/internal/testutil"
 	//+kubebuilder:scaffold:imports
 )
 
