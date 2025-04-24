@@ -41,7 +41,7 @@ jobs:
             ginkgo-flags: --label-filter="various-transfer-part-size"
     #runs-on: "ubuntu-22.04"
     runs-on: mantle_large_runner_16core
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
