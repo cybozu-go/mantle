@@ -237,6 +237,11 @@ func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *
 		return nil, ctrl.Result{}, err
 	}
 
+	// Return an error if the PVC has been re-created after the first call.
+	if uid, ok := backup.GetLabels()[labelLocalBackupTargetPVCUID]; ok && uid != string(pvc.GetUID()) {
+		return nil, ctrl.Result{}, fmt.Errorf("PVC UID does not match the backup target")
+	}
+
 	if err := r.checkPVCInManagedCluster(ctx, &pvc); err != nil {
 		return nil, ctrl.Result{}, err
 	}
@@ -382,6 +387,19 @@ func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, back
 
 	if getSnapshotTargetErr != nil {
 		return ctrl.Result{}, getSnapshotTargetErr
+	}
+
+	if backup.Labels == nil {
+		backup.Labels = make(map[string]string)
+	}
+
+	if _, ok := backup.Labels[labelLocalBackupTargetPVCUID]; !ok {
+		backup.Labels[labelLocalBackupTargetPVCUID] = string(target.pvc.GetUID())
+	}
+
+	if err := r.Update(ctx, backup); err != nil {
+		logger.Error(err, "failed to add label", "label", labelLocalBackupTargetPVCUID)
+		return ctrl.Result{}, err
 	}
 
 	if !controllerutil.ContainsFinalizer(backup, MantleBackupFinalizerName) {
