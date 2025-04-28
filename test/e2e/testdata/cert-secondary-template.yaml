@@ -33,10 +33,10 @@ spec:
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: mantle
+  name: mantle-replication
   namespace: rook-ceph
 spec:
-  secretName: cert-mantle
+  secretName: cert-mantle-replication
   dnsNames:
     - mantle-secondary.example.com
   ipAddresses: [{ENDPOINT}]

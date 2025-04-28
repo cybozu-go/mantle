@@ -1,0 +1,49 @@
+{{- $tls := fromYaml ( include "mantle.webhookCerts" . ) }}
+---
+{{- if eq .Values.controller.role "secondary" }}
+{{- if .Values.webhook.enabled }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ include "mantle.fullname" . }}-validating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    {{- if eq .Values.webhook.certificate.managedBy "helm" }}
+    caBundle: {{ $tls.caCert }}
+    {{- end }}
+    service:
+      name: {{ include "mantle.fullname" . }}-webhook
+      namespace: {{ .Release.Namespace }}
+      path: /validate-storage-k8s-io-v1-volumeattachment
+      port: {{ .Values.webhook.service.port }}
+  failurePolicy: Fail
+  name: volumeattachment.mantle.cybozu.io
+  rules:
+  - apiGroups:
+    - storage.k8s.io
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    resources:
+    - volumeattachments
+  sideEffects: None
+{{- if eq .Values.webhook.certificate.managedBy "helm" }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "mantle.fullname" . }}-webhook
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "mantle.labels" . | nindent 4 }}
+type: kubernetes.io/tls
+data:
+  ca.crt: {{ $tls.caCert }}
+  tls.crt: {{ $tls.clientCert }}
+  tls.key: {{ $tls.clientKey }}
+{{- end }}
+{{- end }}
+{{- end }}

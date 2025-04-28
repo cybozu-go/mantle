@@ -1,4 +1,4 @@
-package controller
+package v1
 
 import (
 	"path/filepath"
@@ -24,11 +24,13 @@ import (
 // These tests use Ginkgo (BDD-style Go testing framework). Refer to
 // http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
 
-var cfg *rest.Config
-var k8sClient client.Client
-var testEnv *envtest.Environment
-
-var resMgr *testutil.ResourceManager
+var (
+	cfg       *rest.Config
+	k8sClient client.Client
+	testEnv   *envtest.Environment
+	resMgr    *testutil.ResourceManager
+	validator *VolumeAttachmentCustomValidator
+)
 
 func TestControllers(t *testing.T) {
 	RegisterFailHandler(Fail)
@@ -45,7 +47,7 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
+		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "..", "config", "crd", "bases")},
 		ErrorIfCRDPathMissing: true,
 	}
 
@@ -70,8 +72,10 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 	By("Setup common resources")
 	resMgr, err = testutil.NewResourceManager(k8sClient)
 	Expect(err).NotTo(HaveOccurred())
-	err = resMgr.CreateStorageClass(ctx)
-	Expect(err).NotTo(HaveOccurred())
+
+	validator = &VolumeAttachmentCustomValidator{
+		client: k8sClient,
+	}
 })
 
 var _ = AfterSuite(func() {

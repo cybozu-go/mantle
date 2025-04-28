@@ -40,6 +40,8 @@ const (
 var (
 	//go:embed testdata/pvc-template.yaml
 	testPVCTemplate string
+	//go:embed testdata/pod-mount-volume-template.yaml
+	testPodMountVolumeTemplate string
 	//go:embed testdata/rbd-pool-sc-template.yaml
 	testRBDPoolSCTemplate string
 	//go:embed testdata/mantlebackup-template.yaml
@@ -99,6 +101,22 @@ func Kubectl(clusterNo int, input []byte, args ...string) ([]byte, []byte, error
 	return execAtLocal(ctx, fields[0], input, fields[1:]...)
 }
 
+func runMakeCommand(args ...string) error {
+	ctx := context.Background()
+
+	path := os.Getenv("MAKEFILE_DIR")
+	if len(path) == 0 {
+		return errors.New("MAKEFILE_DIR envvar is not set")
+	}
+	args = append([]string{"-C", path}, args...)
+	stdout, stderr, err := execAtLocal(ctx, "make", nil, args...)
+	if err != nil {
+		return fmt.Errorf("make failed. stdout: %s, stderr: %s, err: %w",
+			string(stdout), string(stderr), err)
+	}
+	return nil
+}
+
 func CheckDeploymentReady(clusterNo int, namespace, name string) error {
 	_, stderr, err := Kubectl(
 		clusterNo, nil,
@@ -124,6 +142,15 @@ func ApplyMantleRestoreTemplate(clusterNo int, namespace, restoreName, backupNam
 	_, _, err := Kubectl(clusterNo, []byte(manifest), "apply", "-f", "-")
 	if err != nil {
 		return fmt.Errorf("kubectl apply mantlerestore failed. err: %w", err)
+	}
+	return nil
+}
+
+func applyPodMountVolumeTemplate(clusterNo int, namespace, podName, pvcName string) error {
+	manifest := fmt.Sprintf(testPodMountVolumeTemplate, podName, namespace, pvcName)
+	_, _, err := Kubectl(clusterNo, []byte(manifest), "apply", "-n", namespace, "-f", "-")
+	if err != nil {
+		return fmt.Errorf("kubectl apply failed. err: %w", err)
 	}
 	return nil
 }
@@ -258,61 +285,37 @@ func GetPVList(clusterNo int) (*corev1.PersistentVolumeList, error) {
 	return GetObjectList[corev1.PersistentVolumeList](clusterNo, "pv", "")
 }
 
+func GetEventList(clusterNo int, namespace string) (*corev1.EventList, error) {
+	return GetObjectList[corev1.EventList](clusterNo, "event", namespace)
+}
+
 func ChangeClusterRole(clusterNo int, newRole string) error {
-	deploy, err := GetDeploy(clusterNo, CephClusterNamespace, MantleControllerDeployName)
-	if err != nil {
-		return fmt.Errorf("failed to get mantle-controller deploy: %w", err)
+	var profileTarget string
+	switch clusterNo {
+	case PrimaryK8sCluster:
+		profileTarget = "minikube-profile-primary"
+	case SecondaryK8sCluster:
+		profileTarget = "minikube-profile-secondary"
+	default:
+		return fmt.Errorf("invalid clusterNo: %d", clusterNo)
+	}
+	if err := runMakeCommand(profileTarget); err != nil {
+		return err
 	}
 
-	roleIndex := slices.IndexFunc(
-		deploy.Spec.Template.Spec.Containers[0].Args,
-		func(arg string) bool { return strings.HasPrefix(arg, "--role=") },
-	)
-	if roleIndex == -1 {
-		return errors.New("failed to find --role= argument")
+	var valuesFile string
+	switch newRole {
+	case controller.RoleStandalone:
+		valuesFile = "testdata/values-mantle1.yaml"
+	case controller.RolePrimary:
+		valuesFile = "testdata/values-mantle-primary.yaml"
+	case controller.RoleSecondary:
+		valuesFile = "testdata/values-mantle-secondary.yaml"
+	default:
+		return fmt.Errorf("invalid role: %s", newRole)
 	}
 
-	_, _, err = Kubectl(
-		clusterNo, nil, "patch", "deploy", "-n", CephClusterNamespace, MantleControllerDeployName, "--type=json",
-		fmt.Sprintf(
-			`-p=[{"op": "replace", "path": "/spec/template/spec/containers/0/args/%d", "value":"--role=%s"}]`,
-			roleIndex,
-			newRole,
-		),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to patch mantle-controller deploy: %w", err)
-	}
-
-	// Wait for the new controller to start
-	numRetries := 10
-	for i := 0; i < numRetries; i++ {
-		stdout, _, err := Kubectl(clusterNo, nil, "get", "pod", "-n", CephClusterNamespace, "-o", "json")
-		if err != nil {
-			return fmt.Errorf("failed to get pod: %w", err)
-		}
-		var pods corev1.PodList
-		err = json.Unmarshal(stdout, &pods)
-		if err != nil {
-			return fmt.Errorf("failed to unmarshal pod list: %w", err)
-		}
-		ready := true
-		for _, pod := range pods.Items {
-			if strings.HasPrefix(pod.GetName(), MantleControllerDeployName) {
-				for _, container := range pod.Spec.Containers {
-					if !slices.Contains(container.Args, fmt.Sprintf("--role=%s", newRole)) {
-						ready = false
-					}
-				}
-			}
-		}
-		if ready {
-			break
-		}
-		time.Sleep(10 * time.Second)
-	}
-
-	return nil
+	return runMakeCommand("install-mantle", "NAMESPACE=rook-ceph", "HELM_RELEASE=mantle", "VALUES_YAML="+valuesFile)
 }
 
 type ObjectStorageClient struct {
@@ -444,6 +447,12 @@ func SetupEnvironment(namespace string) {
 	Eventually(func() error {
 		return ApplyRBDPoolAndSCTemplate(SecondaryK8sCluster, CephClusterNamespace)
 	}).Should(Succeed())
+}
+
+func CreatePod(cluster int, namespace, podName, pvcName string) {
+	GinkgoHelper()
+	err := applyPodMountVolumeTemplate(cluster, namespace, podName, pvcName)
+	Expect(err).NotTo(HaveOccurred())
 }
 
 func CreatePVC(ctx SpecContext, cluster int, namespace, name string) {

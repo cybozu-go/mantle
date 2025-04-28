@@ -60,3 +60,25 @@ Create the name of the service account to use
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Generate certificates for webhook
+*/}}
+{{- define "mantle.webhookCerts" -}}
+{{- if eq .Values.webhook.certificate.managedBy "helm" }}
+{{- $serviceName := printf "%s-webhook" (include "mantle.fullname" .) -}}
+{{- $secret := lookup "v1" "Secret" .Release.Namespace $serviceName -}}
+{{- if $secret -}}
+caCert: {{ index $secret.data "ca.crt" }}
+clientCert: {{ index $secret.data "tls.crt" }}
+clientKey: {{ index $secret.data "tls.key" }}
+{{- else -}}
+{{- $altNames := list (printf "%s.%s" $serviceName .Release.Namespace) (printf "%s.%s.svc" $serviceName .Release.Namespace) (printf "%s.%s.svc.%s" $serviceName .Release.Namespace .Values.webhook.certificate.dnsDomain) -}}
+{{- $ca := genCA "mantle-ca" 3650 -}}
+{{- $cert := genSignedCert $serviceName nil $altNames 3650 $ca -}}
+caCert: {{ $ca.Cert | b64enc }}
+clientCert: {{ $cert.Cert | b64enc }}
+clientKey: {{ $cert.Key | b64enc }}
+{{- end -}}
+{{- end -}}
+{{- end -}}

@@ -1,0 +1,32 @@
+{{- if eq .Values.controller.role "secondary" }}
+{{- if .Values.webhook.enabled }}
+{{- if eq .Values.webhook.certificate.managedBy "cert-manager" }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "mantle.fullname" . }}-webhook
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "mantle.labels" . | nindent 4 }}
+    {{- with .Values.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  secretName: {{ template "mantle.fullname" . }}-webhook
+  duration: 8760h # 1y
+  issuerRef:
+    {{- with .Values.webhook.certificate.existingCertManagerIssuer }}
+    {{- toYaml . | nindent 4 -}}
+    {{- end }}
+  dnsNames:
+    - {{ template "mantle.fullname" . }}-webhook
+    - {{ template "mantle.fullname" . }}-webhook.{{ .Release.Namespace }}
+    - {{ template "mantle.fullname" . }}-webhook.{{ .Release.Namespace }}.svc
+  usages:
+    - digital signature
+    - key encipherment
+    - server auth
+    - client auth
+{{- end }}
+{{- end }}
+{{- end }}

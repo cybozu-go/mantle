@@ -15,23 +15,26 @@ controller:
   env:
     - name: REQUEUE_RECONCILIATION_IMMEDIATELY
       value: "1"
-  grpcTLSServerCertPath: "/mnt/grpc-tls-server-cert/tls.crt"
-  grpcTLSServerKeyPath: "/mnt/grpc-tls-server-cert/tls.key"
-  grpcTLSClientCAPath: "/mnt/grpc-tls-client-cert/ca.crt"
   volumeMounts:
-    - name: grpc-tls-server-cert
-      mountPath: /mnt/grpc-tls-server-cert
-    - name: grpc-tls-client-cert
-      mountPath: /mnt/grpc-tls-client-cert
+    - name: replication-tls-server-cert
+      mountPath: /mnt/replication-tls-server-cert
+    - name: replication-tls-client-cert
+      mountPath: /mnt/replication-tls-client-cert
   volumes:
-    - name: grpc-tls-server-cert
+    - name: replication-tls-server-cert
       secret:
-        secretName: cert-mantle
-    - name: grpc-tls-client-cert
+        secretName: cert-mantle-replication
+    - name: replication-tls-client-cert
       configMap:
         name: mantle-primary-ca-crt
 
-secondaryService:
+replicationService:
   type: NodePort
   port: 58080
   targetPort: 58080
+  nodePort: 30007
+
+webhook:
+  enabled: true
+  certificate:
+    managedBy: helm 

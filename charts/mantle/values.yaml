@@ -29,7 +29,41 @@ controller:
   ports: []
   env: []
 
-secondaryService:
+  # controller.replicationTLSClientCertPath -- Path to the client certificate for the replication service. Only used when the role is primary.
+  replicationTLSClientCertPath: "/mnt/replication-tls-client-cert/tls.crt"
+  # controller.replicationTLSClientKeyPath -- Path to the client key for the replication service. Only used when the role is primary.
+  replicationTLSClientKeyPath: "/mnt/replication-tls-client-cert/tls.key"
+  # controller.replicationTLSServerCAPath -- Path to the CA certificate for the replication service. Only used when the role is primary.
+  replicationTLSServerCAPath: "/mnt/replication-tls-server-cert/ca.crt"
+  
+  # controller.replicationTLSServerCertPath -- Path to the server certificate for the replication service. Only used when the role is secondary.
+  replicationTLSServerCertPath: "/mnt/replication-tls-server-cert/tls.crt"
+  # controller.replicationTLSServerKeyPath -- Path to the server key for the replication service. Only used when the role is secondary.
+  replicationTLSServerKeyPath: "/mnt/replication-tls-server-cert/tls.key"
+  # controller.replicationTLSClientCAPath -- Path to the CA certificate for the replication service. Only used when the role is secondary.
+  replicationTLSClientCAPath: "/mnt/replication-tls-client-cert/ca.crt"
+
+replicationService:
   # type:
   # port:
   # targetPort:
+
+webhook:
+  # webhook.enabled -- If true and role is secondary, Deploying a webhook to prevent Pods from mounting PVCs created by Mantle.
+  # When deploying multiple Mantle instances, Set the value to `true` on only a single instance.
+  enabled: true
+  service:
+    # webhook.service.port -- Port for the webhook service. 
+    port: 9443
+    # webhook.service.targetPort -- Target port for the webhook server pod.
+    targetPort: 9443
+  certificate:
+    # webhook.certificate.managedBy -- Can be "cert-manager" or "helm".
+    managedBy: cert-manager
+    # webhook.certificate.dnsDomain -- Only used when managedBy is "helm". Cluster DNS domain (required for requesting TLS certificates).
+    dnsDomain: cluster.local
+    # webhook.certificate.existingCertManagerIssuer -- Only used when managedBy is "cert-manager". Specify the cert-manager issuer to be used for AdmissionWebhook.
+    existingCertManagerIssuer: {}
+      # group: cert-manager.io
+      # kind: Issuer
+      # name: webhook-issuer
