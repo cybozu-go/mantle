@@ -395,11 +395,11 @@ func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, back
 
 	if _, ok := backup.Labels[labelLocalBackupTargetPVCUID]; !ok {
 		backup.Labels[labelLocalBackupTargetPVCUID] = string(target.pvc.GetUID())
-	}
 
-	if err := r.Update(ctx, backup); err != nil {
-		logger.Error(err, "failed to add label", "label", labelLocalBackupTargetPVCUID)
-		return ctrl.Result{}, err
+		if err := r.Update(ctx, backup); err != nil {
+			logger.Error(err, "failed to add label", "label", labelLocalBackupTargetPVCUID)
+			return ctrl.Result{}, err
+		}
 	}
 
 	if !controllerutil.ContainsFinalizer(backup, MantleBackupFinalizerName) {
