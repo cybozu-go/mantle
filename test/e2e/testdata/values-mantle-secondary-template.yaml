@@ -15,18 +15,9 @@ controller:
   env:
     - name: REQUEUE_RECONCILIATION_IMMEDIATELY
       value: "1"
-  volumeMounts:
-    - name: replication-tls-server-cert
-      mountPath: /mnt/replication-tls-server-cert
-    - name: replication-tls-client-cert
-      mountPath: /mnt/replication-tls-client-cert
-  volumes:
-    - name: replication-tls-server-cert
-      secret:
-        secretName: cert-mantle-replication
-    - name: replication-tls-client-cert
-      configMap:
-        name: mantle-primary-ca-crt
+  mtls:
+    clientCACertConfigMap: mantle-primary-ca-crt
+    serverTLSSecret: cert-mantle-replication
 
 replicationService:
   type: NodePort

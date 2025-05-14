@@ -28,20 +28,16 @@ controller:
   role: standalone
   ports: []
   env: []
+  mtls:
+    # controller.mtls.serverCACertConfigMap –- ConfigMap name containing the CA certificate for server mTLS. Only used when the role is primary.
+    serverCACertConfigMap: ""
+    # controller.mtls.clientTLSSecret -- TLS secret name containing the client certificate and key for mTLS. Only used when the role is primary.
+    clientTLSSecret: ""
 
-  # controller.replicationTLSClientCertPath -- Path to the client certificate for the replication service. Only used when the role is primary.
-  replicationTLSClientCertPath: "/mnt/replication-tls-client-cert/tls.crt"
-  # controller.replicationTLSClientKeyPath -- Path to the client key for the replication service. Only used when the role is primary.
-  replicationTLSClientKeyPath: "/mnt/replication-tls-client-cert/tls.key"
-  # controller.replicationTLSServerCAPath -- Path to the CA certificate for the replication service. Only used when the role is primary.
-  replicationTLSServerCAPath: "/mnt/replication-tls-server-cert/ca.crt"
-  
-  # controller.replicationTLSServerCertPath -- Path to the server certificate for the replication service. Only used when the role is secondary.
-  replicationTLSServerCertPath: "/mnt/replication-tls-server-cert/tls.crt"
-  # controller.replicationTLSServerKeyPath -- Path to the server key for the replication service. Only used when the role is secondary.
-  replicationTLSServerKeyPath: "/mnt/replication-tls-server-cert/tls.key"
-  # controller.replicationTLSClientCAPath -- Path to the CA certificate for the replication service. Only used when the role is secondary.
-  replicationTLSClientCAPath: "/mnt/replication-tls-client-cert/ca.crt"
+    # controller.mtls.clientCACertConfigMap -- ConfigMap name containing the CA certificate for client mTLS. Only used when the role is secondary.
+    clientCACertConfigMap: ""
+    # controller.mtls.serverTLSSecret -- TLS secret name containing the server certificate and key for mTLS.  Only used when the role is secondary.
+    serverTLSSecret: ""
 
 replicationService:
   # type:

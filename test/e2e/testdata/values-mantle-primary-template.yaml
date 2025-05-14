@@ -18,15 +18,6 @@ controller:
     - name: REQUEUE_RECONCILIATION_AFTER
       value: "1s"
   backupTransferPartSize: {BACKUP_TRANSFER_PART_SIZE}
-  volumeMounts:
-    - name: replication-tls-server-cert
-      mountPath: /mnt/replication-tls-server-cert
-    - name: replication-tls-client-cert
-      mountPath: /mnt/replication-tls-client-cert
-  volumes:
-    - name: replication-tls-server-cert
-      configMap:
-        name: mantle-secondary-ca-crt
-    - name: replication-tls-client-cert
-      secret:
-        secretName: cert-mantle-replication
+  mtls:
+    serverCACertConfigMap: mantle-secondary-ca-crt
+    clientTLSSecret: cert-mantle-replication
