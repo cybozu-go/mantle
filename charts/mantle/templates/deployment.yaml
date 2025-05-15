@@ -108,27 +108,15 @@ spec:
             {{- end }}
 
             {{- if eq .Values.controller.role "primary" }}
-            {{-   with .Values.controller.replicationTLSClientCertPath }}
-            - --replication-tls-client-cert-path={{ . }}
-            {{-   end }}
-            {{-   with .Values.controller.replicationTLSClientKeyPath }}
-            - --replication-tls-client-key-path={{ . }}
-            {{-   end }}
-            {{-   with .Values.controller.replicationTLSServerCAPath }}
-            - --replication-tls-server-ca-path={{ . }}
-            {{-   end }}
+            - --replication-tls-client-cert-path=/mnt/replication-tls-client-cert/tls.crt
+            - --replication-tls-client-key-path=/mnt/replication-tls-client-cert/tls.key
+            - --replication-tls-server-ca-path=/mnt/replication-tls-server-cert/ca.crt
             {{- end }}
 
             {{- if eq .Values.controller.role "secondary" }}
-            {{-   with .Values.controller.replicationTLSServerCertPath }}
-            - --replication-tls-server-cert-path={{ . }}
-            {{-   end }}
-            {{-   with .Values.controller.replicationTLSServerKeyPath }}
-            - --replication-tls-server-key-path={{ . }}
-            {{-   end }}
-            {{-   with .Values.controller.replicationTLSClientCAPath }}
-            - --replication-tls-client-ca-path={{ . }}
-            {{-   end }}
+            - --replication-tls-server-cert-path=/mnt/replication-tls-server-cert/tls.crt
+            - --replication-tls-server-key-path=/mnt/replication-tls-server-cert/tls.key
+            - --replication-tls-client-ca-path=/mnt/replication-tls-client-cert/ca.crt
             - --webhook-cert-path=/mnt/webhook-tls-cert/tls.crt
             - --webhook-key-path=/mnt/webhook-tls-cert/tls.key
             {{- end }}
@@ -151,12 +139,15 @@ spec:
           volumeMounts:
             - name: ceph-config
               mountPath: /etc/ceph
+            {{- if ne .Values.controller.role "standalone" }}
+            - name: replication-tls-server-cert
+              mountPath: /mnt/replication-tls-server-cert
+            - name: replication-tls-client-cert
+              mountPath: /mnt/replication-tls-client-cert
+            {{- end }}
             {{- if eq .Values.controller.role "secondary" }}
             - name: webhook-tls-cert
               mountPath: /mnt/webhook-tls-cert
-            {{- end }}
-            {{- with .Values.controller.volumeMounts }}
-            {{- toYaml . | nindent 12 }}
             {{- end }}
         - command:
             - /bin/bash
@@ -262,13 +253,24 @@ spec:
           name: mon-endpoint-volume
         - emptyDir: {}
           name: ceph-config
+        {{- if eq .Values.controller.role "primary" }}
+        - name: replication-tls-server-cert
+          configMap:
+            name: {{ .Values.controller.mtls.serverCACertConfigMap }}
+        - name: replication-tls-client-cert
+          secret:
+            secretName: {{ .Values.controller.mtls.clientTLSSecret }}
+        {{- end }}
         {{- if eq .Values.controller.role "secondary" }}
+        - name: replication-tls-server-cert
+          secret:
+            secretName: {{ .Values.controller.mtls.serverTLSSecret }}
+        - name: replication-tls-client-cert
+          configMap:
+            name: {{ .Values.controller.mtls.clientCACertConfigMap }}
         - name: webhook-tls-cert
           secret:
             secretName: {{ template "mantle.fullname" . }}-webhook
-        {{- end }}
-        {{- with .Values.controller.volumes }}
-        {{- toYaml . | nindent 8 }}
         {{- end }}
       terminationGracePeriodSeconds: 10
       {{- with .Values.nodeSelector }}
