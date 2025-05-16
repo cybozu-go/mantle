@@ -25,7 +25,6 @@ LOOP_DEV2 := /dev/loop1
 MINIKUBE_PROFILE_PRIMARY=profile1
 MINIKUBE_PROFILE_SECONDARY=profile2
 TMPDIR := tmp
-TEST_MULTIK8S_PACKAGES := replication
 BACKUP_TRANSFER_PART_SIZE := 3Mi # smaller than the PVC size (10Mi)
 MAKEFILE_DIR := $(shell pwd)
 
@@ -327,7 +326,7 @@ do-test-multik8s: $(GINKGO)
 	env \
 	PATH=${PATH} \
 	E2ETEST=1 \
-	$(GINKGO) --fail-fast -v $(GINKGO_FLAGS) $(addprefix multik8s/, $(TEST_MULTIK8S_PACKAGES)); \
+	$(GINKGO) --fail-fast -v $(GINKGO_FLAGS) multik8s; \
 	if [ "$$?" -ne 0 ]; then \
 		echo "Controller logs for $(MINIKUBE_PROFILE_PRIMARY):"; \
 		$${KUBECTL_PRIMARY} logs --tail 100 -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle -c mantle; \

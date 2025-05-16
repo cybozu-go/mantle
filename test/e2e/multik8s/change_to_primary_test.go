@@ -1,4 +1,4 @@
-package replication
+package multik8s
 
 import (
 	"github.com/cybozu-go/mantle/internal/controller"
