@@ -27,11 +27,11 @@ jobs:
         label-filter:
           - full-backup
           - incr-backup
-          - misc
           - backup-failure
           - change-to-primary
           - change-to-secondary
           - change-to-standalone
+          - "!//" # select unlabelled tests
         include:
           - backup-transfer-part-size: 10Mi # equal to the PVC size
             label-filter: various-transfer-part-size
