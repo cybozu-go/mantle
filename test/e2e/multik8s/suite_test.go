@@ -1,4 +1,4 @@
-package replication
+package multik8s
 
 import (
 	"os"

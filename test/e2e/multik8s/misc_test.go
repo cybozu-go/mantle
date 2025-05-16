@@ -1,4 +1,4 @@
-package replication
+package multik8s
 
 import (
 	"fmt"
@@ -14,7 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 )
 
-var _ = Describe("miscellaneous tests", Label("misc"), func() {
+var _ = Describe("miscellaneous tests", func() {
 	It("should succeed to back up if backup-transfer-part-size is changed during uploading", func(ctx SpecContext) {
 		namespace := util.GetUniqueName("ns-")
 		pvcName := util.GetUniqueName("pvc-")
