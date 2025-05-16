@@ -23,7 +23,6 @@ jobs:
       fail-fast: false
       matrix:
         package:
-          - replication
           - replicationfailure
           - changetostandalone
           - changetoprimary
@@ -39,6 +38,15 @@ jobs:
           - package: replication
             backup-transfer-part-size: 200Gi # greater than the PVC size
             ginkgo-flags: --label-filter="various-transfer-part-size"
+          - package: replication
+            backup-transfer-part-size: 3Mi # smaller than the PVC size
+            ginkgo-flags: --label-filter="full-backup"
+          - package: replication
+            backup-transfer-part-size: 3Mi # smaller than the PVC size
+            ginkgo-flags: --label-filter="incr-backup"
+          - package: replication
+            backup-transfer-part-size: 3Mi # smaller than the PVC size
+            ginkgo-flags: --label-filter="misc"
     #runs-on: "ubuntu-22.04"
     runs-on: mantle_large_runner_16core
     timeout-minutes: 120
