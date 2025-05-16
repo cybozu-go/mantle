@@ -22,8 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package:
-          - changetostandalone
+        package: []
         backup-transfer-part-size:
           - 3Mi # smaller than the PVC size
         ginkgo-flags:
@@ -53,6 +52,9 @@ jobs:
           - package: replication
             backup-transfer-part-size: 3Mi # smaller than the PVC size
             ginkgo-flags: --label-filter="change-to-secondary"
+          - package: replication
+            backup-transfer-part-size: 3Mi # smaller than the PVC size
+            ginkgo-flags: --label-filter="change-to-standalone"
     #runs-on: "ubuntu-22.04"
     runs-on: mantle_large_runner_16core
     timeout-minutes: 120

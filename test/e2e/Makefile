@@ -25,7 +25,7 @@ LOOP_DEV2 := /dev/loop1
 MINIKUBE_PROFILE_PRIMARY=profile1
 MINIKUBE_PROFILE_SECONDARY=profile2
 TMPDIR := tmp
-TEST_MULTIK8S_PACKAGES := replication changetostandalone
+TEST_MULTIK8S_PACKAGES := replication
 BACKUP_TRANSFER_PART_SIZE := 3Mi # smaller than the PVC size (10Mi)
 MAKEFILE_DIR := $(shell pwd)
 
