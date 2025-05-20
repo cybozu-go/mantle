@@ -11,7 +11,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/kubernetes/pkg/kubelet/events"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
@@ -113,7 +112,7 @@ var _ = Describe("full backup", Label("full-backup"), func() {
 				if secondaryMB.Status.CreatedAt.IsZero() {
 					return errors.New(".Status.CreatedAt is zero")
 				}
-				if !meta.IsStatusConditionTrue(secondaryMB.Status.Conditions, "ReadyToUse") {
+				if !secondaryMB.IsReady() {
 					return errors.New("ReadyToUse of .Status.Conditions is not True")
 				}
 

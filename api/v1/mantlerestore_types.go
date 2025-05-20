@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -50,6 +51,10 @@ type MantleRestore struct {
 
 	Spec   MantleRestoreSpec   `json:"spec,omitempty"`
 	Status MantleRestoreStatus `json:"status,omitempty"`
+}
+
+func (m *MantleRestore) IsReady() bool {
+	return meta.IsStatusConditionTrue(m.Status.Conditions, RestoreConditionReadyToUse)
 }
 
 // +kubebuilder:object:root=true
