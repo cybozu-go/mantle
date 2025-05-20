@@ -89,7 +89,7 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, restore *mantlev1
 	logger.Info("restoring", "backup", restore.Spec.Backup)
 
 	// skip if already ReadyToUse
-	if meta.IsStatusConditionTrue(restore.Status.Conditions, mantlev1.RestoreConditionReadyToUse) {
+	if restore.IsReady() {
 		return ctrl.Result{}, nil
 	}
 
@@ -136,7 +136,7 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, restore *mantlev1
 	}
 
 	// check if the backup is ReadyToUse
-	if !meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse) {
+	if !backup.IsReady() {
 		logger.Info("backup is not ready to use", "backup", backup.Name, "namespace", backup.Namespace)
 		return requeueReconciliation(), nil
 	}

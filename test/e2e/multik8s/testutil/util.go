@@ -25,7 +25,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
@@ -495,7 +494,7 @@ func WaitMantleBackupReadyToUse(cluster int, namespace, backupName string) {
 		if err != nil {
 			return err
 		}
-		if !meta.IsStatusConditionTrue(mb.Status.Conditions, mantlev1.BackupConditionReadyToUse) {
+		if !mb.IsReady() {
 			return errors.New("status of ReadyToUse condition is not True")
 		}
 		return nil
@@ -510,7 +509,7 @@ func WaitMantleBackupSynced(namespace, backupName string) {
 		if err != nil {
 			return err
 		}
-		if !meta.IsStatusConditionTrue(mb.Status.Conditions, mantlev1.BackupConditionSyncedToRemote) {
+		if !mb.IsSynced() {
 			return errors.New("status of SyncedToRemote condition is not True")
 		}
 		return nil
@@ -557,7 +556,7 @@ func EnsureCorrectRestoration(
 	Eventually(ctx, func(g Gomega) {
 		mr, err := GetMR(clusterNo, namespace, restoreName)
 		g.Expect(err).NotTo(HaveOccurred())
-		g.Expect(meta.IsStatusConditionTrue(mr.Status.Conditions, "ReadyToUse")).To(BeTrue())
+		g.Expect(mr.IsReady()).To(BeTrue())
 	}).Should(Succeed())
 	By(fmt.Sprintf("%s: %s: checking the MantleRestore has the correct contents", clusterName, backupName))
 	Eventually(ctx, func(g Gomega) {
