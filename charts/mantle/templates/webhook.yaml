@@ -5,6 +5,10 @@
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
+  {{- if eq .Values.webhook.certificate.managedBy "cert-manager" }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "mantle.fullname" . }}-webhook
+  {{- end }}
   name: {{ include "mantle.fullname" . }}-validating-webhook-configuration
 webhooks:
 - admissionReviewVersions:
