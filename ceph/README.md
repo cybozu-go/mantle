@@ -32,6 +32,14 @@ git push origin --tags
 1. Update `CEPH_TAG` to the desired version.
 2. If [`neco-containers/ceph/Dockerfile`](https://github.com/cybozu/neco-containers/blob/main/ceph/Dockerfile) or [`neco-containers/ceph/build.sh`](https://github.com/cybozu/neco-containers/blob/main/ceph/build.sh) is updated, update the Dockerfile in the same way.
 
+### Update the others
+
+Update other files that use the Ceph image.
+
+- [ceph/manifests/toolbox.yaml](https://github.com/cybozu-go/mantle/blob/main/ceph/manifests/toolbox.yaml)
+- [config/manager/manager.yaml](https://github.com/cybozu-go/mantle/blob/main/config/manager/manager.yaml)
+- [test/e2e/testdata/values-cluster.yaml](https://github.com/cybozu-go/mantle/blob/main/test/e2e/testdata/values-cluster.yaml)
+
 ### Update the patch
 **In the `cybozu/ceph` repository,** you checkout the target branch (`rbd-export-vx.y.z`). If it doesn't exist yet, it's necessary to create it and apply the newest patch as follows.
 
