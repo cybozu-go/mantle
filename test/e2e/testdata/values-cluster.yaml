@@ -14,7 +14,7 @@ cephClusterSpec:
     count: 1
     allowMultiplePerNode: false
   cephVersion:
-    image: quay.io/ceph/ceph:v18.2.4
+    image: quay.io/ceph/ceph:v19.2.1
     allowUnsupported: false
   skipUpgradeChecks: false
   continueUpgradeAfterChecksEvenIfNotHealthy: false
