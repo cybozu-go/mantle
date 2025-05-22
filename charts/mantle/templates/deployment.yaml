@@ -221,7 +221,7 @@ spec:
               secretKeyRef:
                 key: ceph-username
                 name: rook-ceph-mon
-          image: ghcr.io/cybozu/ceph:18.2.4.2
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
           name: toolbox
           securityContext:
