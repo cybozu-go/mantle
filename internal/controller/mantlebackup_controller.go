@@ -356,15 +356,15 @@ func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, back
 
 	target, result, getSnapshotTargetErr := r.getSnapshotTarget(ctx, backup)
 	notFound := aerrors.IsNotFound(getSnapshotTargetErr)
-	switch {
-	case errors.Is(getSnapshotTargetErr, errSkipProcessing):
-		return ctrl.Result{}, nil
-	case notFound:
-		// deletion logic may run.
-	case getSnapshotTargetErr == nil:
-	default:
-		return ctrl.Result{}, getSnapshotTargetErr
+	if getSnapshotTargetErr != nil {
+		if errors.Is(getSnapshotTargetErr, errSkipProcessing) {
+			return ctrl.Result{}, nil
+		}
+		if !notFound {
+			return ctrl.Result{}, getSnapshotTargetErr
+		}
 	}
+
 	if !result.IsZero() {
 		return result, nil
 	}
@@ -372,7 +372,8 @@ func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, back
 		return r.finalizeStandalone(ctx, backup, target, notFound)
 	}
 
-	if getSnapshotTargetErr != nil {
+	// Only the NotFound error reaches this point, so return it as is.
+	if notFound {
 		return ctrl.Result{}, getSnapshotTargetErr
 	}
 
@@ -434,15 +435,15 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 
 	target, result, getSnapshotTargetErr := r.getSnapshotTarget(ctx, backup)
 	notFound := aerrors.IsNotFound(getSnapshotTargetErr)
-	switch {
-	case errors.Is(getSnapshotTargetErr, errSkipProcessing):
-		return ctrl.Result{}, nil
-	case notFound:
-		// deletion logic may run.
-	case getSnapshotTargetErr == nil:
-	default:
-		return ctrl.Result{}, getSnapshotTargetErr
+	if getSnapshotTargetErr != nil {
+		if errors.Is(getSnapshotTargetErr, errSkipProcessing) {
+			return ctrl.Result{}, nil
+		}
+		if !notFound {
+			return ctrl.Result{}, getSnapshotTargetErr
+		}
 	}
+
 	if !result.IsZero() {
 		return result, nil
 	}
@@ -450,7 +451,8 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 		return r.finalizeSecondary(ctx, backup, target, notFound)
 	}
 
-	if getSnapshotTargetErr != nil {
+	// Only the NotFound error reaches this point, so return it as is.
+	if notFound {
 		return ctrl.Result{}, getSnapshotTargetErr
 	}
 
