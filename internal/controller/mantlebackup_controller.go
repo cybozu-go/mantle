@@ -210,15 +210,6 @@ type snapshotTarget struct {
 
 var errSkipProcessing = fmt.Errorf("skip processing")
 
-type errTargetPVCNotFound struct {
-	error
-}
-
-func isErrTargetPVCNotFound(err error) bool {
-	target := errTargetPVCNotFound{}
-	return errors.As(err, &target)
-}
-
 func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *mantlev1.MantleBackup) (
 	*snapshotTarget,
 	ctrl.Result,
@@ -231,10 +222,7 @@ func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *
 	err := r.Get(ctx, types.NamespacedName{Namespace: pvcNamespace, Name: pvcName}, &pvc)
 	if err != nil {
 		logger.Error(err, "failed to get PVC", "namespace", pvcNamespace, "name", pvcName)
-		if aerrors.IsNotFound(err) {
-			return nil, ctrl.Result{}, errTargetPVCNotFound{err}
-		}
-		return nil, ctrl.Result{}, err
+		return nil, ctrl.Result{}, fmt.Errorf("failed to get PVC: %w", err)
 	}
 
 	// Return an error if the PVC has been re-created after the first call.
@@ -367,28 +355,24 @@ func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, back
 		return ctrl.Result{}, nil
 	}
 
-	target, result, getSnapshotTargetErr := r.getSnapshotTarget(ctx, backup)
+	target, result, err := r.getSnapshotTarget(ctx, backup)
+	notFound := aerrors.IsNotFound(err)
 	switch {
-	case errors.Is(getSnapshotTargetErr, errSkipProcessing):
+	case errors.Is(err, errSkipProcessing):
 		return ctrl.Result{}, nil
-	case isErrTargetPVCNotFound(getSnapshotTargetErr):
-		// deletion logic may run.
-	case getSnapshotTargetErr == nil:
-	default:
-		return ctrl.Result{}, getSnapshotTargetErr
+	case err != nil && !notFound:
+		return ctrl.Result{}, err
 	}
 	if !result.IsZero() {
 		return result, nil
 	}
-
 	if !backup.DeletionTimestamp.IsZero() {
-		return r.finalizeStandalone(ctx, backup, target, isErrTargetPVCNotFound(getSnapshotTargetErr))
+		return r.finalizeStandalone(ctx, backup, target, notFound)
 	}
-
-	if getSnapshotTargetErr != nil {
-		return ctrl.Result{}, getSnapshotTargetErr
+	// Only the NotFound error reaches this point, so return it as is.
+	if notFound {
+		return ctrl.Result{}, err
 	}
-
 	if backup.Labels == nil {
 		backup.Labels = make(map[string]string)
 	}
@@ -445,26 +429,23 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 		return ctrl.Result{}, nil
 	}
 
-	target, result, getSnapshotTargetErr := r.getSnapshotTarget(ctx, backup)
+	target, result, err := r.getSnapshotTarget(ctx, backup)
+	notFound := aerrors.IsNotFound(err)
 	switch {
-	case errors.Is(getSnapshotTargetErr, errSkipProcessing):
+	case errors.Is(err, errSkipProcessing):
 		return ctrl.Result{}, nil
-	case isErrTargetPVCNotFound(getSnapshotTargetErr):
-		// deletion logic may run.
-	case getSnapshotTargetErr == nil:
-	default:
-		return ctrl.Result{}, getSnapshotTargetErr
+	case err != nil && !notFound:
+		return ctrl.Result{}, err
 	}
 	if !result.IsZero() {
 		return result, nil
 	}
-
 	if !backup.DeletionTimestamp.IsZero() {
-		return r.finalizeSecondary(ctx, backup, target, isErrTargetPVCNotFound(getSnapshotTargetErr))
+		return r.finalizeSecondary(ctx, backup, target, notFound)
 	}
-
-	if getSnapshotTargetErr != nil {
-		return ctrl.Result{}, getSnapshotTargetErr
+	// Only the NotFound error reaches this point, so return it as is.
+	if notFound {
+		return ctrl.Result{}, err
 	}
 
 	if err := r.expire(ctx, backup); err != nil {
