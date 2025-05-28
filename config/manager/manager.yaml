@@ -161,7 +161,7 @@ spec:
             secretKeyRef:
               key: ceph-username
               name: rook-ceph-mon
-        image: quay.io/cybozu/ceph:18.2.1.1
+        image: quay.io/ceph/ceph:v19.2.1
         imagePullPolicy: IfNotPresent
         name: toolbox
         securityContext:
