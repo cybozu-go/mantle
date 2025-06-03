@@ -50,6 +50,7 @@ Edit the following files.
 
 - `go.mod`
 - `Dockerfile`
+- `README.md`
 
 #### Depending tools
 
