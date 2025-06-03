@@ -29,7 +29,7 @@ We should also update go.mod by the following commands. Please note that Kuberne
 
 ```bash
 $ VERSION=<upgrading Kubernetes release version>
-$ go get k8s.io/api@v${VERSION} k8s.io/apimachinery@v${VERSION} k8s.io/client-go@v${VERSION}
+$ go get k8s.io/api@v${VERSION} k8s.io/apimachinery@v${VERSION} k8s.io/client-go@v${VERSION} k8s.io/kubernetes@v${VERSION}
 ```
 
 Read the [`controller-runtime`'s release note](https://github.com/kubernetes-sigs/controller-runtime/releases), and update to the newest version that is compatible with all supported kubernetes versions. If there are breaking changes, we should decide how to manage these changes.
