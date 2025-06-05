@@ -1,5 +1,5 @@
 # Build the manager binary
-FROM golang:1.23 AS builder
+FROM golang:1.24 AS builder
 
 WORKDIR /workspace
 # Copy the Go Modules manifests
@@ -25,7 +25,7 @@ COPY pkg/ pkg/
 RUN CGO_ENABLED=0 go build -o manager main.go
 
 # Build s5cmd
-FROM golang:1.23 AS s5cmd-builder
+FROM golang:1.24 AS s5cmd-builder
 WORKDIR /workspace
 ## https://github.com/peak/s5cmd/releases
 ## use v2.3.0

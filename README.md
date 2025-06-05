@@ -12,15 +12,10 @@ If you want to try mantle on your local machine, see [e2e](e2e/) directory which
 
 To use mantle on your real kubernetes cluster, read following sections.
 
-### Prerequisites
-- Deploy
-  - Kubernetes cluster: v1.32.3+
-  - Rook: v1.16.4+
-- build
-  - go: v1.23.0+
-  - docker: 20.10+
-  - kubectl:  v1.32.3+
-  - kubebuilder: 3.14.0+ 
+### Conformed environments
+
+- Kubernetes cluster: v1.33.1+
+- Rook: v1.17.2+
 
 ### To Deploy on the cluster
 **Build and push your image to the location specified by `IMG`:**
@@ -75,6 +70,15 @@ make uninstall
 ```sh
 make undeploy
 ```
+
+## Development
+
+The following tools should be installed manually.
+
+- go: v1.24.0+
+- docker: 20.10+
+- kubebuilder: 3.14.0+
+  - required if you want to add new CRs or webhooks.
 
 ## Contributing
 

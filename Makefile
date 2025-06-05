@@ -9,7 +9,6 @@ $(LOCALBIN):
 KUBECTL ?= $(LOCALBIN)/kubectl
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
-ENVTEST ?= $(LOCALBIN)/setup-envtest
 MOCKGEN ?= $(LOCALBIN)/mockgen
 PROTOC ?= $(LOCALBIN)/protoc
 PROTOC_RUN ?= PATH=$(LOCALBIN):$(PATH) $(PROTOC) -I=$(shell pwd)/include:.
@@ -87,9 +86,9 @@ mock: mockgen
 	$(MOCKGEN) -source=internal/controller/internal/objectstorage/objectstorage.go -destination=internal/controller/internal/objectstorage/objectstorage_mock.go -package=objectstorage
 
 .PHONY: test
-test: manifests generate fmt vet envtest mock ## Run tests.
+test: manifests generate fmt vet mock ## Run tests.
 # adding -p 1 -v to stream logs. see https://github.com/golang/go/issues/46959
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_KUBERNETES_VERSION) --bin-dir $(LOCALBIN) -p path)" \
+	ENVTEST_KUBERNETES_VERSION=$(ENVTEST_KUBERNETES_VERSION) ENVTEST_BIN_DIR=$(LOCALBIN) \
 	SKIP_CEPH_CMD_TEST=1 \
 	go test ./... -coverprofile cover.out -p 1 -v
 
@@ -214,11 +213,6 @@ controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessar
 $(CONTROLLER_GEN): $(LOCALBIN)
 	test -s $(LOCALBIN)/controller-gen && $(LOCALBIN)/controller-gen --version | grep -q $(CONTROLLER_TOOLS_VERSION) || \
 	GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_TOOLS_VERSION)
-
-.PHONY: envtest
-envtest: $(ENVTEST) ## Download envtest-setup locally if necessary.
-$(ENVTEST): $(LOCALBIN)
-	test -s $(LOCALBIN)/setup-envtest || GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$(ENVTEST_BRANCH)
 
 .PHONY: kubectl
 kubectl: $(KUBECTL) # Download kubectl if necessary.

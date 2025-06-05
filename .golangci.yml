@@ -34,6 +34,12 @@ linters:
           - dupl
           - lll
         path: internal/*
+
+      # exclude staticcheck SA1019 for Result.Requeue.
+      - linters:
+          - staticcheck
+        text: "SA1019: .*\\.Requeue is deprecated: Use `RequeueAfter` instead."
+
 formatters:
   enable:
     - gofmt
