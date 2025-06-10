@@ -14,6 +14,39 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 )
 
+var _ = Describe("metrics tests", func() {
+	namespace := util.GetUniqueName("ns-")
+	pvcName := util.GetUniqueName("pvc-")
+	backupName := util.GetUniqueName("mb-")
+	backupConfigName := util.GetUniqueName("mbc-")
+
+	It("should setup", func(ctx SpecContext) {
+		SetupEnvironment(namespace)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
+		WaitMantleBackupSynced(namespace, backupName)
+		CreateMantleBackupConfig(PrimaryK8sCluster, namespace, pvcName, backupConfigName)
+	})
+
+	DescribeTable("metrics should be exposed",
+		func(ctx SpecContext, metricName string) {
+			Eventually(ctx, func(g Gomega) {
+				controllerPod, err := GetControllerPodName(PrimaryK8sCluster)
+				g.Expect(err).NotTo(HaveOccurred())
+				stdout, _, err := Kubectl(PrimaryK8sCluster, nil, "exec", "-n", CephClusterNamespace, controllerPod, "--",
+					"curl", "-s", "http://localhost:8080/metrics")
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(strings.Contains(string(stdout), metricName)).To(BeTrue())
+			}).Should(Succeed())
+		},
+		Entry(`mantle_backup_duration_seconds_total`, `mantle_backup_duration_seconds_total`),
+		Entry(`mantle_mantlebackupconfig_info`, `mantle_mantlebackupconfig_info`),
+		Entry(`mantle_backup_duration_seconds_bucket`, `mantle_backup_duration_seconds_bucket`),
+		Entry(`mantle_backup_duration_seconds_sum`, `mantle_backup_duration_seconds_sum`),
+		Entry(`mantle_backup_duration_seconds_count`, `mantle_backup_duration_seconds_count`),
+	)
+})
+
 var _ = Describe("miscellaneous tests", func() {
 	It("should succeed to back up if backup-transfer-part-size is changed during uploading", func(ctx SpecContext) {
 		namespace := util.GetUniqueName("ns-")
@@ -348,25 +381,4 @@ spec:
 			0, // reset an import Job to the original one to revive the Job.
 		),
 	)
-
-	It("should get metrics from the controller pod in the primary cluster", func(ctx SpecContext) {
-		metrics := []string{
-			`mantle_backup_creation_duration_seconds_count`,
-			`mantle_backup_creation_duration_seconds_sum`,
-		}
-		ensureMetricsAreExposed(metrics)
-	})
 })
-
-func ensureMetricsAreExposed(metrics []string) {
-	GinkgoHelper()
-	controllerPod, err := GetControllerPodName(PrimaryK8sCluster)
-	Expect(err).NotTo(HaveOccurred())
-
-	stdout, _, err := Kubectl(PrimaryK8sCluster, nil, "exec", "-n", CephClusterNamespace, controllerPod, "--",
-		"curl", "-s", "http://localhost:8080/metrics")
-	Expect(err).NotTo(HaveOccurred())
-	for _, metric := range metrics {
-		Expect(strings.Contains(string(stdout), metric)).To(BeTrue())
-	}
-}

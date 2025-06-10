@@ -1,0 +1,10 @@
+apiVersion: mantle.cybozu.io/v1
+kind: MantleBackupConfig
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  pvc: %s
+  expire: "1d"
+  schedule: "00 00 * * *"
+  suspend: false
