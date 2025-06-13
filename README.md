@@ -71,6 +71,35 @@ make uninstall
 make undeploy
 ```
 
+## Prometheus metrics
+
+### `mantle_backup_duration_seconds_total`
+
+`mantle_backup_duration_seconds_total` is a Counter that indicates the time from the creationTimestamp to the completion of the backup.
+
+| Label                   | Description             |
+| ----------------------- | ----------------------- |
+| `persistentvolumeclaim` | The PVC name.           |
+| `resource_namespace`    | The resource namespace. |
+
+### `mantle_mantlebackupconfig_info`
+
+`mantle_mantlebackupconfig_info` is a Gauge that indicates information about the backup configuration.
+
+| Label                   | Description             |
+| ----------------------- | ----------------------- |
+| `persistentvolumeclaim` | The PVC name.           |
+| `resource_namespace`    | The resource namespace. |
+
+### `mantle_backup_duration_seconds`
+
+`mantle_backup_duration_seconds` is a Histogram that indicates the time from the creationTimestamp to the completion of the backup.
+
+| Label                   | Description             |
+| ----------------------- | ----------------------- |
+| `persistentvolumeclaim` | The PVC name.           |
+| `resource_namespace`    | The resource namespace. |
+
 ## Development
 
 The following tools should be installed manually.

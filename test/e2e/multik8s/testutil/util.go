@@ -46,6 +46,8 @@ var (
 	testRBDPoolSCTemplate string
 	//go:embed testdata/mantlebackup-template.yaml
 	testMantleBackupTemplate string
+	//go:embed testdata/mantlebackupconfig-template.yaml
+	testMantleBackupConfigTemplate string
 	//go:embed testdata/mantlerestore-template.yaml
 	testMantleRestoreTemplate string
 	//go:embed testdata/mount-deploy-template.yaml
@@ -133,6 +135,15 @@ func ApplyMantleBackupTemplate(clusterNo int, namespace, pvcName, backupName str
 	_, _, err := Kubectl(clusterNo, []byte(manifest), "apply", "-f", "-")
 	if err != nil {
 		return fmt.Errorf("kubectl apply mantlebackup failed. err: %w", err)
+	}
+	return nil
+}
+
+func ApplyMantleBackupConfigTemplate(clusterNo int, namespace, pvcName, backupConfigName string) error {
+	manifest := fmt.Sprintf(testMantleBackupConfigTemplate, backupConfigName, namespace, pvcName)
+	_, _, err := Kubectl(clusterNo, []byte(manifest), "apply", "-f", "-")
+	if err != nil {
+		return fmt.Errorf("kubectl apply mantlebackupconfig failed. err: %w", err)
 	}
 	return nil
 }
@@ -484,6 +495,14 @@ func CreateMantleBackup(cluster int, namespace, pvcName, backupName string) {
 	By("creating a MantleBackup object")
 	Eventually(func() error {
 		return ApplyMantleBackupTemplate(cluster, namespace, pvcName, backupName)
+	}).Should(Succeed())
+}
+
+func CreateMantleBackupConfig(cluster int, namespace, pvcName, backupConfigName string) {
+	GinkgoHelper()
+	By("creating a MantleBackupConfig object")
+	Eventually(func() error {
+		return ApplyMantleBackupConfigTemplate(cluster, namespace, pvcName, backupConfigName)
 	}).Should(Succeed())
 }
 
