@@ -11,7 +11,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -219,7 +218,7 @@ func (r *ResourceManager) WaitForBackupReady(ctx context.Context, backup *mantle
 		err := r.client.Get(ctx, types.NamespacedName{Name: backup.Name, Namespace: backup.Namespace}, backup)
 		g.Expect(err).NotTo(HaveOccurred())
 
-		g.Expect(meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse)).Should(BeTrue())
+		g.Expect(backup.IsReady()).Should(BeTrue())
 	}).WithContext(ctx).Should(Succeed())
 }
 
@@ -228,7 +227,7 @@ func (r *ResourceManager) WaitForBackupSyncedToRemote(ctx context.Context, backu
 		err := r.client.Get(ctx, types.NamespacedName{Name: backup.Name, Namespace: backup.Namespace}, backup)
 		g.Expect(err).NotTo(HaveOccurred())
 
-		g.Expect(meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionSyncedToRemote)).Should(BeTrue())
+		g.Expect(backup.IsSynced()).Should(BeTrue())
 	}).WithContext(ctx).Should(Succeed())
 }
 

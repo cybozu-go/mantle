@@ -11,7 +11,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	batchv1 "k8s.io/api/batch/v1"
-	"k8s.io/apimachinery/pkg/api/meta"
 )
 
 var _ = Describe("miscellaneous tests", func() {
@@ -94,8 +93,8 @@ var _ = Describe("miscellaneous tests", func() {
 		Expect(err).NotTo(HaveOccurred())
 		WaitTemporaryResourcesDeleted(ctx, primaryMB2, secondaryMB2)
 
-		Expect(meta.IsStatusConditionTrue(secondaryMB1.Status.Conditions, "ReadyToUse")).To(BeTrue())
-		Expect(meta.IsStatusConditionTrue(secondaryMB2.Status.Conditions, "ReadyToUse")).To(BeTrue())
+		Expect(secondaryMB1.IsReady()).To(BeTrue())
+		Expect(secondaryMB2.IsReady()).To(BeTrue())
 
 		snap, err := FindRBDSnapshotInPVC(SecondaryK8sCluster, namespace, pvcName1, backupName1)
 		Expect(err).NotTo(HaveOccurred())
@@ -154,8 +153,7 @@ s5cmd(){
 			Eventually(ctx, func(g Gomega) {
 				primaryMB, err := GetMB(PrimaryK8sCluster, namespace, backupName)
 				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(meta.IsStatusConditionTrue(primaryMB.Status.Conditions, mantlev1.BackupConditionSyncedToRemote)).
-					To(BeFalse())
+				g.Expect(primaryMB.IsSynced()).To(BeFalse())
 
 				jobSlow, err := GetJob(PrimaryK8sCluster, CephClusterNamespace,
 					controller.MakeUploadJobName(primaryMB, partNumSlow))
@@ -234,8 +232,7 @@ s5cmd(){
 			Eventually(ctx, func(g Gomega) {
 				primaryMB, err := GetMB(PrimaryK8sCluster, namespace, backupName)
 				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(meta.IsStatusConditionTrue(primaryMB.Status.Conditions, mantlev1.BackupConditionSyncedToRemote)).
-					To(BeFalse())
+				g.Expect(primaryMB.IsSynced()).To(BeFalse())
 
 				backup, err = GetMB(clusterOfJob, namespace, backupName)
 				g.Expect(err).NotTo(HaveOccurred())

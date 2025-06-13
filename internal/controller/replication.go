@@ -10,7 +10,6 @@ import (
 	"github.com/cybozu-go/mantle/pkg/controller/proto"
 	"google.golang.org/grpc"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -231,7 +230,7 @@ func (s *SecondaryServer) SetSynchronizing(
 		return nil, err
 	}
 
-	if meta.IsStatusConditionTrue(target.Status.Conditions, mantlev1.BackupConditionReadyToUse) {
+	if target.IsReady() {
 		return nil, errors.New("ReadyToUse is true")
 	}
 
