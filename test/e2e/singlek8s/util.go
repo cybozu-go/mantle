@@ -15,7 +15,6 @@ import (
 	testutil "github.com/cybozu-go/mantle/test/util"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/yaml"
 )
 
@@ -395,7 +394,7 @@ func isMantleBackupReady(namespace, name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse), nil
+	return backup.IsReady(), nil
 }
 
 func isMantleRestoreReady(namespace, name string) bool {
@@ -413,7 +412,7 @@ func isMantleRestoreReady(namespace, name string) bool {
 	if restore.Status.Conditions == nil {
 		return false
 	}
-	return meta.IsStatusConditionTrue(restore.Status.Conditions, mantlev1.RestoreConditionReadyToUse)
+	return restore.IsReady()
 }
 
 func writeTestData(namespace, pvc string, data []byte) error {

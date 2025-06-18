@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -84,6 +85,14 @@ type MantleBackupList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []MantleBackup `json:"items"`
+}
+
+func (m *MantleBackup) IsReady() bool {
+	return meta.IsStatusConditionTrue(m.Status.Conditions, BackupConditionReadyToUse)
+}
+
+func (m *MantleBackup) IsSynced() bool {
+	return meta.IsStatusConditionTrue(m.Status.Conditions, BackupConditionSyncedToRemote)
 }
 
 func init() {

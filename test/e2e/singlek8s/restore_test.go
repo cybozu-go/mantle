@@ -11,7 +11,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
@@ -196,7 +195,7 @@ func (test *restoreTest) testRestore() {
 		Expect(err).NotTo(HaveOccurred())
 
 		By("checking if the status is updated")
-		Expect(meta.IsStatusConditionTrue(restore.Status.Conditions, mantlev1.RestoreConditionReadyToUse)).To(BeTrue())
+		Expect(restore.IsReady()).To(BeTrue())
 	})
 
 	It("should not update clone image if it is already created", func() {
@@ -439,7 +438,7 @@ func (test *restoreTest) testCloneImageFromBackup() {
 				return err
 			}
 
-			if !meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse) {
+			if !backup.IsReady() {
 				return fmt.Errorf("backup is not ready")
 			}
 			return nil

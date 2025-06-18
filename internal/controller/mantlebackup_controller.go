@@ -452,7 +452,7 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 		return ctrl.Result{}, err
 	}
 
-	if meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse) {
+	if backup.IsReady() {
 		return r.secondaryCleanup(ctx, backup, true)
 	}
 
@@ -502,7 +502,7 @@ func (r *MantleBackupReconciler) replicate(
 	backup *mantlev1.MantleBackup,
 ) (ctrl.Result, error) {
 	// Skip replication if SyncedToRemote condition is true.
-	if meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionSyncedToRemote) {
+	if backup.IsSynced() {
 		return ctrl.Result{}, nil
 	}
 
@@ -547,7 +547,7 @@ func (r *MantleBackupReconciler) replicateManifests(
 		if backup1.Status.SnapID == nil ||
 			*backup1.Status.SnapID < *backup.Status.SnapID &&
 				backup1.DeletionTimestamp.IsZero() &&
-				!meta.IsStatusConditionTrue(backup1.Status.Conditions, mantlev1.BackupConditionSyncedToRemote) {
+				!backup1.IsSynced() {
 			return requeueReconciliation(), nil
 		}
 	}
@@ -642,10 +642,7 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 	}
 
 	// If the given MantleBackup is not ready to use, create a new RBD snapshot and update its status.
-	if meta.IsStatusConditionTrue(
-		backup.Status.Conditions,
-		mantlev1.BackupConditionReadyToUse,
-	) {
+	if backup.IsReady() {
 		return nil
 	}
 
@@ -802,10 +799,7 @@ func (r *MantleBackupReconciler) prepareForDataSynchronization(
 		return nil, fmt.Errorf("secondary MantleBackup not found: %s, %s",
 			backup.GetName(), backup.GetNamespace())
 	}
-	isSecondaryMantleBackupReadyToUse := meta.IsStatusConditionTrue(
-		secondaryBackup.Status.Conditions,
-		mantlev1.BackupConditionReadyToUse,
-	)
+	isSecondaryMantleBackupReadyToUse := secondaryBackup.IsReady()
 
 	if isSecondaryMantleBackupReadyToUse {
 		return &dataSyncPrepareResult{
@@ -887,8 +881,7 @@ func searchForDiffOriginMantleBackup(
 		if !ok {
 			continue
 		}
-		if !meta.IsStatusConditionTrue(primaryBackup.Status.Conditions, mantlev1.BackupConditionReadyToUse) ||
-			!meta.IsStatusConditionTrue(secondaryBackup.Status.Conditions, mantlev1.BackupConditionReadyToUse) {
+		if !primaryBackup.IsReady() || !secondaryBackup.IsReady() {
 			continue
 		}
 		if !primaryBackup.DeletionTimestamp.IsZero() || !secondaryBackup.DeletionTimestamp.IsZero() {

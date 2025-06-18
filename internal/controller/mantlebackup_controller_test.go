@@ -130,7 +130,7 @@ var _ = Describe("MantleBackup controller", func() {
 			err := k8sClient.Get(ctx, namespacedName, backup)
 			g.Expect(err).NotTo(HaveOccurred())
 			g.Expect(
-				meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse),
+				backup.IsReady(),
 			).To(BeFalse())
 		}, "10s", "1s").Should(Succeed())
 	}
@@ -1770,7 +1770,7 @@ var _ = Describe("import", func() {
 
 			err = k8sClient.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionReadyToUse)).To(BeTrue())
+			Expect(backup.IsReady()).To(BeTrue())
 			Expect(*backup.Status.SnapID).To(Equal(dummySnapshot.Id))
 		})
 	})
@@ -1920,7 +1920,7 @@ var _ = Describe("import", func() {
 			Expect(ok).To(BeFalse())
 
 			// Check that SyncedToRemote is set True
-			Expect(meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionSyncedToRemote)).To(BeTrue())
+			Expect(backup.IsSynced()).To(BeTrue())
 
 			// Check that the Jobs are deleted
 			checkExportAndUploadJobsDeleted(ctx, backup)
@@ -1949,7 +1949,7 @@ var _ = Describe("import", func() {
 			Expect(res.IsZero()).To(BeTrue())
 
 			// SyncedToRemote should NOT be true.
-			Expect(meta.IsStatusConditionTrue(backup.Status.Conditions, mantlev1.BackupConditionSyncedToRemote)).To(BeFalse())
+			Expect(backup.IsSynced()).To(BeFalse())
 		})
 
 		It("should not delete unrelated resources", func(ctx SpecContext) {
