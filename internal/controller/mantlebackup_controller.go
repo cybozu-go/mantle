@@ -15,7 +15,6 @@ import (
 	_ "embed"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
-	"github.com/cybozu-go/mantle/cmd/backup"
 	"github.com/cybozu-go/mantle/internal/ceph"
 	"github.com/cybozu-go/mantle/internal/controller/internal/objectstorage"
 	"github.com/cybozu-go/mantle/internal/controller/metrics"
@@ -2420,19 +2419,15 @@ func (r *MantleBackupReconciler) primaryCleanup(
 	}
 
 	duration := time.Since(target.GetCreationTimestamp().Time).Seconds()
-	source := "none"
-	if _, ok := target.GetLabels()[backup.MantleBackupConfigUID]; ok {
-		source = "mantle-backup-config"
-	}
-	metrics.BackupCreationDuration.
-		With(prometheus.Labels{
-			"cluster_namespace": r.managedCephClusterID,
-			// PVC is located in the same namespace as the MantleBackup.
-			"pvc_namespace": target.GetNamespace(),
-			"pvc":           target.Spec.PVC,
-			"source":        source,
-		}).
-		Observe(duration)
+	metrics.BackupDurationSecondsTotal.With(prometheus.Labels{
+		"persistentvolumeclaim": target.Spec.PVC,
+		"resource_namespace":    target.GetNamespace(),
+	}).Add(float64(duration))
+
+	metrics.BackupDurationSeconds.With(prometheus.Labels{
+		"persistentvolumeclaim": target.Spec.PVC,
+		"resource_namespace":    target.GetNamespace(),
+	}).Observe(duration)
 
 	return ctrl.Result{}, nil
 }

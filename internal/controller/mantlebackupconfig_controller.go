@@ -19,14 +19,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
+	"github.com/cybozu-go/mantle/internal/controller/metrics"
+	"github.com/prometheus/client_golang/prometheus"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
-	MantleBackupConfigFinalizerName     = "mantlebackupconfig.mantle.cybozu.io/finalizer"
-	MantleBackupConfigCronJobNamePrefix = "mbc-"
+	MantleBackupConfigFinalizerName              = "mantlebackupconfig.mantle.cybozu.io/finalizer"
+	MantleBackupConfigAnnotationManagedClusterID = "mantlebackupconfig.mantle.cybozu.io/managed-cluster-id"
+	MantleBackupConfigCronJobNamePrefix          = "mbc-"
 )
 
 // MantleBackupConfigReconciler reconciles a MantleBackupConfig object
@@ -88,7 +91,14 @@ func (r *MantleBackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.R
 
 	// When the deletionTimestamp is set, remove the finalizer and finish reconciling.
 	if !mbc.DeletionTimestamp.IsZero() {
-		if controllerutil.ContainsFinalizer(&mbc, MantleBackupConfigFinalizerName) {
+		if controllerutil.ContainsFinalizer(&mbc, MantleBackupConfigFinalizerName) &&
+			mbc.Annotations[MantleBackupConfigAnnotationManagedClusterID] == r.managedCephClusterID {
+			_ = metrics.BackupConfigInfo.Delete(prometheus.Labels{
+				"persistentvolumeclaim": mbc.Spec.PVC,
+				"resource_namespace":    mbc.Namespace,
+				"mantlebackupconfig":    mbc.Name,
+			})
+
 			// Delete the CronJob. If we failed to delete it because it's not found, ignore the error.
 			logger.Info("start deleting cronjobs")
 			if err := r.deleteCronJob(ctx, &mbc, cronJobInfo.namespace); err != nil && !errors.IsNotFound(err) {
@@ -119,11 +129,23 @@ func (r *MantleBackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.R
 
 	// Set the finalizer if it's not yet set.
 	if !controllerutil.ContainsFinalizer(&mbc, MantleBackupConfigFinalizerName) {
+		if mbc.Annotations == nil {
+			mbc.Annotations = make(map[string]string)
+		}
+		mbc.Annotations[MantleBackupConfigAnnotationManagedClusterID] = r.managedCephClusterID
+
 		controllerutil.AddFinalizer(&mbc, MantleBackupConfigFinalizerName)
 		if err := r.Client.Update(ctx, &mbc); err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to add mbc finalizer: %w", err)
 		}
 	}
+
+	// Export metrics.
+	metrics.BackupConfigInfo.With(prometheus.Labels{
+		"persistentvolumeclaim": mbc.Spec.PVC,
+		"resource_namespace":    mbc.ObjectMeta.Namespace,
+		"mantlebackupconfig":    mbc.ObjectMeta.Name,
+	}).Set(1)
 
 	// Create or update the CronJob
 	if err := r.createOrUpdateCronJob(
