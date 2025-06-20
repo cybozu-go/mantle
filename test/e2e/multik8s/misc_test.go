@@ -38,7 +38,6 @@ var _ = Describe("metrics tests", func() {
 				g.Expect(strings.Contains(string(stdout), metricName)).To(BeTrue())
 			}).Should(Succeed())
 		},
-		Entry(`mantle_backup_duration_seconds_total`, `mantle_backup_duration_seconds_total`),
 		Entry(`mantle_mantlebackupconfig_info`, `mantle_mantlebackupconfig_info`),
 		Entry(`mantle_backup_duration_seconds_bucket`, `mantle_backup_duration_seconds_bucket`),
 		Entry(`mantle_backup_duration_seconds_sum`, `mantle_backup_duration_seconds_sum`),

@@ -8,15 +8,6 @@ import (
 const namespace = "mantle"
 
 var (
-	BackupDurationSecondsTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: namespace,
-			Name:      "backup_duration_seconds_total",
-			Help:      "The time from the creationTimestamp to the completion of the backup.",
-		},
-		[]string{"persistentvolumeclaim", "resource_namespace"},
-	)
-
 	BackupConfigInfo = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: namespace,
@@ -38,7 +29,6 @@ var (
 )
 
 func init() {
-	runtimemetrics.Registry.MustRegister(BackupDurationSecondsTotal)
 	runtimemetrics.Registry.MustRegister(BackupConfigInfo)
 	runtimemetrics.Registry.MustRegister(BackupDurationSeconds)
 }

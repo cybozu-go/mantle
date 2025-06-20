@@ -2419,11 +2419,6 @@ func (r *MantleBackupReconciler) primaryCleanup(
 	}
 
 	duration := time.Since(target.GetCreationTimestamp().Time).Seconds()
-	metrics.BackupDurationSecondsTotal.With(prometheus.Labels{
-		"persistentvolumeclaim": target.Spec.PVC,
-		"resource_namespace":    target.GetNamespace(),
-	}).Add(float64(duration))
-
 	metrics.BackupDurationSeconds.With(prometheus.Labels{
 		"persistentvolumeclaim": target.Spec.PVC,
 		"resource_namespace":    target.GetNamespace(),
