@@ -11,11 +11,11 @@ import (
 	"github.com/cybozu-go/mantle/test/util"
 )
 
-func DiscardBlock(namespace, deployName string) error {
+func ZeroOutBlock(namespace, deployName string) error {
 	_, err := Kubectl("exec", "-n", namespace, "deploy/"+deployName, "--",
-		"blkdiscard", "/dev/rbd-device")
+		"blkdiscard", "-z", "/dev/rbd-device")
 	if err != nil {
-		return fmt.Errorf("failed to discard volume: %w", err)
+		return fmt.Errorf("failed to zero out volume: %w", err)
 	}
 	return nil
 }

@@ -34,9 +34,9 @@ func ImportDiff(filename, pool, image, rollbackTo, namespace, deployName, pvcNam
 			if len(pvcName) == 0 {
 				return fmt.Errorf("rollbackTo or pvcName must be specified")
 			}
-			err := discardVolume(namespace, pvcName)
+			err := zeroOutVolume(namespace, pvcName)
 			if err != nil {
-				return fmt.Errorf("failed to discard volume: %w", err)
+				return fmt.Errorf("failed to zero out volume: %w", err)
 			}
 		} else {
 			stdout, err := Rbd("snap", "rollback", pool+"/"+image+"@"+rollbackTo)
@@ -54,11 +54,11 @@ func ImportDiff(filename, pool, image, rollbackTo, namespace, deployName, pvcNam
 	})
 }
 
-var mtxDiscardVolume = &sync.Mutex{}
+var mtxZeroOutVolume = &sync.Mutex{}
 
-func discardVolume(namespace, pvcName string) error {
-	mtxDiscardVolume.Lock()
-	defer mtxDiscardVolume.Unlock()
+func zeroOutVolume(namespace, pvcName string) error {
+	mtxZeroOutVolume.Lock()
+	defer mtxZeroOutVolume.Unlock()
 
 	origPVCRaw, err := Kubectl("get", "-n", namespace, "pvc", pvcName, "-o", "json")
 	if err != nil {
@@ -78,15 +78,15 @@ func discardVolume(namespace, pvcName string) error {
 		return fmt.Errorf("failed to unmarshal PV: %w", err)
 	}
 
-	discardPVName := util.GetUniqueName("discard-pv-")
-	discardPVCName := util.GetUniqueName("discard-pvc-")
-	discardDeployName := util.GetUniqueName("discard-pod-")
+	zeroOutPVName := util.GetUniqueName("zeroout-pv-")
+	zeroOutPVCName := util.GetUniqueName("zeroout-pvc-")
+	zeroOutDeployName := util.GetUniqueName("zeroout-pod-")
 
 	volumeMode := corev1.PersistentVolumeBlock
-	discardPV := corev1.PersistentVolume{
+	zeroOutPV := corev1.PersistentVolume{
 		TypeMeta: origPV.TypeMeta,
 		ObjectMeta: v1.ObjectMeta{
-			Name: discardPVName,
+			Name: zeroOutPVName,
 		},
 		Spec: corev1.PersistentVolumeSpec{
 			AccessModes: []corev1.PersistentVolumeAccessMode{
@@ -98,7 +98,7 @@ func discardVolume(namespace, pvcName string) error {
 			StorageClassName:              "",
 		},
 	}
-	discardPV.Spec.CSI = &corev1.CSIPersistentVolumeSource{
+	zeroOutPV.Spec.CSI = &corev1.CSIPersistentVolumeSource{
 		Driver:                    origPV.Spec.CSI.Driver,
 		ControllerExpandSecretRef: origPV.Spec.CSI.ControllerExpandSecretRef,
 		NodeStageSecretRef:        origPV.Spec.CSI.NodeStageSecretRef,
@@ -111,20 +111,20 @@ func discardVolume(namespace, pvcName string) error {
 		},
 		VolumeHandle: origPV.Spec.CSI.VolumeAttributes["imageName"],
 	}
-	discardPVRaw, err := json.Marshal(discardPV)
+	zeroOutPVRaw, err := json.Marshal(zeroOutPV)
 	if err != nil {
 		return fmt.Errorf("failed to marshal PV: %w", err)
 	}
-	_, err = KubectlWithInput(discardPVRaw, "apply", "-f", "-")
+	_, err = KubectlWithInput(zeroOutPVRaw, "apply", "-f", "-")
 	if err != nil {
 		return fmt.Errorf("failed to create PV: %w", err)
 	}
 
 	sc := ""
-	discardPVC := corev1.PersistentVolumeClaim{
+	zeroOutPVC := corev1.PersistentVolumeClaim{
 		TypeMeta: origPVC.TypeMeta,
 		ObjectMeta: v1.ObjectMeta{
-			Name:      discardPVCName,
+			Name:      zeroOutPVCName,
 			Namespace: namespace,
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
@@ -134,38 +134,38 @@ func discardVolume(namespace, pvcName string) error {
 			},
 			Resources:  origPVC.Spec.Resources,
 			VolumeMode: &volumeMode,
-			VolumeName: discardPVName,
+			VolumeName: zeroOutPVName,
 		},
 	}
-	discardPVCRaw, err := json.Marshal(discardPVC)
+	zeroOutPVCRaw, err := json.Marshal(zeroOutPVC)
 	if err != nil {
 		return fmt.Errorf("failed to marshal PVC: %w", err)
 	}
-	_, err = KubectlWithInput(discardPVCRaw, "apply", "-f", "-")
+	_, err = KubectlWithInput(zeroOutPVCRaw, "apply", "-f", "-")
 	if err != nil {
 		return fmt.Errorf("failed to create PVC: %w", err)
 	}
 
-	err = CreateDeployment(namespace, discardDeployName, discardPVCName, VolumeModeBlock)
+	err = CreateDeployment(namespace, zeroOutDeployName, zeroOutPVCName, VolumeModeBlock)
 	if err != nil {
 		return fmt.Errorf("failed to create pod: %w", err)
 	}
 
-	if err := DiscardBlock(namespace, discardDeployName); err != nil {
+	if err := ZeroOutBlock(namespace, zeroOutDeployName); err != nil {
 		return err
 	}
 
-	err = DeleteObject("deployment", namespace, discardDeployName)
+	err = DeleteObject("deployment", namespace, zeroOutDeployName)
 	if err != nil {
 		return fmt.Errorf("failed to delete pod: %w", err)
 	}
 
-	err = DeleteObject("pvc", namespace, discardPVCName)
+	err = DeleteObject("pvc", namespace, zeroOutPVCName)
 	if err != nil {
 		return fmt.Errorf("failed to delete PVC: %w", err)
 	}
 
-	err = DeleteObject("pv", "", discardPVName)
+	err = DeleteObject("pv", "", zeroOutPVName)
 	if err != nil {
 		return fmt.Errorf("failed to delete PV: %w", err)
 	}
