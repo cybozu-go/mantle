@@ -111,8 +111,8 @@ func (t *contentTest) createSnapshot() {
 		err = cluster.GetBlockAsFile(t.namespace, t.srcDeployName, t.snapshots[3])
 		Expect(err).NotTo(HaveOccurred())
 
-		// snapshot4 has discard volume
-		err = cluster.DiscardBlock(t.namespace, t.srcDeployName)
+		// snapshot4 has zero-filled volume
+		err = cluster.ZeroOutBlock(t.namespace, t.srcDeployName)
 		Expect(err).NotTo(HaveOccurred())
 		err = cluster.SnapCreate(t.poolName, t.srcImageName, t.snapshots[4])
 		Expect(err).NotTo(HaveOccurred())
@@ -394,7 +394,7 @@ func (t *contentTest) test() {
 				rollbackTo: "snapshot3-offset-1024",
 			},
 			{
-				description:      "(228) discard data area between snapshots, offset + length == rbd volume size",
+				description:      "(228) zero out data area between snapshots, offset + length == rbd volume size",
 				expectedDataName: t.snapshots[4],
 				importsBefore:    []string{"/tmp/snapshot3.bin", "/tmp/snapshot4-offset-1Mi.bin"},
 				exportArgs: []string{
@@ -407,7 +407,7 @@ func (t *contentTest) test() {
 				rollbackTo: "snapshot4-offset-1048576",
 			},
 			{
-				description:      "(229) discard data area between snapshots, offset + length > rbd volume size",
+				description:      "(229) zero out data area between snapshots, offset + length > rbd volume size",
 				expectedDataName: t.snapshots[4],
 				importsBefore:    []string{"/tmp/snapshot3.bin", "/tmp/snapshot4-offset-1Mi.bin"},
 				exportArgs: []string{
