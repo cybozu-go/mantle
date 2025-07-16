@@ -68,6 +68,7 @@ const (
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 //+kubebuilder:resource:shortName=mb
+//+kubebuilder:selectablefield:JSONPath=`.spec.pvc`
 
 // MantleBackup is the Schema for the mantlebackups API
 type MantleBackup struct {

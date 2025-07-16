@@ -148,6 +148,8 @@ spec:
                 x-kubernetes-int-or-string: true
             type: object
         type: object
+    selectableFields:
+    - jsonPath: .spec.pvc
     served: true
     storage: true
     subresources:
