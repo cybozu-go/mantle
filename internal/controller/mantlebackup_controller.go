@@ -53,8 +53,8 @@ const (
 	labelComponentExportJob       = "export-job"
 	labelComponentUploadJob       = "upload-job"
 	labelComponentImportJob       = "import-job"
-	labelComponentDiscardJob      = "discard-job"
-	labelComponentDiscardVolume   = "discard-volume"
+	labelComponentZeroOutJob      = "zeroout-job"
+	labelComponentZeroOutVolume   = "zeroout-volume"
 	annotRemoteUID                = "mantle.cybozu.io/remote-uid"
 	annotDiffFrom                 = "mantle.cybozu.io/diff-from"
 	annotDiffTo                   = "mantle.cybozu.io/diff-to"
@@ -65,9 +65,9 @@ const (
 	MantleUploadJobPrefix     = "mantle-upload-"
 	MantleExportDataPVCPrefix = "mantle-export-"
 	MantleImportJobPrefix     = "mantle-import-"
-	MantleDiscardJobPrefix    = "mantle-discard-"
-	MantleDiscardPVCPrefix    = "mantle-discard-"
-	MantleDiscardPVPrefix     = "mantle-discard-"
+	MantleZeroOutJobPrefix    = "mantle-zeroout-"
+	MantleZeroOutPVCPrefix    = "mantle-zeroout-"
+	MantleZeroOutPVPrefix     = "mantle-zeroout-"
 
 	syncModeFull        = "full"
 	syncModeIncremental = "incremental"
@@ -1359,16 +1359,16 @@ func MakeMiddleSnapshotName(backup *mantlev1.MantleBackup, offset int) string {
 	return fmt.Sprintf("%s-offset-%d", backup.GetAnnotations()[annotRemoteUID], offset)
 }
 
-func MakeDiscardJobName(target *mantlev1.MantleBackup) string {
-	return MantleDiscardJobPrefix + string(target.GetUID())
+func MakeZeroOutJobName(target *mantlev1.MantleBackup) string {
+	return MantleZeroOutJobPrefix + string(target.GetUID())
 }
 
-func MakeDiscardPVCName(target *mantlev1.MantleBackup) string {
-	return MantleDiscardPVCPrefix + string(target.GetUID())
+func MakeZeroOutPVCName(target *mantlev1.MantleBackup) string {
+	return MantleZeroOutPVCPrefix + string(target.GetUID())
 }
 
-func MakeDiscardPVName(target *mantlev1.MantleBackup) string {
-	return MantleDiscardPVPrefix + string(target.GetUID())
+func MakeZeroOutPVName(target *mantlev1.MantleBackup) string {
+	return MantleZeroOutPVPrefix + string(target.GetUID())
 }
 
 func ExtractPartNumFromComponentJobName(componentPrefix string, jobName string, backup *mantlev1.MantleBackup) (int, bool) {
@@ -1773,7 +1773,7 @@ func (r *MantleBackupReconciler) startImport(
 		return ctrl.Result{}, err
 	}
 
-	if result, err := r.reconcileDiscardJob(ctx, backup, target); err != nil || !result.IsZero() {
+	if result, err := r.reconcileZeroOutJob(ctx, backup, target); err != nil || !result.IsZero() {
 		return result, err
 	}
 
@@ -1899,7 +1899,7 @@ func (r *MantleBackupReconciler) updateStatusManifests(
 	})
 }
 
-func (r *MantleBackupReconciler) reconcileDiscardJob(
+func (r *MantleBackupReconciler) reconcileZeroOutJob(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
 	snapshotTarget *snapshotTarget,
@@ -1908,19 +1908,19 @@ func (r *MantleBackupReconciler) reconcileDiscardJob(
 		return ctrl.Result{}, nil
 	}
 
-	if err := r.createOrUpdateDiscardPV(ctx, backup, snapshotTarget.pv); err != nil {
+	if err := r.createOrUpdateZeroOutPV(ctx, backup, snapshotTarget.pv); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	if err := r.createOrUpdateDiscardPVC(ctx, backup, snapshotTarget.pvc); err != nil {
+	if err := r.createOrUpdateZeroOutPVC(ctx, backup, snapshotTarget.pvc); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	if err := r.createOrUpdateDiscardJob(ctx, backup); err != nil {
+	if err := r.createOrUpdateZeroOutJob(ctx, backup); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	completed, err := r.hasDiscardJobCompleted(ctx, backup)
+	completed, err := r.hasZeroOutJobCompleted(ctx, backup)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -1930,20 +1930,20 @@ func (r *MantleBackupReconciler) reconcileDiscardJob(
 	return requeueReconciliation(), nil
 }
 
-func (r *MantleBackupReconciler) createOrUpdateDiscardPV(
+func (r *MantleBackupReconciler) createOrUpdateZeroOutPV(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
 	targetPV *corev1.PersistentVolume,
 ) error {
 	var pv corev1.PersistentVolume
-	pv.SetName(MakeDiscardPVName(backup))
+	pv.SetName(MakeZeroOutPVName(backup))
 	_, err := ctrl.CreateOrUpdate(ctx, r.Client, &pv, func() error {
 		labels := pv.GetLabels()
 		if labels == nil {
 			labels = map[string]string{}
 		}
 		labels["app.kubernetes.io/name"] = labelAppNameValue
-		labels["app.kubernetes.io/component"] = labelComponentDiscardVolume
+		labels["app.kubernetes.io/component"] = labelComponentZeroOutVolume
 		pv.SetLabels(labels)
 
 		pv.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
@@ -1976,13 +1976,13 @@ func (r *MantleBackupReconciler) createOrUpdateDiscardPV(
 	return err
 }
 
-func (r *MantleBackupReconciler) createOrUpdateDiscardPVC(
+func (r *MantleBackupReconciler) createOrUpdateZeroOutPVC(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
 	targetPVC *corev1.PersistentVolumeClaim,
 ) error {
 	var pvc corev1.PersistentVolumeClaim
-	pvc.SetName(MakeDiscardPVCName(backup))
+	pvc.SetName(MakeZeroOutPVCName(backup))
 	pvc.SetNamespace(r.managedCephClusterID)
 	_, err := ctrl.CreateOrUpdate(ctx, r.Client, &pvc, func() error {
 		labels := pvc.GetLabels()
@@ -1990,14 +1990,14 @@ func (r *MantleBackupReconciler) createOrUpdateDiscardPVC(
 			labels = map[string]string{}
 		}
 		labels["app.kubernetes.io/name"] = labelAppNameValue
-		labels["app.kubernetes.io/component"] = labelComponentDiscardVolume
+		labels["app.kubernetes.io/component"] = labelComponentZeroOutVolume
 		pvc.SetLabels(labels)
 
 		storageClassName := ""
 		pvc.Spec.StorageClassName = &storageClassName
 		pvc.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
 		pvc.Spec.Resources = targetPVC.Spec.Resources
-		pvc.Spec.VolumeName = MakeDiscardPVName(backup)
+		pvc.Spec.VolumeName = MakeZeroOutPVName(backup)
 
 		volumeMode := corev1.PersistentVolumeBlock
 		pvc.Spec.VolumeMode = &volumeMode
@@ -2007,12 +2007,12 @@ func (r *MantleBackupReconciler) createOrUpdateDiscardPVC(
 	return err
 }
 
-func (r *MantleBackupReconciler) createOrUpdateDiscardJob(
+func (r *MantleBackupReconciler) createOrUpdateZeroOutJob(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
 ) error {
 	var job batchv1.Job
-	job.SetName(MakeDiscardJobName(backup))
+	job.SetName(MakeZeroOutJobName(backup))
 	job.SetNamespace(r.managedCephClusterID)
 	_, err := ctrl.CreateOrUpdate(ctx, r.Client, &job, func() error {
 		labels := job.GetLabels()
@@ -2020,7 +2020,7 @@ func (r *MantleBackupReconciler) createOrUpdateDiscardJob(
 			labels = map[string]string{}
 		}
 		labels["app.kubernetes.io/name"] = labelAppNameValue
-		labels["app.kubernetes.io/component"] = labelComponentDiscardJob
+		labels["app.kubernetes.io/component"] = labelComponentZeroOutJob
 		job.SetLabels(labels)
 
 		var backoffLimit int32 = 65535
@@ -2032,14 +2032,14 @@ func (r *MantleBackupReconciler) createOrUpdateDiscardJob(
 		var zero int64 = 0
 		job.Spec.Template.Spec.Containers = []corev1.Container{
 			{
-				Name:  "discard",
+				Name:  "zeroout",
 				Image: r.podImage,
 				Command: []string{
 					"/bin/bash",
 					"-c",
 					`
 set -e
-blkdiscard /dev/discard-rbd
+blkdiscard -z /dev/zeroout-rbd
 `,
 				},
 				SecurityContext: &corev1.SecurityContext{
@@ -2049,8 +2049,8 @@ blkdiscard /dev/discard-rbd
 				},
 				VolumeDevices: []corev1.VolumeDevice{
 					{
-						Name:       "discard-rbd",
-						DevicePath: "/dev/discard-rbd",
+						Name:       "zeroout-rbd",
+						DevicePath: "/dev/zeroout-rbd",
 					},
 				},
 				ImagePullPolicy: corev1.PullIfNotPresent,
@@ -2059,10 +2059,10 @@ blkdiscard /dev/discard-rbd
 
 		job.Spec.Template.Spec.Volumes = []corev1.Volume{
 			{
-				Name: "discard-rbd",
+				Name: "zeroout-rbd",
 				VolumeSource: corev1.VolumeSource{
 					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-						ClaimName: MakeDiscardPVCName(backup),
+						ClaimName: MakeZeroOutPVCName(backup),
 					},
 				},
 			},
@@ -2073,11 +2073,11 @@ blkdiscard /dev/discard-rbd
 	return err
 }
 
-func (r *MantleBackupReconciler) hasDiscardJobCompleted(ctx context.Context, backup *mantlev1.MantleBackup) (bool, error) {
+func (r *MantleBackupReconciler) hasZeroOutJobCompleted(ctx context.Context, backup *mantlev1.MantleBackup) (bool, error) {
 	var job batchv1.Job
 	if err := r.Get(
 		ctx,
-		types.NamespacedName{Name: MakeDiscardJobName(backup), Namespace: r.managedCephClusterID},
+		types.NamespacedName{Name: MakeZeroOutJobName(backup), Namespace: r.managedCephClusterID},
 		&job,
 	); err != nil {
 		if aerrors.IsNotFound(err) {
@@ -2517,26 +2517,26 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 		return ctrl.Result{}, fmt.Errorf("failed to delete import Jobs: %w", err)
 	}
 
-	var discardJob batchv1.Job
-	discardJob.SetName(MakeDiscardJobName(target))
-	discardJob.SetNamespace(r.managedCephClusterID)
-	if err := r.Delete(ctx, &discardJob, &client.DeleteOptions{
+	var zeroOutJob batchv1.Job
+	zeroOutJob.SetName(MakeZeroOutJobName(target))
+	zeroOutJob.SetNamespace(r.managedCephClusterID)
+	if err := r.Delete(ctx, &zeroOutJob, &client.DeleteOptions{
 		PropagationPolicy: &propagationPolicy,
 	}); err != nil && !aerrors.IsNotFound(err) {
-		return ctrl.Result{}, fmt.Errorf("failed to delete discard Job: %w", err)
+		return ctrl.Result{}, fmt.Errorf("failed to delete zeroout Job: %w", err)
 	}
 
-	var discardPVC corev1.PersistentVolumeClaim
-	discardPVC.SetName(MakeDiscardPVCName(target))
-	discardPVC.SetNamespace(r.managedCephClusterID)
-	if err := r.Delete(ctx, &discardPVC); err != nil && !aerrors.IsNotFound(err) {
-		return ctrl.Result{}, fmt.Errorf("failed to delete discard PVC: %w", err)
+	var zeroOutPVC corev1.PersistentVolumeClaim
+	zeroOutPVC.SetName(MakeZeroOutPVCName(target))
+	zeroOutPVC.SetNamespace(r.managedCephClusterID)
+	if err := r.Delete(ctx, &zeroOutPVC); err != nil && !aerrors.IsNotFound(err) {
+		return ctrl.Result{}, fmt.Errorf("failed to delete zeroout PVC: %w", err)
 	}
 
-	var discardPV corev1.PersistentVolume
-	discardPV.SetName(MakeDiscardPVName(target))
-	if err := r.Delete(ctx, &discardPV); err != nil && !aerrors.IsNotFound(err) {
-		return ctrl.Result{}, fmt.Errorf("failed to delete discard PV: %w", err)
+	var zeroOutPV corev1.PersistentVolume
+	zeroOutPV.SetName(MakeZeroOutPVName(target))
+	if err := r.Delete(ctx, &zeroOutPV); err != nil && !aerrors.IsNotFound(err) {
+		return ctrl.Result{}, fmt.Errorf("failed to delete zeroout PV: %w", err)
 	}
 
 	if deleteExportData {
