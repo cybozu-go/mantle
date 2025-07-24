@@ -810,7 +810,7 @@ func WaitTemporarySecondaryJobsDeleted(ctx SpecContext, secondaryMB *mantlev1.Ma
 	WaitComponentJobsDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace,
 		controller.MantleImportJobPrefix, secondaryMB)
 	WaitComponentJobsDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace,
-		controller.MantleDiscardJobPrefix, secondaryMB)
+		controller.MantleZeroOutJobPrefix, secondaryMB)
 }
 
 func WaitTemporaryJobsDeleted(ctx SpecContext, primaryMB, secondaryMB *mantlev1.MantleBackup) {
@@ -853,7 +853,7 @@ func WaitTemporaryPrimaryPVCsDeleted(ctx SpecContext, primaryMB *mantlev1.Mantle
 
 func WaitTemporarySecondaryPVCsDeleted(ctx SpecContext, secondaryMB *mantlev1.MantleBackup) {
 	GinkgoHelper()
-	WaitPVCDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace, controller.MakeDiscardPVCName(secondaryMB))
+	WaitPVCDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace, controller.MakeZeroOutPVCName(secondaryMB))
 }
 
 func WaitTemporaryPVCsDeleted(ctx SpecContext, primaryMB, secondaryMB *mantlev1.MantleBackup) {
@@ -877,7 +877,7 @@ func WaitPVDeleted(ctx SpecContext, cluster int, pvName string) {
 
 func WaitTemporarySecondaryPVsDeleted(ctx SpecContext, secondaryMB *mantlev1.MantleBackup) {
 	GinkgoHelper()
-	WaitPVDeleted(ctx, SecondaryK8sCluster, controller.MakeDiscardPVName(secondaryMB))
+	WaitPVDeleted(ctx, SecondaryK8sCluster, controller.MakeZeroOutPVName(secondaryMB))
 }
 
 func WaitTemporaryS3ObjectsDeleted(ctx SpecContext, primaryMB *mantlev1.MantleBackup) {

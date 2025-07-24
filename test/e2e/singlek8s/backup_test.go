@@ -180,10 +180,10 @@ func (test *backupTest) testCase1() {
 			Expect(strings.HasPrefix(job.GetName(), controller.MantleExportJobPrefix)).To(BeFalse())
 			Expect(strings.HasPrefix(job.GetName(), controller.MantleUploadJobPrefix)).To(BeFalse())
 			Expect(strings.HasPrefix(job.GetName(), controller.MantleImportJobPrefix)).To(BeFalse())
-			Expect(strings.HasPrefix(job.GetName(), controller.MantleDiscardJobPrefix)).To(BeFalse())
+			Expect(strings.HasPrefix(job.GetName(), controller.MantleZeroOutJobPrefix)).To(BeFalse())
 		}
 
-		// Check that export and discard PVC are not created.
+		// Check that export and zeroout PVC are not created.
 		stdout, _, err = kubectl("-n", cephCluster1Namespace, "get", "pvc", "-o", "json")
 		Expect(err).NotTo(HaveOccurred())
 		var pvcs corev1.PersistentVolumeClaimList
@@ -191,17 +191,17 @@ func (test *backupTest) testCase1() {
 		Expect(err).NotTo(HaveOccurred())
 		for _, pvc := range pvcs.Items {
 			Expect(strings.HasPrefix(pvc.GetName(), controller.MantleExportDataPVCPrefix)).To(BeFalse())
-			Expect(strings.HasPrefix(pvc.GetName(), controller.MantleDiscardPVCPrefix)).To(BeFalse())
+			Expect(strings.HasPrefix(pvc.GetName(), controller.MantleZeroOutPVCPrefix)).To(BeFalse())
 		}
 
-		// Check that discard PV is not created.
+		// Check that zeroout PV is not created.
 		stdout, _, err = kubectl("-n", cephCluster1Namespace, "get", "pv", "-o", "json")
 		Expect(err).NotTo(HaveOccurred())
 		var pvs corev1.PersistentVolumeList
 		err = json.Unmarshal(stdout, &pvs)
 		Expect(err).NotTo(HaveOccurred())
 		for _, pv := range pvs.Items {
-			Expect(strings.HasPrefix(pv.GetName(), controller.MantleDiscardPVPrefix)).To(BeFalse())
+			Expect(strings.HasPrefix(pv.GetName(), controller.MantleZeroOutPVPrefix)).To(BeFalse())
 		}
 	})
 
