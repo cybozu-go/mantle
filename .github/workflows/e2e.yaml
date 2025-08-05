@@ -4,10 +4,14 @@ on:
     paths-ignore:
       - "**/*.md"
       - "CODEOWNERS"
+      - "LICENSE"
+      - "NOTICE"
   push:
     paths-ignore:
       - "**/*.md"
       - "CODEOWNERS"
+      - "LICENSE"
+      - "NOTICE"
     branches:
       - "main"
 
