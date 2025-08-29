@@ -676,6 +676,7 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 		logger.Error(err, "failed to update MantleBackup status", "status", backup.Status)
 		return err
 	}
+	logger.Info("succeeded to create a backup")
 
 	return nil
 }
@@ -721,6 +722,7 @@ func (r *MantleBackupReconciler) finalizeStandalone(
 		logger.Error(err, "failed to remove finalizer", "finalizer", MantleBackupFinalizerName)
 		return ctrl.Result{}, err
 	}
+	logger.Info("succeeded to delete a backup")
 
 	return ctrl.Result{}, nil
 }
@@ -2368,6 +2370,8 @@ func (r *MantleBackupReconciler) primaryCleanup(
 	ctx context.Context,
 	target *mantlev1.MantleBackup,
 ) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
 	diffFrom, ok := target.GetAnnotations()[annotDiffFrom]
 	if ok {
 		var source mantlev1.MantleBackup
@@ -2417,6 +2421,7 @@ func (r *MantleBackupReconciler) primaryCleanup(
 	if err := r.Client.Status().Patch(ctx, newTarget, client.MergeFrom(target)); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to update SyncedToRemote to True by Patch: %w", err)
 	}
+	logger.Info("succeeded to sync a backup to the remote ceph cluster")
 
 	duration := time.Since(target.GetCreationTimestamp().Time).Seconds()
 	metrics.BackupDurationSeconds.With(prometheus.Labels{
