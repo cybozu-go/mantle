@@ -630,13 +630,15 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 	// snapshot corresponding to the given MantleBackup, so that we can make
 	// sure that every MantleBackup that has a RBD snapshot is labelled with
 	// local-backup-target-pvc-uid.
-	if _, err := ctrl.CreateOrUpdate(ctx, r.Client, backup, func() error {
-		if backup.Labels == nil {
-			backup.Labels = map[string]string{}
-		}
-		backup.Labels[labelLocalBackupTargetPVCUID] = string(target.pvc.GetUID())
-		return nil
-	}); err != nil {
+	key := client.ObjectKeyFromObject(backup)
+	if err := r.Get(ctx, key, backup); err != nil {
+		return err
+	}
+	if backup.Labels == nil {
+		backup.Labels = map[string]string{}
+	}
+	backup.Labels[labelLocalBackupTargetPVCUID] = string(target.pvc.GetUID())
+	if err := r.Update(ctx, backup); err != nil {
 		return err
 	}
 
@@ -952,21 +954,24 @@ func (r *MantleBackupReconciler) annotateExportTargetMantleBackup(
 	incremental bool,
 	sourceName *string,
 ) error {
-	_, err := ctrl.CreateOrUpdate(ctx, r.Client, target, func() error {
-		annot := target.GetAnnotations()
-		if annot == nil {
-			annot = map[string]string{}
-		}
-		if incremental {
-			annot[annotSyncMode] = syncModeIncremental
-			annot[annotDiffFrom] = *sourceName
-		} else {
-			annot[annotSyncMode] = syncModeFull
-		}
-		target.SetAnnotations(annot)
-		return nil
-	})
-	return err
+	key := client.ObjectKeyFromObject(target)
+	if err := r.Get(ctx, key, target); err != nil {
+		return err
+	}
+
+	annot := target.GetAnnotations()
+	if annot == nil {
+		annot = map[string]string{}
+	}
+	if incremental {
+		annot[annotSyncMode] = syncModeIncremental
+		annot[annotDiffFrom] = *sourceName
+	} else {
+		annot[annotSyncMode] = syncModeFull
+	}
+	target.SetAnnotations(annot)
+
+	return r.Update(ctx, target)
 }
 
 func (r *MantleBackupReconciler) annotateExportSourceMantleBackup(
@@ -974,16 +979,19 @@ func (r *MantleBackupReconciler) annotateExportSourceMantleBackup(
 	source *mantlev1.MantleBackup,
 	target *mantlev1.MantleBackup,
 ) error {
-	_, err := ctrl.CreateOrUpdate(ctx, r.Client, source, func() error {
-		annot := source.GetAnnotations()
-		if annot == nil {
-			annot = map[string]string{}
-		}
-		annot[annotDiffTo] = target.GetName()
-		source.SetAnnotations(annot)
-		return nil
-	})
-	return err
+	key := client.ObjectKeyFromObject(source)
+	if err := r.Get(ctx, key, source); err != nil {
+		return err
+	}
+
+	annot := source.GetAnnotations()
+	if annot == nil {
+		annot = map[string]string{}
+	}
+	annot[annotDiffTo] = target.GetName()
+	source.SetAnnotations(annot)
+
+	return r.Update(ctx, source)
 }
 
 // startExport reconciles export Jobs and PVCs. Note that it might update

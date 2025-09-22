@@ -267,33 +267,31 @@ func (s *SecondaryServer) SetSynchronizing(
 			return nil, errors.New("diffTo is invalid")
 		}
 
-		if _, err := ctrl.CreateOrUpdate(ctx, s.client, &source, func() error {
-			annot := source.GetAnnotations()
-			if annot == nil {
-				annot = map[string]string{}
-			}
-			annot[annotDiffTo] = req.Name
-			source.SetAnnotations(annot)
-			return nil
-		}); err != nil {
+		annot := source.GetAnnotations()
+		if annot == nil {
+			annot = map[string]string{}
+		}
+		annot[annotDiffTo] = req.Name
+		source.SetAnnotations(annot)
+
+		if err := s.client.Update(ctx, &source); err != nil {
 			return nil, err
 		}
 	}
 
-	if _, err := ctrl.CreateOrUpdate(ctx, s.client, &target, func() error {
-		annot := target.GetAnnotations()
-		if annot == nil {
-			annot = map[string]string{}
-		}
-		if req.DiffFrom == nil {
-			annot[annotSyncMode] = syncModeFull
-		} else {
-			annot[annotSyncMode] = syncModeIncremental
-			annot[annotDiffFrom] = *req.DiffFrom
-		}
-		target.SetAnnotations(annot)
-		return nil
-	}); err != nil {
+	annot := target.GetAnnotations()
+	if annot == nil {
+		annot = map[string]string{}
+	}
+	if req.DiffFrom == nil {
+		annot[annotSyncMode] = syncModeFull
+	} else {
+		annot[annotSyncMode] = syncModeIncremental
+		annot[annotDiffFrom] = *req.DiffFrom
+	}
+	target.SetAnnotations(annot)
+
+	if err := s.client.Update(ctx, &target); err != nil {
 		return nil, err
 	}
 
