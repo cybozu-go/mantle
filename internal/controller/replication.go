@@ -64,9 +64,15 @@ func (s *SecondaryServer) CreateOrUpdatePVC(
 	pvc.SetName(pvcReceived.GetName())
 	pvc.SetNamespace(pvcReceived.GetNamespace())
 	if _, err := ctrl.CreateOrUpdate(ctx, s.client, &pvc, func() error {
-		isUpdate := !pvc.CreationTimestamp.IsZero()
-		origPVC := pvc.DeepCopy()
-		if isUpdate {
+		isCreate := pvc.CreationTimestamp.IsZero()
+		if isCreate {
+			// Copy only essential fields from the received PVC.
+			pvc.Spec.AccessModes = pvcReceived.Spec.AccessModes
+			pvc.Spec.StorageClassName = pvcReceived.Spec.StorageClassName
+			pvc.Spec.VolumeAttributesClassName = pvcReceived.Spec.VolumeAttributesClassName
+			pvc.Spec.VolumeMode = pvcReceived.Spec.VolumeMode
+			pvc.Spec.Resources.Requests = pvcReceived.Spec.Resources.Requests
+		} else {
 			// Make sure the remote-uids are equal.
 			errMsg := ""
 			if pvc.Annotations == nil {
@@ -88,13 +94,6 @@ func (s *SecondaryServer) CreateOrUpdatePVC(
 		pvc.Annotations = pvcReceived.Annotations
 		pvc.Labels = pvcReceived.Labels
 
-		// We should NOT use pvcReceived.Spec.VolumeName. It's a PV name in the primary k8s server.
-		volumeName := pvc.Spec.VolumeName
-		pvc.Spec = pvcReceived.Spec
-		if isUpdate {
-			pvc.Spec.Resources = origPVC.Spec.Resources
-		}
-		pvc.Spec.VolumeName = volumeName
 		return nil
 	}); err != nil {
 		return nil, fmt.Errorf("CreateOrUpdate failed: %w", err)
