@@ -141,25 +141,6 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, restore *mantlev1
 		return requeueReconciliation(), nil
 	}
 
-	// store the pool name in the status
-	var pv corev1.PersistentVolume
-	err = json.Unmarshal([]byte(backup.Status.PVManifest), &pv)
-	if err != nil {
-		logger.Error(err, "failed to unmarshal PV manifest", "backup", backup.Name, "namespace", backup.Namespace)
-		return ctrl.Result{}, err
-	}
-	restore.Status.Pool = pv.Spec.CSI.VolumeAttributes["pool"]
-	if restore.Status.Pool == "" {
-		err := fmt.Errorf("pool not found in PV manifest")
-		logger.Error(err, "status.pool cannot be set", "backup", backup.Name, "namespace", backup.Namespace)
-		return ctrl.Result{}, err
-	}
-	err = r.client.Status().Update(ctx, restore)
-	if err != nil {
-		logger.Error(err, "failed to update status.pool", "status", restore.Status)
-		return ctrl.Result{}, err
-	}
-
 	// create a clone image from the backup
 	if err := r.cloneImageFromBackup(ctx, restore, &backup); err != nil {
 		logger.Error(err, "failed to clone image from backup", "backup", backup.Name, "namespace", backup.Namespace)
@@ -213,15 +194,19 @@ func (r *MantleRestoreReconciler) cloneImageFromBackup(ctx context.Context, rest
 	if bkImage == "" {
 		return fmt.Errorf("imageName not found in PV manifest")
 	}
+	pool := pv.Spec.CSI.VolumeAttributes["pool"]
+	if pool == "" {
+		return fmt.Errorf("pool not found in PV manifest")
+	}
 
-	images, err := r.ceph.RBDLs(restore.Status.Pool)
+	images, err := r.ceph.RBDLs(pool)
 	if err != nil {
 		return fmt.Errorf("failed to list RBD images: %w", err)
 	}
 
 	// check if the image already exists
 	if slices.Contains(images, r.restoringRBDImageName(restore)) {
-		info, err := r.ceph.RBDInfo(restore.Status.Pool, r.restoringRBDImageName(restore))
+		info, err := r.ceph.RBDInfo(pool, r.restoringRBDImageName(restore))
 		if err != nil {
 			return fmt.Errorf("failed to get RBD info: %w", err)
 		}
@@ -229,7 +214,7 @@ func (r *MantleRestoreReconciler) cloneImageFromBackup(ctx context.Context, rest
 			return fmt.Errorf("failed to get RBD info: parent field is empty")
 		}
 
-		if info.Parent.Pool == restore.Status.Pool && info.Parent.Image == bkImage && info.Parent.Snapshot == backup.Name {
+		if info.Parent.Pool == pool && info.Parent.Image == bkImage && info.Parent.Snapshot == backup.Name {
 			logger.Info("image already exists", "image", r.restoringRBDImageName(restore))
 			return nil
 		} else {
@@ -245,7 +230,7 @@ func (r *MantleRestoreReconciler) cloneImageFromBackup(ctx context.Context, rest
 	}
 
 	// create a clone image from the backup
-	return r.ceph.RBDClone(restore.Status.Pool, bkImage, backup.Name, r.restoringRBDImageName(restore), features)
+	return r.ceph.RBDClone(pool, bkImage, backup.Name, r.restoringRBDImageName(restore), features)
 }
 
 func (r *MantleRestoreReconciler) createOrUpdateRestoringPV(ctx context.Context, restore *mantlev1.MantleRestore, backup *mantlev1.MantleBackup) error {

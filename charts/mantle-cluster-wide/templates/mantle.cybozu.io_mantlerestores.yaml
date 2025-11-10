@@ -112,10 +112,6 @@ spec:
                   - type
                   type: object
                 type: array
-              pool:
-                description: '''pool'' specifies pool name the volumes are restored
-                  to'
-                type: string
             type: object
         type: object
     served: true

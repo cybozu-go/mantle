@@ -412,7 +412,6 @@ func (test *restoreTest) testCloneImageFromBackup() {
 		},
 		Status: mantlev1.MantleRestoreStatus{
 			ClusterID: cephCluster1Namespace,
-			Pool:      test.poolName,
 		},
 	}
 	var info *rbdInfo
