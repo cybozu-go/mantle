@@ -11,7 +11,7 @@ MINIKUBE_VERSION := v1.36.0
 # https://github.com/protocolbuffers/protobuf/releases
 PROTOC_VERSION := 31.1
 # https://github.com/rook/rook/releases
-ROOK_CHART_VERSION := v1.17.3
+ROOK_CHART_VERSION := v1.18.6
 # https://github.com/golangci/golangci-lint/releases
 GOLANGCI_LINT_VERSION := v2.1.6
 # https://github.com/cert-manager/cert-manager/releases
