@@ -1918,11 +1918,24 @@ func (r *MantleBackupReconciler) reconcileZeroOutJob(
 		return ctrl.Result{}, nil
 	}
 
-	if err := r.createOrUpdateZeroOutPV(ctx, backup, snapshotTarget.pv); err != nil {
+	if err := r.createOrUpdateStaticPV(
+		ctx,
+		snapshotTarget.pv,
+		snapshotTarget.pv.Spec.CSI.VolumeAttributes["imageName"],
+		snapshotTarget.pv.Spec.Capacity,
+		MakeZeroOutPVName(backup),
+		labelComponentZeroOutVolume,
+	); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	if err := r.createOrUpdateZeroOutPVC(ctx, backup, snapshotTarget.pvc); err != nil {
+	if err := r.createOrUpdateStaticPVC(
+		ctx,
+		MakeZeroOutPVCName(backup),
+		MakeZeroOutPVName(backup),
+		labelComponentZeroOutVolume,
+		snapshotTarget.pvc.Spec.Resources,
+	); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -1940,24 +1953,40 @@ func (r *MantleBackupReconciler) reconcileZeroOutJob(
 	return requeueReconciliation(), nil
 }
 
-func (r *MantleBackupReconciler) createOrUpdateZeroOutPV(
+// createOrUpdateStaticPV creates or updates a static PersistentVolume (PV) resource.
+// It copies relevant CSI and metadata fields from the basePV, sets the provided volume handle,
+// capacity, and component label, and ensures the PV is configured for static provisioning.
+//
+// Parameters:
+//
+//	ctx           - context for the API calls
+//	basePV        - source PV to copy CSI and metadata fields from
+//	volume        - volume handle to assign to the new PV
+//	capacity      - resource capacity for the PV
+//	newPvName     - name for the new or updated PV
+//	componentName - label value for the component
+//
+// Returns an error if creation or update fails.
+func (r *MantleBackupReconciler) createOrUpdateStaticPV(
 	ctx context.Context,
-	backup *mantlev1.MantleBackup,
-	targetPV *corev1.PersistentVolume,
+	basePV *corev1.PersistentVolume,
+	volume string,
+	capacity corev1.ResourceList,
+	newPvName, componentName string,
 ) error {
 	var pv corev1.PersistentVolume
-	pv.SetName(MakeZeroOutPVName(backup))
+	pv.SetName(newPvName)
 	_, err := ctrl.CreateOrUpdate(ctx, r.Client, &pv, func() error {
 		labels := pv.GetLabels()
 		if labels == nil {
 			labels = map[string]string{}
 		}
 		labels["app.kubernetes.io/name"] = labelAppNameValue
-		labels["app.kubernetes.io/component"] = labelComponentZeroOutVolume
+		labels["app.kubernetes.io/component"] = componentName
 		pv.SetLabels(labels)
 
 		pv.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
-		pv.Spec.Capacity = targetPV.Spec.Capacity
+		pv.Spec.Capacity = capacity
 		pv.Spec.PersistentVolumeReclaimPolicy = corev1.PersistentVolumeReclaimRetain
 		pv.Spec.StorageClassName = ""
 
@@ -1967,18 +1996,18 @@ func (r *MantleBackupReconciler) createOrUpdateZeroOutPV(
 		if pv.Spec.CSI == nil {
 			pv.Spec.CSI = &corev1.CSIPersistentVolumeSource{}
 		}
-		pv.Spec.CSI.Driver = targetPV.Spec.CSI.Driver
-		pv.Spec.CSI.ControllerExpandSecretRef = targetPV.Spec.CSI.ControllerExpandSecretRef
-		pv.Spec.CSI.NodeStageSecretRef = targetPV.Spec.CSI.NodeStageSecretRef
-		pv.Spec.CSI.VolumeHandle = targetPV.Spec.CSI.VolumeAttributes["imageName"]
+		pv.Spec.CSI.Driver = basePV.Spec.CSI.Driver
+		pv.Spec.CSI.ControllerExpandSecretRef = basePV.Spec.CSI.ControllerExpandSecretRef
+		pv.Spec.CSI.NodeStageSecretRef = basePV.Spec.CSI.NodeStageSecretRef
+		pv.Spec.CSI.VolumeHandle = volume
 
 		if pv.Spec.CSI.VolumeAttributes == nil {
 			pv.Spec.CSI.VolumeAttributes = map[string]string{}
 		}
-		pv.Spec.CSI.VolumeAttributes["clusterID"] = targetPV.Spec.CSI.VolumeAttributes["clusterID"]
-		pv.Spec.CSI.VolumeAttributes["imageFeatures"] = targetPV.Spec.CSI.VolumeAttributes["imageFeatures"]
-		pv.Spec.CSI.VolumeAttributes["imageFormat"] = targetPV.Spec.CSI.VolumeAttributes["imageFormat"]
-		pv.Spec.CSI.VolumeAttributes["pool"] = targetPV.Spec.CSI.VolumeAttributes["pool"]
+		pv.Spec.CSI.VolumeAttributes["clusterID"] = basePV.Spec.CSI.VolumeAttributes["clusterID"]
+		pv.Spec.CSI.VolumeAttributes["imageFeatures"] = basePV.Spec.CSI.VolumeAttributes["imageFeatures"]
+		pv.Spec.CSI.VolumeAttributes["imageFormat"] = basePV.Spec.CSI.VolumeAttributes["imageFormat"]
+		pv.Spec.CSI.VolumeAttributes["pool"] = basePV.Spec.CSI.VolumeAttributes["pool"]
 		pv.Spec.CSI.VolumeAttributes["staticVolume"] = "true"
 
 		return nil
@@ -1986,13 +2015,26 @@ func (r *MantleBackupReconciler) createOrUpdateZeroOutPV(
 	return err
 }
 
-func (r *MantleBackupReconciler) createOrUpdateZeroOutPVC(
+// createOrUpdateStaticPVC creates or updates a PersistentVolumeClaim (PVC) for binding to a static PersistentVolume (PV).
+// This function configures the PVC to reference the specified static PV, sets labels, access modes, storage class,
+// and resource requirements for static volume provisioning.
+//
+// Parameters:
+//
+//	ctx           - context for the API calls
+//	pvcName       - name for the new or updated PVC
+//	pvName        - name of the static PV to bind to
+//	componentName - label value for the component
+//	resources     - resource requirements for the PVC
+//
+// Returns an error if creation or update fails.
+func (r *MantleBackupReconciler) createOrUpdateStaticPVC(
 	ctx context.Context,
-	backup *mantlev1.MantleBackup,
-	targetPVC *corev1.PersistentVolumeClaim,
+	pvcName, pvName, componentName string,
+	resources corev1.VolumeResourceRequirements,
 ) error {
 	var pvc corev1.PersistentVolumeClaim
-	pvc.SetName(MakeZeroOutPVCName(backup))
+	pvc.SetName(pvcName)
 	pvc.SetNamespace(r.managedCephClusterID)
 	_, err := ctrl.CreateOrUpdate(ctx, r.Client, &pvc, func() error {
 		labels := pvc.GetLabels()
@@ -2000,14 +2042,14 @@ func (r *MantleBackupReconciler) createOrUpdateZeroOutPVC(
 			labels = map[string]string{}
 		}
 		labels["app.kubernetes.io/name"] = labelAppNameValue
-		labels["app.kubernetes.io/component"] = labelComponentZeroOutVolume
+		labels["app.kubernetes.io/component"] = componentName
 		pvc.SetLabels(labels)
 
 		storageClassName := ""
 		pvc.Spec.StorageClassName = &storageClassName
 		pvc.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
-		pvc.Spec.Resources = targetPVC.Spec.Resources
-		pvc.Spec.VolumeName = MakeZeroOutPVName(backup)
+		pvc.Spec.Resources = resources
+		pvc.Spec.VolumeName = pvName
 
 		volumeMode := corev1.PersistentVolumeBlock
 		pvc.Spec.VolumeMode = &volumeMode

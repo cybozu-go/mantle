@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/cybozu-go/mantle/internal/ceph"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -18,6 +20,68 @@ import (
 )
 
 var errEmptyClusterID error = errors.New("cluster ID is empty")
+
+// createCloneByPV creates a clone RBD image from a snapshot of the volume bound to the given PersistentVolume (PV).
+//
+// This function checks if the clone image already exists in the Ceph pool:
+//   - If the clone exists and is a clone of the specified snapshot, it does nothing and returns nil.
+//   - If the clone exists but is not a clone of the specified snapshot, it returns an error.
+//   - If the clone does not exist, it creates a new clone image from the snapshot using the specified image features.
+//
+// Parameters:
+//
+//	ctx         - context for logging and API calls
+//	cephCmd     - Ceph command interface for RBD operations
+//	pv          - PersistentVolume object containing CSI and image attributes
+//	snapshotName- name of the snapshot to clone from
+//	cloneName   - name for the new clone image
+//
+// Returns an error if required attributes are missing, if Ceph operations fail, or if a conflicting clone image exists.
+func createCloneByPV(ctx context.Context, cephCmd ceph.CephCmd, pv *corev1.PersistentVolume, snapshotName, cloneName string) error {
+	logger := log.FromContext(ctx)
+
+	bkImage := pv.Spec.CSI.VolumeAttributes["imageName"]
+	if bkImage == "" {
+		return fmt.Errorf("imageName not found in PV manifest")
+	}
+	pool := pv.Spec.CSI.VolumeAttributes["pool"]
+	if pool == "" {
+		return fmt.Errorf("pool not found in PV manifest")
+	}
+
+	images, err := cephCmd.RBDLs(pool)
+	if err != nil {
+		return fmt.Errorf("failed to list RBD images: %w", err)
+	}
+
+	// check if the image already exists
+	if slices.Contains(images, cloneName) {
+		info, err := cephCmd.RBDInfo(pool, cloneName)
+		if err != nil {
+			return fmt.Errorf("failed to get RBD info: %w", err)
+		}
+		if info.Parent == nil {
+			return fmt.Errorf("failed to get RBD info: parent field is empty")
+		}
+
+		if info.Parent.Pool == pool && info.Parent.Image == bkImage && info.Parent.Snapshot == snapshotName {
+			logger.Info("image already exists", "image", cloneName)
+			return nil
+		}
+		// If the clone image already exists but is not a clone of the snapshot, it returns an error.
+		return fmt.Errorf("image already exists but not a clone of the backup: %s", cloneName)
+	}
+
+	features := pv.Spec.CSI.VolumeAttributes["imageFeatures"]
+	if features == "" {
+		features = "deep-flatten"
+	} else {
+		features += ",deep-flatten"
+	}
+
+	// create a clone image from the backup
+	return cephCmd.RBDClone(pool, bkImage, snapshotName, cloneName, features)
+}
 
 func getCephClusterIDFromSCName(ctx context.Context, k8sClient client.Client, storageClassName string) (string, error) {
 	var storageClass storagev1.StorageClass
