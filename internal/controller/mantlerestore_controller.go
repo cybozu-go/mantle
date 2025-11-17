@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"slices"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/ceph"
@@ -183,54 +182,13 @@ func (r *MantleRestoreReconciler) restoringPVName(restore *mantlev1.MantleRestor
 }
 
 func (r *MantleRestoreReconciler) cloneImageFromBackup(ctx context.Context, restore *mantlev1.MantleRestore, backup *mantlev1.MantleBackup) error {
-	logger := log.FromContext(ctx)
 	pv := corev1.PersistentVolume{}
 	err := json.Unmarshal([]byte(backup.Status.PVManifest), &pv)
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal PV manifest: %w", err)
 	}
 
-	bkImage := pv.Spec.CSI.VolumeAttributes["imageName"]
-	if bkImage == "" {
-		return fmt.Errorf("imageName not found in PV manifest")
-	}
-	pool := pv.Spec.CSI.VolumeAttributes["pool"]
-	if pool == "" {
-		return fmt.Errorf("pool not found in PV manifest")
-	}
-
-	images, err := r.ceph.RBDLs(pool)
-	if err != nil {
-		return fmt.Errorf("failed to list RBD images: %w", err)
-	}
-
-	// check if the image already exists
-	if slices.Contains(images, r.restoringRBDImageName(restore)) {
-		info, err := r.ceph.RBDInfo(pool, r.restoringRBDImageName(restore))
-		if err != nil {
-			return fmt.Errorf("failed to get RBD info: %w", err)
-		}
-		if info.Parent == nil {
-			return fmt.Errorf("failed to get RBD info: parent field is empty")
-		}
-
-		if info.Parent.Pool == pool && info.Parent.Image == bkImage && info.Parent.Snapshot == backup.Name {
-			logger.Info("image already exists", "image", r.restoringRBDImageName(restore))
-			return nil
-		} else {
-			return fmt.Errorf("image already exists but not a clone of the backup: %s", r.restoringRBDImageName(restore))
-		}
-	}
-
-	features := pv.Spec.CSI.VolumeAttributes["imageFeatures"]
-	if features == "" {
-		features = "deep-flatten"
-	} else {
-		features += ",deep-flatten"
-	}
-
-	// create a clone image from the backup
-	return r.ceph.RBDClone(pool, bkImage, backup.Name, r.restoringRBDImageName(restore), features)
+	return createCloneByPV(ctx, r.ceph, &pv, backup.Name, r.restoringRBDImageName(restore))
 }
 
 func (r *MantleRestoreReconciler) createOrUpdateRestoringPV(ctx context.Context, restore *mantlev1.MantleRestore, backup *mantlev1.MantleBackup) error {
