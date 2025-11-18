@@ -59,10 +59,15 @@ type MantleBackupStatus struct {
 const (
 	BackupConditionReadyToUse     = "ReadyToUse"
 	BackupConditionSyncedToRemote = "SyncedToRemote"
+	BackupConditionVerified       = "Verified"
 
 	// Reasons for ConditionReadyToUse
-	BackupReasonNone                 = "NoProblem"
-	BackupReasonFailedToCreateBackup = "FailedToCreateBackup"
+	ConditionReasonReadyToUseNoProblem = "NoProblem"
+	// Reasons for ConditionSyncedToRemote
+	ConditionReasonSyncedToRemoteNoProblem = "NoProblem"
+	// Reasons for ConditionVerified
+	ConditionReasonVerifiedSuccess = "VerificationJobSuccess"
+	ConditionReasonVerifiedFailed  = "VerificationJobFailed"
 )
 
 //+kubebuilder:object:root=true
