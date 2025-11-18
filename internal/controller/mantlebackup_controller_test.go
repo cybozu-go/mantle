@@ -698,7 +698,7 @@ var _ = Describe("MantleBackup controller", func() {
 				meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
 					Type:   mantlev1.BackupConditionSyncedToRemote,
 					Status: metav1.ConditionTrue,
-					Reason: mantlev1.BackupReasonNone,
+					Reason: mantlev1.ConditionReasonReadyToUseNoProblem,
 				})
 				return nil
 			})
@@ -710,7 +710,7 @@ var _ = Describe("MantleBackup controller", func() {
 				meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
 					Type:   mantlev1.BackupConditionReadyToUse,
 					Status: metav1.ConditionTrue,
-					Reason: mantlev1.BackupReasonNone,
+					Reason: mantlev1.ConditionReasonReadyToUseNoProblem,
 				})
 			}
 
