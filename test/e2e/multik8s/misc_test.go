@@ -261,6 +261,7 @@ s5cmd(){
 
 			By("waiting for the part=1 Job to fail")
 			var backup *mantlev1.MantleBackup
+			var debugJobs []byte // for debugging
 			Eventually(ctx, func(g Gomega) {
 				primaryMB, err := GetMB(PrimaryK8sCluster, namespace, backupName)
 				g.Expect(err).NotTo(HaveOccurred())
@@ -270,10 +271,12 @@ s5cmd(){
 				g.Expect(err).NotTo(HaveOccurred())
 				jobName := makeJobName(backup, partNumFailed)
 
+				debugJobs, _, _ = Kubectl(clusterOfJob, nil, "get", "jobs", "-n", CephClusterNamespace)
+
 				job, err := GetJob(clusterOfJob, CephClusterNamespace, jobName)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete)).To(BeFalse())
-			}).Should(Succeed())
+			}).Should(Succeed(), "jobs:\n", string(debugJobs))
 
 			By("ensuring the part=1 Job continues to fail")
 			Consistently(ctx, func(g Gomega) {

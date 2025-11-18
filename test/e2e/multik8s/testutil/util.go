@@ -213,14 +213,15 @@ func ApplyRBDPoolAndSCTemplate(clusterNo int, namespace string) error { //nolint
 
 func GetObject[T any](clusterNo int, kind, namespace, name string) (*T, error) {
 	var stdout []byte
+	var stderr []byte
 	var err error
 	if namespace == "" {
-		stdout, _, err = Kubectl(clusterNo, nil, "get", kind, name, "-o", "json")
+		stdout, stderr, err = Kubectl(clusterNo, nil, "get", kind, name, "-o", "json")
 	} else {
-		stdout, _, err = Kubectl(clusterNo, nil, "get", kind, "-n", namespace, name, "-o", "json")
+		stdout, stderr, err = Kubectl(clusterNo, nil, "get", kind, "-n", namespace, name, "-o", "json")
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("kubectl get %s failed. stderr: %s, err: %w", kind, string(stderr), err)
 	}
 
 	var obj T
@@ -478,11 +479,13 @@ func WriteRandomDataToPV(ctx SpecContext, cluster int, namespace, pvcName string
 	Eventually(ctx, func() error {
 		return ApplyWriteJobTemplate(cluster, namespace, writeJobName, pvcName)
 	}).Should(Succeed())
+	var debugJob string // for debugging
 	Eventually(ctx, func(g Gomega) {
 		job, err := GetJob(cluster, namespace, writeJobName)
 		g.Expect(err).NotTo(HaveOccurred())
+		debugJob = job.String() // for debugging
 		g.Expect(IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete)).To(BeTrue())
-	}).Should(Succeed())
+	}).Should(Succeed(), "Failed job:"+debugJob)
 	stdout, _, err := Kubectl(cluster, nil, "logs", "-n", namespace, "job/"+writeJobName)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(len(stdout)).NotTo(Equal(0))
