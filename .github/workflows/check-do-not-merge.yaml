@@ -1,0 +1,17 @@
+name: Check Do Not Merge Label
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+jobs:
+  check-label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for do-not-merge label
+        run: |
+          if [[ "${{ contains(github.event.pull_request.labels.*.name, 'do-not-merge') }}" == "true" ]]; then
+            echo "::error::This PR has the 'do-not-merge' label and cannot be merged"
+            exit 1
+          fi
+          echo "No blocking labels found"
