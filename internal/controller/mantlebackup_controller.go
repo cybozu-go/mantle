@@ -655,6 +655,7 @@ func (r *MantleBackupReconciler) verify(
 		},
 		makeVerifyPVName(backup),
 		labelComponentVerifyVolume,
+		true,
 	); err != nil {
 		return fmt.Errorf("failed to create a static PV with the clone: %w", err)
 	}
@@ -2068,6 +2069,7 @@ func (r *MantleBackupReconciler) reconcileZeroOutJob(
 		snapshotTarget.pv.Spec.Capacity,
 		MakeZeroOutPVName(backup),
 		labelComponentZeroOutVolume,
+		false,
 	); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -2108,6 +2110,7 @@ func (r *MantleBackupReconciler) reconcileZeroOutJob(
 //	capacity      - resource capacity for the PV
 //	newPvName     - name for the new or updated PV
 //	componentName - label value for the component
+//	addFlatten    - whether to add deep-flatten feature to the volume attributes
 //
 // Returns an error if creation or update fails.
 func (r *MantleBackupReconciler) createOrUpdateStaticPV(
@@ -2116,6 +2119,7 @@ func (r *MantleBackupReconciler) createOrUpdateStaticPV(
 	volume string,
 	capacity corev1.ResourceList,
 	newPvName, componentName string,
+	addFlatten bool,
 ) error {
 	var pv corev1.PersistentVolume
 	pv.SetName(newPvName)
@@ -2145,8 +2149,16 @@ func (r *MantleBackupReconciler) createOrUpdateStaticPV(
 		if pv.Spec.CSI.VolumeAttributes == nil {
 			pv.Spec.CSI.VolumeAttributes = map[string]string{}
 		}
+		feature := basePV.Spec.CSI.VolumeAttributes["imageFeatures"]
+		if addFlatten {
+			if len(feature) > 0 {
+				feature = feature + ",deep-flatten"
+			} else {
+				feature = "deep-flatten"
+			}
+		}
 		pv.Spec.CSI.VolumeAttributes["clusterID"] = basePV.Spec.CSI.VolumeAttributes["clusterID"]
-		pv.Spec.CSI.VolumeAttributes["imageFeatures"] = basePV.Spec.CSI.VolumeAttributes["imageFeatures"]
+		pv.Spec.CSI.VolumeAttributes["imageFeatures"] = feature
 		pv.Spec.CSI.VolumeAttributes["imageFormat"] = basePV.Spec.CSI.VolumeAttributes["imageFormat"]
 		pv.Spec.CSI.VolumeAttributes["pool"] = basePV.Spec.CSI.VolumeAttributes["pool"]
 		pv.Spec.CSI.VolumeAttributes["staticVolume"] = "true"
@@ -2304,7 +2316,7 @@ func (r *MantleBackupReconciler) createOrUpdateVerifyJob(ctx context.Context, jo
 				Name:  "verify",
 				Image: r.podImage,
 				Command: []string{
-					"/user/sbin/e2fsck",
+					"/usr/sbin/e2fsck",
 					"-fn",
 					"/dev/verify-rbd",
 				},

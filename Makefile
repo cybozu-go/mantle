@@ -81,6 +81,7 @@ vet: ## Run go vet against code.
 
 .PHONY: mock
 mock: mockgen
+	$(MOCKGEN) -source=internal/ceph/ceph.go -destination=internal/ceph/ceph_mock.go -package=ceph
 	$(MOCKGEN) -source=internal/ceph/command.go -destination=internal/ceph/command_mock.go -package=ceph
 	$(MOCKGEN) -source=pkg/controller/proto/controller_grpc.pb.go -destination=pkg/controller/proto/controller_grpc.pb_mock.go -package=proto
 	$(MOCKGEN) -source=internal/controller/internal/objectstorage/objectstorage.go -destination=internal/controller/internal/objectstorage/objectstorage_mock.go -package=objectstorage
