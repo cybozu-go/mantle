@@ -2417,3 +2417,316 @@ var _ = Describe("import", func() {
 		)
 	})
 })
+
+var _ = Describe("MantleBackupReconciler::verify", func() {
+	Context("verify", func() {
+		podImage := "test-mantle-backup-pod-image"
+		var podNamespace string
+		var mgrUtil testutil.ManagerUtil
+		var reconciler *MantleBackupReconciler
+		var ns string
+		var backupSuccess *mantlev1.MantleBackup // for successful verification
+		var backupFail *mantlev1.MantleBackup    // for failed verification
+		var pv *corev1.PersistentVolume
+		var pvc *corev1.PersistentVolumeClaim
+
+		checkPV := func(ctx context.Context, backup *mantlev1.MantleBackup, pvSrc *corev1.PersistentVolume) {
+			GinkgoHelper()
+			var pv corev1.PersistentVolume
+			err := k8sClient.Get(ctx, types.NamespacedName{
+				Name: makeVerifyPVName(backup),
+			}, &pv)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(pv.GetLabels()["app.kubernetes.io/name"]).To(Equal(labelAppNameValue))
+			Expect(pv.GetLabels()["app.kubernetes.io/component"]).To(Equal(labelComponentVerifyVolume))
+			Expect(pv.Spec).To(Equal(corev1.PersistentVolumeSpec{
+				AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+				Capacity:    pvSrc.Spec.Capacity,
+				PersistentVolumeSource: corev1.PersistentVolumeSource{
+					CSI: &corev1.CSIPersistentVolumeSource{
+						Driver:                    pvSrc.Spec.CSI.Driver,
+						ControllerExpandSecretRef: pvSrc.Spec.CSI.ControllerPublishSecretRef,
+						NodeStageSecretRef:        pvSrc.Spec.CSI.NodeStageSecretRef,
+						VolumeAttributes: map[string]string{
+							"clusterID":     pvSrc.Spec.CSI.VolumeAttributes["clusterID"],
+							"imageFeatures": pvSrc.Spec.CSI.VolumeAttributes["imageFeatures"] + ",deep-flatten",
+							"imageFormat":   pvSrc.Spec.CSI.VolumeAttributes["imageFormat"],
+							"pool":          pvSrc.Spec.CSI.VolumeAttributes["pool"],
+							"staticVolume":  "true",
+						},
+						VolumeHandle: makeVerifyImageName(backup),
+					},
+				},
+				PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimRetain,
+				VolumeMode:                    ptr.To(corev1.PersistentVolumeBlock),
+				StorageClassName:              "",
+			}))
+		}
+
+		checkPVC := func(ctx context.Context, backup *mantlev1.MantleBackup, pvcSrc *corev1.PersistentVolumeClaim) {
+			GinkgoHelper()
+			var pvc corev1.PersistentVolumeClaim
+			err := k8sClient.Get(ctx, types.NamespacedName{
+				Name:      makeVerifyPVCName(backup),
+				Namespace: podNamespace,
+			}, &pvc)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(pvc.GetLabels()["app.kubernetes.io/name"]).To(Equal(labelAppNameValue))
+			Expect(pvc.GetLabels()["app.kubernetes.io/component"]).To(Equal(labelComponentVerifyVolume))
+			Expect(pvc.Spec).To(Equal(corev1.PersistentVolumeClaimSpec{
+				AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+				Resources:        pvcSrc.Spec.Resources,
+				StorageClassName: ptr.To(""),
+				VolumeMode:       ptr.To(corev1.PersistentVolumeBlock),
+				VolumeName:       makeVerifyPVName(backup),
+			}))
+		}
+
+		checkJobSpec := func(ctx context.Context, backup *mantlev1.MantleBackup) *batchv1.Job {
+			GinkgoHelper()
+			var job batchv1.Job
+			err := k8sClient.Get(ctx, types.NamespacedName{
+				Name:      makeVerifyJobName(backup),
+				Namespace: podNamespace,
+			}, &job)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(job.GetLabels()["app.kubernetes.io/name"]).To(Equal(labelAppNameValue))
+			Expect(job.GetLabels()["app.kubernetes.io/component"]).To(Equal(labelComponentVerifyJob))
+			Expect(job.Spec.BackoffLimit).To(Equal(ptr.To(int32(65535))))
+			Expect(job.Spec.Template.Spec.Containers).To(HaveLen(1))
+			// ignore fields set by the system
+			container := job.Spec.Template.Spec.Containers[0].DeepCopy()
+			container.TerminationMessagePath = ""
+			container.TerminationMessagePolicy = ""
+			Expect(*container).To(Equal(corev1.Container{
+				Name:            "verify",
+				Command:         []string{"/usr/sbin/e2fsck", "-fn", "/dev/verify-rbd"},
+				Image:           podImage,
+				ImagePullPolicy: corev1.PullIfNotPresent,
+				SecurityContext: &corev1.SecurityContext{
+					Privileged: ptr.To(true),
+					RunAsGroup: ptr.To(int64(0)),
+					RunAsUser:  ptr.To(int64(0)),
+				},
+				VolumeDevices: []corev1.VolumeDevice{
+					{
+						Name:       "verify-rbd",
+						DevicePath: "/dev/verify-rbd",
+					},
+				},
+			}))
+			Expect(job.Spec.Template.Spec.RestartPolicy).To(Equal(corev1.RestartPolicyNever))
+			Expect(job.Spec.Template.Spec.Volumes).To(HaveLen(1))
+			Expect(job.Spec.Template.Spec.Volumes[0]).To(Equal(corev1.Volume{
+				Name: "verify-rbd",
+				VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: makeVerifyPVCName(backup),
+					},
+				},
+			}))
+			Expect(job.Spec.PodFailurePolicy).To(Equal(&batchv1.PodFailurePolicy{
+				Rules: []batchv1.PodFailurePolicyRule{
+					{
+						Action: batchv1.PodFailurePolicyActionFailJob,
+						OnExitCodes: &batchv1.PodFailurePolicyOnExitCodesRequirement{
+							ContainerName: ptr.To("verify"),
+							Operator:      batchv1.PodFailurePolicyOnExitCodesOpIn,
+							Values:        []int32{1, 2, 3, 4, 5, 6, 7},
+						},
+					},
+				},
+			},
+			))
+
+			return &job
+		}
+
+		getVerifyCondition := func(ctx context.Context, backup *mantlev1.MantleBackup) *metav1.ConditionStatus {
+			GinkgoHelper()
+
+			var currentBackup mantlev1.MantleBackup
+			err := k8sClient.Get(ctx, types.NamespacedName{
+				Name:      backup.GetName(),
+				Namespace: backup.GetNamespace(),
+			}, &currentBackup)
+			Expect(err).NotTo(HaveOccurred())
+
+			for _, cond := range currentBackup.Status.Conditions {
+				if cond.Type == mantlev1.BackupConditionVerified {
+					return &cond.Status
+				}
+			}
+			return nil
+		}
+
+		It("setup", func(ctx SpecContext) {
+			podNamespace = resMgr.ClusterID
+			mgrUtil = testutil.NewManagerUtil(context.Background(), cfg, scheme.Scheme)
+			reconciler = NewMantleBackupReconciler(
+				mgrUtil.GetManager().GetClient(),
+				mgrUtil.GetManager().GetScheme(),
+				podNamespace,
+				"",  // unused
+				nil, // unused
+				podImage,
+				"",                  // unused
+				nil,                 // unused
+				nil,                 // unused
+				resource.Quantity{}, // unused
+			)
+			reconciler.ceph = testutil.NewFakeRBD()
+			// Don't execute reconciler by manager since we want to call verify method directly.
+			// err := reconciler.SetupWithManager(mgrUtil.GetManager())
+			// Expect(err).NotTo(HaveOccurred())
+			mgrUtil.Start()
+		})
+
+		It("creates resources", func(ctx SpecContext) {
+			var err error
+			ns = resMgr.CreateNamespace()
+			pv, pvc, err = resMgr.CreateUniquePVAndPVC(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			backupSuccess, err = resMgr.CreateUniqueBackupFor(ctx, pvc)
+			Expect(err).NotTo(HaveOccurred())
+			backupFail, err = resMgr.CreateUniqueBackupFor(ctx, pvc)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Indicates a backup has been taken
+			pvcJson, err := json.Marshal(pvc)
+			Expect(err).NotTo(HaveOccurred())
+			pvJson, err := json.Marshal(pv)
+			Expect(err).NotTo(HaveOccurred())
+			size, success := pv.Spec.Capacity.Storage().AsInt64()
+			for _, backup := range []*mantlev1.MantleBackup{backupSuccess, backupFail} {
+				backup.Status.PVCManifest = string(pvcJson)
+				backup.Status.PVManifest = string(pvJson)
+				Expect(success).To(BeTrue())
+				backup.Status.SnapSize = &size
+			}
+		})
+
+		It("generates correct names", func(ctx SpecContext) {
+			for _, backup := range []*mantlev1.MantleBackup{backupSuccess, backupFail} {
+				Expect(makeVerifyImageName(backup)).To(Equal(mantleVerifyImagePrefix + string(backup.GetUID())))
+				Expect(makeVerifyJobName(backup)).To(Equal(mantleVerifyJobPrefix + string(backup.GetUID())))
+				Expect(makeVerifyPVName(backup)).To(Equal(mantleVerifyPVPrefix + string(backup.GetUID())))
+				Expect(makeVerifyPVCName(backup)).To(Equal(mantleVerifyPVCPrefix + string(backup.GetUID())))
+			}
+		})
+
+		It("should create PV, PVC, and Job by the first verify process", func(ctx SpecContext) {
+			err := reconciler.verify(ctx, backupSuccess)
+			Expect(err).NotTo(HaveOccurred())
+
+			// check resources created by verify method
+			checkPV(ctx, backupSuccess, pv)
+			checkPVC(ctx, backupSuccess, pvc)
+			job := checkJobSpec(ctx, backupSuccess)
+			// Job should not be completed yet
+			Expect(job.Status.Conditions).To(HaveLen(0))
+			// `verified` field in status should not be set yet
+			Expect(getVerifyCondition(ctx, backupSuccess)).To(BeNil())
+		})
+
+		It("should mark verified when Job completes successfully", func(ctx SpecContext) {
+			// Update the Job to Completed
+			var currentJob batchv1.Job
+			err := k8sClient.Get(ctx, types.NamespacedName{
+				Name:      makeVerifyJobName(backupSuccess),
+				Namespace: podNamespace,
+			}, &currentJob)
+			Expect(err).NotTo(HaveOccurred())
+
+			updatedJob := currentJob.DeepCopy()
+			// To avoid validation error
+			updatedJob.Status.StartTime = ptr.To(metav1.NewTime(time.Now()))
+			updatedJob.Status.CompletionTime = ptr.To(metav1.NewTime(time.Now()))
+			if updatedJob.Status.Conditions == nil {
+				updatedJob.Status.Conditions = []batchv1.JobCondition{}
+			}
+			updatedJob.Status.Conditions = append(updatedJob.Status.Conditions,
+				batchv1.JobCondition{ // To avoid validation error
+					Type:               batchv1.JobSuccessCriteriaMet,
+					Status:             corev1.ConditionTrue,
+					Message:            "dummy",
+					Reason:             "dummy",
+					LastTransitionTime: metav1.NewTime(time.Now()),
+				},
+				batchv1.JobCondition{ // The important one
+					Type:               batchv1.JobComplete,
+					Status:             corev1.ConditionTrue,
+					Message:            "dummy",
+					Reason:             "dummy",
+					LastTransitionTime: metav1.NewTime(time.Now()),
+				})
+			err = k8sClient.Status().Patch(ctx, updatedJob, client.MergeFrom(&currentJob))
+			Expect(err).NotTo(HaveOccurred())
+
+			err = reconciler.verify(ctx, backupSuccess)
+			Expect(err).NotTo(HaveOccurred())
+			checkPV(ctx, backupSuccess, pv)
+			checkPVC(ctx, backupSuccess, pvc)
+			checkJobSpec(ctx, backupSuccess)
+			// `verified` field in status should be True
+			condStatus := getVerifyCondition(ctx, backupSuccess)
+			Expect(condStatus).NotTo(BeNil())
+			Expect(*condStatus).To(Equal(metav1.ConditionTrue))
+		})
+
+		It("should mark not verified when Job fails", func(ctx SpecContext) {
+			err := reconciler.verify(ctx, backupFail)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Update the Job to Failed
+			var currentJob batchv1.Job
+			err = k8sClient.Get(ctx, types.NamespacedName{
+				Name:      makeVerifyJobName(backupFail),
+				Namespace: podNamespace,
+			}, &currentJob)
+			Expect(err).NotTo(HaveOccurred())
+
+			updatedJob := currentJob.DeepCopy()
+			// To avoid validation error
+			updatedJob.Status.StartTime = ptr.To(metav1.NewTime(time.Now()))
+			if updatedJob.Status.Conditions == nil {
+				updatedJob.Status.Conditions = []batchv1.JobCondition{}
+			}
+			updatedJob.Status.Conditions = append(updatedJob.Status.Conditions,
+				batchv1.JobCondition{ // To avoid validation error
+					Type:               batchv1.JobFailureTarget,
+					Status:             corev1.ConditionTrue,
+					Message:            "dummy",
+					Reason:             "dummy",
+					LastTransitionTime: metav1.NewTime(time.Now()),
+				},
+				batchv1.JobCondition{ // The important one
+					Type:               batchv1.JobFailed,
+					Status:             corev1.ConditionTrue,
+					Message:            "dummy",
+					Reason:             "dummy",
+					LastTransitionTime: metav1.NewTime(time.Now()),
+				})
+			err = k8sClient.Status().Patch(ctx, updatedJob, client.MergeFrom(&currentJob))
+			Expect(err).NotTo(HaveOccurred())
+
+			err = reconciler.verify(ctx, backupFail)
+			Expect(err).NotTo(HaveOccurred())
+			checkPV(ctx, backupFail, pv)
+			checkPVC(ctx, backupFail, pvc)
+			checkJobSpec(ctx, backupFail)
+			// `verified` field in status should be False
+			condStatus := getVerifyCondition(ctx, backupFail)
+			Expect(condStatus).NotTo(BeNil())
+			Expect(*condStatus).To(Equal(metav1.ConditionFalse))
+		})
+
+		It("quit", func(ctx SpecContext) {
+			err := mgrUtil.Stop()
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+})
