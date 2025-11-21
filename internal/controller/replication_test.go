@@ -16,6 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/utils/ptr"
 )
 
 const (
@@ -87,7 +88,6 @@ func (test *replicationUnitTest) testCreateUpdatePVCAfterResizing() {
 	It("calls CreateOrUpdatePVC twice with the different PVC sizes and should not update the PVC size", func() {
 		ctx := context.Background()
 
-		scName := "test-sc"
 		srcPVC := &corev1.PersistentVolumeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-pvc",
@@ -104,7 +104,7 @@ func (test *replicationUnitTest) testCreateUpdatePVCAfterResizing() {
 						corev1.ResourceStorage: resource.MustParse("1Gi"),
 					},
 				},
-				StorageClassName: &scName,
+				StorageClassName: ptr.To("test-sc"),
 			},
 		}
 
