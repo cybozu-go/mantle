@@ -8,6 +8,7 @@ import (
 	"github.com/cybozu-go/mantle/test/util"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 )
 
 func Rbd(args ...string) ([]byte, error) {
@@ -82,7 +83,6 @@ func zeroOutVolume(namespace, pvcName string) error {
 	zeroOutPVCName := util.GetUniqueName("zeroout-pvc-")
 	zeroOutDeployName := util.GetUniqueName("zeroout-pod-")
 
-	volumeMode := corev1.PersistentVolumeBlock
 	zeroOutPV := corev1.PersistentVolume{
 		TypeMeta: origPV.TypeMeta,
 		ObjectMeta: v1.ObjectMeta{
@@ -94,7 +94,7 @@ func zeroOutVolume(namespace, pvcName string) error {
 			},
 			Capacity:                      origPV.Spec.Capacity,
 			PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimRetain,
-			VolumeMode:                    &volumeMode,
+			VolumeMode:                    ptr.To(corev1.PersistentVolumeBlock),
 			StorageClassName:              "",
 		},
 	}
@@ -120,7 +120,6 @@ func zeroOutVolume(namespace, pvcName string) error {
 		return fmt.Errorf("failed to create PV: %w", err)
 	}
 
-	sc := ""
 	zeroOutPVC := corev1.PersistentVolumeClaim{
 		TypeMeta: origPVC.TypeMeta,
 		ObjectMeta: v1.ObjectMeta{
@@ -128,12 +127,12 @@ func zeroOutVolume(namespace, pvcName string) error {
 			Namespace: namespace,
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
-			StorageClassName: &sc,
+			StorageClassName: ptr.To(""),
 			AccessModes: []corev1.PersistentVolumeAccessMode{
 				corev1.ReadWriteOnce,
 			},
 			Resources:  origPVC.Spec.Resources,
-			VolumeMode: &volumeMode,
+			VolumeMode: ptr.To(corev1.PersistentVolumeBlock),
 			VolumeName: zeroOutPVName,
 		},
 	}
