@@ -610,9 +610,9 @@ var _ = Describe("MantleBackup controller", func() {
 				g.Expect(jobExport.GetLabels()["app.kubernetes.io/name"]).To(Equal(labelAppNameValue))
 				g.Expect(jobExport.GetLabels()["app.kubernetes.io/component"]).To(Equal(labelComponentExportJob))
 				g.Expect(*jobExport.Spec.BackoffLimit).To(Equal(int32(65535)))
-				g.Expect(*jobExport.Spec.Template.Spec.SecurityContext.FSGroup).To(Equal(int64(10000)))
-				g.Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsUser).To(Equal(int64(10000)))
-				g.Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsGroup).To(Equal(int64(10000)))
+				g.Expect(*jobExport.Spec.Template.Spec.SecurityContext.FSGroup).To(Equal(nonRootFSGroup))
+				g.Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsUser).To(Equal(nonRootUserID))
+				g.Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsGroup).To(Equal(nonRootGroupID))
 				g.Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsNonRoot).To(Equal(true))
 
 				// Make sure FROM_SNAP_NAME is empty because we're performing a full backup.
@@ -675,9 +675,9 @@ var _ = Describe("MantleBackup controller", func() {
 				g.Expect(jobUpload.GetLabels()["app.kubernetes.io/name"]).To(Equal("mantle"))
 				g.Expect(jobUpload.GetLabels()["app.kubernetes.io/component"]).To(Equal("upload-job"))
 				g.Expect(*jobUpload.Spec.BackoffLimit).To(Equal(int32(65535)))
-				g.Expect(*jobUpload.Spec.Template.Spec.SecurityContext.FSGroup).To(Equal(int64(10000)))
-				g.Expect(*jobUpload.Spec.Template.Spec.SecurityContext.RunAsUser).To(Equal(int64(10000)))
-				g.Expect(*jobUpload.Spec.Template.Spec.SecurityContext.RunAsGroup).To(Equal(int64(10000)))
+				g.Expect(*jobUpload.Spec.Template.Spec.SecurityContext.FSGroup).To(Equal(nonRootFSGroup))
+				g.Expect(*jobUpload.Spec.Template.Spec.SecurityContext.RunAsUser).To(Equal(nonRootUserID))
+				g.Expect(*jobUpload.Spec.Template.Spec.SecurityContext.RunAsGroup).To(Equal(nonRootGroupID))
 				g.Expect(*jobUpload.Spec.Template.Spec.SecurityContext.RunAsNonRoot).To(Equal(true))
 
 				// Make sure HTTP_PROXY, HTTPS_PROXY, and NO_PROXY environment variables are correctly set.
