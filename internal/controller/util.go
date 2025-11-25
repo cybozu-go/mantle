@@ -41,11 +41,11 @@ func createCloneByPV(ctx context.Context, cephCmd ceph.CephCmd, pv *corev1.Persi
 	logger := log.FromContext(ctx)
 
 	bkImage := pv.Spec.CSI.VolumeAttributes["imageName"]
-	if bkImage == "" {
+	if len(bkImage) == 0 {
 		return fmt.Errorf("imageName not found in PV manifest")
 	}
 	pool := pv.Spec.CSI.VolumeAttributes["pool"]
-	if pool == "" {
+	if len(pool) == 0 {
 		return fmt.Errorf("pool not found in PV manifest")
 	}
 

@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/kube-openapi/pkg/validation/strfmt"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -53,6 +54,8 @@ const (
 	labelComponentExportJob       = "export-job"
 	labelComponentUploadJob       = "upload-job"
 	labelComponentImportJob       = "import-job"
+	labelComponentVerifyJob       = "verify-job"
+	labelComponentVerifyVolume    = "verify-volume"
 	labelComponentZeroOutJob      = "zeroout-job"
 	labelComponentZeroOutVolume   = "zeroout-volume"
 	annotRemoteUID                = "mantle.cybozu.io/remote-uid"
@@ -65,6 +68,10 @@ const (
 	MantleUploadJobPrefix     = "mantle-upload-"
 	MantleExportDataPVCPrefix = "mantle-export-"
 	MantleImportJobPrefix     = "mantle-import-"
+	mantleVerifyImagePrefix   = "mantle-verify-"
+	mantleVerifyJobPrefix     = "mantle-verify-"
+	mantleVerifyPVCPrefix     = "mantle-verify-"
+	mantleVerifyPVPrefix      = "mantle-verify-"
 	MantleZeroOutJobPrefix    = "mantle-zeroout-"
 	MantleZeroOutPVCPrefix    = "mantle-zeroout-"
 	MantleZeroOutPVPrefix     = "mantle-zeroout-"
@@ -75,6 +82,10 @@ const (
 	EnvExportJobScript = "EXPORT_JOB_SCRIPT"
 	EnvUploadJobScript = "UPLOAD_JOB_SCRIPT"
 	EnvImportJobScript = "IMPORT_JOB_SCRIPT"
+
+	nonRootFSGroup = int64(10000)
+	nonRootGroupID = int64(10000)
+	nonRootUserID  = int64(10000)
 )
 
 var (
@@ -619,6 +630,124 @@ func (r *MantleBackupReconciler) replicateManifests(
 	return ctrl.Result{}, nil
 }
 
+//nolint:unused // TODO: Delete this line after starting use.
+func (r *MantleBackupReconciler) verify(
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
+) error {
+	var storedPVC corev1.PersistentVolumeClaim
+	if err := json.Unmarshal([]byte(backup.Status.PVCManifest), &storedPVC); err != nil {
+		return fmt.Errorf("failed to unmarshal PVC manifest: %w", err)
+	}
+
+	var storedPV corev1.PersistentVolume
+	if err := json.Unmarshal([]byte(backup.Status.PVManifest), &storedPV); err != nil {
+		return fmt.Errorf("failed to unmarshal PV manifest: %w", err)
+	}
+
+	// create a clone by the snapshot bound to the MB
+	if err := createCloneByPV(ctx, r.ceph, &storedPV, backup.Name, makeVerifyImageName(backup)); err != nil {
+		return fmt.Errorf("failed to create a clone by the snapshot: %w", err)
+	}
+
+	// create a static PV with the clone
+	if err := r.createOrUpdateStaticPV(
+		ctx,
+		&storedPV,
+		makeVerifyImageName(backup),
+		corev1.ResourceList{
+			corev1.ResourceStorage: *resource.NewQuantity(*backup.Status.SnapSize, resource.BinarySI),
+		},
+		makeVerifyPVName(backup),
+		labelComponentVerifyVolume,
+		true,
+	); err != nil {
+		return fmt.Errorf("failed to create a static PV with the clone: %w", err)
+	}
+
+	// create a PVC with the PV
+	if err := r.createOrUpdateStaticPVC(
+		ctx,
+		makeVerifyPVCName(backup),
+		makeVerifyPVName(backup),
+		labelComponentVerifyVolume,
+		storedPVC.Spec.Resources,
+	); err != nil {
+		return fmt.Errorf("failed to create a PVC with the PV: %w", err)
+	}
+
+	// create a Job to execute e2fsck on the PVC
+	if err := r.createOrUpdateVerifyJob(
+		ctx,
+		makeVerifyJobName(backup),
+		makeVerifyPVCName(backup),
+	); err != nil {
+		return fmt.Errorf("failed to create a Job to execute e2fsck on the PVC: %w", err)
+	}
+
+	// wait for the Job to complete
+	jobFinished, jobSucceeded, err := r.checkJobStatus(ctx, makeVerifyJobName(backup))
+	if err != nil {
+		return fmt.Errorf("failed to check the Job status: %w", err)
+	}
+	if !jobFinished {
+		// still running
+		return nil
+	}
+
+	// update MB's conditions field
+	condition := metav1.ConditionTrue
+	reason := mantlev1.ConditionReasonVerifiedSuccess
+	if !jobSucceeded {
+		condition = metav1.ConditionFalse
+		reason = mantlev1.ConditionReasonVerifiedFailed
+	}
+	if err := r.updateMantleBackupCondition(
+		ctx, backup,
+		mantlev1.BackupConditionVerified,
+		condition,
+		reason,
+	); err != nil {
+		return fmt.Errorf("failed to update MantleBackup condition: %w", err)
+	}
+
+	return nil
+}
+
+// checkJobStatus checks the status of the Job with the given name.
+// It returns (is job finished, is job succeeded, error).
+//
+//nolint:unused // TODO: Delete this line after starting use `verify`.
+func (r *MantleBackupReconciler) checkJobStatus(ctx context.Context, jobName string) (bool, bool, error) {
+	var job batchv1.Job
+	if err := r.Get(
+		ctx,
+		types.NamespacedName{
+			Namespace: r.managedCephClusterID,
+			Name:      jobName,
+		},
+		&job,
+	); err != nil {
+		if aerrors.IsNotFound(err) {
+			// The cache must be stale.
+			return false, false, nil
+		}
+		return false, false, fmt.Errorf("failed to get Job for checking job status: %w", err)
+	}
+
+	for _, c := range job.Status.Conditions {
+		if c.Type == batchv1.JobComplete && c.Status == corev1.ConditionTrue {
+			return true, true, nil
+		}
+		if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue {
+			return true, false, nil
+		}
+	}
+
+	// job is still running
+	return false, false, nil
+}
+
 func (r *MantleBackupReconciler) provisionRBDSnapshot(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
@@ -672,7 +801,7 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 		backup.Status.SnapSize = &snapshot.Size
 
 		meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
-			Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionTrue, Reason: mantlev1.BackupReasonNone})
+			Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionTrue, Reason: mantlev1.ConditionReasonReadyToUseNoProblem})
 		return nil
 	}); err != nil {
 		logger.Error(err, "failed to update MantleBackup status", "status", backup.Status)
@@ -1091,13 +1220,12 @@ func (r *MantleBackupReconciler) handleCompletedJobsOfComponent(
 			continue
 		}
 
-		propagationPolicy := metav1.DeletePropagationBackground
 		if err := r.Delete(ctx, &job.job, &client.DeleteOptions{
 			Preconditions: &metav1.Preconditions{
 				UID:             &job.job.UID,
 				ResourceVersion: &job.job.ResourceVersion,
 			},
-			PropagationPolicy: &propagationPolicy,
+			PropagationPolicy: ptr.To(metav1.DeletePropagationBackground),
 		}); err != nil {
 			return -1, fmt.Errorf("failed to delete Job: %s: %w", job.job.GetName(), err)
 		}
@@ -1369,6 +1497,26 @@ func MakeMiddleSnapshotName(backup *mantlev1.MantleBackup, offset int) string {
 	return fmt.Sprintf("%s-offset-%d", backup.GetAnnotations()[annotRemoteUID], offset)
 }
 
+//nolint:unused // TODO: Delete this line after starting use.
+func makeVerifyImageName(target *mantlev1.MantleBackup) string {
+	return mantleVerifyImagePrefix + string(target.GetUID())
+}
+
+//nolint:unused // TODO: Delete this line after starting use.
+func makeVerifyJobName(target *mantlev1.MantleBackup) string {
+	return mantleVerifyJobPrefix + string(target.GetUID())
+}
+
+//nolint:unused // TODO: Delete this line after starting use.
+func makeVerifyPVCName(target *mantlev1.MantleBackup) string {
+	return mantleVerifyPVCPrefix + string(target.GetUID())
+}
+
+//nolint:unused // TODO: Delete this line after starting use.
+func makeVerifyPVName(target *mantlev1.MantleBackup) string {
+	return mantleVerifyPVPrefix + string(target.GetUID())
+}
+
 func MakeZeroOutJobName(target *mantlev1.MantleBackup) string {
 	return MantleZeroOutJobPrefix + string(target.GetUID())
 }
@@ -1446,18 +1594,13 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(
 		labels["app.kubernetes.io/component"] = labelComponentExportJob
 		job.SetLabels(labels)
 
-		var backoffLimit int32 = 65535
-		job.Spec.BackoffLimit = &backoffLimit
+		job.Spec.BackoffLimit = ptr.To(int32(65535))
 
-		var fsGroup int64 = 10000
-		var runAsGroup int64 = 10000
-		runAsNonRoot := true
-		var runAsUser int64 = 10000
 		job.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
-			FSGroup:      &fsGroup,
-			RunAsGroup:   &runAsGroup,
-			RunAsNonRoot: &runAsNonRoot,
-			RunAsUser:    &runAsUser,
+			FSGroup:      ptr.To(nonRootFSGroup),
+			RunAsGroup:   ptr.To(nonRootGroupID),
+			RunAsNonRoot: ptr.To(true),
+			RunAsUser:    ptr.To(nonRootUserID),
 		}
 
 		job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
@@ -1531,7 +1674,6 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(
 			},
 		}
 
-		fals := false
 		job.Spec.Template.Spec.Volumes = []corev1.Volume{
 			{
 				Name: "volume-to-store",
@@ -1546,7 +1688,7 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(
 				VolumeSource: corev1.VolumeSource{
 					Secret: &corev1.SecretVolumeSource{
 						SecretName: "rook-ceph-mon",
-						Optional:   &fals,
+						Optional:   ptr.To(false),
 						Items: []corev1.KeyToPath{{
 							Key:  "ceph-secret",
 							Path: "secret.keyring",
@@ -1620,18 +1762,13 @@ func (r *MantleBackupReconciler) createOrUpdateUploadJobs(
 			labels["app.kubernetes.io/component"] = labelComponentUploadJob
 			job.SetLabels(labels)
 
-			var backoffLimit int32 = 65535
-			job.Spec.BackoffLimit = &backoffLimit
+			job.Spec.BackoffLimit = ptr.To(int32(65535))
 
-			var fsGroup int64 = 10000
-			var runAsGroup int64 = 10000
-			runAsNonRoot := true
-			var runAsUser int64 = 10000
 			job.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
-				FSGroup:      &fsGroup,
-				RunAsGroup:   &runAsGroup,
-				RunAsNonRoot: &runAsNonRoot,
-				RunAsUser:    &runAsUser,
+				FSGroup:      ptr.To(nonRootFSGroup),
+				RunAsGroup:   ptr.To(nonRootGroupID),
+				RunAsNonRoot: ptr.To(true),
+				RunAsUser:    ptr.To(nonRootUserID),
 			}
 
 			job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
@@ -1925,6 +2062,7 @@ func (r *MantleBackupReconciler) reconcileZeroOutJob(
 		snapshotTarget.pv.Spec.Capacity,
 		MakeZeroOutPVName(backup),
 		labelComponentZeroOutVolume,
+		false,
 	); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -1965,6 +2103,7 @@ func (r *MantleBackupReconciler) reconcileZeroOutJob(
 //	capacity      - resource capacity for the PV
 //	newPvName     - name for the new or updated PV
 //	componentName - label value for the component
+//	addFlatten    - whether to add deep-flatten feature to the volume attributes
 //
 // Returns an error if creation or update fails.
 func (r *MantleBackupReconciler) createOrUpdateStaticPV(
@@ -1973,6 +2112,7 @@ func (r *MantleBackupReconciler) createOrUpdateStaticPV(
 	volume string,
 	capacity corev1.ResourceList,
 	newPvName, componentName string,
+	addFlatten bool,
 ) error {
 	var pv corev1.PersistentVolume
 	pv.SetName(newPvName)
@@ -1989,9 +2129,7 @@ func (r *MantleBackupReconciler) createOrUpdateStaticPV(
 		pv.Spec.Capacity = capacity
 		pv.Spec.PersistentVolumeReclaimPolicy = corev1.PersistentVolumeReclaimRetain
 		pv.Spec.StorageClassName = ""
-
-		volumeMode := corev1.PersistentVolumeBlock
-		pv.Spec.VolumeMode = &volumeMode
+		pv.Spec.VolumeMode = ptr.To(corev1.PersistentVolumeBlock)
 
 		if pv.Spec.CSI == nil {
 			pv.Spec.CSI = &corev1.CSIPersistentVolumeSource{}
@@ -2004,8 +2142,16 @@ func (r *MantleBackupReconciler) createOrUpdateStaticPV(
 		if pv.Spec.CSI.VolumeAttributes == nil {
 			pv.Spec.CSI.VolumeAttributes = map[string]string{}
 		}
+		feature := basePV.Spec.CSI.VolumeAttributes["imageFeatures"]
+		if addFlatten {
+			if len(feature) > 0 {
+				feature = feature + ",deep-flatten"
+			} else {
+				feature = "deep-flatten"
+			}
+		}
 		pv.Spec.CSI.VolumeAttributes["clusterID"] = basePV.Spec.CSI.VolumeAttributes["clusterID"]
-		pv.Spec.CSI.VolumeAttributes["imageFeatures"] = basePV.Spec.CSI.VolumeAttributes["imageFeatures"]
+		pv.Spec.CSI.VolumeAttributes["imageFeatures"] = feature
 		pv.Spec.CSI.VolumeAttributes["imageFormat"] = basePV.Spec.CSI.VolumeAttributes["imageFormat"]
 		pv.Spec.CSI.VolumeAttributes["pool"] = basePV.Spec.CSI.VolumeAttributes["pool"]
 		pv.Spec.CSI.VolumeAttributes["staticVolume"] = "true"
@@ -2075,13 +2221,10 @@ func (r *MantleBackupReconciler) createOrUpdateZeroOutJob(
 		labels["app.kubernetes.io/component"] = labelComponentZeroOutJob
 		job.SetLabels(labels)
 
-		var backoffLimit int32 = 65535
-		job.Spec.BackoffLimit = &backoffLimit
+		job.Spec.BackoffLimit = ptr.To(int32(65535))
 
 		job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
 
-		tru := true
-		var zero int64 = 0
 		job.Spec.Template.Spec.Containers = []corev1.Container{
 			{
 				Name:  "zeroout",
@@ -2095,9 +2238,9 @@ blkdiscard -z /dev/zeroout-rbd
 `,
 				},
 				SecurityContext: &corev1.SecurityContext{
-					Privileged: &tru,
-					RunAsGroup: &zero,
-					RunAsUser:  &zero,
+					Privileged: ptr.To(true),
+					RunAsGroup: ptr.To(int64(0)),
+					RunAsUser:  ptr.To(int64(0)),
 				},
 				VolumeDevices: []corev1.VolumeDevice{
 					{
@@ -2115,6 +2258,76 @@ blkdiscard -z /dev/zeroout-rbd
 				VolumeSource: corev1.VolumeSource{
 					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
 						ClaimName: MakeZeroOutPVCName(backup),
+					},
+				},
+			},
+		}
+
+		return nil
+	})
+	return err
+}
+
+//nolint:unused // TODO: Delete this line after starting use `verify`.
+func (r *MantleBackupReconciler) createOrUpdateVerifyJob(ctx context.Context, jobName, pvcName string) error {
+	var job batchv1.Job
+	job.SetName(jobName)
+	job.SetNamespace(r.managedCephClusterID)
+	_, err := ctrl.CreateOrUpdate(ctx, r.Client, &job, func() error {
+		labels := job.GetLabels()
+		if labels == nil {
+			labels = map[string]string{}
+		}
+		labels["app.kubernetes.io/name"] = labelAppNameValue
+		labels["app.kubernetes.io/component"] = labelComponentVerifyJob
+		job.SetLabels(labels)
+
+		job.Spec.BackoffLimit = ptr.To(int32(65535))
+		job.Spec.PodFailurePolicy = &batchv1.PodFailurePolicy{
+			Rules: []batchv1.PodFailurePolicyRule{
+				{
+					Action: batchv1.PodFailurePolicyActionFailJob,
+					OnExitCodes: &batchv1.PodFailurePolicyOnExitCodesRequirement{
+						ContainerName: ptr.To("verify"),
+						Operator:      batchv1.PodFailurePolicyOnExitCodesOpIn,
+						Values:        []int32{1, 2, 3, 4, 5, 6, 7}, // File system errors
+					},
+				},
+			},
+		}
+
+		job.Spec.Template.Spec.Containers = []corev1.Container{
+			{
+				Name:  "verify",
+				Image: r.podImage,
+				Command: []string{
+					"/usr/sbin/e2fsck",
+					"-fn",
+					"/dev/verify-rbd",
+				},
+				SecurityContext: &corev1.SecurityContext{
+					Privileged: ptr.To(true),
+					RunAsGroup: ptr.To(int64(0)),
+					RunAsUser:  ptr.To(int64(0)),
+				},
+				VolumeDevices: []corev1.VolumeDevice{
+					{
+						Name:       "verify-rbd",
+						DevicePath: "/dev/verify-rbd",
+					},
+				},
+				ImagePullPolicy: corev1.PullIfNotPresent,
+			},
+		}
+
+		job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyNever
+
+		job.Spec.Template.Spec.Volumes = []corev1.Volume{
+			{
+				Name: "verify-rbd",
+				VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: pvcName,
 					},
 				},
 			},
@@ -2175,7 +2388,7 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 			meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
 				Type:   mantlev1.BackupConditionReadyToUse,
 				Status: metav1.ConditionTrue,
-				Reason: mantlev1.BackupReasonNone,
+				Reason: mantlev1.ConditionReasonReadyToUseNoProblem,
 			})
 			return nil
 		}); err != nil {
@@ -2235,16 +2448,12 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 		labels["app.kubernetes.io/component"] = labelComponentImportJob
 		job.SetLabels(labels)
 
-		var backoffLimit int32 = 65535
-		job.Spec.BackoffLimit = &backoffLimit
+		job.Spec.BackoffLimit = ptr.To(int32(65535))
 
-		var runAsGroup int64 = 10000
-		runAsNonRoot := true
-		var runAsUser int64 = 10000
 		job.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
-			RunAsGroup:   &runAsGroup,
-			RunAsNonRoot: &runAsNonRoot,
-			RunAsUser:    &runAsUser,
+			RunAsGroup:   ptr.To(nonRootGroupID),
+			RunAsNonRoot: ptr.To(true),
+			RunAsUser:    ptr.To(nonRootUserID),
 		}
 
 		job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
@@ -2358,14 +2567,13 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 
 		job.Spec.Template.Spec.Containers = []corev1.Container{container}
 
-		fals := false
 		job.Spec.Template.Spec.Volumes = []corev1.Volume{
 			{
 				Name: "ceph-admin-secret",
 				VolumeSource: corev1.VolumeSource{
 					Secret: &corev1.SecretVolumeSource{
 						SecretName: "rook-ceph-mon",
-						Optional:   &fals,
+						Optional:   ptr.To(false),
 						Items: []corev1.KeyToPath{{
 							Key:  "ceph-secret",
 							Path: "secret.keyring",
@@ -2460,16 +2668,13 @@ func (r *MantleBackupReconciler) primaryCleanup(
 		return ctrl.Result{}, nil
 	}
 
-	// Update the status of the MantleBackup. Use Patch here because Update() is
-	// likely to fail due to "the object has been modified" error.
-	newTarget := target.DeepCopy()
-	meta.SetStatusCondition(&newTarget.Status.Conditions, metav1.Condition{
-		Type:   mantlev1.BackupConditionSyncedToRemote,
-		Status: metav1.ConditionTrue,
-		Reason: mantlev1.BackupReasonNone,
-	})
-	if err := r.Client.Status().Patch(ctx, newTarget, client.MergeFrom(target)); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to update SyncedToRemote to True by Patch: %w", err)
+	if err := r.updateMantleBackupCondition(
+		ctx, target,
+		mantlev1.BackupConditionSyncedToRemote,
+		metav1.ConditionTrue,
+		mantlev1.ConditionReasonSyncedToRemoteNoProblem,
+	); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to set SyncedToRemote condition to True: %w", err)
 	}
 	logger.Info("succeeded to sync a backup to the remote ceph cluster")
 
@@ -2499,14 +2704,12 @@ func (r *MantleBackupReconciler) deleteAllJobsOfComponent(
 		return fmt.Errorf("failed to get the number of the parts of the exported data: %w", err)
 	}
 
-	propagationPolicy := metav1.DeletePropagationBackground
-
 	for partNum := 0; partNum < numParts; partNum++ {
 		var job batchv1.Job
 		job.SetName(makeJobName(backup, partNum))
 		job.SetNamespace(r.managedCephClusterID)
 		if err := r.Delete(ctx, &job, &client.DeleteOptions{
-			PropagationPolicy: &propagationPolicy,
+			PropagationPolicy: ptr.To(metav1.DeletePropagationBackground),
 		}); err != nil && !aerrors.IsNotFound(err) {
 			return fmt.Errorf("failed to delete Job: %s/%s: %w", job.GetNamespace(), job.GetName(), err)
 		}
@@ -2529,14 +2732,12 @@ func (r *MantleBackupReconciler) deleteAllExportDataPVCs(ctx context.Context, ba
 		return fmt.Errorf("failed to get the number of the parts of the exported data: %w", err)
 	}
 
-	propagationPolicy := metav1.DeletePropagationBackground
-
 	for partNum := 0; partNum < numParts; partNum++ {
 		pvc := corev1.PersistentVolumeClaim{}
 		pvc.SetName(MakeExportDataPVCName(backup, partNum))
 		pvc.SetNamespace(r.managedCephClusterID)
 		if err := r.Delete(ctx, &pvc, &client.DeleteOptions{
-			PropagationPolicy: &propagationPolicy,
+			PropagationPolicy: ptr.To(metav1.DeletePropagationBackground),
 		}); err != nil && !aerrors.IsNotFound(err) {
 			return fmt.Errorf("failed to delete PVC: %s/%s: %w", pvc.GetNamespace(), pvc.GetName(), err)
 		}
@@ -2566,8 +2767,6 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 		}
 	}
 
-	propagationPolicy := metav1.DeletePropagationBackground
-
 	if err := r.deleteAllImportJobs(ctx, target); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to delete import Jobs: %w", err)
 	}
@@ -2576,7 +2775,7 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 	zeroOutJob.SetName(MakeZeroOutJobName(target))
 	zeroOutJob.SetNamespace(r.managedCephClusterID)
 	if err := r.Delete(ctx, &zeroOutJob, &client.DeleteOptions{
-		PropagationPolicy: &propagationPolicy,
+		PropagationPolicy: ptr.To(metav1.DeletePropagationBackground),
 	}); err != nil && !aerrors.IsNotFound(err) {
 		return ctrl.Result{}, fmt.Errorf("failed to delete zeroout Job: %w", err)
 	}
@@ -2675,5 +2874,26 @@ func (r *MantleBackupReconciler) deleteMiddleSnapshots(backup *mantlev1.MantleBa
 		}
 	}
 
+	return nil
+}
+
+func (r *MantleBackupReconciler) updateMantleBackupCondition(
+	ctx context.Context,
+	target *mantlev1.MantleBackup,
+	conditionType string,
+	status metav1.ConditionStatus,
+	reason string,
+) error {
+	// Update the status of the MantleBackup. Use Patch here because Update() is
+	// likely to fail due to "the object has been modified" error.
+	willBeApplied := target.DeepCopy()
+	meta.SetStatusCondition(&willBeApplied.Status.Conditions, metav1.Condition{
+		Type:   conditionType,
+		Status: status,
+		Reason: reason,
+	})
+	if err := r.Client.Status().Patch(ctx, willBeApplied, client.MergeFrom(target)); err != nil {
+		return fmt.Errorf("failed to update MantleBackup condition by patch: %w", err)
+	}
 	return nil
 }
