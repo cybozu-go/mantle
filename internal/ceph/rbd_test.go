@@ -163,6 +163,123 @@ var _ = Describe("CephCmd.RBDLs", func() {
 	})
 })
 
+var _ = Describe("CephCmd.RBDLockAdd", func() {
+	var t reporter
+
+	It("should run without error", func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		m := NewMockcommand(ctrl)
+		m.EXPECT().execute("rbd", "-p", "pool", "lock", "add", "image", "lockID").Return([]byte{}, nil)
+
+		cmd := mockedCephCmd(m)
+		err := cmd.RBDLockAdd("pool", "image", "lockID")
+		Expect(err).ToNot(HaveOccurred())
+	})
+
+	It("should return an error, if the command failed", func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		m := NewMockcommand(ctrl)
+		m.EXPECT().execute(gomock.Any()).Return([]byte{}, fmt.Errorf("error"))
+
+		cmd := mockedCephCmd(m)
+		err := cmd.RBDLockAdd("pool", "image", "lockID")
+		Expect(err).To(HaveOccurred())
+	})
+})
+
+var _ = Describe("CephCmd.RBDLockLs", func() {
+	var t reporter
+
+	It("should return the correct RBDLock", func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		m := NewMockcommand(ctrl)
+		m.EXPECT().
+			execute("rbd", "-p", "pool", "--format", "json", "lock", "ls", "image").
+			Return([]byte(`
+		[
+			{"id": "HOGE","locker": "client.12345","address": "192.168.0.1:0/12345"},
+			{"id": "FOO","locker": "client.67890","address": "192.168.0.2:0/67890"}
+		]
+		`), nil)
+
+		cmd := mockedCephCmd(m)
+		locks, err := cmd.RBDLockLs("pool", "image")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(locks).To(HaveLen(2))
+		Expect(locks[0].LockID).To(Equal("HOGE"))
+		Expect(locks[0].Locker).To(Equal("client.12345"))
+		Expect(locks[0].Address).To(Equal("192.168.0.1:0/12345"))
+		Expect(locks[1].LockID).To(Equal("FOO"))
+		Expect(locks[1].Locker).To(Equal("client.67890"))
+		Expect(locks[1].Address).To(Equal("192.168.0.2:0/67890"))
+	})
+
+	It("should return empty list, if there are no locks", func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		m := NewMockcommand(ctrl)
+		m.EXPECT().
+			execute("rbd", "-p", "pool", "--format", "json", "lock", "ls", "image").
+			Return([]byte(`[]`), nil)
+		cmd := mockedCephCmd(m)
+		locks, err := cmd.RBDLockLs("pool", "image")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(locks).To(HaveLen(0))
+	})
+
+	It("should return an error, if the command failed", func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		m := NewMockcommand(ctrl)
+		m.EXPECT().execute(gomock.Any()).Return([]byte{}, fmt.Errorf("error"))
+		cmd := mockedCephCmd(m)
+		_, err := cmd.RBDLockLs("pool", "image")
+		Expect(err).To(HaveOccurred())
+	})
+})
+
+var _ = Describe("CephCmd.RBDLockRm", func() {
+	var t reporter
+
+	It("should run without error", func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+		m := NewMockcommand(ctrl)
+		m.EXPECT().
+			execute("rbd", "-p", "pool", "lock", "rm", "image", "lockID", "client.12345").
+			Return([]byte{}, nil)
+		cmd := mockedCephCmd(m)
+		lock := &RBDLock{
+			LockID: "lockID",
+			Locker: "client.12345",
+		}
+		err := cmd.RBDLockRm("pool", "image", lock)
+		Expect(err).ToNot(HaveOccurred())
+	})
+
+	It("should return an error, if the command failed", func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+		m := NewMockcommand(ctrl)
+		m.EXPECT().execute(gomock.Any()).Return([]byte{}, fmt.Errorf("error"))
+		cmd := mockedCephCmd(m)
+		lock := &RBDLock{
+			LockID: "lockID",
+			Locker: "client.12345",
+		}
+		err := cmd.RBDLockRm("pool", "image", lock)
+		Expect(err).To(HaveOccurred())
+	})
+})
+
 var _ = Describe("CephCmd.RBDRm", func() {
 	var t reporter
 

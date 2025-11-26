@@ -52,6 +52,42 @@ func (c *cephCmdImpl) RBDLs(pool string) ([]string, error) {
 	return images, nil
 }
 
+// RBDLockAdd adds a lock to an RBD image.
+func (c *cephCmdImpl) RBDLockAdd(pool, image, lockID string) error {
+	_, err := c.command.execute("rbd", "-p", pool, "lock", "add", image, lockID)
+	if err != nil {
+		return fmt.Errorf("failed to add lock to RBD image: %w", err)
+	}
+
+	return nil
+}
+
+// RBDLockLs lists locks on an RBD image.
+func (c *cephCmdImpl) RBDLockLs(pool, image string) ([]*RBDLock, error) {
+	out, err := c.command.execute("rbd", "-p", pool, "--format", "json", "lock", "ls", image)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list locks on RBD image: %w", err)
+	}
+
+	var locks []*RBDLock
+	err = json.Unmarshal(out, &locks)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal RBD locks: %w", err)
+	}
+
+	return locks, nil
+}
+
+// RBDLockRm releases a lock from an RBD image.
+func (c *cephCmdImpl) RBDLockRm(pool, image string, lock *RBDLock) error {
+	_, err := c.command.execute("rbd", "-p", pool, "lock", "rm", image, lock.LockID, lock.Locker)
+	if err != nil {
+		return fmt.Errorf("failed to remove lock from RBD image: %w", err)
+	}
+
+	return nil
+}
+
 // RBDRm removes an RBD image.
 func (c *cephCmdImpl) RBDRm(pool, image string) error {
 	_, err := c.command.execute("rbd", "rm", fmt.Sprintf("%s/%s", pool, image))

@@ -30,6 +30,12 @@ func (t *RBDTimeStamp) UnmarshalJSON(data []byte) error {
 	return err
 }
 
+type RBDLock struct {
+	LockID  string `json:"id"`
+	Locker  string `json:"locker"`
+	Address string `json:"address"`
+}
+
 type RBDSnapshot struct {
 	Id        int          `json:"id,omitempty"`
 	Name      string       `json:"name,omitempty"`
@@ -42,6 +48,9 @@ type CephCmd interface {
 	RBDClone(pool, srcImage, srcSnap, dstImage, features string) error
 	RBDInfo(pool, image string) (*RBDImageInfo, error)
 	RBDLs(pool string) ([]string, error)
+	RBDLockAdd(pool, image, lockID string) error
+	RBDLockLs(pool, image string) ([]*RBDLock, error)
+	RBDLockRm(pool, image string, lock *RBDLock) error
 	RBDRm(pool, image string) error
 	RBDTrashMv(pool, image string) error
 	CephRBDTaskAddTrashRemove(pool, image string) error

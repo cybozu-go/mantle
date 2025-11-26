@@ -36,6 +36,18 @@ func (f *fakeRBD) RBDLs(pool string) ([]string, error) {
 	return nil, nil
 }
 
+func (f *fakeRBD) RBDLockAdd(pool, image, lockID string) error {
+	panic("not implemented")
+}
+
+func (f *fakeRBD) RBDLockLs(pool, image string) ([]*ceph.RBDLock, error) {
+	panic("not implemented")
+}
+
+func (f *fakeRBD) RBDLockRm(pool, image string, lock *ceph.RBDLock) error {
+	panic("not implemented")
+}
+
 func (f *fakeRBD) RBDRm(pool, image string) error {
 	return nil
 }
