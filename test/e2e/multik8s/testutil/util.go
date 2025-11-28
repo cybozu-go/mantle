@@ -487,7 +487,7 @@ func WriteRandomDataToPV(ctx SpecContext, cluster int, namespace, pvcName string
 	}).Should(Succeed())
 	stdout, _, err := Kubectl(cluster, nil, "logs", "-n", namespace, "job/"+writeJobName)
 	Expect(err).NotTo(HaveOccurred())
-	Expect(len(stdout)).NotTo(Equal(0))
+	Expect(stdout).NotTo(HaveLen(0))
 	return string(stdout)
 }
 
