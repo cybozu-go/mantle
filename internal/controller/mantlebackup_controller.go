@@ -19,7 +19,6 @@ import (
 	"github.com/cybozu-go/mantle/internal/controller/internal/objectstorage"
 	"github.com/cybozu-go/mantle/internal/controller/metrics"
 	"github.com/cybozu-go/mantle/pkg/controller/proto"
-	"github.com/docker/docker/daemon/logger"
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/time/rate"
 	batchv1 "k8s.io/api/batch/v1"
@@ -1896,6 +1895,8 @@ func (r *MantleBackupReconciler) startImport(
 	backup *mantlev1.MantleBackup,
 	target *snapshotTarget,
 ) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
 	if !r.doesMantleBackupHaveSyncModeAnnot(backup) {
 		// SetSynchronizing is not called yet or the cache is stale.
 		return ctrl.Result{}, nil
