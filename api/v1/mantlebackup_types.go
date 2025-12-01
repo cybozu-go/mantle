@@ -101,6 +101,10 @@ func (m *MantleBackup) IsSynced() bool {
 	return meta.IsStatusConditionTrue(m.Status.Conditions, BackupConditionSyncedToRemote)
 }
 
+func (m *MantleBackup) IsVerified() bool {
+	return meta.IsStatusConditionTrue(m.Status.Conditions, BackupConditionVerified)
+}
+
 func init() {
 	SchemeBuilder.Register(&MantleBackup{}, &MantleBackupList{})
 }

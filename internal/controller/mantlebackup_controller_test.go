@@ -1591,9 +1591,9 @@ var _ = Describe("export and upload", func() {
 			origSize := *resource.NewQuantity(testutil.FakeRBDSnapshotSize-1, resource.BinarySI)
 			mbr.backupTransferPartSize = origSize
 
-			// We use reconcileAsStandalone to focus on the part size update logic.
+			// We use reconcilePre to focus on the part size update logic.
 			Eventually(func(g Gomega) {
-				result, err := mbr.reconcileAsStandalone(ctx, backup)
+				result, err := mbr.reconcilePre(ctx, backup)
 				g.Expect(result.IsZero()).To(BeTrue())
 				g.Expect(err).NotTo(HaveOccurred())
 
@@ -1607,7 +1607,7 @@ var _ = Describe("export and upload", func() {
 			mbr.backupTransferPartSize = newSize
 
 			Eventually(func(g Gomega) {
-				result, err := mbr.reconcileAsStandalone(ctx, backup)
+				result, err := mbr.reconcilePre(ctx, backup)
 				g.Expect(result.IsZero()).To(BeTrue())
 				g.Expect(err).NotTo(HaveOccurred())
 			}, "10s").Should(Succeed())
@@ -2583,7 +2583,7 @@ var _ = Describe("MantleBackupReconciler", func() {
 							"pool":          pvSrc.Spec.CSI.VolumeAttributes["pool"],
 							"staticVolume":  "true",
 						},
-						VolumeHandle: makeVerifyImageName(backup),
+						VolumeHandle: MakeVerifyImageName(backup),
 					},
 				},
 				PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimRetain,
@@ -2739,7 +2739,7 @@ var _ = Describe("MantleBackupReconciler", func() {
 
 		It("generates correct names", func(ctx SpecContext) {
 			for _, backup := range []*mantlev1.MantleBackup{backupSuccess, backupFail} {
-				Expect(makeVerifyImageName(backup)).To(Equal(mantleVerifyImagePrefix + string(backup.GetUID())))
+				Expect(MakeVerifyImageName(backup)).To(Equal(mantleVerifyImagePrefix + string(backup.GetUID())))
 				Expect(makeVerifyJobName(backup)).To(Equal(mantleVerifyJobPrefix + string(backup.GetUID())))
 				Expect(makeVerifyPVName(backup)).To(Equal(mantleVerifyPVPrefix + string(backup.GetUID())))
 				Expect(makeVerifyPVCName(backup)).To(Equal(mantleVerifyPVCPrefix + string(backup.GetUID())))
