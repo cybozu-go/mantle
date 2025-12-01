@@ -76,7 +76,7 @@ var _ = Describe("change to secondary", Label("change-to-secondary"), func() {
 		CreatePVC(ctx, SecondaryK8sCluster, namespace, pvcName1)
 		writtenDataHash10 = WriteRandomDataToPV(ctx, SecondaryK8sCluster, namespace, pvcName1)
 		CreateMantleBackup(SecondaryK8sCluster, namespace, pvcName1, backupName10)
-		WaitMantleBackupReadyToUse(SecondaryK8sCluster, namespace, backupName10)
+		WaitMantleBackupSnapshotCaptured(SecondaryK8sCluster, namespace, backupName10)
 	})
 
 	It("should ensure the MantleBackup created by standalone mantle doesn't exist in the primary k8s cluster",

@@ -24,7 +24,7 @@ var _ = Describe("change role from primary to standalone during full backup", La
 		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
 		writtenDataHash := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
-		WaitMantleBackupReadyToUse(PrimaryK8sCluster, namespace, backupName)
+		WaitMantleBackupSnapshotCaptured(PrimaryK8sCluster, namespace, backupName)
 
 		By("changing the primary mantle to standalone")
 		err := ChangeClusterRole(PrimaryK8sCluster, controller.RoleStandalone)
