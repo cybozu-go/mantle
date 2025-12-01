@@ -129,15 +129,21 @@ var _ = Describe("full backup", Label("full-backup"), func() {
 				return nil
 			}).Should(Succeed())
 
+			// Make sure verification step has completed in both clusters.
+			WaitMantleBackupVerified(PrimaryK8sCluster, namespace, primaryMB.GetName())
+			WaitMantleBackupVerified(SecondaryK8sCluster, namespace, secondaryMB.GetName())
+
 			// Make sure snapshots are correctly created.
-			primarySnaps, err := ListRBDSnapshotsInPVC(PrimaryK8sCluster, namespace, pvcName)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(primarySnaps).To(HaveLen(1))
-			Expect(primarySnaps[0].Name).To(Equal(backupName))
-			secondarySnaps, err := ListRBDSnapshotsInPVC(SecondaryK8sCluster, namespace, pvcName)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(secondarySnaps).To(HaveLen(1)) // Middle snapshots should be deleted.
-			Expect(secondarySnaps[0].Name).To(Equal(backupName))
+			Eventually(func(g Gomega) {
+				primarySnaps, err := ListRBDSnapshotsInPVC(PrimaryK8sCluster, namespace, pvcName)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(primarySnaps).To(HaveLen(1))
+				g.Expect(primarySnaps[0].Name).To(Equal(backupName))
+				secondarySnaps, err := ListRBDSnapshotsInPVC(SecondaryK8sCluster, namespace, pvcName)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(secondarySnaps).To(HaveLen(1)) // Middle snapshots should be deleted.
+				g.Expect(secondarySnaps[0].Name).To(Equal(backupName))
+			}).Should(Succeed())
 
 			By("ensuring the PVC can be attached to the pod in the primary cluster")
 			CreatePod(PrimaryK8sCluster, namespace, podName, pvcName)
