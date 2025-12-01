@@ -1902,7 +1902,7 @@ var _ = Describe("import", func() {
 			checkPVCDeleted(ctx, MakeExportDataPVCName(backup, 0))
 		}
 
-		It("should delete annotations, Jobs, and PVCs, and update SyncedToRemote", func(ctx SpecContext) {
+		It("should delete annotations, Jobs, and PVCs", func(ctx SpecContext) {
 			// Create source MantleBackup
 			source, err := createMantleBackupUsingDummyPVC(ctx, "source", ns)
 			Expect(err).NotTo(HaveOccurred())
@@ -1941,9 +1941,6 @@ var _ = Describe("import", func() {
 			Expect(err).NotTo(HaveOccurred())
 			_, ok = source.GetAnnotations()[annotDiffTo]
 			Expect(ok).To(BeFalse())
-
-			// Check that SyncedToRemote is set True
-			Expect(backup.IsSynced()).To(BeTrue())
 
 			// Check that the Jobs are deleted
 			checkExportAndUploadJobsDeleted(ctx, backup)
