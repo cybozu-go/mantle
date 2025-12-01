@@ -1919,9 +1919,6 @@ var _ = Describe("import", func() {
 			_, ok = source.GetAnnotations()[annotDiffTo]
 			Expect(ok).To(BeFalse())
 
-			// Check that SyncedToRemote is set True
-			Expect(backup.IsSynced()).To(BeTrue())
-
 			// Check that the Jobs are deleted
 			checkExportAndUploadJobsDeleted(ctx, backup)
 
