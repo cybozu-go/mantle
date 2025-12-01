@@ -384,7 +384,7 @@ func getRBDInfo(clusterNS, pool, image string) (*rbdInfo, error) {
 	return &info, nil
 }
 
-func isMantleBackupReady(namespace, name string) (bool, error) {
+func isMantleBackupSnapshotCaptured(namespace, name string) (bool, error) {
 	stdout, _, err := kubectl("-n", namespace, "get", "mantlebackup", name, "-o", "json")
 	if err != nil {
 		return false, err
@@ -394,7 +394,7 @@ func isMantleBackupReady(namespace, name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return backup.IsReady(), nil
+	return backup.IsSnapshotCaptured(), nil
 }
 
 func isMantleRestoreReady(namespace, name string) bool {
