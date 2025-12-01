@@ -129,6 +129,10 @@ var _ = Describe("full backup", Label("full-backup"), func() {
 				return nil
 			}).Should(Succeed())
 
+			// Make sure verification step has completed in both clusters.
+			WaitMantleBackupVerified(PrimaryK8sCluster, namespace, primaryMB.GetName())
+			WaitMantleBackupVerified(SecondaryK8sCluster, namespace, secondaryMB.GetName())
+
 			// Make sure snapshots are correctly created.
 			primarySnaps, err := ListRBDSnapshotsInPVC(PrimaryK8sCluster, namespace, pvcName)
 			Expect(err).NotTo(HaveOccurred())
@@ -136,7 +140,9 @@ var _ = Describe("full backup", Label("full-backup"), func() {
 			Expect(primarySnaps[0].Name).To(Equal(backupName))
 			secondarySnaps, err := ListRBDSnapshotsInPVC(SecondaryK8sCluster, namespace, pvcName)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(secondarySnaps).To(HaveLen(1)) // Middle snapshots should be deleted.
+			Eventually(func(g Gomega) {
+				Expect(secondarySnaps).To(HaveLen(1)) // Middle snapshots should be deleted.
+			})
 			Expect(secondarySnaps[0].Name).To(Equal(backupName))
 
 			By("ensuring the PVC can be attached to the pod in the primary cluster")

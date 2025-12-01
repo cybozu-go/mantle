@@ -523,6 +523,21 @@ func WaitMantleBackupSnapshotCaptured(cluster int, namespace, backupName string)
 	}, "10m", "1s").Should(Succeed())
 }
 
+func WaitMantleBackupVerified(cluster int, namespace, backupName string) {
+	GinkgoHelper()
+	By("checking MantleBackup's Verified status")
+	Eventually(func() error {
+		mb, err := GetMB(cluster, namespace, backupName)
+		if err != nil {
+			return err
+		}
+		if !mb.IsVerified() {
+			return errors.New("status of SnapshotCaptured condition is not True")
+		}
+		return nil
+	}, "10m", "1s").Should(Succeed())
+}
+
 func WaitMantleBackupSynced(namespace, backupName string) {
 	GinkgoHelper()
 	By(fmt.Sprintf("checking MantleBackup's SyncedToRemote status: %s/%s", namespace, backupName))

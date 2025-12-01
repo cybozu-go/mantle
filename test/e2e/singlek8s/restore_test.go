@@ -101,6 +101,9 @@ func (test *restoreTest) testRestore() {
 		err := applyPVCTemplate(test.tenantNamespace, test.pvcName, test.storageClassName)
 		Expect(err).NotTo(HaveOccurred())
 
+		err = writeTestData(test.tenantNamespace, test.pvcName, testData1)
+		Expect(err).NotTo(HaveOccurred())
+
 		err = applyMantleRestoreTemplate(test.tenantNamespace, test.mantleRestoreName1, test.mantleBackupName1)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -132,6 +135,8 @@ func (test *restoreTest) testRestore() {
 
 		By("creating the PVC after the MantleRestore")
 		err = applyPVCTemplate(test.tenantNamespace, test.pvcName, test.storageClassName)
+		Expect(err).NotTo(HaveOccurred())
+		err = writeTestData(test.tenantNamespace, test.pvcName, testData1)
 		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(func() bool {
