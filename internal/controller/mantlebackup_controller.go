@@ -410,8 +410,10 @@ func (r *MantleBackupReconciler) reconcilePre(ctx context.Context, backup *mantl
 		return ctrl.Result{}, err
 	}
 
-	if err := r.provisionRBDSnapshot(ctx, backup, target); err != nil {
-		return ctrl.Result{}, err
+	if !backup.IsReady() {
+		if err := r.provisionRBDSnapshot(ctx, backup, target); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	return ctrl.Result{}, nil
@@ -423,6 +425,13 @@ func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, back
 		return result, err
 	}
 
+	if !backup.IsVerified() {
+		if err := r.verify(ctx, backup); err != nil {
+			return ctrl.Result{}, err
+		}
+		return requeueReconciliation(), nil
+	}
+
 	return r.primaryCleanup(ctx, backup)
 }
 
@@ -432,11 +441,21 @@ func (r *MantleBackupReconciler) reconcileAsPrimary(ctx context.Context, backup 
 		return result, err
 	}
 
+	if !backup.IsVerified() {
+		if err := r.verify(ctx, backup); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
 	if !backup.IsSynced() {
 		result, err := r.replicate(ctx, backup)
 		if err != nil || !result.IsZero() {
 			return result, err
 		}
+	}
+
+	if !backup.IsVerified() || !backup.IsSynced() {
+		return requeueReconciliation(), nil
 	}
 
 	return r.primaryCleanup(ctx, backup)
@@ -484,6 +503,13 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 		if err != nil || !result.IsZero() {
 			return result, err
 		}
+	}
+
+	if backup.IsReady() && !backup.IsVerified() {
+		if err := r.verify(ctx, backup); err != nil {
+			return ctrl.Result{}, err
+		}
+		return requeueReconciliation(), nil
 	}
 
 	return r.secondaryCleanup(ctx, backup, true)
@@ -664,7 +690,6 @@ func (r *MantleBackupReconciler) replicateManifests(
 	return ctrl.Result{}, nil
 }
 
-//nolint:unused // TODO: Delete this line after starting use.
 func (r *MantleBackupReconciler) verify(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
@@ -680,7 +705,7 @@ func (r *MantleBackupReconciler) verify(
 	}
 
 	// create a clone by the snapshot bound to the MB
-	if err := createCloneByPV(ctx, r.ceph, &storedPV, backup.Name, makeVerifyImageName(backup)); err != nil {
+	if err := createCloneByPV(ctx, r.ceph, &storedPV, backup.Name, MakeVerifyImageName(backup)); err != nil {
 		return fmt.Errorf("failed to create a clone by the snapshot: %w", err)
 	}
 
@@ -688,7 +713,7 @@ func (r *MantleBackupReconciler) verify(
 	if err := r.createOrUpdateStaticPV(
 		ctx,
 		&storedPV,
-		makeVerifyImageName(backup),
+		MakeVerifyImageName(backup),
 		corev1.ResourceList{
 			corev1.ResourceStorage: *resource.NewQuantity(*backup.Status.SnapSize, resource.BinarySI),
 		},
@@ -750,8 +775,6 @@ func (r *MantleBackupReconciler) verify(
 
 // checkJobStatus checks the status of the Job with the given name.
 // It returns (is job finished, is job succeeded, error).
-//
-//nolint:unused // TODO: Delete this line after starting use `verify`.
 func (r *MantleBackupReconciler) checkJobStatus(ctx context.Context, jobName string) (bool, bool, error) {
 	var job batchv1.Job
 	if err := r.Get(
@@ -803,11 +826,6 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 	backup.Labels[labelLocalBackupTargetPVCUID] = string(target.pvc.GetUID())
 	if err := r.Update(ctx, backup); err != nil {
 		return err
-	}
-
-	// If the given MantleBackup is not ready to use, create a new RBD snapshot and update its status.
-	if backup.IsReady() {
-		return nil
 	}
 
 	snapshot, err := r.createRBDSnapshot(ctx, target.poolName, target.imageName, backup)
@@ -1519,22 +1537,18 @@ func MakeMiddleSnapshotName(backup *mantlev1.MantleBackup, offset int) string {
 	return fmt.Sprintf("%s-offset-%d", backup.GetAnnotations()[annotRemoteUID], offset)
 }
 
-//nolint:unused // TODO: Delete this line after starting use.
-func makeVerifyImageName(target *mantlev1.MantleBackup) string {
+func MakeVerifyImageName(target *mantlev1.MantleBackup) string {
 	return mantleVerifyImagePrefix + string(target.GetUID())
 }
 
-//nolint:unused // TODO: Delete this line after starting use.
 func makeVerifyJobName(target *mantlev1.MantleBackup) string {
 	return mantleVerifyJobPrefix + string(target.GetUID())
 }
 
-//nolint:unused // TODO: Delete this line after starting use.
 func makeVerifyPVCName(target *mantlev1.MantleBackup) string {
 	return mantleVerifyPVCPrefix + string(target.GetUID())
 }
 
-//nolint:unused // TODO: Delete this line after starting use.
 func makeVerifyPVName(target *mantlev1.MantleBackup) string {
 	return mantleVerifyPVPrefix + string(target.GetUID())
 }
@@ -2369,7 +2383,6 @@ blkdiscard -z /dev/zeroout-rbd
 	return err
 }
 
-//nolint:unused // TODO: Delete this line after starting use `verify`.
 func (r *MantleBackupReconciler) createOrUpdateVerifyJob(ctx context.Context, jobName, pvcName string) error {
 	var job batchv1.Job
 	job.SetName(jobName)
@@ -2757,6 +2770,19 @@ func (r *MantleBackupReconciler) primaryCleanup(
 		return ctrl.Result{}, fmt.Errorf("failed to delete export data PVCs: %w", err)
 	}
 
+	if err := r.deleteVerifyJob(ctx, target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete verify Job: %w", err)
+	}
+	if err := r.deleteVerifyPVC(ctx, target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete verify PVC: %w", err)
+	}
+	if err := r.deleteVerifyPV(ctx, target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete verify PV: %w", err)
+	}
+	if err := r.deleteVerifyRBDImage(target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete verify RBD image: %w", err)
+	}
+
 	delete(target.GetAnnotations(), annotDiffFrom)
 	delete(target.GetAnnotations(), annotSyncMode)
 	if err := r.Update(ctx, target); err != nil {
@@ -2825,6 +2851,55 @@ func (r *MantleBackupReconciler) deleteAllExportDataPVCs(ctx context.Context, ba
 	return nil
 }
 
+func (r *MantleBackupReconciler) deleteVerifyJob(ctx context.Context, backup *mantlev1.MantleBackup) error {
+	var job batchv1.Job
+	job.SetName(makeVerifyJobName(backup))
+	job.SetNamespace(r.managedCephClusterID)
+	if err := r.Delete(ctx, &job, &client.DeleteOptions{
+		PropagationPolicy: ptr.To(metav1.DeletePropagationBackground),
+	}); err != nil && !aerrors.IsNotFound(err) {
+		return fmt.Errorf("failed to delete verify Job: %s/%s: %w", job.GetNamespace(), job.GetName(), err)
+	}
+	return nil
+}
+
+func (r *MantleBackupReconciler) deleteVerifyPV(ctx context.Context, backup *mantlev1.MantleBackup) error {
+	var pv corev1.PersistentVolume
+	pv.SetName(makeVerifyPVName(backup))
+	if err := r.Delete(ctx, &pv); err != nil && !aerrors.IsNotFound(err) {
+		return fmt.Errorf("failed to delete verify PV: %w", err)
+	}
+	return nil
+}
+
+func (r *MantleBackupReconciler) deleteVerifyPVC(ctx context.Context, backup *mantlev1.MantleBackup) error {
+	var pvc corev1.PersistentVolumeClaim
+	pvc.SetName(makeVerifyPVCName(backup))
+	pvc.SetNamespace(r.managedCephClusterID)
+	if err := r.Delete(ctx, &pvc); err != nil && !aerrors.IsNotFound(err) {
+		return fmt.Errorf("failed to delete verify PVC: %w", err)
+	}
+	return nil
+}
+
+func (r *MantleBackupReconciler) deleteVerifyRBDImage(backup *mantlev1.MantleBackup) error {
+	if backup.Status.PVManifest == "" {
+		// The RBD image for verification is created after the PV manifest is stored in the status.
+		// Thus, when the PV manifest is missing, the RBD image hasn't been created, so we can safely return nil.
+		return nil
+	}
+	var pv corev1.PersistentVolume
+	if err := json.Unmarshal([]byte(backup.Status.PVManifest), &pv); err != nil {
+		return fmt.Errorf("failed to unmarshal PV manifest: %w", err)
+	}
+	pool := pv.Spec.CSI.VolumeAttributes["pool"]
+	if pool == "" {
+		return errors.New("pool name is missing in the PV manifest")
+	}
+	image := MakeVerifyImageName(backup)
+	return deleteRBDImageAsynchronously(r.ceph, pool, image)
+}
+
 func (r *MantleBackupReconciler) secondaryCleanup(
 	ctx context.Context,
 	target *mantlev1.MantleBackup,
@@ -2870,6 +2945,19 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 	zeroOutPV.SetName(MakeZeroOutPVName(target))
 	if err := r.Delete(ctx, &zeroOutPV); err != nil && !aerrors.IsNotFound(err) {
 		return ctrl.Result{}, fmt.Errorf("failed to delete zeroout PV: %w", err)
+	}
+
+	if err := r.deleteVerifyJob(ctx, target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete verify Job: %w", err)
+	}
+	if err := r.deleteVerifyPVC(ctx, target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete verify PVC: %w", err)
+	}
+	if err := r.deleteVerifyPV(ctx, target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete verify PV: %w", err)
+	}
+	if err := r.deleteVerifyRBDImage(target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete verify RBD image: %w", err)
 	}
 
 	if deleteExportData {
