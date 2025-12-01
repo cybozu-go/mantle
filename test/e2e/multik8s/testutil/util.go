@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	_ "embed"
@@ -9,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -764,17 +766,13 @@ func WaitUploadJobCreated(ctx SpecContext, cluster int, namespace, backupName st
 	}).Should(Succeed())
 }
 
-func WaitJobDeleted(ctx SpecContext, cluster int, namespace, jobName string) {
+func CheckJobExist(clusterNo int, namespace, jobName string) bool {
 	GinkgoHelper()
-	By("waiting for a job to be deleted")
-	Eventually(ctx, func(g Gomega) {
-		jobs, err := GetJobList(cluster, CephClusterNamespace)
-		g.Expect(err).NotTo(HaveOccurred())
-		exist := slices.ContainsFunc(jobs.Items, func(job batchv1.Job) bool {
-			return job.GetName() == jobName
-		})
-		g.Expect(exist).To(BeFalse())
-	}).Should(Succeed())
+	jobs, err := GetJobList(clusterNo, namespace)
+	Expect(err).NotTo(HaveOccurred())
+	return slices.ContainsFunc(jobs.Items, func(job batchv1.Job) bool {
+		return job.GetName() == jobName
+	})
 }
 
 func WaitComponentJobsDeleted(
@@ -1078,4 +1076,59 @@ func ChangeComponentJobScript(
 			}
 		}
 	}).Should(Succeed())
+}
+
+func WaitControllerLog(ctx SpecContext, clusterNo int, pattern string, duration time.Duration) error {
+	timeoutCtx, cancel := context.WithTimeout(ctx, duration)
+	defer cancel()
+
+	matcher := regexp.MustCompile(pattern)
+
+	fields, err := getKubectlInvocation(clusterNo)
+	if err != nil {
+		panic(err)
+	}
+	fields = append(fields, "logs", "-n", CephClusterNamespace, "deployment/"+MantleControllerDeployName, "-f")
+
+	command := exec.CommandContext(timeoutCtx, fields[0], fields[1:]...)
+	stdoutPipe, err := command.StdoutPipe()
+	if err != nil {
+		panic(err)
+	}
+	err = command.Start()
+	if err != nil {
+		panic(err)
+	}
+	defer func() {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+	}()
+
+	// read stdout line by line until the pattern is found
+	scanner := bufio.NewScanner(stdoutPipe)
+	found := make(chan struct{})
+	go func() {
+		for scanner.Scan() {
+			select {
+			case <-timeoutCtx.Done():
+				return
+			default:
+			}
+			line := scanner.Text()
+			if matcher.MatchString(line) {
+				close(found)
+				return
+			}
+		}
+		if scanner.Err() != nil {
+			panic(scanner.Err())
+		}
+	}()
+
+	select {
+	case <-timeoutCtx.Done():
+		return timeoutCtx.Err()
+	case <-found:
+		return nil
+	}
 }

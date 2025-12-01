@@ -1895,6 +1895,8 @@ func (r *MantleBackupReconciler) startImport(
 	backup *mantlev1.MantleBackup,
 	target *snapshotTarget,
 ) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
 	if !r.doesMantleBackupHaveSyncModeAnnot(backup) {
 		// SetSynchronizing is not called yet or the cache is stale.
 		return ctrl.Result{}, nil
@@ -1920,12 +1922,25 @@ func (r *MantleBackupReconciler) startImport(
 		return ctrl.Result{}, err
 	}
 
+	succeed, err := r.lockVolume(target.poolName, target.imageName, string(backup.GetUID()))
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to lock the volume: %w", err)
+	}
+	if !succeed {
+		logger.Info("the volume is locked by another process", "uid", string(backup.GetUID()))
+		return requeueReconciliation(), nil
+	}
+
 	if result, err := r.reconcileZeroOutJob(ctx, backup, target); err != nil || !result.IsZero() {
 		return result, err
 	}
 
 	if result, err := r.reconcileImportJob(ctx, backup, target, largestCompletedPartNum); err != nil || !result.IsZero() {
 		return result, err
+	}
+
+	if err := r.unlockVolume(target.poolName, target.imageName, string(backup.GetUID())); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to unlock the volume: %w", err)
 	}
 
 	return ctrl.Result{}, nil
@@ -2044,6 +2059,70 @@ func (r *MantleBackupReconciler) updateStatusManifests(
 
 		return nil
 	})
+}
+
+// lockVolume adds a lock to the specified RBD volume if the lock is not already held.
+// It returns true if the lock is held by this caller, false if another lock is held or an error occurs.
+func (r *MantleBackupReconciler) lockVolume(
+	poolName, imageName, lockID string,
+) (bool, error) {
+	// Add a lock.
+	if errAdd := r.ceph.RBDLockAdd(poolName, imageName, lockID); errAdd != nil {
+		locks, errLs := r.ceph.RBDLockLs(poolName, imageName)
+		if errLs != nil {
+			return false, fmt.Errorf("failed to add a lock and list locks on volume %s/%s: %w", poolName, imageName, errors.Join(errAdd, errLs))
+		}
+
+		switch len(locks) {
+		case 0:
+			// It may have been unlocked after the lock failed, but since other causes are also possible, an error is returned.
+			return false, fmt.Errorf("failed to add a lock to the volume %s/%s: %w", poolName, imageName, errAdd)
+
+		case 1:
+			if locks[0].LockID == lockID {
+				// Already locked by this MB.
+				return true, nil
+			}
+			// Locked by another process.
+			return false, nil
+
+		default:
+			// Multiple locks found; unexpected state.
+			return false, fmt.Errorf("multiple locks found on volume %s/%s after failed lock attempt(%v)", poolName, imageName, locks)
+		}
+	}
+
+	// Locked
+	return true, nil
+}
+
+// unlockVolume removes the specified lock from the RBD volume if the lock is held.
+// No action is taken if the lock is not found.
+func (r *MantleBackupReconciler) unlockVolume(
+	poolName, imageName, lockID string,
+) error {
+	// List up locks to check if the lock is held.
+	locks, err := r.ceph.RBDLockLs(poolName, imageName)
+	if err != nil {
+		return fmt.Errorf("failed to list locks of the volume %s/%s: %w", poolName, imageName, err)
+	}
+
+	if len(locks) >= 2 {
+		return fmt.Errorf("multiple locks found on volume %s/%s when unlocking (%v)", poolName, imageName, locks)
+	}
+
+	for _, lock := range locks {
+		if lock.LockID == lockID {
+			// Unlock
+			if err := r.ceph.RBDLockRm(poolName, imageName, lock); err != nil {
+				return fmt.Errorf("failed to remove the lock from the volume %s/%s: %w", poolName, imageName, err)
+			}
+			return nil
+		}
+	}
+
+	// Already unlocked.
+	return nil
 }
 
 func (r *MantleBackupReconciler) reconcileZeroOutJob(

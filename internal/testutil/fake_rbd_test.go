@@ -46,4 +46,45 @@ var _ = Describe("FakeRBD", func() {
 		err = f.RBDSnapRm("pool", "image", "snap2")
 		Expect(err).ToNot(HaveOccurred())
 	})
+
+	It("should lock/unlock a volume", func() {
+		f := NewFakeRBD()
+
+		By("checking adding a lock succeeds")
+		err := f.RBDLockAdd("pool", "image1", "lock1")
+		Expect(err).ToNot(HaveOccurred())
+
+		By("checking adding the same lock fails")
+		err = f.RBDLockAdd("pool", "image1", "lock1")
+		Expect(err).To(HaveOccurred())
+
+		By("checking adding a different lock fails")
+		err = f.RBDLockAdd("pool", "image1", "lock2")
+		Expect(err).To(HaveOccurred())
+
+		By("checking adding another lock succeeds")
+		err = f.RBDLockAdd("pool", "image2", "lock1")
+		Expect(err).ToNot(HaveOccurred())
+
+		By("checking listing locks succeeds")
+		locks1, err := f.RBDLockLs("pool", "image1")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(locks1).To(HaveLen(1))
+		Expect(locks1).To(ConsistOf(
+			HaveField("LockID", "lock1"),
+		))
+		locks2, err := f.RBDLockLs("pool", "image2")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(locks2).To(HaveLen(1))
+		Expect(locks2).To(ConsistOf(
+			HaveField("LockID", "lock1"),
+		))
+
+		By("checking removing a lock succeeds")
+		err = f.RBDLockRm("pool", "image1", locks1[0])
+		Expect(err).ToNot(HaveOccurred())
+		locks1, err = f.RBDLockLs("pool", "image1")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(locks1).To(BeEmpty())
+	})
 })

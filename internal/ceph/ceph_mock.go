@@ -82,6 +82,49 @@ func (mr *MockCephCmdMockRecorder) RBDInfo(pool, image any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RBDInfo", reflect.TypeOf((*MockCephCmd)(nil).RBDInfo), pool, image)
 }
 
+// RBDLockAdd mocks base method.
+func (m *MockCephCmd) RBDLockAdd(pool, image, lockID string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RBDLockAdd", pool, image, lockID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RBDLockAdd indicates an expected call of RBDLockAdd.
+func (mr *MockCephCmdMockRecorder) RBDLockAdd(pool, image, lockID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RBDLockAdd", reflect.TypeOf((*MockCephCmd)(nil).RBDLockAdd), pool, image, lockID)
+}
+
+// RBDLockLs mocks base method.
+func (m *MockCephCmd) RBDLockLs(pool, image string) ([]*RBDLock, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RBDLockLs", pool, image)
+	ret0, _ := ret[0].([]*RBDLock)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RBDLockLs indicates an expected call of RBDLockLs.
+func (mr *MockCephCmdMockRecorder) RBDLockLs(pool, image any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RBDLockLs", reflect.TypeOf((*MockCephCmd)(nil).RBDLockLs), pool, image)
+}
+
+// RBDLockRm mocks base method.
+func (m *MockCephCmd) RBDLockRm(pool, image string, lock *RBDLock) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RBDLockRm", pool, image, lock)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RBDLockRm indicates an expected call of RBDLockRm.
+func (mr *MockCephCmdMockRecorder) RBDLockRm(pool, image, lock any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RBDLockRm", reflect.TypeOf((*MockCephCmd)(nil).RBDLockRm), pool, image, lock)
+}
+
 // RBDLs mocks base method.
 func (m *MockCephCmd) RBDLs(pool string) ([]string, error) {
 	m.ctrl.T.Helper()
