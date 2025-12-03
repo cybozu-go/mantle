@@ -327,30 +327,48 @@ do-test-multik8s: $(GINKGO)
 	PATH=${PATH} \
 	E2ETEST=1 \
 	$(GINKGO) --fail-fast -v $(GINKGO_FLAGS) multik8s; \
-	if [ "$$?" -ne 0 ]; then \
-		echo "Controller logs for $(MINIKUBE_PROFILE_PRIMARY):"; \
-		$${KUBECTL_PRIMARY} logs --tail 1000 -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle -c mantle; \
-		echo ""; \
-		echo "Controller logs for $(MINIKUBE_PROFILE_SECONDARY):"; \
-		$${KUBECTL_SECONDARY}  logs --tail 1000 -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle -c mantle; \
-		echo ""; \
-		echo "Primary MBs"; \
-		$${KUBECTL_PRIMARY} get mantlebackups -A -o yaml; \
-		echo ""; \
-		echo "Secondary MBs"; \
-		$${KUBECTL_SECONDARY} get mantlebackups -A -o yaml; \
-		echo ""; \
-		echo "Primary PVCs"; \
-		$${KUBECTL_PRIMARY} get pvc -A -o yaml; \
-		echo ""; \
-		echo "Secondary PVCs"; \
-		$${KUBECTL_SECONDARY} get pvc -A -o yaml; \
-		echo ""; \
-		echo "Primary PVs"; \
-		$${KUBECTL_PRIMARY} get pv -o yaml; \
-		echo ""; \
-		echo "Secondary PVs"; \
-		$${KUBECTL_SECONDARY} get pv -o yaml; \
-		# Explicitly fail the test to mark the CI job as failed. \
-		exit 1; \
-	fi
+	RCODE=$$?; \
+	echo "Controller logs for $(MINIKUBE_PROFILE_PRIMARY):"; \
+	$${KUBECTL_PRIMARY} logs --tail 1000 -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle -c mantle; \
+	echo ""; \
+	echo "Controller logs for $(MINIKUBE_PROFILE_SECONDARY):"; \
+	$${KUBECTL_SECONDARY}  logs --tail 1000 -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle -c mantle; \
+	echo ""; \
+	echo "Primary MBs"; \
+	$${KUBECTL_PRIMARY} get mantlebackups -A -o yaml; \
+	echo ""; \
+	echo "Secondary MBs"; \
+	$${KUBECTL_SECONDARY} get mantlebackups -A -o yaml; \
+	echo ""; \
+	echo "Primary PVCs"; \
+	$${KUBECTL_PRIMARY} get pvc -A -o yaml; \
+	echo ""; \
+	echo "Secondary PVCs"; \
+	$${KUBECTL_SECONDARY} get pvc -A -o yaml; \
+	echo ""; \
+	echo "Primary PVs"; \
+	$${KUBECTL_PRIMARY} get pv -o yaml; \
+	echo ""; \
+	echo "Secondary PVs"; \
+	$${KUBECTL_SECONDARY} get pv -o yaml; \
+	echo ""; \
+	echo "Primary RBD images and snapshots:"; \
+	for POOL in $$($(KUBECTL_PRIMARY) exec -n $(CEPH_CLUSTER1_NAMESPACE) deploy/rook-ceph-tools -- ceph osd pool ls); do \
+		echo "Ceph pool $${POOL}:"; \
+		for IMAGE in $$($(KUBECTL_PRIMARY) exec -n $(CEPH_CLUSTER1_NAMESPACE) deploy/rook-ceph-tools -- rbd -p $${POOL} ls); do \
+			echo "🕵️ $${IMAGE}"; \
+			$(KUBECTL_PRIMARY) exec -n $(CEPH_CLUSTER1_NAMESPACE) deploy/rook-ceph-tools -- rbd info $${POOL}/$${IMAGE}; \
+			$(KUBECTL_PRIMARY) exec -n $(CEPH_CLUSTER1_NAMESPACE) deploy/rook-ceph-tools -- rbd -p $${POOL} snap ls $${IMAGE}; \
+		done; \
+	done; \
+	echo ""; \
+	echo "Secondary RBD images and snapshots:"; \
+	for POOL in $$($(KUBECTL_SECONDARY) exec -n $(CEPH_CLUSTER1_NAMESPACE) deploy/rook-ceph-tools -- ceph osd pool ls); do \
+		echo "Ceph pool $${POOL}:"; \
+		for IMAGE in $$($(KUBECTL_SECONDARY) exec -n $(CEPH_CLUSTER1_NAMESPACE) deploy/rook-ceph-tools -- rbd -p $${POOL} ls); do \
+			echo "🕵️ $${IMAGE}"; \
+			$(KUBECTL_SECONDARY) exec -n $(CEPH_CLUSTER1_NAMESPACE) deploy/rook-ceph-tools -- rbd info $${POOL}/$${IMAGE}; \
+			$(KUBECTL_SECONDARY) exec -n $(CEPH_CLUSTER1_NAMESPACE) deploy/rook-ceph-tools -- rbd -p $${POOL} snap ls $${IMAGE}; \
+		done; \
+	done; \
+	exit $$RCODE
