@@ -494,21 +494,21 @@ var _ = Describe("MantleBackup controller", func() {
 					Uid: "a7c9d5e2-4b8f-4e2a-9d3f-1b6a7c8e9f2b",
 				}, nil)
 			secondaryBackups := []*mantlev1.MantleBackup{}
-			grpcClient.EXPECT().CreateOrUpdateMantleBackup(gomock.Any(), gomock.Any()).
+			grpcClient.EXPECT().CreateMantleBackup(gomock.Any(), gomock.Any()).
 				MinTimes(1).
 				DoAndReturn(
 					func(
 						ctx context.Context,
-						req *proto.CreateOrUpdateMantleBackupRequest,
+						req *proto.CreateMantleBackupRequest,
 						opts ...grpc.CallOption,
-					) (*proto.CreateOrUpdateMantleBackupResponse, error) {
+					) (*proto.CreateMantleBackupResponse, error) {
 						var secondaryBackup mantlev1.MantleBackup
 						err := json.Unmarshal(req.GetMantleBackup(), &secondaryBackup)
 						if err != nil {
 							panic(err)
 						}
 						secondaryBackups = append(secondaryBackups, &secondaryBackup)
-						return &proto.CreateOrUpdateMantleBackupResponse{}, nil
+						return &proto.CreateMantleBackupResponse{}, nil
 					})
 			grpcClient.EXPECT().ListMantleBackup(gomock.Any(), gomock.Any()).
 				MinTimes(1).

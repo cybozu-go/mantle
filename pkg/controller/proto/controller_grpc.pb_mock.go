@@ -41,24 +41,24 @@ func (m *MockMantleServiceClient) EXPECT() *MockMantleServiceClientMockRecorder 
 	return m.recorder
 }
 
-// CreateOrUpdateMantleBackup mocks base method.
-func (m *MockMantleServiceClient) CreateOrUpdateMantleBackup(ctx context.Context, in *CreateOrUpdateMantleBackupRequest, opts ...grpc.CallOption) (*CreateOrUpdateMantleBackupResponse, error) {
+// CreateMantleBackup mocks base method.
+func (m *MockMantleServiceClient) CreateMantleBackup(ctx context.Context, in *CreateMantleBackupRequest, opts ...grpc.CallOption) (*CreateMantleBackupResponse, error) {
 	m.ctrl.T.Helper()
 	varargs := []any{ctx, in}
 	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
-	ret := m.ctrl.Call(m, "CreateOrUpdateMantleBackup", varargs...)
-	ret0, _ := ret[0].(*CreateOrUpdateMantleBackupResponse)
+	ret := m.ctrl.Call(m, "CreateMantleBackup", varargs...)
+	ret0, _ := ret[0].(*CreateMantleBackupResponse)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// CreateOrUpdateMantleBackup indicates an expected call of CreateOrUpdateMantleBackup.
-func (mr *MockMantleServiceClientMockRecorder) CreateOrUpdateMantleBackup(ctx, in any, opts ...any) *gomock.Call {
+// CreateMantleBackup indicates an expected call of CreateMantleBackup.
+func (mr *MockMantleServiceClientMockRecorder) CreateMantleBackup(ctx, in any, opts ...any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	varargs := append([]any{ctx, in}, opts...)
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateOrUpdateMantleBackup", reflect.TypeOf((*MockMantleServiceClient)(nil).CreateOrUpdateMantleBackup), varargs...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateMantleBackup", reflect.TypeOf((*MockMantleServiceClient)(nil).CreateMantleBackup), varargs...)
 }
 
 // CreateOrUpdatePVC mocks base method.
@@ -145,19 +145,19 @@ func (m *MockMantleServiceServer) EXPECT() *MockMantleServiceServerMockRecorder 
 	return m.recorder
 }
 
-// CreateOrUpdateMantleBackup mocks base method.
-func (m *MockMantleServiceServer) CreateOrUpdateMantleBackup(arg0 context.Context, arg1 *CreateOrUpdateMantleBackupRequest) (*CreateOrUpdateMantleBackupResponse, error) {
+// CreateMantleBackup mocks base method.
+func (m *MockMantleServiceServer) CreateMantleBackup(arg0 context.Context, arg1 *CreateMantleBackupRequest) (*CreateMantleBackupResponse, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CreateOrUpdateMantleBackup", arg0, arg1)
-	ret0, _ := ret[0].(*CreateOrUpdateMantleBackupResponse)
+	ret := m.ctrl.Call(m, "CreateMantleBackup", arg0, arg1)
+	ret0, _ := ret[0].(*CreateMantleBackupResponse)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// CreateOrUpdateMantleBackup indicates an expected call of CreateOrUpdateMantleBackup.
-func (mr *MockMantleServiceServerMockRecorder) CreateOrUpdateMantleBackup(arg0, arg1 any) *gomock.Call {
+// CreateMantleBackup indicates an expected call of CreateMantleBackup.
+func (mr *MockMantleServiceServerMockRecorder) CreateMantleBackup(arg0, arg1 any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateOrUpdateMantleBackup", reflect.TypeOf((*MockMantleServiceServer)(nil).CreateOrUpdateMantleBackup), arg0, arg1)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateMantleBackup", reflect.TypeOf((*MockMantleServiceServer)(nil).CreateMantleBackup), arg0, arg1)
 }
 
 // CreateOrUpdatePVC mocks base method.

@@ -14,13 +14,13 @@ message CreateOrUpdatePVCResponse {
     string uid = 1;
 }
 
-// CreateOrUpdateMantleBackupRequest is a request message for CreateOrUpdateMantleBackup RPC.
-message CreateOrUpdateMantleBackupRequest {
+// CreateMantleBackupRequest is a request message for CreateMantleBackup RPC.
+message CreateMantleBackupRequest {
     bytes mantleBackup = 1;
 }
 
-// CreateOrUpdateMantleBackupResponse is a response message for CreateOrUpdateMantleBackup RPC.
-message CreateOrUpdateMantleBackupResponse {
+// CreateMantleBackupResponse is a response message for CreateMantleBackup RPC.
+message CreateMantleBackupResponse {
     // nothing.
 }
 
@@ -48,7 +48,7 @@ message SetSynchronizingResponse {
 
 service MantleService {
     rpc CreateOrUpdatePVC(CreateOrUpdatePVCRequest) returns (CreateOrUpdatePVCResponse);
-    rpc CreateOrUpdateMantleBackup(CreateOrUpdateMantleBackupRequest) returns (CreateOrUpdateMantleBackupResponse);
+    rpc CreateMantleBackup(CreateMantleBackupRequest) returns (CreateMantleBackupResponse);
     rpc ListMantleBackup(ListMantleBackupRequest) returns (ListMantleBackupResponse);
     rpc SetSynchronizing(SetSynchronizingRequest) returns (SetSynchronizingResponse);
 }

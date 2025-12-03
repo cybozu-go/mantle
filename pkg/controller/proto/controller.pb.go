@@ -111,28 +111,28 @@ func (x *CreateOrUpdatePVCResponse) GetUid() string {
 	return ""
 }
 
-// CreateOrUpdateMantleBackupRequest is a request message for CreateOrUpdateMantleBackup RPC.
-type CreateOrUpdateMantleBackupRequest struct {
+// CreateMantleBackupRequest is a request message for CreateMantleBackup RPC.
+type CreateMantleBackupRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	MantleBackup  []byte                 `protobuf:"bytes,1,opt,name=mantleBackup,proto3" json:"mantleBackup,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *CreateOrUpdateMantleBackupRequest) Reset() {
-	*x = CreateOrUpdateMantleBackupRequest{}
+func (x *CreateMantleBackupRequest) Reset() {
+	*x = CreateMantleBackupRequest{}
 	mi := &file_pkg_controller_proto_controller_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *CreateOrUpdateMantleBackupRequest) String() string {
+func (x *CreateMantleBackupRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*CreateOrUpdateMantleBackupRequest) ProtoMessage() {}
+func (*CreateMantleBackupRequest) ProtoMessage() {}
 
-func (x *CreateOrUpdateMantleBackupRequest) ProtoReflect() protoreflect.Message {
+func (x *CreateMantleBackupRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_pkg_controller_proto_controller_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -144,39 +144,39 @@ func (x *CreateOrUpdateMantleBackupRequest) ProtoReflect() protoreflect.Message 
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CreateOrUpdateMantleBackupRequest.ProtoReflect.Descriptor instead.
-func (*CreateOrUpdateMantleBackupRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use CreateMantleBackupRequest.ProtoReflect.Descriptor instead.
+func (*CreateMantleBackupRequest) Descriptor() ([]byte, []int) {
 	return file_pkg_controller_proto_controller_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *CreateOrUpdateMantleBackupRequest) GetMantleBackup() []byte {
+func (x *CreateMantleBackupRequest) GetMantleBackup() []byte {
 	if x != nil {
 		return x.MantleBackup
 	}
 	return nil
 }
 
-// CreateOrUpdateMantleBackupResponse is a response message for CreateOrUpdateMantleBackup RPC.
-type CreateOrUpdateMantleBackupResponse struct {
+// CreateMantleBackupResponse is a response message for CreateMantleBackup RPC.
+type CreateMantleBackupResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *CreateOrUpdateMantleBackupResponse) Reset() {
-	*x = CreateOrUpdateMantleBackupResponse{}
+func (x *CreateMantleBackupResponse) Reset() {
+	*x = CreateMantleBackupResponse{}
 	mi := &file_pkg_controller_proto_controller_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *CreateOrUpdateMantleBackupResponse) String() string {
+func (x *CreateMantleBackupResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*CreateOrUpdateMantleBackupResponse) ProtoMessage() {}
+func (*CreateMantleBackupResponse) ProtoMessage() {}
 
-func (x *CreateOrUpdateMantleBackupResponse) ProtoReflect() protoreflect.Message {
+func (x *CreateMantleBackupResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_pkg_controller_proto_controller_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -188,8 +188,8 @@ func (x *CreateOrUpdateMantleBackupResponse) ProtoReflect() protoreflect.Message
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CreateOrUpdateMantleBackupResponse.ProtoReflect.Descriptor instead.
-func (*CreateOrUpdateMantleBackupResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use CreateMantleBackupResponse.ProtoReflect.Descriptor instead.
+func (*CreateMantleBackupResponse) Descriptor() ([]byte, []int) {
 	return file_pkg_controller_proto_controller_proto_rawDescGZIP(), []int{3}
 }
 
@@ -397,10 +397,10 @@ const file_pkg_controller_proto_controller_proto_rawDesc = "" +
 	"\x18CreateOrUpdatePVCRequest\x12\x10\n" +
 	"\x03pvc\x18\x01 \x01(\fR\x03pvc\"-\n" +
 	"\x19CreateOrUpdatePVCResponse\x12\x10\n" +
-	"\x03uid\x18\x01 \x01(\tR\x03uid\"G\n" +
-	"!CreateOrUpdateMantleBackupRequest\x12\"\n" +
-	"\fmantleBackup\x18\x01 \x01(\fR\fmantleBackup\"$\n" +
-	"\"CreateOrUpdateMantleBackupResponse\"O\n" +
+	"\x03uid\x18\x01 \x01(\tR\x03uid\"?\n" +
+	"\x19CreateMantleBackupRequest\x12\"\n" +
+	"\fmantleBackup\x18\x01 \x01(\fR\fmantleBackup\"\x1c\n" +
+	"\x1aCreateMantleBackupResponse\"O\n" +
 	"\x17ListMantleBackupRequest\x12\x16\n" +
 	"\x06pvcUID\x18\x01 \x01(\tR\x06pvcUID\x12\x1c\n" +
 	"\tnamespace\x18\x02 \x01(\tR\tnamespace\"F\n" +
@@ -411,10 +411,10 @@ const file_pkg_controller_proto_controller_proto_rawDesc = "" +
 	"\tnamespace\x18\x02 \x01(\tR\tnamespace\x12\x1f\n" +
 	"\bdiffFrom\x18\x03 \x01(\tH\x00R\bdiffFrom\x88\x01\x01B\v\n" +
 	"\t_diffFrom\"\x1a\n" +
-	"\x18SetSynchronizingResponse2\x84\x03\n" +
+	"\x18SetSynchronizingResponse2\xec\x02\n" +
 	"\rMantleService\x12V\n" +
-	"\x11CreateOrUpdatePVC\x12\x1f.proto.CreateOrUpdatePVCRequest\x1a .proto.CreateOrUpdatePVCResponse\x12q\n" +
-	"\x1aCreateOrUpdateMantleBackup\x12(.proto.CreateOrUpdateMantleBackupRequest\x1a).proto.CreateOrUpdateMantleBackupResponse\x12S\n" +
+	"\x11CreateOrUpdatePVC\x12\x1f.proto.CreateOrUpdatePVCRequest\x1a .proto.CreateOrUpdatePVCResponse\x12Y\n" +
+	"\x12CreateMantleBackup\x12 .proto.CreateMantleBackupRequest\x1a!.proto.CreateMantleBackupResponse\x12S\n" +
 	"\x10ListMantleBackup\x12\x1e.proto.ListMantleBackupRequest\x1a\x1f.proto.ListMantleBackupResponse\x12S\n" +
 	"\x10SetSynchronizing\x12\x1e.proto.SetSynchronizingRequest\x1a\x1f.proto.SetSynchronizingResponseB2Z0github.com/cybozu-go/mantle/pkg/controller/protob\x06proto3"
 
@@ -432,22 +432,22 @@ func file_pkg_controller_proto_controller_proto_rawDescGZIP() []byte {
 
 var file_pkg_controller_proto_controller_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_pkg_controller_proto_controller_proto_goTypes = []any{
-	(*CreateOrUpdatePVCRequest)(nil),           // 0: proto.CreateOrUpdatePVCRequest
-	(*CreateOrUpdatePVCResponse)(nil),          // 1: proto.CreateOrUpdatePVCResponse
-	(*CreateOrUpdateMantleBackupRequest)(nil),  // 2: proto.CreateOrUpdateMantleBackupRequest
-	(*CreateOrUpdateMantleBackupResponse)(nil), // 3: proto.CreateOrUpdateMantleBackupResponse
-	(*ListMantleBackupRequest)(nil),            // 4: proto.ListMantleBackupRequest
-	(*ListMantleBackupResponse)(nil),           // 5: proto.ListMantleBackupResponse
-	(*SetSynchronizingRequest)(nil),            // 6: proto.SetSynchronizingRequest
-	(*SetSynchronizingResponse)(nil),           // 7: proto.SetSynchronizingResponse
+	(*CreateOrUpdatePVCRequest)(nil),   // 0: proto.CreateOrUpdatePVCRequest
+	(*CreateOrUpdatePVCResponse)(nil),  // 1: proto.CreateOrUpdatePVCResponse
+	(*CreateMantleBackupRequest)(nil),  // 2: proto.CreateMantleBackupRequest
+	(*CreateMantleBackupResponse)(nil), // 3: proto.CreateMantleBackupResponse
+	(*ListMantleBackupRequest)(nil),    // 4: proto.ListMantleBackupRequest
+	(*ListMantleBackupResponse)(nil),   // 5: proto.ListMantleBackupResponse
+	(*SetSynchronizingRequest)(nil),    // 6: proto.SetSynchronizingRequest
+	(*SetSynchronizingResponse)(nil),   // 7: proto.SetSynchronizingResponse
 }
 var file_pkg_controller_proto_controller_proto_depIdxs = []int32{
 	0, // 0: proto.MantleService.CreateOrUpdatePVC:input_type -> proto.CreateOrUpdatePVCRequest
-	2, // 1: proto.MantleService.CreateOrUpdateMantleBackup:input_type -> proto.CreateOrUpdateMantleBackupRequest
+	2, // 1: proto.MantleService.CreateMantleBackup:input_type -> proto.CreateMantleBackupRequest
 	4, // 2: proto.MantleService.ListMantleBackup:input_type -> proto.ListMantleBackupRequest
 	6, // 3: proto.MantleService.SetSynchronizing:input_type -> proto.SetSynchronizingRequest
 	1, // 4: proto.MantleService.CreateOrUpdatePVC:output_type -> proto.CreateOrUpdatePVCResponse
-	3, // 5: proto.MantleService.CreateOrUpdateMantleBackup:output_type -> proto.CreateOrUpdateMantleBackupResponse
+	3, // 5: proto.MantleService.CreateMantleBackup:output_type -> proto.CreateMantleBackupResponse
 	5, // 6: proto.MantleService.ListMantleBackup:output_type -> proto.ListMantleBackupResponse
 	7, // 7: proto.MantleService.SetSynchronizing:output_type -> proto.SetSynchronizingResponse
 	4, // [4:8] is the sub-list for method output_type

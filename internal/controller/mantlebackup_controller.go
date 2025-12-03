@@ -617,10 +617,10 @@ func (r *MantleBackupReconciler) replicateManifests(
 		return ctrl.Result{}, err
 	}
 
-	// Call CreateOrUpdateMantleBackup.
-	if _, err := client.CreateOrUpdateMantleBackup(
+	// Call CreateMantleBackup.
+	if _, err := client.CreateMantleBackup(
 		ctx,
-		&proto.CreateOrUpdateMantleBackupRequest{
+		&proto.CreateMantleBackupRequest{
 			MantleBackup: backupSentJson,
 		},
 	); err != nil {
