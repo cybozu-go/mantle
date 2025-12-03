@@ -16,7 +16,7 @@ controller:
   #noProxy: localhost,127.0.0.1,10.96.0.0/12
   env:
     - name: REQUEUE_RECONCILIATION_AFTER
-      value: "1s"
+      value: "10s"
   backupTransferPartSize: {BACKUP_TRANSFER_PART_SIZE}
   mtls:
     serverCACertConfigMap: mantle-secondary-ca-crt

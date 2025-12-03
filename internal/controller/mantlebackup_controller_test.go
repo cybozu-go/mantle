@@ -1380,7 +1380,7 @@ var _ = Describe("export and upload", func() {
 			diffFrom:                          diffFrom,
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(ret.Requeue).To(BeTrue())
+		Expect(ret.RequeueAfter).NotTo(BeZero())
 
 		return target
 	}
@@ -1394,7 +1394,7 @@ var _ = Describe("export and upload", func() {
 			diffFrom:                          nil,
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(ret.Requeue).To(BeTrue())
+		Expect(ret.RequeueAfter).NotTo(BeZero())
 	}
 
 	completeJob := func(ctx SpecContext, jobName string) {
@@ -1739,7 +1739,7 @@ var _ = Describe("import", func() {
 			// The first call to reconcileImportJob should create an import Job
 			res, err := mbr.reconcileImportJob(ctx, backup, snapshotTarget, -1)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(res.Requeue).To(BeTrue())
+			Expect(res.RequeueAfter).NotTo(BeZero())
 
 			var importJob batchv1.Job
 			err = k8sClient.Get(ctx, types.NamespacedName{
@@ -1751,7 +1751,7 @@ var _ = Describe("import", func() {
 			// The successive calls should return ctrl.Result{Requeue: true} until the import Job is completed.
 			res, err = mbr.reconcileImportJob(ctx, backup, snapshotTarget, -1)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(res.Requeue).To(BeTrue())
+			Expect(res.RequeueAfter).NotTo(BeZero())
 
 			// Make the import Job completed.
 			completeJob(ctx, importJob.GetNamespace(), importJob.GetName())
@@ -2177,7 +2177,7 @@ var _ = Describe("import", func() {
 
 			result, err := mbr.reconcileZeroOutJob(ctx, backup, &snapshotTarget{})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue).To(BeFalse())
+			Expect(result.RequeueAfter).To(BeZero())
 
 			var pv corev1.PersistentVolume
 			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeZeroOutPVName(backup)}, &pv)
@@ -2258,7 +2258,7 @@ var _ = Describe("import", func() {
 			// The first call to reconcileZeroOutJob should create a PV, PVC, and Job, and requeue.
 			result, err := mbr.reconcileZeroOutJob(ctx, backup, snapshotTarget)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue).To(BeTrue())
+			Expect(result.RequeueAfter).NotTo(BeZero())
 
 			var pv corev1.PersistentVolume
 			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeZeroOutPVName(backup), Namespace: nsController}, &pv)
@@ -2325,7 +2325,7 @@ var _ = Describe("import", func() {
 			// A call to reconcileZeroOutJob should NOT requeue after the Job completed
 			result, err = mbr.reconcileZeroOutJob(ctx, backup, snapshotTarget)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue).To(BeFalse())
+			Expect(result.RequeueAfter).To(BeZero())
 		})
 	})
 
