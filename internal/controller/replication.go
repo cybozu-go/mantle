@@ -10,6 +10,7 @@ import (
 	"github.com/cybozu-go/mantle/pkg/controller/proto"
 	"google.golang.org/grpc"
 	corev1 "k8s.io/api/core/v1"
+	aerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -109,10 +110,10 @@ func (s *SecondaryServer) CreateOrUpdatePVC(
 	return &proto.CreateOrUpdatePVCResponse{Uid: string(pvc.GetUID())}, nil
 }
 
-func (s *SecondaryServer) CreateOrUpdateMantleBackup(
+func (s *SecondaryServer) CreateMantleBackup(
 	ctx context.Context,
-	req *proto.CreateOrUpdateMantleBackupRequest,
-) (*proto.CreateOrUpdateMantleBackupResponse, error) {
+	req *proto.CreateMantleBackupRequest,
+) (*proto.CreateMantleBackupResponse, error) {
 	var backupReceived mantlev1.MantleBackup
 	if err := json.Unmarshal(req.MantleBackup, &backupReceived); err != nil {
 		return nil, err
@@ -139,62 +140,59 @@ func (s *SecondaryServer) CreateOrUpdateMantleBackup(
 			annotRemoteUID, backupReceived.GetName(), backupReceived.GetNamespace())
 	}
 
-	var backup mantlev1.MantleBackup
-	backup.SetName(backupReceived.GetName())
-	backup.SetNamespace(backupReceived.GetNamespace())
-	if _, err := ctrl.CreateOrUpdate(ctx, s.client, &backup, func() error {
-		if !backup.CreationTimestamp.IsZero() {
-			errMsg := ""
-			if backup.Labels == nil {
-				errMsg = "labels field is nil in backup"
-			} else {
-				pvcUID, ok := backup.Labels[labelLocalBackupTargetPVCUID]
-				if !ok {
-					errMsg = "label not found"
-				} else if pvcUID != pvcUIDReceived {
-					errMsg = "label not matched"
-				}
-			}
-			if errMsg != "" {
-				return fmt.Errorf("%s: %s: %s: %s",
-					errMsg, labelLocalBackupTargetPVCUID, backupReceived.GetName(), backupReceived.GetNamespace())
-			}
-
-			if backup.Annotations == nil {
-				errMsg = "annotation field is nil in backup"
-			} else {
-				remoteUID, ok := backup.Annotations[annotRemoteUID]
-				if !ok {
-					errMsg = "annotation not found in backup"
-				} else if remoteUID != remoteUIDReceived {
-					errMsg = "annotation not matched"
-				}
-			}
-			if errMsg != "" {
-				return fmt.Errorf("%s: %s: %s: %s",
-					errMsg, annotRemoteUID, backupReceived.GetName(), backupReceived.GetNamespace())
-			}
+	var backupExists mantlev1.MantleBackup
+	if err := s.client.Get(ctx, types.NamespacedName{
+		Namespace: backupReceived.GetNamespace(),
+		Name:      backupReceived.GetName(),
+	}, &backupExists); err != nil {
+		if !aerrors.IsNotFound(err) {
+			return nil, fmt.Errorf("failed to get MantleBackup: %w", err)
 		}
-
-		backup.Finalizers = backupReceived.Finalizers
-		backup.Annotations = backupReceived.Annotations
-		backup.Labels = backupReceived.Labels
-		backup.Spec = backupReceived.Spec
-		return nil
-	}); err != nil {
-		return nil, fmt.Errorf("CreateOrUpdate failed: %w", err)
+		// Not found, create a new one.
+		if err := s.client.Create(ctx, &backupReceived); err != nil {
+			return nil, fmt.Errorf("failed to create MantleBackup: %w", err)
+		}
+		if err := s.client.Status().Update(ctx, &backupReceived); err != nil {
+			return nil, fmt.Errorf("failed to update status of MantleBackup: %w", err)
+		}
+		return &proto.CreateMantleBackupResponse{}, nil
 	}
 
-	// Use Patch here because updateStatus is likely to fail due to "the object has been modified" error.
-	newBackup := backup.DeepCopy()
-	newBackup.Status.CreatedAt = backupReceived.Status.CreatedAt
-	newBackup.Status.SnapSize = backupReceived.Status.SnapSize
-	newBackup.Status.TransferPartSize = backupReceived.Status.TransferPartSize
-	if err := s.client.Status().Patch(ctx, newBackup, client.MergeFrom(&backup)); err != nil {
-		return nil, fmt.Errorf("status patch failed: %w", err)
+	// Found, check it.
+	if backupExists.Labels == nil || backupExists.Annotations == nil {
+		return nil, fmt.Errorf("both labels and annotations must not be nil in the existing MantleBackup: %s/%s",
+			backupReceived.GetNamespace(), backupReceived.GetName())
 	}
 
-	return &proto.CreateOrUpdateMantleBackupResponse{}, nil
+	if pvcUID, ok := backupExists.Labels[labelLocalBackupTargetPVCUID]; !ok {
+		return nil, fmt.Errorf("label %s not found in the existing MantleBackup: %s/%s",
+			labelLocalBackupTargetPVCUID, backupReceived.GetNamespace(), backupReceived.GetName())
+	} else if pvcUID != pvcUIDReceived {
+		return nil, fmt.Errorf("label %s not matched in the existing MantleBackup: %s/%s",
+			labelLocalBackupTargetPVCUID, backupReceived.GetNamespace(), backupReceived.GetName())
+	}
+
+	if remoteUID, ok := backupExists.Annotations[annotRemoteUID]; !ok {
+		return nil, fmt.Errorf("annotation %s not found in the existing MantleBackup: %s/%s",
+			annotRemoteUID, backupReceived.GetNamespace(), backupReceived.GetName())
+	} else if remoteUID != remoteUIDReceived {
+		return nil, fmt.Errorf("annotation %s not matched in the existing MantleBackup: %s/%s",
+			annotRemoteUID, backupReceived.GetNamespace(), backupReceived.GetName())
+	}
+
+	// Update status if not set.
+	if backupExists.Status.CreatedAt.IsZero() {
+		newBackup := backupExists.DeepCopy()
+		newBackup.Status.CreatedAt = backupReceived.Status.CreatedAt
+		newBackup.Status.SnapSize = backupReceived.Status.SnapSize
+		newBackup.Status.TransferPartSize = backupReceived.Status.TransferPartSize
+		if err := s.client.Status().Patch(ctx, newBackup, client.MergeFrom(&backupExists)); err != nil {
+			return nil, fmt.Errorf("status patch failed: %w", err)
+		}
+	}
+
+	// Already exists with matching pvc-uid and remote-uid, do nothing.
+	return &proto.CreateMantleBackupResponse{}, nil
 }
 
 func (s *SecondaryServer) ListMantleBackup(

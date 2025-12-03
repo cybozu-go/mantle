@@ -494,21 +494,21 @@ var _ = Describe("MantleBackup controller", func() {
 					Uid: "a7c9d5e2-4b8f-4e2a-9d3f-1b6a7c8e9f2b",
 				}, nil)
 			secondaryBackups := []*mantlev1.MantleBackup{}
-			grpcClient.EXPECT().CreateOrUpdateMantleBackup(gomock.Any(), gomock.Any()).
+			grpcClient.EXPECT().CreateMantleBackup(gomock.Any(), gomock.Any()).
 				MinTimes(1).
 				DoAndReturn(
 					func(
 						ctx context.Context,
-						req *proto.CreateOrUpdateMantleBackupRequest,
+						req *proto.CreateMantleBackupRequest,
 						opts ...grpc.CallOption,
-					) (*proto.CreateOrUpdateMantleBackupResponse, error) {
+					) (*proto.CreateMantleBackupResponse, error) {
 						var secondaryBackup mantlev1.MantleBackup
 						err := json.Unmarshal(req.GetMantleBackup(), &secondaryBackup)
 						if err != nil {
 							panic(err)
 						}
 						secondaryBackups = append(secondaryBackups, &secondaryBackup)
-						return &proto.CreateOrUpdateMantleBackupResponse{}, nil
+						return &proto.CreateMantleBackupResponse{}, nil
 					})
 			grpcClient.EXPECT().ListMantleBackup(gomock.Any(), gomock.Any()).
 				MinTimes(1).
@@ -1380,7 +1380,7 @@ var _ = Describe("export and upload", func() {
 			diffFrom:                          diffFrom,
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(ret.Requeue).To(BeTrue())
+		Expect(ret.RequeueAfter).NotTo(BeZero())
 
 		return target
 	}
@@ -1394,7 +1394,7 @@ var _ = Describe("export and upload", func() {
 			diffFrom:                          nil,
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(ret.Requeue).To(BeTrue())
+		Expect(ret.RequeueAfter).NotTo(BeZero())
 	}
 
 	completeJob := func(ctx SpecContext, jobName string) {
@@ -1739,7 +1739,7 @@ var _ = Describe("import", func() {
 			// The first call to reconcileImportJob should create an import Job
 			res, err := mbr.reconcileImportJob(ctx, backup, snapshotTarget, -1)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(res.Requeue).To(BeTrue())
+			Expect(res.RequeueAfter).NotTo(BeZero())
 
 			var importJob batchv1.Job
 			err = k8sClient.Get(ctx, types.NamespacedName{
@@ -1751,7 +1751,7 @@ var _ = Describe("import", func() {
 			// The successive calls should return ctrl.Result{Requeue: true} until the import Job is completed.
 			res, err = mbr.reconcileImportJob(ctx, backup, snapshotTarget, -1)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(res.Requeue).To(BeTrue())
+			Expect(res.RequeueAfter).NotTo(BeZero())
 
 			// Make the import Job completed.
 			completeJob(ctx, importJob.GetNamespace(), importJob.GetName())
@@ -2177,7 +2177,7 @@ var _ = Describe("import", func() {
 
 			result, err := mbr.reconcileZeroOutJob(ctx, backup, &snapshotTarget{})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue).To(BeFalse())
+			Expect(result.RequeueAfter).To(BeZero())
 
 			var pv corev1.PersistentVolume
 			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeZeroOutPVName(backup)}, &pv)
@@ -2258,14 +2258,14 @@ var _ = Describe("import", func() {
 			// The first call to reconcileZeroOutJob should create a PV, PVC, and Job, and requeue.
 			result, err := mbr.reconcileZeroOutJob(ctx, backup, snapshotTarget)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue).To(BeTrue())
+			Expect(result.RequeueAfter).NotTo(BeZero())
 
 			var pv corev1.PersistentVolume
 			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeZeroOutPVName(backup), Namespace: nsController}, &pv)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(pv.GetLabels()["app.kubernetes.io/name"]).To(Equal(labelAppNameValue))
 			Expect(pv.GetLabels()["app.kubernetes.io/component"]).To(Equal(labelComponentZeroOutVolume))
-			Expect(len(pv.Spec.AccessModes)).To(Equal(1))
+			Expect(pv.Spec.AccessModes).To(HaveLen(1))
 			Expect(pv.Spec.AccessModes[0]).To(Equal(corev1.ReadWriteOnce))
 			Expect(pv.Spec.Capacity).To(Equal(pvCapacity))
 			Expect(pv.Spec.CSI.Driver).To(Equal(pvDriver))
@@ -2287,7 +2287,7 @@ var _ = Describe("import", func() {
 			Expect(pvc.GetLabels()["app.kubernetes.io/name"]).To(Equal(labelAppNameValue))
 			Expect(pvc.GetLabels()["app.kubernetes.io/component"]).To(Equal(labelComponentZeroOutVolume))
 			Expect(*pvc.Spec.StorageClassName).To(Equal(""))
-			Expect(len(pvc.Spec.AccessModes)).To(Equal(1))
+			Expect(pvc.Spec.AccessModes).To(HaveLen(1))
 			Expect(pvc.Spec.AccessModes[0]).To(Equal(corev1.ReadWriteOnce))
 			Expect(pvc.Spec.Resources).To(Equal(pvcResources))
 			Expect(*pvc.Spec.VolumeMode).To(Equal(corev1.PersistentVolumeBlock))
@@ -2299,17 +2299,17 @@ var _ = Describe("import", func() {
 			Expect(job.GetLabels()["app.kubernetes.io/name"]).To(Equal(labelAppNameValue))
 			Expect(job.GetLabels()["app.kubernetes.io/component"]).To(Equal(labelComponentZeroOutJob))
 			Expect(*job.Spec.BackoffLimit).To(Equal(int32(65535)))
-			Expect(len(job.Spec.Template.Spec.Containers)).To(Equal(1))
+			Expect(job.Spec.Template.Spec.Containers).To(HaveLen(1))
 			Expect(job.Spec.Template.Spec.Containers[0].Name).To(Equal("zeroout"))
 			Expect(*job.Spec.Template.Spec.Containers[0].SecurityContext.Privileged).To(BeTrue())
 			Expect(*job.Spec.Template.Spec.Containers[0].SecurityContext.RunAsGroup).To(Equal(int64(0)))
 			Expect(*job.Spec.Template.Spec.Containers[0].SecurityContext.RunAsUser).To(Equal(int64(0)))
 			Expect(job.Spec.Template.Spec.Containers[0].Image).To(Equal(mbr.podImage))
-			Expect(len(job.Spec.Template.Spec.Containers[0].VolumeDevices)).To(Equal(1))
+			Expect(job.Spec.Template.Spec.Containers[0].VolumeDevices).To(HaveLen(1))
 			Expect(job.Spec.Template.Spec.Containers[0].VolumeDevices[0].Name).To(Equal("zeroout-rbd"))
 			Expect(job.Spec.Template.Spec.Containers[0].VolumeDevices[0].DevicePath).To(Equal("/dev/zeroout-rbd"))
 			Expect(job.Spec.Template.Spec.RestartPolicy).To(Equal(corev1.RestartPolicyOnFailure))
-			Expect(len(job.Spec.Template.Spec.Volumes)).To(Equal(1))
+			Expect(job.Spec.Template.Spec.Volumes).To(HaveLen(1))
 			Expect(job.Spec.Template.Spec.Volumes[0]).To(Equal(corev1.Volume{
 				Name: "zeroout-rbd",
 				VolumeSource: corev1.VolumeSource{
@@ -2325,7 +2325,7 @@ var _ = Describe("import", func() {
 			// A call to reconcileZeroOutJob should NOT requeue after the Job completed
 			result, err = mbr.reconcileZeroOutJob(ctx, backup, snapshotTarget)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue).To(BeFalse())
+			Expect(result.RequeueAfter).To(BeZero())
 		})
 	})
 

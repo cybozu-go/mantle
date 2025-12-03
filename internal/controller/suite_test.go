@@ -71,6 +71,9 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
 
+	err = os.Setenv("REQUEUE_RECONCILIATION_AFTER", "10s")
+	Expect(err).NotTo(HaveOccurred())
+
 	By("Setup common resources")
 	resMgr, err = testutil.NewResourceManager(k8sClient)
 	Expect(err).NotTo(HaveOccurred())

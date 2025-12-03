@@ -4,8 +4,8 @@
 ## Table of Contents
 
 - [pkg/controller/proto/controller.proto](#pkg_controller_proto_controller-proto)
-    - [CreateOrUpdateMantleBackupRequest](#proto-CreateOrUpdateMantleBackupRequest)
-    - [CreateOrUpdateMantleBackupResponse](#proto-CreateOrUpdateMantleBackupResponse)
+    - [CreateMantleBackupRequest](#proto-CreateMantleBackupRequest)
+    - [CreateMantleBackupResponse](#proto-CreateMantleBackupResponse)
     - [CreateOrUpdatePVCRequest](#proto-CreateOrUpdatePVCRequest)
     - [CreateOrUpdatePVCResponse](#proto-CreateOrUpdatePVCResponse)
     - [ListMantleBackupRequest](#proto-ListMantleBackupRequest)
@@ -26,10 +26,10 @@
 
 
 
-<a name="proto-CreateOrUpdateMantleBackupRequest"></a>
+<a name="proto-CreateMantleBackupRequest"></a>
 
-### CreateOrUpdateMantleBackupRequest
-CreateOrUpdateMantleBackupRequest is a request message for CreateOrUpdateMantleBackup RPC.
+### CreateMantleBackupRequest
+CreateMantleBackupRequest is a request message for CreateMantleBackup RPC.
 
 
 | Field | Type | Label | Description |
@@ -41,10 +41,10 @@ CreateOrUpdateMantleBackupRequest is a request message for CreateOrUpdateMantleB
 
 
 
-<a name="proto-CreateOrUpdateMantleBackupResponse"></a>
+<a name="proto-CreateMantleBackupResponse"></a>
 
-### CreateOrUpdateMantleBackupResponse
-CreateOrUpdateMantleBackupResponse is a response message for CreateOrUpdateMantleBackup RPC.
+### CreateMantleBackupResponse
+CreateMantleBackupResponse is a response message for CreateMantleBackup RPC.
 
 nothing.
 
@@ -155,7 +155,7 @@ SetSynchronizingResponse is a response message for SetSynchronize RPC.
 | Method Name | Request Type | Response Type | Description |
 | ----------- | ------------ | ------------- | ------------|
 | CreateOrUpdatePVC | [CreateOrUpdatePVCRequest](#proto-CreateOrUpdatePVCRequest) | [CreateOrUpdatePVCResponse](#proto-CreateOrUpdatePVCResponse) |  |
-| CreateOrUpdateMantleBackup | [CreateOrUpdateMantleBackupRequest](#proto-CreateOrUpdateMantleBackupRequest) | [CreateOrUpdateMantleBackupResponse](#proto-CreateOrUpdateMantleBackupResponse) |  |
+| CreateMantleBackup | [CreateMantleBackupRequest](#proto-CreateMantleBackupRequest) | [CreateMantleBackupResponse](#proto-CreateMantleBackupResponse) |  |
 | ListMantleBackup | [ListMantleBackupRequest](#proto-ListMantleBackupRequest) | [ListMantleBackupResponse](#proto-ListMantleBackupResponse) |  |
 | SetSynchronizing | [SetSynchronizingRequest](#proto-SetSynchronizingRequest) | [SetSynchronizingResponse](#proto-SetSynchronizingResponse) |  |
 

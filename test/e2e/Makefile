@@ -329,10 +329,28 @@ do-test-multik8s: $(GINKGO)
 	$(GINKGO) --fail-fast -v $(GINKGO_FLAGS) multik8s; \
 	if [ "$$?" -ne 0 ]; then \
 		echo "Controller logs for $(MINIKUBE_PROFILE_PRIMARY):"; \
-		$${KUBECTL_PRIMARY} logs --tail 100 -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle -c mantle; \
+		$${KUBECTL_PRIMARY} logs --tail 1000 -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle -c mantle; \
 		echo ""; \
 		echo "Controller logs for $(MINIKUBE_PROFILE_SECONDARY):"; \
-		$${KUBECTL_SECONDARY}  logs --tail 100 -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle -c mantle; \
+		$${KUBECTL_SECONDARY}  logs --tail 1000 -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle -c mantle; \
+		echo ""; \
+		echo "Primary MBs"; \
+		$${KUBECTL_PRIMARY} get mantlebackups -A -o yaml; \
+		echo ""; \
+		echo "Secondary MBs"; \
+		$${KUBECTL_SECONDARY} get mantlebackups -A -o yaml; \
+		echo ""; \
+		echo "Primary PVCs"; \
+		$${KUBECTL_PRIMARY} get pvc -A -o yaml; \
+		echo ""; \
+		echo "Secondary PVCs"; \
+		$${KUBECTL_SECONDARY} get pvc -A -o yaml; \
+		echo ""; \
+		echo "Primary PVs"; \
+		$${KUBECTL_PRIMARY} get pv -o yaml; \
+		echo ""; \
+		echo "Secondary PVs"; \
+		$${KUBECTL_SECONDARY} get pv -o yaml; \
 		# Explicitly fail the test to mark the CI job as failed. \
 		exit 1; \
 	fi

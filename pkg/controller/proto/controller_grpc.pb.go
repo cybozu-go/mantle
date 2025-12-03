@@ -19,10 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	MantleService_CreateOrUpdatePVC_FullMethodName          = "/proto.MantleService/CreateOrUpdatePVC"
-	MantleService_CreateOrUpdateMantleBackup_FullMethodName = "/proto.MantleService/CreateOrUpdateMantleBackup"
-	MantleService_ListMantleBackup_FullMethodName           = "/proto.MantleService/ListMantleBackup"
-	MantleService_SetSynchronizing_FullMethodName           = "/proto.MantleService/SetSynchronizing"
+	MantleService_CreateOrUpdatePVC_FullMethodName  = "/proto.MantleService/CreateOrUpdatePVC"
+	MantleService_CreateMantleBackup_FullMethodName = "/proto.MantleService/CreateMantleBackup"
+	MantleService_ListMantleBackup_FullMethodName   = "/proto.MantleService/ListMantleBackup"
+	MantleService_SetSynchronizing_FullMethodName   = "/proto.MantleService/SetSynchronizing"
 )
 
 // MantleServiceClient is the client API for MantleService service.
@@ -30,7 +30,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type MantleServiceClient interface {
 	CreateOrUpdatePVC(ctx context.Context, in *CreateOrUpdatePVCRequest, opts ...grpc.CallOption) (*CreateOrUpdatePVCResponse, error)
-	CreateOrUpdateMantleBackup(ctx context.Context, in *CreateOrUpdateMantleBackupRequest, opts ...grpc.CallOption) (*CreateOrUpdateMantleBackupResponse, error)
+	CreateMantleBackup(ctx context.Context, in *CreateMantleBackupRequest, opts ...grpc.CallOption) (*CreateMantleBackupResponse, error)
 	ListMantleBackup(ctx context.Context, in *ListMantleBackupRequest, opts ...grpc.CallOption) (*ListMantleBackupResponse, error)
 	SetSynchronizing(ctx context.Context, in *SetSynchronizingRequest, opts ...grpc.CallOption) (*SetSynchronizingResponse, error)
 }
@@ -53,10 +53,10 @@ func (c *mantleServiceClient) CreateOrUpdatePVC(ctx context.Context, in *CreateO
 	return out, nil
 }
 
-func (c *mantleServiceClient) CreateOrUpdateMantleBackup(ctx context.Context, in *CreateOrUpdateMantleBackupRequest, opts ...grpc.CallOption) (*CreateOrUpdateMantleBackupResponse, error) {
+func (c *mantleServiceClient) CreateMantleBackup(ctx context.Context, in *CreateMantleBackupRequest, opts ...grpc.CallOption) (*CreateMantleBackupResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(CreateOrUpdateMantleBackupResponse)
-	err := c.cc.Invoke(ctx, MantleService_CreateOrUpdateMantleBackup_FullMethodName, in, out, cOpts...)
+	out := new(CreateMantleBackupResponse)
+	err := c.cc.Invoke(ctx, MantleService_CreateMantleBackup_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +88,7 @@ func (c *mantleServiceClient) SetSynchronizing(ctx context.Context, in *SetSynch
 // for forward compatibility.
 type MantleServiceServer interface {
 	CreateOrUpdatePVC(context.Context, *CreateOrUpdatePVCRequest) (*CreateOrUpdatePVCResponse, error)
-	CreateOrUpdateMantleBackup(context.Context, *CreateOrUpdateMantleBackupRequest) (*CreateOrUpdateMantleBackupResponse, error)
+	CreateMantleBackup(context.Context, *CreateMantleBackupRequest) (*CreateMantleBackupResponse, error)
 	ListMantleBackup(context.Context, *ListMantleBackupRequest) (*ListMantleBackupResponse, error)
 	SetSynchronizing(context.Context, *SetSynchronizingRequest) (*SetSynchronizingResponse, error)
 	mustEmbedUnimplementedMantleServiceServer()
@@ -104,8 +104,8 @@ type UnimplementedMantleServiceServer struct{}
 func (UnimplementedMantleServiceServer) CreateOrUpdatePVC(context.Context, *CreateOrUpdatePVCRequest) (*CreateOrUpdatePVCResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateOrUpdatePVC not implemented")
 }
-func (UnimplementedMantleServiceServer) CreateOrUpdateMantleBackup(context.Context, *CreateOrUpdateMantleBackupRequest) (*CreateOrUpdateMantleBackupResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method CreateOrUpdateMantleBackup not implemented")
+func (UnimplementedMantleServiceServer) CreateMantleBackup(context.Context, *CreateMantleBackupRequest) (*CreateMantleBackupResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateMantleBackup not implemented")
 }
 func (UnimplementedMantleServiceServer) ListMantleBackup(context.Context, *ListMantleBackupRequest) (*ListMantleBackupResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListMantleBackup not implemented")
@@ -152,20 +152,20 @@ func _MantleService_CreateOrUpdatePVC_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
-func _MantleService_CreateOrUpdateMantleBackup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CreateOrUpdateMantleBackupRequest)
+func _MantleService_CreateMantleBackup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateMantleBackupRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MantleServiceServer).CreateOrUpdateMantleBackup(ctx, in)
+		return srv.(MantleServiceServer).CreateMantleBackup(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: MantleService_CreateOrUpdateMantleBackup_FullMethodName,
+		FullMethod: MantleService_CreateMantleBackup_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MantleServiceServer).CreateOrUpdateMantleBackup(ctx, req.(*CreateOrUpdateMantleBackupRequest))
+		return srv.(MantleServiceServer).CreateMantleBackup(ctx, req.(*CreateMantleBackupRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -218,8 +218,8 @@ var MantleService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _MantleService_CreateOrUpdatePVC_Handler,
 		},
 		{
-			MethodName: "CreateOrUpdateMantleBackup",
-			Handler:    _MantleService_CreateOrUpdateMantleBackup_Handler,
+			MethodName: "CreateMantleBackup",
+			Handler:    _MantleService_CreateMantleBackup_Handler,
 		},
 		{
 			MethodName: "ListMantleBackup",

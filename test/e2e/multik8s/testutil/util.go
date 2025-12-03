@@ -468,6 +468,7 @@ func CreatePod(cluster int, namespace, podName, pvcName string) {
 }
 
 func CreatePVC(ctx SpecContext, cluster int, namespace, name string) {
+	GinkgoHelper()
 	Eventually(ctx, func() error {
 		return applyPVCTemplate(cluster, namespace, name)
 	}).Should(Succeed())
@@ -487,13 +488,13 @@ func WriteRandomDataToPV(ctx SpecContext, cluster int, namespace, pvcName string
 	}).Should(Succeed())
 	stdout, _, err := Kubectl(cluster, nil, "logs", "-n", namespace, "job/"+writeJobName)
 	Expect(err).NotTo(HaveOccurred())
-	Expect(len(stdout)).NotTo(Equal(0))
+	Expect(stdout).NotTo(HaveLen(0))
 	return string(stdout)
 }
 
 func CreateMantleBackup(cluster int, namespace, pvcName, backupName string) {
 	GinkgoHelper()
-	By("creating a MantleBackup object")
+	By(fmt.Sprintf("creating a MantleBackup object @%d:%s/%s", cluster, namespace, backupName))
 	Eventually(func() error {
 		return ApplyMantleBackupTemplate(cluster, namespace, pvcName, backupName)
 	}).Should(Succeed())
@@ -501,7 +502,7 @@ func CreateMantleBackup(cluster int, namespace, pvcName, backupName string) {
 
 func CreateMantleBackupConfig(cluster int, namespace, pvcName, backupConfigName string) {
 	GinkgoHelper()
-	By("creating a MantleBackupConfig object")
+	By(fmt.Sprintf("creating a MantleBackupConfig object @%d:%s/%s for %s", cluster, namespace, backupConfigName, pvcName))
 	Eventually(func() error {
 		return ApplyMantleBackupConfigTemplate(cluster, namespace, pvcName, backupConfigName)
 	}).Should(Succeed())

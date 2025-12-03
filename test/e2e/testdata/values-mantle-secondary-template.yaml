@@ -13,8 +13,8 @@ controller:
   envSecret: export-data
   gcInterval: 1s
   env:
-    - name: REQUEUE_RECONCILIATION_IMMEDIATELY
-      value: "1"
+    - name: REQUEUE_RECONCILIATION_AFTER
+      value: "10s"
   mtls:
     clientCACertConfigMap: mantle-primary-ca-crt
     serverTLSSecret: cert-mantle-replication

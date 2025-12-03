@@ -132,11 +132,11 @@ var _ = Describe("full backup", Label("full-backup"), func() {
 			// Make sure snapshots are correctly created.
 			primarySnaps, err := ListRBDSnapshotsInPVC(PrimaryK8sCluster, namespace, pvcName)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(len(primarySnaps)).To(Equal(1))
+			Expect(primarySnaps).To(HaveLen(1))
 			Expect(primarySnaps[0].Name).To(Equal(backupName))
 			secondarySnaps, err := ListRBDSnapshotsInPVC(SecondaryK8sCluster, namespace, pvcName)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(len(secondarySnaps)).To(Equal(1)) // middle snapshots should be deleted.
+			Expect(secondarySnaps).To(HaveLen(1)) // Middle snapshots should be deleted.
 			Expect(secondarySnaps[0].Name).To(Equal(backupName))
 
 			By("ensuring the PVC can be attached to the pod in the primary cluster")
