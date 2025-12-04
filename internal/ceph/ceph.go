@@ -60,7 +60,7 @@ type CephCmd interface {
 }
 
 type cephCmdImpl struct {
-	command command
+	command Command
 }
 
 func NewCephCmd() CephCmd {
