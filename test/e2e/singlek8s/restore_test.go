@@ -230,12 +230,17 @@ func (test *restoreTest) testRestore() {
 }
 
 func (test *restoreTest) testCleanup() {
+	testData1 := []byte("test data 1")
+
 	It("should reconcile the restore", func() {
 		test.cleanup()
 		imageName := fmt.Sprintf("mantle-%s-%s", test.tenantNamespace, test.mantleRestoreName1)
 
 		err := applyPVCTemplate(test.tenantNamespace, test.pvcName, test.storageClassName)
 		Expect(err).NotTo(HaveOccurred())
+		err = writeTestData(test.tenantNamespace, test.pvcName, testData1)
+		Expect(err).NotTo(HaveOccurred())
+
 		err = applyMantleBackupTemplate(test.tenantNamespace, test.pvcName, test.mantleBackupName1)
 		Expect(err).NotTo(HaveOccurred())
 		err = applyMantleRestoreTemplate(test.tenantNamespace, test.mantleRestoreName1, test.mantleBackupName1)
@@ -284,6 +289,9 @@ func (test *restoreTest) testCleanup() {
 
 		err := applyPVCTemplate(test.tenantNamespace, test.pvcName, test.storageClassName)
 		Expect(err).NotTo(HaveOccurred())
+		err = writeTestData(test.tenantNamespace, test.pvcName, testData1)
+		Expect(err).NotTo(HaveOccurred())
+
 		err = applyMantleBackupTemplate(test.tenantNamespace, test.pvcName, test.mantleBackupName1)
 		Expect(err).NotTo(HaveOccurred())
 		err = applyMantleRestoreTemplate(test.tenantNamespace, test.mantleRestoreName1, test.mantleBackupName1)
