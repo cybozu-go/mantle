@@ -102,6 +102,16 @@ var _ = Describe("change to secondary", Label("change-to-secondary"), func() {
 		WaitMantleBackupSynced(namespace, backupName21)
 	})
 
+	It("should verify MantleBackups correctly", func(ctx SpecContext) {
+		WaitMantleBackupVerified(PrimaryK8sCluster, namespace, backupName00)
+		WaitMantleBackupVerified(SecondaryK8sCluster, namespace, backupName00)
+		WaitMantleBackupVerified(SecondaryK8sCluster, namespace, backupName10)
+		WaitMantleBackupVerified(PrimaryK8sCluster, namespace, backupName20)
+		WaitMantleBackupVerified(SecondaryK8sCluster, namespace, backupName20)
+		WaitMantleBackupVerified(PrimaryK8sCluster, namespace, backupName21)
+		WaitMantleBackupVerified(SecondaryK8sCluster, namespace, backupName21)
+	})
+
 	It("should restore MantleBackups correctly", func(ctx SpecContext) {
 		restoreName00 := util.GetUniqueName("mr-")
 		EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName00, restoreName00, writtenDataHash00)
