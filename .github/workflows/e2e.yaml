@@ -2,12 +2,14 @@ name: "e2e"
 on:
   pull_request:
     paths-ignore:
+      - "**/*"
       - "**/*.md"
       - "CODEOWNERS"
       - "LICENSE"
       - "NOTICE"
   push:
     paths-ignore:
+      - "**/*"
       - "**/*.md"
       - "CODEOWNERS"
       - "LICENSE"

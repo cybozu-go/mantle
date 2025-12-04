@@ -15,32 +15,32 @@ import (
 	gomock "go.uber.org/mock/gomock"
 )
 
-// Mockcommand is a mock of command interface.
-type Mockcommand struct {
+// MockCommand is a mock of Command interface.
+type MockCommand struct {
 	ctrl     *gomock.Controller
-	recorder *MockcommandMockRecorder
+	recorder *MockCommandMockRecorder
 	isgomock struct{}
 }
 
-// MockcommandMockRecorder is the mock recorder for Mockcommand.
-type MockcommandMockRecorder struct {
-	mock *Mockcommand
+// MockCommandMockRecorder is the mock recorder for MockCommand.
+type MockCommandMockRecorder struct {
+	mock *MockCommand
 }
 
-// NewMockcommand creates a new mock instance.
-func NewMockcommand(ctrl *gomock.Controller) *Mockcommand {
-	mock := &Mockcommand{ctrl: ctrl}
-	mock.recorder = &MockcommandMockRecorder{mock}
+// NewMockCommand creates a new mock instance.
+func NewMockCommand(ctrl *gomock.Controller) *MockCommand {
+	mock := &MockCommand{ctrl: ctrl}
+	mock.recorder = &MockCommandMockRecorder{mock}
 	return mock
 }
 
 // EXPECT returns an object that allows the caller to indicate expected use.
-func (m *Mockcommand) EXPECT() *MockcommandMockRecorder {
+func (m *MockCommand) EXPECT() *MockCommandMockRecorder {
 	return m.recorder
 }
 
 // execute mocks base method.
-func (m *Mockcommand) execute(command ...string) ([]byte, error) {
+func (m *MockCommand) execute(command ...string) ([]byte, []byte, error) {
 	m.ctrl.T.Helper()
 	varargs := []any{}
 	for _, a := range command {
@@ -48,12 +48,13 @@ func (m *Mockcommand) execute(command ...string) ([]byte, error) {
 	}
 	ret := m.ctrl.Call(m, "execute", varargs...)
 	ret0, _ := ret[0].([]byte)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
+	ret1, _ := ret[1].([]byte)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
 }
 
 // execute indicates an expected call of execute.
-func (mr *MockcommandMockRecorder) execute(command ...any) *gomock.Call {
+func (mr *MockCommandMockRecorder) execute(command ...any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "execute", reflect.TypeOf((*Mockcommand)(nil).execute), command...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "execute", reflect.TypeOf((*MockCommand)(nil).execute), command...)
 }
