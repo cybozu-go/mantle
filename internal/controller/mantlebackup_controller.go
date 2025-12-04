@@ -69,7 +69,7 @@ const (
 	MantleExportDataPVCPrefix = "mantle-export-"
 	MantleImportJobPrefix     = "mantle-import-"
 	mantleVerifyImagePrefix   = "mantle-verify-"
-	mantleVerifyJobPrefix     = "mantle-verify-"
+	MantleVerifyJobPrefix     = "mantle-verify-"
 	mantleVerifyPVCPrefix     = "mantle-verify-"
 	mantleVerifyPVPrefix      = "mantle-verify-"
 	MantleZeroOutJobPrefix    = "mantle-zeroout-"
@@ -718,7 +718,7 @@ func (r *MantleBackupReconciler) verify(
 	// create a PVC with the PV
 	if err := r.createOrUpdateStaticPVC(
 		ctx,
-		makeVerifyPVCName(backup),
+		MakeVerifyPVCName(backup),
 		makeVerifyPVName(backup),
 		labelComponentVerifyVolume,
 		storedPVC.Spec.Resources,
@@ -729,14 +729,14 @@ func (r *MantleBackupReconciler) verify(
 	// create a Job to execute e2fsck on the PVC
 	if err := r.createOrUpdateVerifyJob(
 		ctx,
-		makeVerifyJobName(backup),
-		makeVerifyPVCName(backup),
+		MakeVerifyJobName(backup),
+		MakeVerifyPVCName(backup),
 	); err != nil {
 		return fmt.Errorf("failed to create a Job to execute e2fsck on the PVC: %w", err)
 	}
 
 	// wait for the Job to complete
-	jobFinished, jobSucceeded, err := r.checkJobStatus(ctx, makeVerifyJobName(backup))
+	jobFinished, jobSucceeded, err := r.checkJobStatus(ctx, MakeVerifyJobName(backup))
 	if err != nil {
 		return fmt.Errorf("failed to check the Job status: %w", err)
 	}
@@ -1544,11 +1544,11 @@ func makeVerifyImageName(target *mantlev1.MantleBackup) string {
 	return mantleVerifyImagePrefix + string(target.GetUID())
 }
 
-func makeVerifyJobName(target *mantlev1.MantleBackup) string {
-	return mantleVerifyJobPrefix + string(target.GetUID())
+func MakeVerifyJobName(target *mantlev1.MantleBackup) string {
+	return MantleVerifyJobPrefix + string(target.GetUID())
 }
 
-func makeVerifyPVCName(target *mantlev1.MantleBackup) string {
+func MakeVerifyPVCName(target *mantlev1.MantleBackup) string {
 	return mantleVerifyPVCPrefix + string(target.GetUID())
 }
 
@@ -2855,7 +2855,7 @@ func (r *MantleBackupReconciler) deleteAllExportDataPVCs(ctx context.Context, ba
 
 func (r *MantleBackupReconciler) deleteVerifyJob(ctx context.Context, backup *mantlev1.MantleBackup) error {
 	var job batchv1.Job
-	job.SetName(makeVerifyJobName(backup))
+	job.SetName(MakeVerifyJobName(backup))
 	job.SetNamespace(r.managedCephClusterID)
 	if err := r.Delete(ctx, &job, &client.DeleteOptions{
 		PropagationPolicy: ptr.To(metav1.DeletePropagationBackground),
@@ -2876,7 +2876,7 @@ func (r *MantleBackupReconciler) deleteVerifyPV(ctx context.Context, backup *man
 
 func (r *MantleBackupReconciler) deleteVerifyPVC(ctx context.Context, backup *mantlev1.MantleBackup) error {
 	var pvc corev1.PersistentVolumeClaim
-	pvc.SetName(makeVerifyPVCName(backup))
+	pvc.SetName(MakeVerifyPVCName(backup))
 	pvc.SetNamespace(r.managedCephClusterID)
 	if err := r.Delete(ctx, &pvc); err != nil && !aerrors.IsNotFound(err) {
 		return fmt.Errorf("failed to delete verify PVC: %w", err)
