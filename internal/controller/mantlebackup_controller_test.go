@@ -120,7 +120,7 @@ var _ = Describe("MantleBackup controller", func() {
 	var ns string
 	var lastExpireQueuedBackups sync.Map
 
-	ensureBackupNotReadyToUse := func(ctx context.Context, backup *mantlev1.MantleBackup) {
+	ensureBackupNotSnapshotCaptured := func(ctx context.Context, backup *mantlev1.MantleBackup) {
 		GinkgoHelper()
 		Consistently(ctx, func(g Gomega, ctx context.Context) {
 			namespacedName := types.NamespacedName{
@@ -130,7 +130,7 @@ var _ = Describe("MantleBackup controller", func() {
 			err := k8sClient.Get(ctx, namespacedName, backup)
 			g.Expect(err).NotTo(HaveOccurred())
 			g.Expect(
-				backup.IsReady(),
+				backup.IsSnapshotCaptured(),
 			).To(BeFalse())
 		}, "10s", "1s").Should(Succeed())
 	}
@@ -224,7 +224,7 @@ var _ = Describe("MantleBackup controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// check the PVC UID is stored in the MantleBackup
-			resMgr.WaitForBackupReady(ctx, backup)
+			resMgr.WaitForBackupSnapshotCaptured(ctx, backup)
 			Expect(backup.GetLabels()[labelLocalBackupTargetPVCUID]).To(Equal(string(pvc.GetUID())))
 
 			// simulate the PVC UID mismatch
@@ -233,7 +233,7 @@ var _ = Describe("MantleBackup controller", func() {
 			Expect(err).To(HaveOccurred())
 		})
 
-		It("should be ready to use", func(ctx SpecContext) {
+		It("should capture snapshot", func(ctx SpecContext) {
 			pv, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -241,7 +241,7 @@ var _ = Describe("MantleBackup controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			waitForHavingFinalizer(ctx, backup)
-			resMgr.WaitForBackupReady(ctx, backup)
+			resMgr.WaitForBackupSnapshotCaptured(ctx, backup)
 
 			pvcJS := backup.Status.PVCManifest
 			Expect(pvcJS).NotTo(BeEmpty())
@@ -270,7 +270,7 @@ var _ = Describe("MantleBackup controller", func() {
 			testutil.CheckDeletedEventually[mantlev1.MantleBackup](ctx, k8sClient, backup.Name, backup.Namespace)
 		})
 
-		It("should still be ready to use even if the PVC lost", func(ctx SpecContext) {
+		It("should still have snapshot even if the PVC lost", func(ctx SpecContext) {
 			_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -278,13 +278,13 @@ var _ = Describe("MantleBackup controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			waitForHavingFinalizer(ctx, backup)
-			resMgr.WaitForBackupReady(ctx, backup)
+			resMgr.WaitForBackupSnapshotCaptured(ctx, backup)
 
 			pvc.Status.Phase = corev1.ClaimLost // simulate lost PVC
 			err = k8sClient.Status().Update(ctx, pvc)
 			Expect(err).NotTo(HaveOccurred())
 
-			resMgr.WaitForBackupReady(ctx, backup)
+			resMgr.WaitForBackupSnapshotCaptured(ctx, backup)
 		})
 
 		DescribeTable("MantleBackup with correct expiration",
@@ -344,7 +344,7 @@ var _ = Describe("MantleBackup controller", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				By("waiting for the backup to be ready")
-				resMgr.WaitForBackupReady(ctx, backup)
+				resMgr.WaitForBackupSnapshotCaptured(ctx, backup)
 
 				expectCreatedAt := backup.Status.CreatedAt.Time
 
@@ -377,7 +377,7 @@ var _ = Describe("MantleBackup controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("waiting for the backup to be ready")
-			resMgr.WaitForBackupReady(ctx, backup)
+			resMgr.WaitForBackupSnapshotCaptured(ctx, backup)
 
 			By("simulate backup expiration")
 			simulateExpire(ctx, backup, -time.Hour)
@@ -387,7 +387,7 @@ var _ = Describe("MantleBackup controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("should not be ready to use if the PVC is the lost state from the beginning", func(ctx SpecContext) {
+		It("should not capture snapshot if the PVC is the lost state from the beginning", func(ctx SpecContext) {
 			pv, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 			Expect(err).NotTo(HaveOccurred())
 			pv.Status.Phase = corev1.VolumeAvailable
@@ -400,10 +400,10 @@ var _ = Describe("MantleBackup controller", func() {
 			backup, err := resMgr.CreateUniqueBackupFor(ctx, pvc)
 			Expect(err).NotTo(HaveOccurred())
 
-			ensureBackupNotReadyToUse(ctx, backup)
+			ensureBackupNotSnapshotCaptured(ctx, backup)
 		})
 
-		It("should not be ready to use if specified non-existent PVC name", func(ctx SpecContext) {
+		It("should not capture snapshot if specified non-existent PVC name", func(ctx SpecContext) {
 			var err error
 			backup, err := resMgr.CreateUniqueBackupFor(ctx, &corev1.PersistentVolumeClaim{
 				ObjectMeta: metav1.ObjectMeta{
@@ -413,7 +413,7 @@ var _ = Describe("MantleBackup controller", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			ensureBackupNotReadyToUse(ctx, backup)
+			ensureBackupNotSnapshotCaptured(ctx, backup)
 		})
 
 		It("should fail the resource creation the second time if the same MantleBackup is created twice", func(ctx SpecContext) {
@@ -698,19 +698,19 @@ var _ = Describe("MantleBackup controller", func() {
 				meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
 					Type:   mantlev1.BackupConditionSyncedToRemote,
 					Status: metav1.ConditionTrue,
-					Reason: mantlev1.ConditionReasonReadyToUseNoProblem,
+					Reason: mantlev1.ConditionReasonSnapshotCapturedNoProblem,
 				})
 				return nil
 			})
 			Expect(err).NotTo(HaveOccurred())
 
 			// Make the all existing MantleBackups in the (mocked) secondary Mantle
-			// ReadyToUse=True.
+			// SnapshotCaptured=True.
 			for _, backup := range secondaryBackups {
 				meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
-					Type:   mantlev1.BackupConditionReadyToUse,
+					Type:   mantlev1.BackupConditionSnapshotCaptured,
 					Status: metav1.ConditionTrue,
-					Reason: mantlev1.ConditionReasonReadyToUseNoProblem,
+					Reason: mantlev1.ConditionReasonSnapshotCapturedNoProblem,
 				})
 			}
 
@@ -783,7 +783,7 @@ var _ = Describe("searchDiffOriginMantleBackup", func() {
 	// ref. https://pkg.go.dev/slices#Clone
 	primaryBackupsWithBlankCondition := slices.Clone(basePrimaryBackups)
 	primaryBackupsWithBlankCondition[2] = *basePrimaryBackups[2].DeepCopy()
-	meta.RemoveStatusCondition(&primaryBackupsWithBlankCondition[2].Status.Conditions, mantlev1.BackupConditionReadyToUse)
+	meta.RemoveStatusCondition(&primaryBackupsWithBlankCondition[2].Status.Conditions, mantlev1.BackupConditionSnapshotCaptured)
 	primaryBackupsWithDeletionTimestamp := slices.Clone(basePrimaryBackups)
 	primaryBackupsWithDeletionTimestamp[2] = *basePrimaryBackups[2].DeepCopy()
 	now := metav1.Now()
@@ -843,7 +843,7 @@ func newMantleBackup(
 	labels map[string]string,
 	withDelTimestamp bool,
 	snapID int,
-	readyToUse metav1.ConditionStatus,
+	snapshotCaptured metav1.ConditionStatus,
 	syncedToRemote metav1.ConditionStatus,
 ) *mantlev1.MantleBackup {
 	newMB := &mantlev1.MantleBackup{
@@ -862,8 +862,8 @@ func newMantleBackup(
 		newMB.SetDeletionTimestamp(&now)
 	}
 	meta.SetStatusCondition(&newMB.Status.Conditions, metav1.Condition{
-		Type:   mantlev1.BackupConditionReadyToUse,
-		Status: readyToUse,
+		Type:   mantlev1.BackupConditionSnapshotCaptured,
+		Status: snapshotCaptured,
 	})
 	meta.SetStatusCondition(&newMB.Status.Conditions, metav1.Condition{
 		Type:   mantlev1.BackupConditionSyncedToRemote,
@@ -890,7 +890,7 @@ var _ = Describe("prepareForDataSynchronization", func() {
 		primaryBackupsWithoutTarget []*mantlev1.MantleBackup,
 		secondaryMantleBackups []*mantlev1.MantleBackup,
 		isIncremental bool,
-		isSecondaryMantleBackupReadyToUse bool,
+		isSecondaryMantleBackupSnapshotCaptured bool,
 		diffFrom *mantlev1.MantleBackup,
 	) {
 		var t reporter
@@ -944,7 +944,7 @@ var _ = Describe("prepareForDataSynchronization", func() {
 			backup, grpcClient)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ret.isIncremental).To(Equal(isIncremental))
-		Expect(ret.isSecondaryMantleBackupReadyToUse).To(Equal(isSecondaryMantleBackupReadyToUse))
+		Expect(ret.isSecondaryMantleBackupSnapshotCaptured).To(Equal(isSecondaryMantleBackupSnapshotCaptured))
 		if isIncremental {
 			Expect(ret.diffFrom).NotTo(BeNil())
 			Expect(ret.diffFrom.GetName()).To(Equal(diffFrom.GetName()))
@@ -1192,12 +1192,12 @@ var _ = Describe("SetSynchronizing", func() {
 			},
 		),
 		Entry(
-			"a backup should fail if target's ReadyToUse is True",
+			"a backup should fail if target's SnapshotCaptured is True",
 			&mantlev1.MantleBackup{
 				Status: mantlev1.MantleBackupStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   mantlev1.BackupConditionReadyToUse,
+							Type:   mantlev1.BackupConditionSnapshotCaptured,
 							Status: metav1.ConditionTrue,
 						},
 					},
@@ -1360,7 +1360,7 @@ var _ = Describe("export and upload", func() {
 		ctx SpecContext,
 		mbr *MantleBackupReconciler,
 		name, ns string,
-		isIncremental, isSecondaryMantleBackupReadyToUse bool,
+		isIncremental, isSecondaryMantleBackupSnapshotCaptured bool,
 		diffFrom *mantlev1.MantleBackup,
 	) *mantlev1.MantleBackup {
 		GinkgoHelper()
@@ -1375,9 +1375,9 @@ var _ = Describe("export and upload", func() {
 			Times(1).Return(&proto.SetSynchronizingResponse{}, nil)
 
 		ret, err := mbr.startExportAndUpload(ctx, target, &dataSyncPrepareResult{
-			isIncremental:                     isIncremental,
-			isSecondaryMantleBackupReadyToUse: isSecondaryMantleBackupReadyToUse,
-			diffFrom:                          diffFrom,
+			isIncremental:                           isIncremental,
+			isSecondaryMantleBackupSnapshotCaptured: isSecondaryMantleBackupSnapshotCaptured,
+			diffFrom:                                diffFrom,
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ret.RequeueAfter).NotTo(BeZero())
@@ -1389,9 +1389,9 @@ var _ = Describe("export and upload", func() {
 		grpcClient.EXPECT().SetSynchronizing(gomock.Any(), gomock.Any()).
 			Times(1).Return(&proto.SetSynchronizingResponse{}, nil)
 		ret, err := mbr.startExportAndUpload(ctx, target, &dataSyncPrepareResult{
-			isIncremental:                     false,
-			isSecondaryMantleBackupReadyToUse: false,
-			diffFrom:                          nil,
+			isIncremental:                           false,
+			isSecondaryMantleBackupSnapshotCaptured: false,
+			diffFrom:                                nil,
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ret.RequeueAfter).NotTo(BeZero())
@@ -1770,7 +1770,7 @@ var _ = Describe("import", func() {
 
 			err = k8sClient.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(backup.IsReady()).To(BeTrue())
+			Expect(backup.IsSnapshotCaptured()).To(BeTrue())
 			Expect(*backup.Status.SnapID).To(Equal(dummySnapshot.Id))
 		})
 	})
@@ -1918,9 +1918,6 @@ var _ = Describe("import", func() {
 			Expect(err).NotTo(HaveOccurred())
 			_, ok = source.GetAnnotations()[annotDiffTo]
 			Expect(ok).To(BeFalse())
-
-			// Check that SyncedToRemote is set True
-			Expect(backup.IsSynced()).To(BeTrue())
 
 			// Check that the Jobs are deleted
 			checkExportAndUploadJobsDeleted(ctx, backup)

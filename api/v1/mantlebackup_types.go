@@ -57,12 +57,12 @@ type MantleBackupStatus struct {
 }
 
 const (
-	BackupConditionReadyToUse     = "ReadyToUse"
-	BackupConditionSyncedToRemote = "SyncedToRemote"
-	BackupConditionVerified       = "Verified"
+	BackupConditionSnapshotCaptured = "SnapshotCaptured"
+	BackupConditionSyncedToRemote   = "SyncedToRemote"
+	BackupConditionVerified         = "Verified"
 
-	// Reasons for ConditionReadyToUse
-	ConditionReasonReadyToUseNoProblem = "NoProblem"
+	// Reasons for ConditionSnapshotCaptured
+	ConditionReasonSnapshotCapturedNoProblem = "NoProblem"
 	// Reasons for ConditionSyncedToRemote
 	ConditionReasonSyncedToRemoteNoProblem = "NoProblem"
 	// Reasons for ConditionVerified
@@ -93,8 +93,8 @@ type MantleBackupList struct {
 	Items           []MantleBackup `json:"items"`
 }
 
-func (m *MantleBackup) IsReady() bool {
-	return meta.IsStatusConditionTrue(m.Status.Conditions, BackupConditionReadyToUse)
+func (m *MantleBackup) IsSnapshotCaptured() bool {
+	return meta.IsStatusConditionTrue(m.Status.Conditions, BackupConditionSnapshotCaptured)
 }
 
 func (m *MantleBackup) IsSynced() bool {
