@@ -22,15 +22,16 @@ func newCommandTools(kubectl []string, namespace string) command {
 	}
 }
 
-func (c *commandToolsImpl) execute(cephCommand ...string) ([]byte, error) {
-	var stdout bytes.Buffer
+func (c *commandToolsImpl) execute(cephCommand ...string) ([]byte, []byte, error) {
+	var stdout, stderr bytes.Buffer
 	arg := []string{}
 	arg = append(arg, c.kubectl...)
 	arg = append(arg, "exec", "-n", c.namespace, "deploy/rook-ceph-tools", "--")
 	arg = append(arg, cephCommand...)
 	command := exec.Command(arg[0], arg[1:]...)
 	command.Stdout = &stdout
+	command.Stderr = &stderr
 
 	err := command.Run()
-	return stdout.Bytes(), err
+	return stdout.Bytes(), stderr.Bytes(), err
 }

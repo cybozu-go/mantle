@@ -40,7 +40,7 @@ func (m *Mockcommand) EXPECT() *MockcommandMockRecorder {
 }
 
 // execute mocks base method.
-func (m *Mockcommand) execute(command ...string) ([]byte, error) {
+func (m *Mockcommand) execute(command ...string) ([]byte, []byte, error) {
 	m.ctrl.T.Helper()
 	varargs := []any{}
 	for _, a := range command {
@@ -48,8 +48,9 @@ func (m *Mockcommand) execute(command ...string) ([]byte, error) {
 	}
 	ret := m.ctrl.Call(m, "execute", varargs...)
 	ret0, _ := ret[0].([]byte)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
+	ret1, _ := ret[1].([]byte)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
 }
 
 // execute indicates an expected call of execute.
