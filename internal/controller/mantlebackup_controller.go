@@ -462,7 +462,7 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 		return ctrl.Result{}, err
 	}
 
-	if backup.IsReady() {
+	if backup.IsSnapshotCaptured() {
 		return r.secondaryCleanup(ctx, backup, true)
 	}
 
@@ -525,7 +525,7 @@ func (r *MantleBackupReconciler) replicate(
 		return ctrl.Result{}, err
 	}
 
-	if prepareResult.isSecondaryMantleBackupReadyToUse {
+	if prepareResult.isSecondaryMantleBackupSnapshotCaptured {
 		return r.primaryCleanup(ctx, backup)
 	}
 	return r.startExportAndUpload(ctx, backup, prepareResult)
@@ -771,8 +771,8 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 		return err
 	}
 
-	// If the given MantleBackup is not ready to use, create a new RBD snapshot and update its status.
-	if backup.IsReady() {
+	// If the given MantleBackup snapshot is not captured, create a new RBD snapshot and update its status.
+	if backup.IsSnapshotCaptured() {
 		return nil
 	}
 
@@ -801,7 +801,7 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 		backup.Status.SnapSize = &snapshot.Size
 
 		meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
-			Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionTrue, Reason: mantlev1.ConditionReasonReadyToUseNoProblem})
+			Type: mantlev1.BackupConditionSnapshotCaptured, Status: metav1.ConditionTrue, Reason: mantlev1.ConditionReasonSnapshotCapturedNoProblem})
 		return nil
 	}); err != nil {
 		logger.Error(err, "failed to update MantleBackup status", "status", backup.Status)
@@ -895,9 +895,9 @@ func (r *MantleBackupReconciler) finalizeSecondary(
 }
 
 type dataSyncPrepareResult struct {
-	isIncremental                     bool // NOTE: The value is forcibly set to false if isSecondaryMantleBackupReadyToUse is true.
-	isSecondaryMantleBackupReadyToUse bool
-	diffFrom                          *mantlev1.MantleBackup // non-nil value iff isIncremental is true.
+	isIncremental                           bool // NOTE: The value is forcibly set to false if isSecondaryMantleBackupSnapshotCaptured is true.
+	isSecondaryMantleBackupSnapshotCaptured bool
+	diffFrom                                *mantlev1.MantleBackup // non-nil value iff isIncremental is true.
 }
 
 func (r *MantleBackupReconciler) prepareForDataSynchronization(
@@ -931,13 +931,13 @@ func (r *MantleBackupReconciler) prepareForDataSynchronization(
 		return nil, fmt.Errorf("secondary MantleBackup not found: %s, %s",
 			backup.GetName(), backup.GetNamespace())
 	}
-	isSecondaryMantleBackupReadyToUse := secondaryBackup.IsReady()
+	isSecondaryMantleBackupSnapshotCaptured := secondaryBackup.IsSnapshotCaptured()
 
-	if isSecondaryMantleBackupReadyToUse {
+	if isSecondaryMantleBackupSnapshotCaptured {
 		return &dataSyncPrepareResult{
-			isIncremental:                     false,
-			isSecondaryMantleBackupReadyToUse: true,
-			diffFrom:                          nil,
+			isIncremental:                           false,
+			isSecondaryMantleBackupSnapshotCaptured: true,
+			diffFrom:                                nil,
 		}, nil
 	}
 
@@ -945,9 +945,9 @@ func (r *MantleBackupReconciler) prepareForDataSynchronization(
 		switch syncMode {
 		case syncModeFull:
 			return &dataSyncPrepareResult{
-				isIncremental:                     false,
-				isSecondaryMantleBackupReadyToUse: isSecondaryMantleBackupReadyToUse,
-				diffFrom:                          nil,
+				isIncremental:                           false,
+				isSecondaryMantleBackupSnapshotCaptured: isSecondaryMantleBackupSnapshotCaptured,
+				diffFrom:                                nil,
 			}, nil
 		case syncModeIncremental:
 			diffFromName, ok := backup.GetAnnotations()[annotDiffFrom]
@@ -965,9 +965,9 @@ func (r *MantleBackupReconciler) prepareForDataSynchronization(
 			}
 
 			return &dataSyncPrepareResult{
-				isIncremental:                     true,
-				isSecondaryMantleBackupReadyToUse: isSecondaryMantleBackupReadyToUse,
-				diffFrom:                          &diffFrom,
+				isIncremental:                           true,
+				isSecondaryMantleBackupSnapshotCaptured: isSecondaryMantleBackupSnapshotCaptured,
+				diffFrom:                                &diffFrom,
 			}, nil
 		default:
 			return nil, fmt.Errorf("unknown sync mode: %s", syncMode)
@@ -988,9 +988,9 @@ func (r *MantleBackupReconciler) prepareForDataSynchronization(
 	isIncremental := (diffFrom != nil)
 
 	return &dataSyncPrepareResult{
-		isIncremental:                     isIncremental,
-		isSecondaryMantleBackupReadyToUse: isSecondaryMantleBackupReadyToUse,
-		diffFrom:                          diffFrom,
+		isIncremental:                           isIncremental,
+		isSecondaryMantleBackupSnapshotCaptured: isSecondaryMantleBackupSnapshotCaptured,
+		diffFrom:                                diffFrom,
 	}, nil
 }
 
@@ -1013,7 +1013,7 @@ func searchForDiffOriginMantleBackup(
 		if !ok {
 			continue
 		}
-		if !primaryBackup.IsReady() || !secondaryBackup.IsReady() {
+		if !primaryBackup.IsSnapshotCaptured() || !secondaryBackup.IsSnapshotCaptured() {
 			continue
 		}
 		if !primaryBackup.DeletionTimestamp.IsZero() || !secondaryBackup.DeletionTimestamp.IsZero() {
@@ -2461,13 +2461,13 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 			return ctrl.Result{}, fmt.Errorf("failed to find imported RBD snapshot: %w", err)
 		}
 
-		// Update the status of the MantleBackup to set True to the ReadyToUse condition.
+		// Update the status of the MantleBackup to set True to the SnapshotCaptured condition.
 		if err := updateStatus(ctx, r.Client, backup, func() error {
 			backup.Status.SnapID = &snapshot.Id
 			meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
-				Type:   mantlev1.BackupConditionReadyToUse,
+				Type:   mantlev1.BackupConditionSnapshotCaptured,
 				Status: metav1.ConditionTrue,
-				Reason: mantlev1.ConditionReasonReadyToUseNoProblem,
+				Reason: mantlev1.ConditionReasonSnapshotCapturedNoProblem,
 			})
 			return nil
 		}); err != nil {

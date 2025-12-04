@@ -125,8 +125,8 @@ var _ = Describe("miscellaneous tests", func() {
 		Expect(err).NotTo(HaveOccurred())
 		WaitTemporaryResourcesDeleted(ctx, primaryMB2, secondaryMB2)
 
-		Expect(secondaryMB1.IsReady()).To(BeTrue())
-		Expect(secondaryMB2.IsReady()).To(BeTrue())
+		Expect(secondaryMB1.IsSnapshotCaptured()).To(BeTrue())
+		Expect(secondaryMB2.IsSnapshotCaptured()).To(BeTrue())
 
 		snap, err := FindRBDSnapshotInPVC(SecondaryK8sCluster, namespace, pvcName1, backupName1)
 		Expect(err).NotTo(HaveOccurred())
