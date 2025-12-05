@@ -1069,7 +1069,7 @@ func (r *MantleBackupReconciler) startExportAndUpload(
 			DiffFrom:  sourceBackupName,
 		},
 	); err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("failed to call SetSynchronizing RPC: %w", err)
 	}
 
 	largestCompletedExportPartNum, err := r.startExport(ctx, targetBackup, sourceBackupName)
@@ -2435,7 +2435,7 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 	// Check that all import Jobs are completed
 	finalPartNum, err := r.getNumberOfParts(backup)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to calcuate num of export data parts: %w", err)
+		return ctrl.Result{}, fmt.Errorf("failed to calculate num of export data parts: %w", err)
 	}
 	if partNum == finalPartNum {
 		// Make sure the (final) RBD snapshot is created.
