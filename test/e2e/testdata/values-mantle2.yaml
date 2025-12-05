@@ -5,3 +5,6 @@ image:
 
 controller:
   gcInterval: 1s
+  env:
+    - name: REQUEUE_RECONCILIATION_AFTER
+      value: "10s"
