@@ -45,13 +45,13 @@ func (r *GarbageCollectorRunner) Start(ctx context.Context) error {
 			break
 		}
 
-		logger.Info("garbage collection started")
+		//logger.Info("garbage collection started")
 
 		if err := r.deleteOrphanedPVs(ctx); err != nil {
 			logger.Error(err, "failed to delete orphaned PVs", "error", err)
 		}
 
-		logger.Info("garbage collection finished")
+		//logger.Info("garbage collection finished")
 	}
 
 	return nil

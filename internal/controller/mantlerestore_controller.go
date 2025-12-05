@@ -29,6 +29,8 @@ type MantleRestoreReconciler struct {
 }
 
 const (
+	mbnAnnotationSkipVerifyKey      = "mantle.cybozu.io/skip-verify"
+	mbAnnotationSkipVerifyValue     = "true"
 	MantleRestoreFinalizerName      = "mantlerestore.mantle.cybozu.io/finalizer"
 	RestoringPVFinalizerName        = "mantle.cybozu.io/restoring-pv-finalizer"
 	PVAnnotationRestoredBy          = "mantle.cybozu.io/restored-by"
@@ -134,9 +136,15 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, restore *mantlev1
 		return ctrl.Result{}, err
 	}
 
-	// check if the backup is ReadyToUse
-	if !backup.IsReady() {
-		logger.Info("backup is not ready to use", "backup", backup.Name, "namespace", backup.Namespace)
+	// check if the backup is SnapshotCaptured
+	if !backup.IsSnapshotCaptured() {
+		logger.Info("snapshot is not captured", "backup", backup.Name, "namespace", backup.Namespace)
+		return requeueReconciliation(), nil
+	}
+
+	// check if the backup is verified or verification is skipped
+	if skip, ok := backup.GetAnnotations()[mbnAnnotationSkipVerifyKey]; !backup.IsVerified() && (!ok || skip != mbAnnotationSkipVerifyValue) {
+		logger.Info("verification is not completed", "backup", backup.Name, "namespace", backup.Namespace)
 		return requeueReconciliation(), nil
 	}
 

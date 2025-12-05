@@ -135,7 +135,7 @@ spec:
 status:
   conditions:
     # The corresponding backup data is ready to use if `status` is "True"
-    - type: "ReadyToUse"
+    - type: "SnapshotCaptured"
       status: "True"
 ```
 
