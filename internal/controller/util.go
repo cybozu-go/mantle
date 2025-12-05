@@ -160,3 +160,29 @@ func requeueReconciliation() ctrl.Result {
 	}
 	return ctrl.Result{RequeueAfter: duration}
 }
+
+func deleteRBDImageAsynchronously(ceph ceph.CephCmd, pool, image string) error {
+	images, err := ceph.RBDLs(pool)
+	if err != nil {
+		return fmt.Errorf("failed to list RBD images: %w", err)
+	}
+
+	if !slices.Contains(images, image) {
+		return nil
+	}
+
+	imageInfo, err := ceph.RBDInfo(pool, image)
+	if err != nil {
+		return fmt.Errorf("failed to get info about the RBD image: %s/%s: %w", pool, image, err)
+	}
+
+	if err := ceph.RBDTrashMv(pool, image); err != nil {
+		return fmt.Errorf("failed to move the RBD image to trash: %s/%s: %w", pool, image, err)
+	}
+
+	if err := ceph.CephRBDTaskAddTrashRemove(pool, imageInfo.ID); err != nil {
+		return fmt.Errorf("failed to add task to remove the RBD image from trash: %s/%s: %w", pool, image, err)
+	}
+
+	return nil
+}

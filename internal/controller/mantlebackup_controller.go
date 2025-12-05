@@ -2776,13 +2776,14 @@ func (r *MantleBackupReconciler) primaryCleanup(
 	if err := r.deleteVerifyJob(ctx, target); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to delete verify Job: %w", err)
 	}
-
+	if err := r.deleteVerifyPVC(ctx, target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete verify PVC: %w", err)
+	}
 	if err := r.deleteVerifyPV(ctx, target); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to delete verify PV: %w", err)
 	}
-
-	if err := r.deleteVerifyPVC(ctx, target); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to delete verify PVC: %w", err)
+	if err := r.deleteVerifyRBDImage(target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete verify RBD image: %w", err)
 	}
 
 	delete(target.GetAnnotations(), annotDiffFrom)
@@ -2884,6 +2885,24 @@ func (r *MantleBackupReconciler) deleteVerifyPVC(ctx context.Context, backup *ma
 	return nil
 }
 
+func (r *MantleBackupReconciler) deleteVerifyRBDImage(backup *mantlev1.MantleBackup) error {
+	if backup.Status.PVManifest == "" {
+		// The RBD image for verification is created after the PV manifest is stored in the status.
+		// Thus, when the PV manifest is missing, the RBD image hasn't been created, so we can safely return nil.
+		return nil
+	}
+	var pv corev1.PersistentVolume
+	if err := json.Unmarshal([]byte(backup.Status.PVManifest), &pv); err != nil {
+		return fmt.Errorf("failed to unmarshal PV manifest: %w", err)
+	}
+	pool := pv.Spec.CSI.VolumeAttributes["pool"]
+	if pool == "" {
+		return errors.New("pool name is missing in the PV manifest")
+	}
+	image := makeVerifyImageName(backup)
+	return deleteRBDImageAsynchronously(r.ceph, pool, image)
+}
+
 func (r *MantleBackupReconciler) secondaryCleanup(
 	ctx context.Context,
 	target *mantlev1.MantleBackup,
@@ -2934,13 +2953,14 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 	if err := r.deleteVerifyJob(ctx, target); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to delete verify Job: %w", err)
 	}
-
+	if err := r.deleteVerifyPVC(ctx, target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete verify PVC: %w", err)
+	}
 	if err := r.deleteVerifyPV(ctx, target); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to delete verify PV: %w", err)
 	}
-
-	if err := r.deleteVerifyPVC(ctx, target); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to delete verify PVC: %w", err)
+	if err := r.deleteVerifyRBDImage(target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete verify RBD image: %w", err)
 	}
 
 	if deleteExportData {
