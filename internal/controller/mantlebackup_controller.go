@@ -696,7 +696,7 @@ func (r *MantleBackupReconciler) verify(
 	}
 
 	// create a clone by the snapshot bound to the MB
-	if err := createCloneByPV(ctx, r.ceph, &storedPV, backup.Name, makeVerifyImageName(backup)); err != nil {
+	if err := createCloneByPV(ctx, r.ceph, &storedPV, backup.Name, MakeVerifyImageName(backup)); err != nil {
 		return fmt.Errorf("failed to create a clone by the snapshot: %w", err)
 	}
 
@@ -704,7 +704,7 @@ func (r *MantleBackupReconciler) verify(
 	if err := r.createOrUpdateStaticPV(
 		ctx,
 		&storedPV,
-		makeVerifyImageName(backup),
+		MakeVerifyImageName(backup),
 		corev1.ResourceList{
 			corev1.ResourceStorage: *resource.NewQuantity(*backup.Status.SnapSize, resource.BinarySI),
 		},
@@ -1540,7 +1540,7 @@ func MakeMiddleSnapshotName(backup *mantlev1.MantleBackup, offset int) string {
 	return fmt.Sprintf("%s-offset-%d", backup.GetAnnotations()[annotRemoteUID], offset)
 }
 
-func makeVerifyImageName(target *mantlev1.MantleBackup) string {
+func MakeVerifyImageName(target *mantlev1.MantleBackup) string {
 	return mantleVerifyImagePrefix + string(target.GetUID())
 }
 
@@ -2899,7 +2899,7 @@ func (r *MantleBackupReconciler) deleteVerifyRBDImage(backup *mantlev1.MantleBac
 	if pool == "" {
 		return errors.New("pool name is missing in the PV manifest")
 	}
-	image := makeVerifyImageName(backup)
+	image := MakeVerifyImageName(backup)
 	return deleteRBDImageAsynchronously(r.ceph, pool, image)
 }
 

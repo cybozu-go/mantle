@@ -2566,7 +2566,7 @@ var _ = Describe("MantleBackupReconciler", func() {
 							"pool":          pvSrc.Spec.CSI.VolumeAttributes["pool"],
 							"staticVolume":  "true",
 						},
-						VolumeHandle: makeVerifyImageName(backup),
+						VolumeHandle: MakeVerifyImageName(backup),
 					},
 				},
 				PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimRetain,
@@ -2722,7 +2722,7 @@ var _ = Describe("MantleBackupReconciler", func() {
 
 		It("generates correct names", func(ctx SpecContext) {
 			for _, backup := range []*mantlev1.MantleBackup{backupSuccess, backupFail} {
-				Expect(makeVerifyImageName(backup)).To(Equal(mantleVerifyImagePrefix + string(backup.GetUID())))
+				Expect(MakeVerifyImageName(backup)).To(Equal(mantleVerifyImagePrefix + string(backup.GetUID())))
 				Expect(MakeVerifyJobName(backup)).To(Equal(MantleVerifyJobPrefix + string(backup.GetUID())))
 				Expect(makeVerifyPVName(backup)).To(Equal(mantleVerifyPVPrefix + string(backup.GetUID())))
 				Expect(MakeVerifyPVCName(backup)).To(Equal(mantleVerifyPVCPrefix + string(backup.GetUID())))

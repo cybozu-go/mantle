@@ -939,11 +939,24 @@ func WaitTemporaryS3ObjectsDeleted(ctx SpecContext, primaryMB *mantlev1.MantleBa
 	}).Should(Succeed())
 }
 
+func WaitVerifyRBDImageDeleted(ctx SpecContext, cluster int, backup *mantlev1.MantleBackup) {
+	GinkgoHelper()
+	Eventually(ctx, func(g Gomega) {
+		cmd := createCephCmd(cluster)
+		images, err := cmd.RBDLs("rook-ceph-block")
+		g.Expect(err).NotTo(HaveOccurred())
+		image := controller.MakeVerifyImageName(backup)
+		g.Expect(slices.Contains(images, image)).To(BeFalse())
+	}).Should(Succeed())
+}
+
 func WaitTemporaryResourcesDeleted(ctx SpecContext, primaryMB, secondaryMB *mantlev1.MantleBackup) {
 	GinkgoHelper()
 	WaitTemporaryJobsDeleted(ctx, primaryMB, secondaryMB)
 	WaitTemporaryPVCsDeleted(ctx, primaryMB, secondaryMB)
 	WaitTemporaryPVsDeleted(ctx, primaryMB, secondaryMB)
+	WaitVerifyRBDImageDeleted(ctx, PrimaryK8sCluster, primaryMB)
+	WaitVerifyRBDImageDeleted(ctx, SecondaryK8sCluster, secondaryMB)
 	WaitTemporaryS3ObjectsDeleted(ctx, primaryMB)
 }
 
