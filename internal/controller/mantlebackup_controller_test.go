@@ -1318,7 +1318,12 @@ func createMantleBackupUsingDummyPVC(ctx context.Context, name, ns string) (*man
 	return target, nil
 }
 
-func createSnapshotForMantleBackupUsingDummyPVC(ctx context.Context, cephCmd ceph.CephCmd, backup *mantlev1.MantleBackup) error {
+func createSnapshotForMantleBackupUsingDummyPVC(
+	ctx context.Context,
+	cephCmd ceph.CephCmd,
+	backup *mantlev1.MantleBackup,
+	transferPartSize resource.Quantity,
+) error {
 	snapName := util.GetUniqueName("snap")
 	if err := cephCmd.RBDSnapCreate(dummyPoolName, dummyImageName, snapName); err != nil {
 		return err
@@ -1334,6 +1339,7 @@ func createSnapshotForMantleBackupUsingDummyPVC(ctx context.Context, cephCmd cep
 	if err := updateStatus(ctx, k8sClient, backup, func() error {
 		backup.Status.SnapID = &snaps[index].Id
 		backup.Status.SnapSize = &snaps[index].Size
+		backup.Status.TransferPartSize = &transferPartSize
 		return nil
 	}); err != nil {
 		return err
@@ -1341,14 +1347,9 @@ func createSnapshotForMantleBackupUsingDummyPVC(ctx context.Context, cephCmd cep
 	return nil
 }
 
-func setStatusTransferPartSize(ctx context.Context, backup *mantlev1.MantleBackup) error {
-	transferPartSize := resource.MustParse("1Gi")
-	backup.Status.TransferPartSize = &transferPartSize
-	if err := k8sClient.Status().Update(ctx, backup); err != nil {
-		return err
-	}
-	return nil
-}
+var (
+	defaultTransferPartSize = resource.MustParse("1Gi")
+)
 
 var _ = Describe("export and upload", func() {
 	var mockCtrl *gomock.Controller
@@ -1368,7 +1369,7 @@ var _ = Describe("export and upload", func() {
 		target, err := createMantleBackupUsingDummyPVC(ctx, name, ns)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, target)
+		err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, target, mbr.backupTransferPartSize)
 		Expect(err).NotTo(HaveOccurred())
 
 		grpcClient.EXPECT().SetSynchronizing(gomock.Any(), gomock.Any()).
@@ -1571,25 +1572,50 @@ var _ = Describe("export and upload", func() {
 		)
 
 		It("should use the original transfer part size if it's changed", func(ctx SpecContext) {
+			// drop all items in the expire queue to avoid getting stuck
+			go func() {
+				for {
+					select {
+					case <-mbr.expireQueueCh:
+					case <-ctx.Done():
+						return
+					}
+				}
+			}()
+			mbr.managedCephClusterID = resMgr.ClusterID
+			_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			backup, err := resMgr.CreateUniqueBackupFor(ctx, pvc)
+			Expect(err).NotTo(HaveOccurred())
+
 			origSize := *resource.NewQuantity(testutil.FakeRBDSnapshotSize-1, resource.BinarySI)
-			newSize := *resource.NewQuantity(testutil.FakeRBDSnapshotSize+1, resource.BinarySI)
 			mbr.backupTransferPartSize = origSize
-			backup := createAndExportMantleBackup(ctx, mbr, "backup", ns, false, false, nil)
+
+			// We use reconcileAsStandalone to focus on the part size update logic.
+			Eventually(func(g Gomega) {
+				result, err := mbr.reconcileAsStandalone(ctx, backup)
+				g.Expect(result.IsZero()).To(BeTrue())
+				g.Expect(err).NotTo(HaveOccurred())
+
+				err = k8sClient.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(backup.Status.TransferPartSize).NotTo(BeNil())
+				g.Expect(backup.Status.TransferPartSize.Equal(origSize)).To(BeTrue())
+			}).Should(Succeed())
+
+			newSize := *resource.NewQuantity(testutil.FakeRBDSnapshotSize+1, resource.BinarySI)
 			mbr.backupTransferPartSize = newSize
 
-			// mimic as if the reconciler is called at least once after setting the new transfer part size.
-			runStartExportAndUpload(ctx, backup)
+			Eventually(func(g Gomega) {
+				result, err := mbr.reconcileAsStandalone(ctx, backup)
+				g.Expect(result.IsZero()).To(BeTrue())
+				g.Expect(err).NotTo(HaveOccurred())
+			}, "10s").Should(Succeed())
 
-			Eventually(ctx, func(g Gomega, ctx SpecContext) {
-				err := k8sClient.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup)
-				Expect(err).NotTo(HaveOccurred())
-			}).Should(Succeed())
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(backup.Status.TransferPartSize).NotTo(BeNil())
 			Expect(backup.Status.TransferPartSize.Equal(origSize)).To(BeTrue())
-
-			completeJob(ctx, MakeExportJobName(backup, 0))
-			runStartExportAndUpload(ctx, backup)
-			completeJob(ctx, MakeExportJobName(backup, 1))
-			runStartExportAndUpload(ctx, backup)
 		})
 	})
 
@@ -1703,13 +1729,12 @@ var _ = Describe("import", func() {
 		It("should work correctly", func(ctx SpecContext) {
 			backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
 			Expect(err).NotTo(HaveOccurred())
-			err = setStatusTransferPartSize(ctx, backup)
-			Expect(err).NotTo(HaveOccurred())
 
-			// set .status.snapSize
+			// set .status.snapSize and .status.transferPartSize
 			err = updateStatus(ctx, k8sClient, backup, func() error {
-				var i int64 = testutil.FakeRBDSnapshotSize
-				backup.Status.SnapSize = &i
+				backup.Status.SnapSize = ptr.To(int64(testutil.FakeRBDSnapshotSize))
+				transferPartSize := resource.MustParse("1Gi")
+				backup.Status.TransferPartSize = &transferPartSize
 				return nil
 			})
 			Expect(err).NotTo(HaveOccurred())
@@ -1793,9 +1818,7 @@ var _ = Describe("import", func() {
 		backup.SetAnnotations(m)
 		err = k8sClient.Update(ctx, backup)
 		Expect(err).NotTo(HaveOccurred())
-		err = setStatusTransferPartSize(ctx, backup)
-		Expect(err).NotTo(HaveOccurred())
-		err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, backup)
+		err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, backup, defaultTransferPartSize)
 		Expect(err).NotTo(HaveOccurred())
 		return backup
 	}
@@ -1888,7 +1911,7 @@ var _ = Describe("import", func() {
 			})
 			err = k8sClient.Update(ctx, source)
 			Expect(err).NotTo(HaveOccurred())
-			err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, source)
+			err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, source, defaultTransferPartSize)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Create target MantleBackup
@@ -1932,9 +1955,7 @@ var _ = Describe("import", func() {
 		It("should work correctly if deletionTimestamp is set", func(ctx SpecContext) {
 			backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
 			Expect(err).NotTo(HaveOccurred())
-			err = setStatusTransferPartSize(ctx, backup)
-			Expect(err).NotTo(HaveOccurred())
-			err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, backup)
+			err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, backup, defaultTransferPartSize)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = k8sClient.Delete(ctx, backup)
@@ -2039,9 +2060,7 @@ var _ = Describe("import", func() {
 			})
 			err = k8sClient.Update(ctx, source)
 			Expect(err).NotTo(HaveOccurred())
-			err = setStatusTransferPartSize(ctx, source)
-			Expect(err).NotTo(HaveOccurred())
-			err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, source)
+			err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, source, defaultTransferPartSize)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Create target MantleBackup
@@ -2096,9 +2115,7 @@ var _ = Describe("import", func() {
 			})
 			err = k8sClient.Update(ctx, backup)
 			Expect(err).NotTo(HaveOccurred())
-			err = setStatusTransferPartSize(ctx, backup)
-			Expect(err).NotTo(HaveOccurred())
-			err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, backup)
+			err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, backup, defaultTransferPartSize)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = k8sClient.Delete(ctx, backup)
