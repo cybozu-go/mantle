@@ -149,9 +149,12 @@ func (s *SecondaryServer) CreateMantleBackup(
 			return nil, fmt.Errorf("failed to get MantleBackup: %w", err)
 		}
 		// Not found, create a new one.
+		// Note that s.client.Create clears the status field, so we preserve it via DeepCopy before creating.
+		originalBackupReceived := backupReceived.DeepCopy()
 		if err := s.client.Create(ctx, &backupReceived); err != nil {
 			return nil, fmt.Errorf("failed to create MantleBackup: %w", err)
 		}
+		backupReceived.Status = originalBackupReceived.Status
 		if err := s.client.Status().Update(ctx, &backupReceived); err != nil {
 			return nil, fmt.Errorf("failed to update status of MantleBackup: %w", err)
 		}
