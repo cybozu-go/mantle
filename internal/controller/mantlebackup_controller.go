@@ -800,6 +800,13 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 		backup.Status.CreatedAt = metav1.NewTime(snapshot.Timestamp.Time)
 		backup.Status.SnapSize = &snapshot.Size
 
+		if backup.Status.TransferPartSize == nil {
+			// .status.transferPartSize isn't necessary in the standalone mode,
+			// but its value must be set before CreateMantleBackup RPC, so we
+			// set it here.
+			backup.Status.TransferPartSize = &r.backupTransferPartSize
+		}
+
 		meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
 			Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionTrue, Reason: mantlev1.ConditionReasonReadyToUseNoProblem})
 		return nil
@@ -1062,7 +1069,7 @@ func (r *MantleBackupReconciler) startExportAndUpload(
 			DiffFrom:  sourceBackupName,
 		},
 	); err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("failed to call SetSynchronizing RPC: %w", err)
 	}
 
 	largestCompletedExportPartNum, err := r.startExport(ctx, targetBackup, sourceBackupName)
@@ -1144,10 +1151,6 @@ func (r *MantleBackupReconciler) startExport(
 	} else if !ok {
 		// skip to create an export Job
 		return largestCompletedPartNum, nil
-	}
-
-	if err := r.addStatusTransferPartSizeIfEmpty(ctx, targetBackup); err != nil {
-		return -1, fmt.Errorf("failed to patch .status.transferPartSize: %w", err)
 	}
 
 	if ok, err := r.haveAllExportJobsCompleted(targetBackup, largestCompletedPartNum); err != nil {
@@ -1317,21 +1320,6 @@ func (r *MantleBackupReconciler) getPartNumRangeOfExpectedRunningUploadJobs(
 	throttle := max(0, r.primarySettings.MaxUploadJobs-count)
 
 	return uploadedPartNum + 1, min(exportedPartNum, uploadedPartNum+throttle), nil
-}
-
-func (r *MantleBackupReconciler) addStatusTransferPartSizeIfEmpty(ctx context.Context, backup *mantlev1.MantleBackup) error {
-	if backup.Status.TransferPartSize != nil {
-		return nil
-	}
-
-	// Use PATCH here in order not to update backup with stale values.
-	oldBackup := backup.DeepCopy()
-	backup.Status.TransferPartSize = &r.backupTransferPartSize
-	if err := r.Client.Status().Patch(ctx, backup, client.MergeFrom(oldBackup)); err != nil {
-		return fmt.Errorf("failed to patch .status.transferPartSize: %s: %w", r.backupTransferPartSize.String(), err)
-	}
-
-	return nil
 }
 
 func (r *MantleBackupReconciler) getPoolAndImageFromStatusPVManifest(backup *mantlev1.MantleBackup) (string, string, error) {
@@ -2447,7 +2435,7 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 	// Check that all import Jobs are completed
 	finalPartNum, err := r.getNumberOfParts(backup)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to calcuate num of export data parts: %w", err)
+		return ctrl.Result{}, fmt.Errorf("failed to calculate num of export data parts: %w", err)
 	}
 	if partNum == finalPartNum {
 		// Make sure the (final) RBD snapshot is created.
