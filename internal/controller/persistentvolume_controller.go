@@ -89,6 +89,7 @@ func (r *PersistentVolumeReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 	// Wait until the PV's status becomes Released.
 	if pv.Status.Phase != corev1.VolumeReleased {
+		logger.Info("waiting for the PV to be Released", "pvName", pv.Name, "phase", pv.Status.Phase)
 		return ctrl.Result{}, nil
 	}
 

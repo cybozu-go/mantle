@@ -6,6 +6,7 @@ import (
 	"time"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
+	"github.com/cybozu-go/mantle/internal/ceph"
 	"github.com/cybozu-go/mantle/internal/controller"
 	"github.com/cybozu-go/mantle/test/util"
 	. "github.com/onsi/ginkgo/v2"
@@ -542,10 +543,31 @@ func (test *restoreTest) testRemoveImage() {
 }
 
 func (test *restoreTest) cleanup() {
-	err := deleteNamespacedResource(test.tenantNamespace, "mantlerestore")
-	Expect(err).NotTo(HaveOccurred())
-	err = deleteNamespacedResource(test.tenantNamespace, "mantlebackup")
-	Expect(err).NotTo(HaveOccurred())
-	err = deleteNamespacedResource(test.tenantNamespace, "pvc")
-	Expect(err).NotTo(HaveOccurred())
+	stdout, _, _ := kubectl("get", "mantlebackup", "-n", test.tenantNamespace, "-o", "yaml")
+	fmt.Println("MantleBackup resources:\n", string(stdout))
+	stdout, _, _ = kubectl("get", "mantlerestore", "-n", test.tenantNamespace, "-o", "yaml")
+	fmt.Println("MantleRestore resources:\n", string(stdout))
+	stdout, _, _ = kubectl("get", "pvc", "-A", test.tenantNamespace, "-o", "yaml")
+	fmt.Println("PVC resources:\n", string(stdout))
+	stdout, _, _ = kubectl("get", "pv", "-o", "yaml")
+	fmt.Println("PV resources:\n", string(stdout))
+
+	deleteNamespacedResource(test.tenantNamespace, "mantlerestore")
+	deleteNamespacedResource(test.tenantNamespace, "mantlebackup")
+	deleteNamespacedResource(test.tenantNamespace, "pvc")
+
+	// debug infos
+	fmt.Println("Debug info: RBD images and snapshots in the pool:", test.poolName)
+	cephCmd := ceph.NewCephCmd()
+	images, _ := cephCmd.RBDLs(test.poolName)
+	for _, img := range images {
+		info, _ := cephCmd.RBDInfo(test.poolName, img)
+		snaps, _ := cephCmd.RBDSnapLs(test.poolName, img)
+		fmt.Println("  Image:", img)
+		fmt.Println("    ID:", info.ID, " Pool:", info.Parent.Pool, " ParentImage:", info.Parent.Image, " ParentSnapshot", info.Parent.Snapshot)
+		fmt.Println("    Snapshots:")
+		for _, snap := range snaps {
+			fmt.Println("      Name:", snap.Name, " ID:", snap.Id, " Size:", snap.Size, " Protected:", snap.Protected, " Timestamp:", snap.Timestamp)
+		}
+	}
 }

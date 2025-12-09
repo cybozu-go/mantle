@@ -309,15 +309,34 @@ do_test: $(GINKGO)
 	E2ETEST=1 \
 	KUBECTL=$(KUBECTL) \
 	$(GINKGO) --fail-fast -v $(GINKGO_FLAGS) singlek8s; \
-	if [ "$$?" -ne 0 ]; then \
-		echo "Controller logs for $(CEPH_CLUSTER1_NAMESPACE) namespace:"; \
-		$(KUBECTL) logs --tail 100 -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle -c mantle; \
-		echo ""; \
-		echo "Controller logs for $(CEPH_CLUSTER2_NAMESPACE) namespace:"; \
-		$(KUBECTL) logs --tail 100 -n $(CEPH_CLUSTER2_NAMESPACE) -l app.kubernetes.io/name=mantle -c mantle; \
-		# Explicitly fail the test to mark the CI job as failed. \
-		exit 1; \
-	fi
+	RCODE=$$? \
+	echo "Controller logs for $(CEPH_CLUSTER1_NAMESPACE) namespace:"; \
+	$(KUBECTL) logs --tail 1000 -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle -c mantle; \
+	echo ""; \
+	echo "Controller logs for $(CEPH_CLUSTER2_NAMESPACE) namespace:"; \
+	$(KUBECTL) logs --tail 1000 -n $(CEPH_CLUSTER2_NAMESPACE) -l app.kubernetes.io/name=mantle -c mantle; \
+	echo ""; \
+	echo "MantleBackups:"; \
+	$(KUBECTL) get mantlebackups -A -o yaml; \
+	echo ""; \
+	echo "MantleRestores:"; \
+	$(KUBECTL) get mantlerestores -A -o yaml; \
+	echo ""; \
+	echo "PVCs:"; \
+	$(KUBECTL) get pvc -A -o yaml; \
+	echo ""; \
+	echo "PVs:"; \
+	$(KUBECTL) get pv -o yaml; \
+	echo ""; \
+	for POOL in $$($(KUBECTL) exec -n $(CEPH_CLUSTER1_NAMESPACE) deploy/rook-ceph-tools -- ceph osd pool ls); do \
+		echo "Ceph pool $${POOL}:"; \
+		for IMAGE in $$($(KUBECTL) exec -n $(CEPH_CLUSTER1_NAMESPACE) deploy/rook-ceph-tools -- rbd -p $${POOL} ls); do \
+			echo "🕵️ $${IMAGE}"; \
+			$(KUBECTL) exec -n $(CEPH_CLUSTER1_NAMESPACE) deploy/rook-ceph-tools -- rbd info $${POOL}/$${IMAGE}; \
+			$(KUBECTL) exec -n $(CEPH_CLUSTER1_NAMESPACE) deploy/rook-ceph-tools -- rbd -p $${POOL} snap ls $${IMAGE}; \
+		done; \
+	done; \
+	exit $$RCODE
 
 .PHONY: do-test-multik8s
 do-test-multik8s: $(GINKGO)
@@ -327,30 +346,28 @@ do-test-multik8s: $(GINKGO)
 	PATH=${PATH} \
 	E2ETEST=1 \
 	$(GINKGO) --fail-fast -v $(GINKGO_FLAGS) multik8s; \
-	if [ "$$?" -ne 0 ]; then \
-		echo "Controller logs for $(MINIKUBE_PROFILE_PRIMARY):"; \
-		$${KUBECTL_PRIMARY} logs --tail 1000 -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle -c mantle; \
-		echo ""; \
-		echo "Controller logs for $(MINIKUBE_PROFILE_SECONDARY):"; \
-		$${KUBECTL_SECONDARY}  logs --tail 1000 -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle -c mantle; \
-		echo ""; \
-		echo "Primary MBs"; \
-		$${KUBECTL_PRIMARY} get mantlebackups -A -o yaml; \
-		echo ""; \
-		echo "Secondary MBs"; \
-		$${KUBECTL_SECONDARY} get mantlebackups -A -o yaml; \
-		echo ""; \
-		echo "Primary PVCs"; \
-		$${KUBECTL_PRIMARY} get pvc -A -o yaml; \
-		echo ""; \
-		echo "Secondary PVCs"; \
-		$${KUBECTL_SECONDARY} get pvc -A -o yaml; \
-		echo ""; \
-		echo "Primary PVs"; \
-		$${KUBECTL_PRIMARY} get pv -o yaml; \
-		echo ""; \
-		echo "Secondary PVs"; \
-		$${KUBECTL_SECONDARY} get pv -o yaml; \
-		# Explicitly fail the test to mark the CI job as failed. \
-		exit 1; \
-	fi
+	RCODE=$$? \
+	echo "Controller logs for $(MINIKUBE_PROFILE_PRIMARY):"; \
+	$${KUBECTL_PRIMARY} logs --tail 1000 -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle -c mantle; \
+	echo ""; \
+	echo "Controller logs for $(MINIKUBE_PROFILE_SECONDARY):"; \
+	$${KUBECTL_SECONDARY}  logs --tail 1000 -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle -c mantle; \
+	echo ""; \
+	echo "Primary MBs"; \
+	$${KUBECTL_PRIMARY} get mantlebackups -A -o yaml; \
+	echo ""; \
+	echo "Secondary MBs"; \
+	$${KUBECTL_SECONDARY} get mantlebackups -A -o yaml; \
+	echo ""; \
+	echo "Primary PVCs"; \
+	$${KUBECTL_PRIMARY} get pvc -A -o yaml; \
+	echo ""; \
+	echo "Secondary PVCs"; \
+	$${KUBECTL_SECONDARY} get pvc -A -o yaml; \
+	echo ""; \
+	echo "Primary PVs"; \
+	$${KUBECTL_PRIMARY} get pv -o yaml; \
+	echo ""; \
+	echo "Secondary PVs"; \
+	$${KUBECTL_SECONDARY} get pv -o yaml; \
+	exit $$RCODE
