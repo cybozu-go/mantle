@@ -374,6 +374,11 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPV() {
 		err := test.reconciler.createOrUpdateRestoringPV(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
+		Eventually(ctx, func(g Gomega) {
+			err = k8sClient.Get(ctx, client.ObjectKey{Name: test.reconciler.restoringPVName(restore)}, &pv)
+			g.Expect(err).NotTo(HaveOccurred())
+		}).Should(Succeed())
+
 		err = test.reconciler.deleteRestoringPV(ctx, restore)
 		Expect(err).NotTo(HaveOccurred())
 
