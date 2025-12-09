@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"net"
 
+	mantlev1 "github.com/cybozu-go/mantle/api/v1"
+	"github.com/cybozu-go/mantle/internal/ceph"
 	"github.com/cybozu-go/mantle/internal/testutil"
 	"github.com/cybozu-go/mantle/pkg/controller/proto"
+	"github.com/cybozu-go/mantle/test/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"google.golang.org/grpc"
@@ -34,54 +37,53 @@ type replicationUnitTest struct {
 var _ = Describe("Replication unit tests", func() {
 	var test replicationUnitTest
 
-	Describe("setup environment", test.setupEnv)
-	Describe("test CreateUpdatePVC", test.testCreateUpdatePVCAfterResizing)
-	Describe("tearDown environment", test.tearDownEnv)
-})
+	BeforeEach(func(ctx SpecContext) {
+		By("prepares Replication server", func() {
+			test.mgrUtil = testutil.NewManagerUtil(context.Background(), cfg, scheme.Scheme)
+			test.ns = resMgr.CreateNamespace()
 
-func (test *replicationUnitTest) setupEnv() {
-	It("prepares Replication server", func() {
-		test.mgrUtil = testutil.NewManagerUtil(context.Background(), cfg, scheme.Scheme)
-		test.ns = resMgr.CreateNamespace()
-
-		test.server = grpc.NewServer()
-		proto.RegisterMantleServiceServer(test.server, NewSecondaryServer(k8sClient))
-		l, err := net.Listen("tcp", replicationTestEndpoint)
-		Expect(err).NotTo(HaveOccurred())
-
-		go func() {
-			err := test.server.Serve(l)
+			test.server = grpc.NewServer()
+			proto.RegisterMantleServiceServer(test.server, NewSecondaryServer(k8sClient))
+			l, err := net.Listen("tcp", replicationTestEndpoint)
 			Expect(err).NotTo(HaveOccurred())
-		}()
 
-		test.mgrUtil.Start()
+			go func() {
+				err := test.server.Serve(l)
+				Expect(err).NotTo(HaveOccurred())
+			}()
+
+			test.mgrUtil.Start()
+		})
+
+		By("creates gRPC client", func() {
+			var err error
+			test.conn, err = grpc.NewClient(
+				replicationTestEndpoint,
+				grpc.WithTransportCredentials(insecure.NewCredentials()),
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			test.client = proto.NewMantleServiceClient(test.conn)
+		})
 	})
 
-	It("creates gRPC client", func() {
-		var err error
-		test.conn, err = grpc.NewClient(
-			replicationTestEndpoint,
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-		)
-		Expect(err).NotTo(HaveOccurred())
+	AfterEach(func(ctx SpecContext) {
+		By("closes gRPC client", func() {
+			err := test.conn.Close()
+			Expect(err).NotTo(HaveOccurred())
+		})
 
-		test.client = proto.NewMantleServiceClient(test.conn)
-	})
-}
+		By("stops server", func() {
+			test.server.GracefulStop()
 
-func (test *replicationUnitTest) tearDownEnv() {
-	It("closes gRPC client", func() {
-		err := test.conn.Close()
-		Expect(err).NotTo(HaveOccurred())
+			err := test.mgrUtil.Stop()
+			Expect(err).NotTo(HaveOccurred())
+		})
 	})
 
-	It("stops server", func() {
-		test.server.GracefulStop()
-
-		err := test.mgrUtil.Stop()
-		Expect(err).NotTo(HaveOccurred())
-	})
-}
+	Context("CreateUpdatePVC", test.testCreateUpdatePVCAfterResizing)
+	Context("CreateMantleBackup", test.testCreateMantleBackup)
+})
 
 func (test *replicationUnitTest) testCreateUpdatePVCAfterResizing() {
 	// CSATEST-1492
@@ -143,5 +145,195 @@ func (test *replicationUnitTest) testCreateUpdatePVCAfterResizing() {
 		Expect(pvc.Annotations["dummy"]).To(Equal("test-2"))
 		// the storage size should not be updated
 		Expect(pvc.Spec.Resources.Requests.Storage().String()).To(Equal("1Gi"))
+	})
+}
+
+func (test *replicationUnitTest) newMantleBackup() *mantlev1.MantleBackup {
+	GinkgoHelper()
+	snapshot := ceph.RBDSnapshot{}
+	err := json.Unmarshal(
+		[]byte(`{"id":3,"name":"snap1","size":524288000,"protected":"false","timestamp":"Fri May  9 07:58:12 2025"}`),
+		&snapshot,
+	)
+	Expect(err).NotTo(HaveOccurred())
+
+	return &mantlev1.MantleBackup{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      util.GetUniqueName("test-mb-"),
+			Namespace: test.ns,
+			Labels: map[string]string{
+				labelRemoteBackupTargetPVCUID: util.GetUniqueName("test-remote-pvc-uid-"),
+				labelLocalBackupTargetPVCUID:  util.GetUniqueName("test-local-pvc-uid-"),
+			},
+			Annotations: map[string]string{
+				annotRemoteUID: util.GetUniqueName("test-remote-uid-"),
+			},
+		},
+		Spec: mantlev1.MantleBackupSpec{
+			PVC:    util.GetUniqueName("test-pvc-"),
+			Expire: "1d",
+		},
+		Status: mantlev1.MantleBackupStatus{
+			CreatedAt:        metav1.Time(snapshot.Timestamp),
+			SnapSize:         ptr.To(snapshot.Size),
+			TransferPartSize: ptr.To(resource.MustParse("1Gi")),
+		},
+	}
+}
+
+func (test *replicationUnitTest) expectPersistedMantleBackup(ctx SpecContext, expected *mantlev1.MantleBackup) {
+	GinkgoHelper()
+
+	actual := &mantlev1.MantleBackup{}
+	err := k8sClient.Get(ctx, types.NamespacedName{
+		Namespace: expected.Namespace,
+		Name:      expected.Name,
+	}, actual)
+	Expect(err).NotTo(HaveOccurred())
+
+	Expect(actual.Labels).To(Equal(expected.Labels))
+	Expect(actual.Annotations).To(Equal(expected.Annotations))
+	Expect(actual.Spec.PVC).To(Equal(expected.Spec.PVC))
+	Expect(actual.Spec.Expire).To(Equal(expected.Spec.Expire))
+	Expect(actual.Status.CreatedAt.Equal(&expected.Status.CreatedAt)).To(BeTrue())
+	Expect(actual.Status.SnapSize).To(Equal(expected.Status.SnapSize))
+	Expect(actual.Status.TransferPartSize).To(Equal(expected.Status.TransferPartSize))
+}
+
+func (test *replicationUnitTest) testCreateMantleBackup() {
+	It("should create MantleBackup with statuses", func(ctx SpecContext) {
+		// Arrange
+		mb := test.newMantleBackup()
+		mbJson, err := json.Marshal(mb)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Act
+		_, err = test.client.CreateMantleBackup(ctx, &proto.CreateMantleBackupRequest{
+			MantleBackup: mbJson,
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Assert
+		test.expectPersistedMantleBackup(ctx, mb)
+	})
+
+	It("should be idempotent", func(ctx SpecContext) {
+		// Arrange
+		mb := test.newMantleBackup()
+		mbJson, err := json.Marshal(mb)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = test.client.CreateMantleBackup(ctx, &proto.CreateMantleBackupRequest{
+			MantleBackup: mbJson,
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Act
+		_, err = test.client.CreateMantleBackup(ctx, &proto.CreateMantleBackupRequest{
+			MantleBackup: mbJson,
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Assert
+		test.expectPersistedMantleBackup(ctx, mb)
+	})
+
+	It("should not update MantleBackup if it already exists", func(ctx SpecContext) {
+		// Arrange
+		mb := test.newMantleBackup()
+		mbJson, err := json.Marshal(mb)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = test.client.CreateMantleBackup(ctx, &proto.CreateMantleBackupRequest{
+			MantleBackup: mbJson,
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Modify the MantleBackup object
+		origMB := mb.DeepCopy()
+		mb.Status.TransferPartSize = ptr.To(resource.MustParse("2Gi"))
+		Expect(mb.Status.TransferPartSize).NotTo(Equal(origMB.Status.TransferPartSize))
+		mbJson, err = json.Marshal(mb)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Act
+		_, err = test.client.CreateMantleBackup(ctx, &proto.CreateMantleBackupRequest{
+			MantleBackup: mbJson,
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Assert
+		test.expectPersistedMantleBackup(ctx, origMB)
+	})
+
+	It("should set status if MantleBackup already exists without status", func(ctx SpecContext) {
+		// Arrange
+		mb := test.newMantleBackup()
+		mb2 := mb.DeepCopy()
+		mb2.Status = mantlev1.MantleBackupStatus{} // Clear status
+		err := k8sClient.Create(ctx, mb2)
+		Expect(err).NotTo(HaveOccurred())
+
+		mbJson, err := json.Marshal(mb)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Act
+		_, err = test.client.CreateMantleBackup(ctx, &proto.CreateMantleBackupRequest{
+			MantleBackup: mbJson,
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Assert
+		test.expectPersistedMantleBackup(ctx, mb)
+	})
+
+	It("should reject PVC UID label different from existing one", func(ctx SpecContext) {
+		// Arrange
+		mb := test.newMantleBackup()
+		mbJson, err := json.Marshal(mb)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = test.client.CreateMantleBackup(ctx, &proto.CreateMantleBackupRequest{
+			MantleBackup: mbJson,
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Modify the PVC UID label
+		mb.Labels[labelLocalBackupTargetPVCUID] = "different-uid"
+		mbJson, err = json.Marshal(mb)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Act
+		_, err = test.client.CreateMantleBackup(ctx, &proto.CreateMantleBackupRequest{
+			MantleBackup: mbJson,
+		})
+
+		// Assert
+		Expect(err).To(HaveOccurred())
+	})
+
+	It("should reject remote UID annotation different from existing one", func(ctx SpecContext) {
+		// Arrange
+		mb := test.newMantleBackup()
+		mbJson, err := json.Marshal(mb)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = test.client.CreateMantleBackup(ctx, &proto.CreateMantleBackupRequest{
+			MantleBackup: mbJson,
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Modify the remote UID annotation
+		mb.Annotations[annotRemoteUID] = "different-uid"
+		mbJson, err = json.Marshal(mb)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Act
+		_, err = test.client.CreateMantleBackup(ctx, &proto.CreateMantleBackupRequest{
+			MantleBackup: mbJson,
+		})
+
+		// Assert
+		Expect(err).To(HaveOccurred())
 	})
 }
