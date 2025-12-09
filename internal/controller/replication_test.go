@@ -34,54 +34,52 @@ type replicationUnitTest struct {
 var _ = Describe("Replication unit tests", func() {
 	var test replicationUnitTest
 
-	Describe("setup environment", test.setupEnv)
-	Describe("test CreateUpdatePVC", test.testCreateUpdatePVCAfterResizing)
-	Describe("tearDown environment", test.tearDownEnv)
-})
+	BeforeEach(func(ctx SpecContext) {
+		By("prepares Replication server", func() {
+			test.mgrUtil = testutil.NewManagerUtil(context.Background(), cfg, scheme.Scheme)
+			test.ns = resMgr.CreateNamespace()
 
-func (test *replicationUnitTest) setupEnv() {
-	It("prepares Replication server", func() {
-		test.mgrUtil = testutil.NewManagerUtil(context.Background(), cfg, scheme.Scheme)
-		test.ns = resMgr.CreateNamespace()
-
-		test.server = grpc.NewServer()
-		proto.RegisterMantleServiceServer(test.server, NewSecondaryServer(k8sClient))
-		l, err := net.Listen("tcp", replicationTestEndpoint)
-		Expect(err).NotTo(HaveOccurred())
-
-		go func() {
-			err := test.server.Serve(l)
+			test.server = grpc.NewServer()
+			proto.RegisterMantleServiceServer(test.server, NewSecondaryServer(k8sClient))
+			l, err := net.Listen("tcp", replicationTestEndpoint)
 			Expect(err).NotTo(HaveOccurred())
-		}()
 
-		test.mgrUtil.Start()
+			go func() {
+				err := test.server.Serve(l)
+				Expect(err).NotTo(HaveOccurred())
+			}()
+
+			test.mgrUtil.Start()
+		})
+
+		By("creates gRPC client", func() {
+			var err error
+			test.conn, err = grpc.NewClient(
+				replicationTestEndpoint,
+				grpc.WithTransportCredentials(insecure.NewCredentials()),
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			test.client = proto.NewMantleServiceClient(test.conn)
+		})
 	})
 
-	It("creates gRPC client", func() {
-		var err error
-		test.conn, err = grpc.NewClient(
-			replicationTestEndpoint,
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-		)
-		Expect(err).NotTo(HaveOccurred())
+	AfterEach(func(ctx SpecContext) {
+		By("closes gRPC client", func() {
+			err := test.conn.Close()
+			Expect(err).NotTo(HaveOccurred())
+		})
 
-		test.client = proto.NewMantleServiceClient(test.conn)
-	})
-}
+		By("stops server", func() {
+			test.server.GracefulStop()
 
-func (test *replicationUnitTest) tearDownEnv() {
-	It("closes gRPC client", func() {
-		err := test.conn.Close()
-		Expect(err).NotTo(HaveOccurred())
+			err := test.mgrUtil.Stop()
+			Expect(err).NotTo(HaveOccurred())
+		})
 	})
 
-	It("stops server", func() {
-		test.server.GracefulStop()
-
-		err := test.mgrUtil.Stop()
-		Expect(err).NotTo(HaveOccurred())
-	})
-}
+	Context("CreateUpdatePVC", test.testCreateUpdatePVCAfterResizing)
+})
 
 func (test *replicationUnitTest) testCreateUpdatePVCAfterResizing() {
 	// CSATEST-1492
