@@ -29,21 +29,20 @@ func TestMtest(t *testing.T) {
 	RunSpecs(t, "rbd backup system test")
 }
 
-var _ = Describe("Mantle", func() {
-	Context("wait environment", waitEnvironment)
+var _ = Describe("Mantle", Ordered, func() {
 	Context("backup", backupTestSuite)
 	Context("restore", restoreTestSuite)
 	Context("multi Rook/Ceph env", multiRookCephTestSuite)
-})
 
-func waitEnvironment() {
-	It("wait for mantle-controller to be ready", func() {
-		Eventually(func() error {
-			return checkDeploymentReady(cephCluster1Namespace, "mantle-controller")
-		}).Should(Succeed())
+	BeforeAll(func() {
+		By("wait for mantle-controller to be ready", func() {
+			Eventually(func() error {
+				return checkDeploymentReady(cephCluster1Namespace, "mantle-controller")
+			}).Should(Succeed())
 
-		Eventually(func() error {
-			return checkDeploymentReady(cephCluster2Namespace, "mantle2-controller")
-		}).Should(Succeed())
+			Eventually(func() error {
+				return checkDeploymentReady(cephCluster2Namespace, "mantle2-controller")
+			}).Should(Succeed())
+		})
 	})
-}
+})
