@@ -101,6 +101,9 @@ func (test *restoreTest) testRestore() {
 		err := applyPVCTemplate(test.tenantNamespace, test.pvcName, test.storageClassName)
 		Expect(err).NotTo(HaveOccurred())
 
+		err = writeTestData(test.tenantNamespace, test.pvcName, testData1)
+		Expect(err).NotTo(HaveOccurred())
+
 		err = applyMantleRestoreTemplate(test.tenantNamespace, test.mantleRestoreName1, test.mantleBackupName1)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -117,7 +120,7 @@ func (test *restoreTest) testRestore() {
 		}).Should(BeTrue())
 	})
 
-	It("should wait for the MantleBackup to be ReadyToUse", func() {
+	It("should wait for the MantleBackup to be SnapshotCaptured", func() {
 		test.cleanup()
 
 		err := applyMantleBackupTemplate(test.tenantNamespace, test.pvcName, test.mantleBackupName1)
@@ -132,6 +135,8 @@ func (test *restoreTest) testRestore() {
 
 		By("creating the PVC after the MantleRestore")
 		err = applyPVCTemplate(test.tenantNamespace, test.pvcName, test.storageClassName)
+		Expect(err).NotTo(HaveOccurred())
+		err = writeTestData(test.tenantNamespace, test.pvcName, testData1)
 		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(func() bool {
@@ -225,12 +230,17 @@ func (test *restoreTest) testRestore() {
 }
 
 func (test *restoreTest) testCleanup() {
+	testData1 := []byte("test data 1")
+
 	It("should reconcile the restore", func() {
 		test.cleanup()
 		imageName := fmt.Sprintf("mantle-%s-%s", test.tenantNamespace, test.mantleRestoreName1)
 
 		err := applyPVCTemplate(test.tenantNamespace, test.pvcName, test.storageClassName)
 		Expect(err).NotTo(HaveOccurred())
+		err = writeTestData(test.tenantNamespace, test.pvcName, testData1)
+		Expect(err).NotTo(HaveOccurred())
+
 		err = applyMantleBackupTemplate(test.tenantNamespace, test.pvcName, test.mantleBackupName1)
 		Expect(err).NotTo(HaveOccurred())
 		err = applyMantleRestoreTemplate(test.tenantNamespace, test.mantleRestoreName1, test.mantleBackupName1)
@@ -279,6 +289,9 @@ func (test *restoreTest) testCleanup() {
 
 		err := applyPVCTemplate(test.tenantNamespace, test.pvcName, test.storageClassName)
 		Expect(err).NotTo(HaveOccurred())
+		err = writeTestData(test.tenantNamespace, test.pvcName, testData1)
+		Expect(err).NotTo(HaveOccurred())
+
 		err = applyMantleBackupTemplate(test.tenantNamespace, test.pvcName, test.mantleBackupName1)
 		Expect(err).NotTo(HaveOccurred())
 		err = applyMantleRestoreTemplate(test.tenantNamespace, test.mantleRestoreName1, test.mantleBackupName1)
@@ -437,7 +450,7 @@ func (test *restoreTest) testCloneImageFromBackup() {
 				return err
 			}
 
-			if !backup.IsReady() {
+			if !backup.IsSnapshotCaptured() {
 				return fmt.Errorf("backup is not ready")
 			}
 			return nil

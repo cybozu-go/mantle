@@ -69,7 +69,7 @@ const (
 	MantleExportDataPVCPrefix = "mantle-export-"
 	MantleImportJobPrefix     = "mantle-import-"
 	mantleVerifyImagePrefix   = "mantle-verify-"
-	mantleVerifyJobPrefix     = "mantle-verify-"
+	MantleVerifyJobPrefix     = "mantle-verify-"
 	mantleVerifyPVCPrefix     = "mantle-verify-"
 	mantleVerifyPVPrefix      = "mantle-verify-"
 	MantleZeroOutJobPrefix    = "mantle-zeroout-"
@@ -355,7 +355,7 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	panic("unreachable")
 }
 
-func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
+func (r *MantleBackupReconciler) reconcilePre(ctx context.Context, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	if isCreatedWhenMantleControllerWasSecondary(backup) {
@@ -410,19 +410,55 @@ func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, back
 		return ctrl.Result{}, err
 	}
 
-	if err := r.provisionRBDSnapshot(ctx, backup, target); err != nil {
-		return ctrl.Result{}, err
+	if !backup.IsSnapshotCaptured() {
+		if err := r.provisionRBDSnapshot(ctx, backup, target); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	return ctrl.Result{}, nil
 }
 
-func (r *MantleBackupReconciler) reconcileAsPrimary(ctx context.Context, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
-	result, err := r.reconcileAsStandalone(ctx, backup)
+func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
+	result, err := r.reconcilePre(ctx, backup)
 	if err != nil || !result.IsZero() {
 		return result, err
 	}
-	return r.replicate(ctx, backup)
+
+	if !backup.IsVerified() {
+		if err := r.verify(ctx, backup); err != nil {
+			return ctrl.Result{}, err
+		}
+		return requeueReconciliation(), nil
+	}
+
+	return r.primaryCleanup(ctx, backup)
+}
+
+func (r *MantleBackupReconciler) reconcileAsPrimary(ctx context.Context, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
+	result, err := r.reconcilePre(ctx, backup)
+	if err != nil || !result.IsZero() {
+		return result, err
+	}
+
+	if !backup.IsVerified() {
+		if err := r.verify(ctx, backup); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	if !backup.IsSynced() {
+		result, err := r.replicate(ctx, backup)
+		if err != nil || !result.IsZero() {
+			return result, err
+		}
+	}
+
+	if !backup.IsVerified() || !backup.IsSynced() {
+		return requeueReconciliation(), nil
+	}
+
+	return r.primaryCleanup(ctx, backup)
 }
 
 func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
@@ -462,11 +498,21 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 		return ctrl.Result{}, err
 	}
 
-	if backup.IsReady() {
-		return r.secondaryCleanup(ctx, backup, true)
+	if !backup.IsSnapshotCaptured() {
+		result, err := r.startImport(ctx, backup, target)
+		if err != nil || !result.IsZero() {
+			return result, err
+		}
 	}
 
-	return r.startImport(ctx, backup, target)
+	if backup.IsSnapshotCaptured() && !backup.IsVerified() {
+		if err := r.verify(ctx, backup); err != nil {
+			return ctrl.Result{}, err
+		}
+		return requeueReconciliation(), nil
+	}
+
+	return r.secondaryCleanup(ctx, backup, true)
 }
 
 func scheduleExpire(_ context.Context, evt event.TypedGenericEvent[client.Object], q workqueue.TypedRateLimitingInterface[ctrl.Request]) {
@@ -511,10 +557,7 @@ func (r *MantleBackupReconciler) replicate(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
 ) (ctrl.Result, error) {
-	// Skip replication if SyncedToRemote condition is true.
-	if backup.IsSynced() {
-		return ctrl.Result{}, nil
-	}
+	logger := log.FromContext(ctx)
 
 	result, err := r.replicateManifests(ctx, backup)
 	if err != nil || result != (ctrl.Result{}) {
@@ -525,9 +568,26 @@ func (r *MantleBackupReconciler) replicate(
 		return ctrl.Result{}, err
 	}
 
-	if prepareResult.isSecondaryMantleBackupReadyToUse {
-		return r.primaryCleanup(ctx, backup)
+	if prepareResult.isSecondaryMantleBackupSnapshotCaptured {
+		if err := r.updateMantleBackupCondition(
+			ctx, backup,
+			mantlev1.BackupConditionSyncedToRemote,
+			metav1.ConditionTrue,
+			mantlev1.ConditionReasonSyncedToRemoteNoProblem,
+		); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to set SyncedToRemote condition to True: %w", err)
+		}
+		logger.Info("succeeded to sync a backup to the remote ceph cluster")
+
+		duration := time.Since(backup.GetCreationTimestamp().Time).Seconds()
+		metrics.BackupDurationSeconds.With(prometheus.Labels{
+			"persistentvolumeclaim": backup.Spec.PVC,
+			"resource_namespace":    backup.GetNamespace(),
+		}).Observe(duration)
+
+		return requeueReconciliation(), nil
 	}
+
 	return r.startExportAndUpload(ctx, backup, prepareResult)
 }
 
@@ -630,7 +690,6 @@ func (r *MantleBackupReconciler) replicateManifests(
 	return ctrl.Result{}, nil
 }
 
-//nolint:unused // TODO: Delete this line after starting use.
 func (r *MantleBackupReconciler) verify(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
@@ -646,7 +705,7 @@ func (r *MantleBackupReconciler) verify(
 	}
 
 	// create a clone by the snapshot bound to the MB
-	if err := createCloneByPV(ctx, r.ceph, &storedPV, backup.Name, makeVerifyImageName(backup)); err != nil {
+	if err := createCloneByPV(ctx, r.ceph, &storedPV, backup.Name, MakeVerifyImageName(backup)); err != nil {
 		return fmt.Errorf("failed to create a clone by the snapshot: %w", err)
 	}
 
@@ -654,11 +713,11 @@ func (r *MantleBackupReconciler) verify(
 	if err := r.createOrUpdateStaticPV(
 		ctx,
 		&storedPV,
-		makeVerifyImageName(backup),
+		MakeVerifyImageName(backup),
 		corev1.ResourceList{
 			corev1.ResourceStorage: *resource.NewQuantity(*backup.Status.SnapSize, resource.BinarySI),
 		},
-		makeVerifyPVName(backup),
+		MakeVerifyPVName(backup),
 		labelComponentVerifyVolume,
 		true,
 	); err != nil {
@@ -668,8 +727,8 @@ func (r *MantleBackupReconciler) verify(
 	// create a PVC with the PV
 	if err := r.createOrUpdateStaticPVC(
 		ctx,
-		makeVerifyPVCName(backup),
-		makeVerifyPVName(backup),
+		MakeVerifyPVCName(backup),
+		MakeVerifyPVName(backup),
 		labelComponentVerifyVolume,
 		storedPVC.Spec.Resources,
 	); err != nil {
@@ -679,14 +738,14 @@ func (r *MantleBackupReconciler) verify(
 	// create a Job to execute e2fsck on the PVC
 	if err := r.createOrUpdateVerifyJob(
 		ctx,
-		makeVerifyJobName(backup),
-		makeVerifyPVCName(backup),
+		MakeVerifyJobName(backup),
+		MakeVerifyPVCName(backup),
 	); err != nil {
 		return fmt.Errorf("failed to create a Job to execute e2fsck on the PVC: %w", err)
 	}
 
 	// wait for the Job to complete
-	jobFinished, jobSucceeded, err := r.checkJobStatus(ctx, makeVerifyJobName(backup))
+	jobFinished, jobSucceeded, err := r.checkJobStatus(ctx, MakeVerifyJobName(backup))
 	if err != nil {
 		return fmt.Errorf("failed to check the Job status: %w", err)
 	}
@@ -716,8 +775,6 @@ func (r *MantleBackupReconciler) verify(
 
 // checkJobStatus checks the status of the Job with the given name.
 // It returns (is job finished, is job succeeded, error).
-//
-//nolint:unused // TODO: Delete this line after starting use `verify`.
 func (r *MantleBackupReconciler) checkJobStatus(ctx context.Context, jobName string) (bool, bool, error) {
 	var job batchv1.Job
 	if err := r.Get(
@@ -771,11 +828,6 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 		return err
 	}
 
-	// If the given MantleBackup is not ready to use, create a new RBD snapshot and update its status.
-	if backup.IsReady() {
-		return nil
-	}
-
 	snapshot, err := r.createRBDSnapshot(ctx, target.poolName, target.imageName, backup)
 	if err != nil {
 		return err
@@ -808,7 +860,7 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 		}
 
 		meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
-			Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionTrue, Reason: mantlev1.ConditionReasonReadyToUseNoProblem})
+			Type: mantlev1.BackupConditionSnapshotCaptured, Status: metav1.ConditionTrue, Reason: mantlev1.ConditionReasonSnapshotCapturedNoProblem})
 		return nil
 	}); err != nil {
 		logger.Error(err, "failed to update MantleBackup status", "status", backup.Status)
@@ -902,9 +954,9 @@ func (r *MantleBackupReconciler) finalizeSecondary(
 }
 
 type dataSyncPrepareResult struct {
-	isIncremental                     bool // NOTE: The value is forcibly set to false if isSecondaryMantleBackupReadyToUse is true.
-	isSecondaryMantleBackupReadyToUse bool
-	diffFrom                          *mantlev1.MantleBackup // non-nil value iff isIncremental is true.
+	isIncremental                           bool // NOTE: The value is forcibly set to false if isSecondaryMantleBackupSnapshotCaptured is true.
+	isSecondaryMantleBackupSnapshotCaptured bool
+	diffFrom                                *mantlev1.MantleBackup // non-nil value iff isIncremental is true.
 }
 
 func (r *MantleBackupReconciler) prepareForDataSynchronization(
@@ -938,13 +990,13 @@ func (r *MantleBackupReconciler) prepareForDataSynchronization(
 		return nil, fmt.Errorf("secondary MantleBackup not found: %s, %s",
 			backup.GetName(), backup.GetNamespace())
 	}
-	isSecondaryMantleBackupReadyToUse := secondaryBackup.IsReady()
+	isSecondaryMantleBackupSnapshotCaptured := secondaryBackup.IsSnapshotCaptured()
 
-	if isSecondaryMantleBackupReadyToUse {
+	if isSecondaryMantleBackupSnapshotCaptured {
 		return &dataSyncPrepareResult{
-			isIncremental:                     false,
-			isSecondaryMantleBackupReadyToUse: true,
-			diffFrom:                          nil,
+			isIncremental:                           false,
+			isSecondaryMantleBackupSnapshotCaptured: true,
+			diffFrom:                                nil,
 		}, nil
 	}
 
@@ -952,9 +1004,9 @@ func (r *MantleBackupReconciler) prepareForDataSynchronization(
 		switch syncMode {
 		case syncModeFull:
 			return &dataSyncPrepareResult{
-				isIncremental:                     false,
-				isSecondaryMantleBackupReadyToUse: isSecondaryMantleBackupReadyToUse,
-				diffFrom:                          nil,
+				isIncremental:                           false,
+				isSecondaryMantleBackupSnapshotCaptured: isSecondaryMantleBackupSnapshotCaptured,
+				diffFrom:                                nil,
 			}, nil
 		case syncModeIncremental:
 			diffFromName, ok := backup.GetAnnotations()[annotDiffFrom]
@@ -972,9 +1024,9 @@ func (r *MantleBackupReconciler) prepareForDataSynchronization(
 			}
 
 			return &dataSyncPrepareResult{
-				isIncremental:                     true,
-				isSecondaryMantleBackupReadyToUse: isSecondaryMantleBackupReadyToUse,
-				diffFrom:                          &diffFrom,
+				isIncremental:                           true,
+				isSecondaryMantleBackupSnapshotCaptured: isSecondaryMantleBackupSnapshotCaptured,
+				diffFrom:                                &diffFrom,
 			}, nil
 		default:
 			return nil, fmt.Errorf("unknown sync mode: %s", syncMode)
@@ -995,9 +1047,9 @@ func (r *MantleBackupReconciler) prepareForDataSynchronization(
 	isIncremental := (diffFrom != nil)
 
 	return &dataSyncPrepareResult{
-		isIncremental:                     isIncremental,
-		isSecondaryMantleBackupReadyToUse: isSecondaryMantleBackupReadyToUse,
-		diffFrom:                          diffFrom,
+		isIncremental:                           isIncremental,
+		isSecondaryMantleBackupSnapshotCaptured: isSecondaryMantleBackupSnapshotCaptured,
+		diffFrom:                                diffFrom,
 	}, nil
 }
 
@@ -1020,7 +1072,7 @@ func searchForDiffOriginMantleBackup(
 		if !ok {
 			continue
 		}
-		if !primaryBackup.IsReady() || !secondaryBackup.IsReady() {
+		if !primaryBackup.IsSnapshotCaptured() || !secondaryBackup.IsSnapshotCaptured() {
 			continue
 		}
 		if !primaryBackup.DeletionTimestamp.IsZero() || !secondaryBackup.DeletionTimestamp.IsZero() {
@@ -1485,23 +1537,19 @@ func MakeMiddleSnapshotName(backup *mantlev1.MantleBackup, offset int) string {
 	return fmt.Sprintf("%s-offset-%d", backup.GetAnnotations()[annotRemoteUID], offset)
 }
 
-//nolint:unused // TODO: Delete this line after starting use.
-func makeVerifyImageName(target *mantlev1.MantleBackup) string {
+func MakeVerifyImageName(target *mantlev1.MantleBackup) string {
 	return mantleVerifyImagePrefix + string(target.GetUID())
 }
 
-//nolint:unused // TODO: Delete this line after starting use.
-func makeVerifyJobName(target *mantlev1.MantleBackup) string {
-	return mantleVerifyJobPrefix + string(target.GetUID())
+func MakeVerifyJobName(target *mantlev1.MantleBackup) string {
+	return MantleVerifyJobPrefix + string(target.GetUID())
 }
 
-//nolint:unused // TODO: Delete this line after starting use.
-func makeVerifyPVCName(target *mantlev1.MantleBackup) string {
+func MakeVerifyPVCName(target *mantlev1.MantleBackup) string {
 	return mantleVerifyPVCPrefix + string(target.GetUID())
 }
 
-//nolint:unused // TODO: Delete this line after starting use.
-func makeVerifyPVName(target *mantlev1.MantleBackup) string {
+func MakeVerifyPVName(target *mantlev1.MantleBackup) string {
 	return mantleVerifyPVPrefix + string(target.GetUID())
 }
 
@@ -2335,7 +2383,6 @@ blkdiscard -z /dev/zeroout-rbd
 	return err
 }
 
-//nolint:unused // TODO: Delete this line after starting use `verify`.
 func (r *MantleBackupReconciler) createOrUpdateVerifyJob(ctx context.Context, jobName, pvcName string) error {
 	var job batchv1.Job
 	job.SetName(jobName)
@@ -2449,13 +2496,13 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 			return ctrl.Result{}, fmt.Errorf("failed to find imported RBD snapshot: %w", err)
 		}
 
-		// Update the status of the MantleBackup to set True to the ReadyToUse condition.
+		// Update the status of the MantleBackup to set True to the SnapshotCaptured condition.
 		if err := updateStatus(ctx, r.Client, backup, func() error {
 			backup.Status.SnapID = &snapshot.Id
 			meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
-				Type:   mantlev1.BackupConditionReadyToUse,
+				Type:   mantlev1.BackupConditionSnapshotCaptured,
 				Status: metav1.ConditionTrue,
-				Reason: mantlev1.ConditionReasonReadyToUseNoProblem,
+				Reason: mantlev1.ConditionReasonSnapshotCapturedNoProblem,
 			})
 			return nil
 		}); err != nil {
@@ -2695,8 +2742,6 @@ func (r *MantleBackupReconciler) primaryCleanup(
 	ctx context.Context,
 	target *mantlev1.MantleBackup,
 ) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-
 	diffFrom, ok := target.GetAnnotations()[annotDiffFrom]
 	if ok {
 		var source mantlev1.MantleBackup
@@ -2725,31 +2770,24 @@ func (r *MantleBackupReconciler) primaryCleanup(
 		return ctrl.Result{}, fmt.Errorf("failed to delete export data PVCs: %w", err)
 	}
 
+	if err := r.deleteVerifyJob(ctx, target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete verify Job: %w", err)
+	}
+	if err := r.deleteVerifyPVC(ctx, target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete verify PVC: %w", err)
+	}
+	if err := r.deleteVerifyPV(ctx, target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete verify PV: %w", err)
+	}
+	if err := r.deleteVerifyRBDImage(target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete verify RBD image: %w", err)
+	}
+
 	delete(target.GetAnnotations(), annotDiffFrom)
 	delete(target.GetAnnotations(), annotSyncMode)
 	if err := r.Update(ctx, target); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to delete annotations of diff-from and sync-mode: %w", err)
 	}
-
-	if !target.DeletionTimestamp.IsZero() {
-		return ctrl.Result{}, nil
-	}
-
-	if err := r.updateMantleBackupCondition(
-		ctx, target,
-		mantlev1.BackupConditionSyncedToRemote,
-		metav1.ConditionTrue,
-		mantlev1.ConditionReasonSyncedToRemoteNoProblem,
-	); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to set SyncedToRemote condition to True: %w", err)
-	}
-	logger.Info("succeeded to sync a backup to the remote ceph cluster")
-
-	duration := time.Since(target.GetCreationTimestamp().Time).Seconds()
-	metrics.BackupDurationSeconds.With(prometheus.Labels{
-		"persistentvolumeclaim": target.Spec.PVC,
-		"resource_namespace":    target.GetNamespace(),
-	}).Observe(duration)
 
 	return ctrl.Result{}, nil
 }
@@ -2813,6 +2851,55 @@ func (r *MantleBackupReconciler) deleteAllExportDataPVCs(ctx context.Context, ba
 	return nil
 }
 
+func (r *MantleBackupReconciler) deleteVerifyJob(ctx context.Context, backup *mantlev1.MantleBackup) error {
+	var job batchv1.Job
+	job.SetName(MakeVerifyJobName(backup))
+	job.SetNamespace(r.managedCephClusterID)
+	if err := r.Delete(ctx, &job, &client.DeleteOptions{
+		PropagationPolicy: ptr.To(metav1.DeletePropagationBackground),
+	}); err != nil && !aerrors.IsNotFound(err) {
+		return fmt.Errorf("failed to delete verify Job: %s/%s: %w", job.GetNamespace(), job.GetName(), err)
+	}
+	return nil
+}
+
+func (r *MantleBackupReconciler) deleteVerifyPV(ctx context.Context, backup *mantlev1.MantleBackup) error {
+	var pv corev1.PersistentVolume
+	pv.SetName(MakeVerifyPVName(backup))
+	if err := r.Delete(ctx, &pv); err != nil && !aerrors.IsNotFound(err) {
+		return fmt.Errorf("failed to delete verify PV: %w", err)
+	}
+	return nil
+}
+
+func (r *MantleBackupReconciler) deleteVerifyPVC(ctx context.Context, backup *mantlev1.MantleBackup) error {
+	var pvc corev1.PersistentVolumeClaim
+	pvc.SetName(MakeVerifyPVCName(backup))
+	pvc.SetNamespace(r.managedCephClusterID)
+	if err := r.Delete(ctx, &pvc); err != nil && !aerrors.IsNotFound(err) {
+		return fmt.Errorf("failed to delete verify PVC: %w", err)
+	}
+	return nil
+}
+
+func (r *MantleBackupReconciler) deleteVerifyRBDImage(backup *mantlev1.MantleBackup) error {
+	if backup.Status.PVManifest == "" {
+		// The RBD image for verification is created after the PV manifest is stored in the status.
+		// Thus, when the PV manifest is missing, the RBD image hasn't been created, so we can safely return nil.
+		return nil
+	}
+	var pv corev1.PersistentVolume
+	if err := json.Unmarshal([]byte(backup.Status.PVManifest), &pv); err != nil {
+		return fmt.Errorf("failed to unmarshal PV manifest: %w", err)
+	}
+	pool := pv.Spec.CSI.VolumeAttributes["pool"]
+	if pool == "" {
+		return errors.New("pool name is missing in the PV manifest")
+	}
+	image := MakeVerifyImageName(backup)
+	return deleteRBDImageAsynchronously(r.ceph, pool, image)
+}
+
 func (r *MantleBackupReconciler) secondaryCleanup(
 	ctx context.Context,
 	target *mantlev1.MantleBackup,
@@ -2858,6 +2945,19 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 	zeroOutPV.SetName(MakeZeroOutPVName(target))
 	if err := r.Delete(ctx, &zeroOutPV); err != nil && !aerrors.IsNotFound(err) {
 		return ctrl.Result{}, fmt.Errorf("failed to delete zeroout PV: %w", err)
+	}
+
+	if err := r.deleteVerifyJob(ctx, target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete verify Job: %w", err)
+	}
+	if err := r.deleteVerifyPVC(ctx, target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete verify PVC: %w", err)
+	}
+	if err := r.deleteVerifyPV(ctx, target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete verify PV: %w", err)
+	}
+	if err := r.deleteVerifyRBDImage(target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to delete verify RBD image: %w", err)
 	}
 
 	if deleteExportData {

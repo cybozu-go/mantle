@@ -87,7 +87,7 @@ func (test *mantleRestoreControllerUnitTest) setupEnv() {
 		Expect(err).NotTo(HaveOccurred())
 
 		By("waiting for the backup to be ready")
-		resMgr.WaitForBackupReady(ctx, test.backup)
+		resMgr.WaitForBackupSnapshotCaptured(ctx, test.backup)
 	})
 }
 
