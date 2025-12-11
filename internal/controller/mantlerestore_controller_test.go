@@ -315,6 +315,11 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPVC() {
 		err := test.reconciler.createOrUpdateRestoringPVC(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
+		Eventually(ctx, func(g Gomega) {
+			err = k8sClient.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &pvc)
+			g.Expect(err).NotTo(HaveOccurred())
+		}).Should(Succeed())
+
 		err = test.reconciler.deleteRestoringPVC(ctx, restore)
 		Expect(err).NotTo(HaveOccurred())
 
