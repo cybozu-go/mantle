@@ -32,6 +32,7 @@ func TestMtest(t *testing.T) {
 var _ = Describe("Mantle", Ordered, func() {
 	Context("backup", backupTestSuite)
 	Context("restore", restoreTestSuite)
+	Context("verification", verifyTestSuite)
 	Context("multi Rook/Ceph env", multiRookCephTestSuite)
 
 	BeforeAll(func() {

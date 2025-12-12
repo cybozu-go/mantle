@@ -523,6 +523,21 @@ func WaitMantleBackupReadyToUse(cluster int, namespace, backupName string) {
 	}, "10m", "1s").Should(Succeed())
 }
 
+func WaitMantleBackupVerified(cluster int, namespace, backupName string) {
+	GinkgoHelper()
+	By("checking MantleBackup's Verified status")
+	Eventually(func() error {
+		mb, err := GetMB(cluster, namespace, backupName)
+		if err != nil {
+			return err
+		}
+		if !mb.IsVerified() {
+			return errors.New("status of Verified condition is not True")
+		}
+		return nil
+	}, "10m", "1s").Should(Succeed())
+}
+
 func WaitMantleBackupSynced(namespace, backupName string) {
 	GinkgoHelper()
 	By(fmt.Sprintf("checking MantleBackup's SyncedToRemote status: %s/%s", namespace, backupName))
@@ -796,12 +811,26 @@ func WaitComponentJobsDeleted(
 	}).Should(Succeed())
 }
 
+func WaitJobDeleted(ctx SpecContext, cluster int, namespace, jobName string) {
+	GinkgoHelper()
+	By("waiting for a Job to be deleted")
+	Eventually(ctx, func(g Gomega) {
+		jobs, err := GetJobList(cluster, CephClusterNamespace)
+		g.Expect(err).NotTo(HaveOccurred())
+		exist := slices.ContainsFunc(jobs.Items, func(job batchv1.Job) bool {
+			return job.GetName() == jobName
+		})
+		g.Expect(exist).To(BeFalse())
+	}).Should(Succeed())
+}
+
 func WaitTemporaryPrimaryJobsDeleted(ctx SpecContext, primaryMB *mantlev1.MantleBackup) {
 	GinkgoHelper()
 	WaitComponentJobsDeleted(ctx, PrimaryK8sCluster, CephClusterNamespace,
 		controller.MantleExportJobPrefix, primaryMB)
 	WaitComponentJobsDeleted(ctx, PrimaryK8sCluster, CephClusterNamespace,
 		controller.MantleUploadJobPrefix, primaryMB)
+	WaitJobDeleted(ctx, PrimaryK8sCluster, CephClusterNamespace, controller.MakeVerifyJobName(primaryMB))
 }
 
 func WaitTemporarySecondaryJobsDeleted(ctx SpecContext, secondaryMB *mantlev1.MantleBackup) {
@@ -810,6 +839,7 @@ func WaitTemporarySecondaryJobsDeleted(ctx SpecContext, secondaryMB *mantlev1.Ma
 		controller.MantleImportJobPrefix, secondaryMB)
 	WaitComponentJobsDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace,
 		controller.MantleZeroOutJobPrefix, secondaryMB)
+	WaitJobDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace, controller.MakeVerifyJobName(secondaryMB))
 }
 
 func WaitTemporaryJobsDeleted(ctx SpecContext, primaryMB, secondaryMB *mantlev1.MantleBackup) {
@@ -848,11 +878,13 @@ func WaitTemporaryPrimaryPVCsDeleted(ctx SpecContext, primaryMB *mantlev1.Mantle
 	GinkgoHelper()
 	WaitPVCsDeleted(ctx, PrimaryK8sCluster, CephClusterNamespace,
 		fmt.Sprintf("%s%s-", controller.MantleExportDataPVCPrefix, string(primaryMB.GetUID())))
+	WaitPVCDeleted(ctx, PrimaryK8sCluster, CephClusterNamespace, controller.MakeVerifyPVCName(primaryMB))
 }
 
 func WaitTemporarySecondaryPVCsDeleted(ctx SpecContext, secondaryMB *mantlev1.MantleBackup) {
 	GinkgoHelper()
 	WaitPVCDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace, controller.MakeZeroOutPVCName(secondaryMB))
+	WaitPVCDeleted(ctx, SecondaryK8sCluster, CephClusterNamespace, controller.MakeVerifyPVCName(secondaryMB))
 }
 
 func WaitTemporaryPVCsDeleted(ctx SpecContext, primaryMB, secondaryMB *mantlev1.MantleBackup) {
@@ -874,9 +906,21 @@ func WaitPVDeleted(ctx SpecContext, cluster int, pvName string) {
 	}).Should(Succeed())
 }
 
+func WaitTemporaryPrimaryPVsDeleted(ctx SpecContext, primaryMB *mantlev1.MantleBackup) {
+	GinkgoHelper()
+	WaitPVDeleted(ctx, PrimaryK8sCluster, controller.MakeVerifyPVName(primaryMB))
+}
+
 func WaitTemporarySecondaryPVsDeleted(ctx SpecContext, secondaryMB *mantlev1.MantleBackup) {
 	GinkgoHelper()
 	WaitPVDeleted(ctx, SecondaryK8sCluster, controller.MakeZeroOutPVName(secondaryMB))
+	WaitPVDeleted(ctx, SecondaryK8sCluster, controller.MakeVerifyPVName(secondaryMB))
+}
+
+func WaitTemporaryPVsDeleted(ctx SpecContext, primaryMB, secondaryMB *mantlev1.MantleBackup) {
+	GinkgoHelper()
+	WaitTemporaryPrimaryPVsDeleted(ctx, primaryMB)
+	WaitTemporarySecondaryPVsDeleted(ctx, secondaryMB)
 }
 
 func WaitTemporaryS3ObjectsDeleted(ctx SpecContext, primaryMB *mantlev1.MantleBackup) {
@@ -895,11 +939,24 @@ func WaitTemporaryS3ObjectsDeleted(ctx SpecContext, primaryMB *mantlev1.MantleBa
 	}).Should(Succeed())
 }
 
+func WaitVerifyRBDImageDeleted(ctx SpecContext, cluster int, backup *mantlev1.MantleBackup) {
+	GinkgoHelper()
+	Eventually(ctx, func(g Gomega) {
+		cmd := createCephCmd(cluster)
+		images, err := cmd.RBDLs("rook-ceph-block")
+		g.Expect(err).NotTo(HaveOccurred())
+		image := controller.MakeVerifyImageName(backup)
+		g.Expect(slices.Contains(images, image)).To(BeFalse())
+	}).Should(Succeed())
+}
+
 func WaitTemporaryResourcesDeleted(ctx SpecContext, primaryMB, secondaryMB *mantlev1.MantleBackup) {
 	GinkgoHelper()
 	WaitTemporaryJobsDeleted(ctx, primaryMB, secondaryMB)
 	WaitTemporaryPVCsDeleted(ctx, primaryMB, secondaryMB)
-	WaitTemporarySecondaryPVsDeleted(ctx, secondaryMB)
+	WaitTemporaryPVsDeleted(ctx, primaryMB, secondaryMB)
+	WaitVerifyRBDImageDeleted(ctx, PrimaryK8sCluster, primaryMB)
+	WaitVerifyRBDImageDeleted(ctx, SecondaryK8sCluster, secondaryMB)
 	WaitTemporaryS3ObjectsDeleted(ctx, primaryMB)
 }
 
