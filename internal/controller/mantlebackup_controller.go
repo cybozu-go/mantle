@@ -355,7 +355,7 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	panic("unreachable")
 }
 
-func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
+func (r *MantleBackupReconciler) reconcilePre(ctx context.Context, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	if isCreatedWhenMantleControllerWasSecondary(backup) {
@@ -417,12 +417,29 @@ func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, back
 	return ctrl.Result{}, nil
 }
 
-func (r *MantleBackupReconciler) reconcileAsPrimary(ctx context.Context, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
-	result, err := r.reconcileAsStandalone(ctx, backup)
+func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
+	result, err := r.reconcilePre(ctx, backup)
 	if err != nil || !result.IsZero() {
 		return result, err
 	}
-	return r.replicate(ctx, backup)
+
+	return r.primaryCleanup(ctx, backup)
+}
+
+func (r *MantleBackupReconciler) reconcileAsPrimary(ctx context.Context, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
+	result, err := r.reconcilePre(ctx, backup)
+	if err != nil || !result.IsZero() {
+		return result, err
+	}
+
+	if !backup.IsSynced() {
+		result, err := r.replicate(ctx, backup)
+		if err != nil || !result.IsZero() {
+			return result, err
+		}
+	}
+
+	return r.primaryCleanup(ctx, backup)
 }
 
 func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
@@ -462,11 +479,14 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 		return ctrl.Result{}, err
 	}
 
-	if backup.IsReady() {
-		return r.secondaryCleanup(ctx, backup, true)
+	if !backup.IsReady() {
+		result, err := r.startImport(ctx, backup, target)
+		if err != nil || !result.IsZero() {
+			return result, err
+		}
 	}
 
-	return r.startImport(ctx, backup, target)
+	return r.secondaryCleanup(ctx, backup, true)
 }
 
 func scheduleExpire(_ context.Context, evt event.TypedGenericEvent[client.Object], q workqueue.TypedRateLimitingInterface[ctrl.Request]) {
@@ -511,10 +531,7 @@ func (r *MantleBackupReconciler) replicate(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
 ) (ctrl.Result, error) {
-	// Skip replication if SyncedToRemote condition is true.
-	if backup.IsSynced() {
-		return ctrl.Result{}, nil
-	}
+	logger := log.FromContext(ctx)
 
 	result, err := r.replicateManifests(ctx, backup)
 	if err != nil || result != (ctrl.Result{}) {
@@ -526,8 +543,25 @@ func (r *MantleBackupReconciler) replicate(
 	}
 
 	if prepareResult.isSecondaryMantleBackupReadyToUse {
-		return r.primaryCleanup(ctx, backup)
+		if err := r.updateMantleBackupCondition(
+			ctx, backup,
+			mantlev1.BackupConditionSyncedToRemote,
+			metav1.ConditionTrue,
+			mantlev1.ConditionReasonSyncedToRemoteNoProblem,
+		); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to set SyncedToRemote condition to True: %w", err)
+		}
+		logger.Info("succeeded to sync a backup to the remote ceph cluster")
+
+		duration := time.Since(backup.GetCreationTimestamp().Time).Seconds()
+		metrics.BackupDurationSeconds.With(prometheus.Labels{
+			"persistentvolumeclaim": backup.Spec.PVC,
+			"resource_namespace":    backup.GetNamespace(),
+		}).Observe(duration)
+
+		return requeueReconciliation(), nil
 	}
+
 	return r.startExportAndUpload(ctx, backup, prepareResult)
 }
 
@@ -2695,8 +2729,6 @@ func (r *MantleBackupReconciler) primaryCleanup(
 	ctx context.Context,
 	target *mantlev1.MantleBackup,
 ) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-
 	diffFrom, ok := target.GetAnnotations()[annotDiffFrom]
 	if ok {
 		var source mantlev1.MantleBackup
@@ -2730,26 +2762,6 @@ func (r *MantleBackupReconciler) primaryCleanup(
 	if err := r.Update(ctx, target); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to delete annotations of diff-from and sync-mode: %w", err)
 	}
-
-	if !target.DeletionTimestamp.IsZero() {
-		return ctrl.Result{}, nil
-	}
-
-	if err := r.updateMantleBackupCondition(
-		ctx, target,
-		mantlev1.BackupConditionSyncedToRemote,
-		metav1.ConditionTrue,
-		mantlev1.ConditionReasonSyncedToRemoteNoProblem,
-	); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to set SyncedToRemote condition to True: %w", err)
-	}
-	logger.Info("succeeded to sync a backup to the remote ceph cluster")
-
-	duration := time.Since(target.GetCreationTimestamp().Time).Seconds()
-	metrics.BackupDurationSeconds.With(prometheus.Labels{
-		"persistentvolumeclaim": target.Spec.PVC,
-		"resource_namespace":    target.GetNamespace(),
-	}).Observe(duration)
 
 	return ctrl.Result{}, nil
 }
