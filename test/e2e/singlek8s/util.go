@@ -397,6 +397,19 @@ func isMantleBackupReady(namespace, name string) (bool, error) {
 	return backup.IsReady(), nil
 }
 
+func isMantleBackupVerified(namespace, name string) (bool, error) {
+	stdout, _, err := kubectl("-n", namespace, "get", "mantlebackup", name, "-o", "json")
+	if err != nil {
+		return false, err
+	}
+	var backup mantlev1.MantleBackup
+	err = yaml.Unmarshal(stdout, &backup)
+	if err != nil {
+		return false, err
+	}
+	return backup.IsVerified(), nil
+}
+
 func isMantleRestoreReady(namespace, name string) bool {
 	stdout, stderr, err := kubectl("get", "mantlerestore", "-n", namespace, name, "-o", "json")
 	if err != nil {

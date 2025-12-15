@@ -134,6 +134,14 @@ func (test *restoreTest) testRestore() {
 		err = applyPVCTemplate(test.tenantNamespace, test.pvcName, test.storageClassName)
 		Expect(err).NotTo(HaveOccurred())
 
+		By("waiting for the MantleBackup to be verified")
+		Eventually(func(g Gomega) {
+			verified, err := isMantleBackupVerified(test.tenantNamespace, test.mantleBackupName1)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(verified).To(BeTrue())
+		}).Should(BeTrue())
+
+		By("waiting for the MantleRestore to be ready")
 		Eventually(func() bool {
 			return isMantleRestoreReady(test.tenantNamespace, test.mantleRestoreName1)
 		}).Should(BeTrue())
