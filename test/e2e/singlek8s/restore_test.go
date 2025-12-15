@@ -127,6 +127,11 @@ func (test *restoreTest) testRestore() {
 		err := applyMantleBackupTemplate(test.tenantNamespace, test.pvcName, test.mantleBackupName1)
 		Expect(err).NotTo(HaveOccurred())
 
+		By("annotating the MantleBackup to skip verification")
+		_, _, err = kubectl("annotate", "mb", "-n", test.tenantNamespace, test.mantleBackupName1,
+			"mantle.cybozu.io/skip-verify=true")
+		Expect(err).NotTo(HaveOccurred())
+
 		err = applyMantleRestoreTemplate(test.tenantNamespace, test.mantleRestoreName1, test.mantleBackupName1)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -136,9 +141,6 @@ func (test *restoreTest) testRestore() {
 
 		By("creating the PVC after the MantleRestore")
 		err = applyPVCTemplate(test.tenantNamespace, test.pvcName, test.storageClassName)
-		Expect(err).NotTo(HaveOccurred())
-		By("writing test data to PVC to avoid verification failure")
-		err = writeTestData(test.tenantNamespace, test.pvcName, testData1)
 		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(func() bool {
