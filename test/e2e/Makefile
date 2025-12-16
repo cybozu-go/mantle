@@ -351,6 +351,20 @@ do-test-multik8s: $(GINKGO)
 		echo ""; \
 		echo "Secondary PVs"; \
 		$${KUBECTL_SECONDARY} get pv -o yaml; \
+		echo ""; \
+		echo "Primary Jobs"; \
+		$${KUBECTL_PRIMARY} get job -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle -o yaml; \
+		echo ""; \
+		echo "Secondary Jobs"; \
+		$${KUBECTL_SECONDARY} get job -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle -o yaml; \
+		echo ""; \
+		echo "Job logs for $(MINIKUBE_PROFILE_PRIMARY):"; \
+		$${KUBECTL_PRIMARY} get job -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle -o name | \
+			while read line; do echo $$line; $${KUBECTL_PRIMARY} logs -n $(CEPH_CLUSTER1_NAMESPACE) $$line; done; \
+		echo ""; \
+		echo "Job logs for $(MINIKUBE_PROFILE_SECONDARY):"; \
+		$${KUBECTL_SECONDARY} get job -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle -o name | \
+			while read line; do echo $$line; $${KUBECTL_SECONDARY} logs -n $(CEPH_CLUSTER1_NAMESPACE) $$line; done; \
 		# Explicitly fail the test to mark the CI job as failed. \
 		exit 1; \
 	fi
