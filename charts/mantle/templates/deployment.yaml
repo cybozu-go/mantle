@@ -117,8 +117,6 @@ spec:
             - --replication-tls-server-cert-path=/mnt/replication-tls-server-cert/tls.crt
             - --replication-tls-server-key-path=/mnt/replication-tls-server-cert/tls.key
             - --replication-tls-client-ca-path=/mnt/replication-tls-client-cert/ca.crt
-            - --webhook-cert-path=/mnt/webhook-tls-cert/tls.crt
-            - --webhook-key-path=/mnt/webhook-tls-cert/tls.key
             {{- end }}
           env:
             - name: POD_NAME
@@ -144,10 +142,6 @@ spec:
               mountPath: /mnt/replication-tls-server-cert
             - name: replication-tls-client-cert
               mountPath: /mnt/replication-tls-client-cert
-            {{- end }}
-            {{- if eq .Values.controller.role "secondary" }}
-            - name: webhook-tls-cert
-              mountPath: /mnt/webhook-tls-cert
             {{- end }}
         - command:
             - /bin/bash
@@ -268,9 +262,6 @@ spec:
         - name: replication-tls-client-cert
           configMap:
             name: {{ .Values.controller.mtls.clientCACertConfigMap }}
-        - name: webhook-tls-cert
-          secret:
-            secretName: {{ template "mantle.fullname" . }}-webhook
         {{- end }}
       terminationGracePeriodSeconds: 10
       {{- with .Values.nodeSelector }}

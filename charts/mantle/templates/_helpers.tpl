@@ -51,6 +51,14 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+Webhook selector labels
+*/}}
+{{- define "mantle.webhookSelectorLabels" -}}
+app.kubernetes.io/name: {{ include "mantle.name" . }}-webhook
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+
+{{/*
 Create the name of the service account to use
 */}}
 {{- define "mantle.serviceAccountName" -}}

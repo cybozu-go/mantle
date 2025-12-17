@@ -28,16 +28,13 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/controller"
-	webhookv1 "github.com/cybozu-go/mantle/internal/webhook/v1"
 	"github.com/cybozu-go/mantle/pkg/controller/proto"
 	//+kubebuilder:scaffold:imports
 )
@@ -76,8 +73,6 @@ var (
 	replicationTLSServerCertPath string
 	replicationTLSServerKeyPath  string
 	replicationTLSServerCAPath   string
-	webhookCertPath              string
-	webhookKeyPath               string
 
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
@@ -141,10 +136,6 @@ func init() {
 		"The file path of a TLS key used for server authentication of gRPC.")
 	flags.StringVar(&replicationTLSServerCAPath, "replication-tls-server-ca-path", "",
 		"The file path of a TLS CA certificate that issues a certificate used for server authentication of gRPC.")
-	flags.StringVar(&webhookCertPath, "webhook-cert-path", "",
-		"The file path of the webhook certificate file.")
-	flags.StringVar(&webhookKeyPath, "webhook-key-path", "",
-		"The file path of the webhook key file.")
 
 	goflags := flag.NewFlagSet("goflags", flag.ExitOnError)
 	zapOpts.Development = true
@@ -218,12 +209,6 @@ func checkCommandlineArgs() error {
 		if replicationTLSClientCertPath != "" || replicationTLSClientKeyPath != "" || replicationTLSServerCAPath != "" {
 			return errors.New("--replication-tls-client-cert-path, --replication-tls-client-key-path, " +
 				"or --replication-tls-server-ca-path must not be specified if --role is 'secondary'")
-		}
-		if webhookCertPath == "" {
-			return errors.New("--webhook-cert-path must be specified if --role is 'secondary'")
-		}
-		if webhookKeyPath == "" {
-			return errors.New("--webhook-key-path must be specified if --role is 'secondary'")
 		}
 
 	default:
@@ -477,10 +462,6 @@ func setupSecondary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup
 		serv.GracefulStop()
 	}()
 
-	err = webhookv1.SetupVolumeAttachmentWebhookWithManager(mgr)
-	if err != nil {
-		return fmt.Errorf("failed to setup VolumeAttachment webhook: %w", err)
-	}
 	return setupReconcilers(mgr, nil)
 }
 
@@ -541,33 +522,12 @@ func subMain() error {
 			return err
 		}
 	case controller.RoleSecondary:
-		webhookTLSOpts := []func(*tls.Config){}
-		setupLog.Info("Initializing webhook certificate watcher using provided certificates",
-			"webhook-cert-path", webhookCertPath, "webhook-key-path", webhookKeyPath)
-
-		webhookCertWatcher, err := certwatcher.New(webhookCertPath, webhookKeyPath)
-		if err != nil {
-			setupLog.Error(err, "Failed to initialize webhook certificate watcher")
-			return err
-		}
-
-		webhookTLSOpts = append(webhookTLSOpts, func(config *tls.Config) {
-			config.GetCertificate = webhookCertWatcher.GetCertificate
-		})
-		mgrOptions.WebhookServer = webhook.NewServer(webhook.Options{
-			TLSOpts: webhookTLSOpts,
-		})
 		mgr, err = ctrl.NewManager(ctrl.GetConfigOrDie(), mgrOptions)
 		if err != nil {
 			setupLog.Error(err, "unable to start manager")
 			return err
 		}
 		if err := setupSecondary(ctx, mgr, &wg, cancel); err != nil {
-			return err
-		}
-		setupLog.Info("Adding webhook certificate watcher to manager")
-		if err := mgr.Add(webhookCertWatcher); err != nil {
-			setupLog.Error(err, "unable to add webhook certificate watcher to manager")
 			return err
 		}
 	}
