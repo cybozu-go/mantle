@@ -33,9 +33,8 @@ Create chart name and version as used by the chart label.
 {{/*
 Common labels
 */}}
-{{- define "mantle.labels" -}}
+{{- define "mantle.commonLabels" -}}
 helm.sh/chart: {{ include "mantle.chart" . }}
-{{ include "mantle.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
@@ -43,11 +42,51 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
 {{/*
-Selector labels
+Common selector labels
 */}}
-{{- define "mantle.selectorLabels" -}}
+{{- define "mantle.commonSelectorLabels" -}}
 app.kubernetes.io/name: {{ include "mantle.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+
+{{/*
+Controller selector labels
+*/}}
+{{- define "mantle.controllerSelectorLabels" -}}
+{{ include "mantle.commonSelectorLabels" . }}
+app.kubernetes.io/component: controller
+{{- end }}
+
+{{/*
+Controller labels
+*/}}
+{{- define "mantle.controllerLabels" -}}
+{{ include "mantle.commonLabels" . }}
+{{ include "mantle.controllerSelectorLabels" . }}
+{{- end }}
+
+{{/*
+Webhook selector labels
+*/}}
+{{- define "mantle.webhookSelectorLabels" -}}
+{{ include "mantle.commonSelectorLabels" . }}
+app.kubernetes.io/component: webhook
+{{- end }}
+
+{{/*
+Webhook labels
+*/}}
+{{- define "mantle.webhookLabels" -}}
+{{ include "mantle.commonLabels" . }}
+{{ include "mantle.webhookSelectorLabels" . }}
+{{- end }}
+
+{{/*
+Labels for the resources both the controller and webhook use
+*/}}
+{{- define "mantle.labels" -}}
+{{ include "mantle.commonLabels" . }}
+{{ include "mantle.commonSelectorLabels" . }}
 {{- end }}
 
 {{/*

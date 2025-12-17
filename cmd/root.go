@@ -5,6 +5,7 @@ import (
 
 	"github.com/cybozu-go/mantle/cmd/backup"
 	"github.com/cybozu-go/mantle/cmd/controller"
+	"github.com/cybozu-go/mantle/cmd/webhook"
 	"github.com/spf13/cobra"
 )
 
@@ -15,6 +16,7 @@ var rootCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(backup.BackupCmd)
 	rootCmd.AddCommand(controller.ControllerCmd)
+	rootCmd.AddCommand(webhook.WebhookCmd)
 }
 
 func Execute() {

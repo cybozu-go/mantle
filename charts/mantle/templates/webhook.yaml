@@ -1,6 +1,5 @@
 {{- $tls := fromYaml ( include "mantle.webhookCerts" . ) }}
 ---
-{{- if eq .Values.controller.role "secondary" }}
 {{- if .Values.webhook.enabled }}
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
@@ -42,12 +41,11 @@ metadata:
   name: {{ include "mantle.fullname" . }}-webhook
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "mantle.labels" . | nindent 4 }}
+    {{- include "mantle.webhookLabels" . | nindent 4 }}
 type: kubernetes.io/tls
 data:
   ca.crt: {{ $tls.caCert }}
   tls.crt: {{ $tls.clientCert }}
   tls.key: {{ $tls.clientKey }}
-{{- end }}
 {{- end }}
 {{- end }}

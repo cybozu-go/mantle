@@ -45,9 +45,23 @@ replicationService:
   # targetPort:
 
 webhook:
-  # webhook.enabled -- If true and role is secondary, Deploying a webhook to prevent Pods from mounting PVCs created by Mantle.
+  # webhook.enabled -- If true, deploy a webhook to prevent Pods from mounting PVCs created by Mantle.
   # When deploying multiple Mantle instances, Set the value to `true` on only a single instance.
-  enabled: true
+  enabled: false
+  # webhook.replicaCount -- Number of replicas for the webhook deployment.
+  replicaCount: 1
+  # webhook.podAnnotations -- Annotations to add to the webhook pod.
+  podAnnotations: {}
+  # webhook.podLabels -- Labels to add to the webhook pod.
+  podLabels: {}
+  # webhook.resources -- Resource requests and limits for the webhook container.
+  resources: {}
+  # webhook.nodeSelector -- Node selector for the webhook pod.
+  nodeSelector: {}
+  # webhook.tolerations -- Tolerations for the webhook pod.
+  tolerations: []
+  # webhook.affinity -- Affinity rules for the webhook pod.
+  affinity: {}
   service:
     # webhook.service.port -- Port for the webhook service. 
     port: 9443
