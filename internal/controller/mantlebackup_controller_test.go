@@ -1347,6 +1347,38 @@ func createSnapshotForMantleBackupUsingDummyPVC(
 	return nil
 }
 
+func getSnapshotTargetByDummyMB(
+	backup *mantlev1.MantleBackup,
+) (*snapshotTarget, error) {
+	var pvc corev1.PersistentVolumeClaim
+	err := json.Unmarshal([]byte(backup.Status.PVCManifest), &pvc)
+	if err != nil {
+		return nil, err
+	}
+
+	var pv corev1.PersistentVolume
+	err = json.Unmarshal([]byte(backup.Status.PVManifest), &pv)
+	if err != nil {
+		return nil, err
+	}
+
+	imageName, ok := pv.Spec.CSI.VolumeAttributes["imageName"]
+	if !ok {
+		return nil, fmt.Errorf("failed to get imageName from PV")
+	}
+	poolName, ok := pv.Spec.CSI.VolumeAttributes["pool"]
+	if !ok {
+		return nil, fmt.Errorf("failed to get pool from PV")
+	}
+
+	return &snapshotTarget{
+		pvc:       &pvc,
+		pv:        &pv,
+		imageName: imageName,
+		poolName:  poolName,
+	}, nil
+}
+
 var (
 	defaultTransferPartSize = resource.MustParse("1Gi")
 )
@@ -1739,22 +1771,8 @@ var _ = Describe("import", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			snapshotTarget := &snapshotTarget{
-				pvc: &corev1.PersistentVolumeClaim{},
-				pv: &corev1.PersistentVolume{
-					Spec: corev1.PersistentVolumeSpec{
-						PersistentVolumeSource: corev1.PersistentVolumeSource{
-							CSI: &corev1.CSIPersistentVolumeSource{
-								VolumeAttributes: map[string]string{
-									"pool": "",
-								},
-							},
-						},
-					},
-				},
-				imageName: "",
-				poolName:  "",
-			}
+			snapshotTarget, err := getSnapshotTargetByDummyMB(backup)
+			Expect(err).NotTo(HaveOccurred())
 
 			mockObjectStorage.EXPECT().Exists(gomock.Any(), gomock.Eq("target--0.bin")).DoAndReturn(
 				func(_ context.Context, _ string) (bool, error) {
@@ -1781,17 +1799,30 @@ var _ = Describe("import", func() {
 			// Make the import Job completed.
 			completeJob(ctx, importJob.GetNamespace(), importJob.GetName())
 
-			// Make dummy snapshot.
-			err = mbr.ceph.RBDSnapCreate("", "", backup.GetName())
-			Expect(err).NotTo(HaveOccurred())
-			dummySnapshot, err := ceph.FindRBDSnapshot(mbr.ceph, "", "", backup.GetName())
-			Expect(err).NotTo(HaveOccurred())
-
-			// The call should update the status of the MantleBackup resource.
+			// Finally, the call should return (ctrl.Result{}, nil)
 			largestCompletedPartNum := int(testutil.FakeRBDSnapshotSize/backup.Status.TransferPartSize.Value() - 1)
 			res, err = mbr.reconcileImportJob(ctx, backup, snapshotTarget, largestCompletedPartNum)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.IsZero()).To(BeTrue())
+		})
+	})
+
+	Context("markSecondaryReadyToUse", func() {
+		It("should work correctly", func(ctx SpecContext) {
+			backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
+			Expect(err).NotTo(HaveOccurred())
+
+			snapshotTarget, err := getSnapshotTargetByDummyMB(backup)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Make dummy snapshot.
+			err = mbr.ceph.RBDSnapCreate(snapshotTarget.poolName, snapshotTarget.imageName, backup.GetName())
+			Expect(err).NotTo(HaveOccurred())
+			dummySnapshot, err := ceph.FindRBDSnapshot(mbr.ceph, snapshotTarget.poolName, snapshotTarget.imageName, backup.GetName())
+			Expect(err).NotTo(HaveOccurred())
+
+			err = mbr.markSecondaryReadyToUse(ctx, backup, snapshotTarget)
+			Expect(err).NotTo(HaveOccurred())
 
 			err = k8sClient.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup)
 			Expect(err).NotTo(HaveOccurred())

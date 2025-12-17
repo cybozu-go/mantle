@@ -1965,6 +1965,10 @@ func (r *MantleBackupReconciler) startImport(
 		return ctrl.Result{}, fmt.Errorf("failed to unlock the volume: %w", err)
 	}
 
+	if err := r.markSecondaryReadyToUse(ctx, backup, target); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to mark the secondary as ready to use: %w", err)
+	}
+
 	return ctrl.Result{}, nil
 }
 
@@ -2458,6 +2462,9 @@ func (r *MantleBackupReconciler) hasZeroOutJobCompleted(ctx context.Context, bac
 	return false, nil
 }
 
+// reconcileImportJob ensures that the import Job for the next part is created if the previous parts have been imported.
+// It checks if all import Jobs are completed and whether the export data for the next part is already uploaded.
+// This function only returns (ctrl.Result{}, nil) when all parts are imported; otherwise, it requeues the reconciliation or errors out.
 func (r *MantleBackupReconciler) reconcileImportJob(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
@@ -2472,30 +2479,6 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 		return ctrl.Result{}, fmt.Errorf("failed to calculate num of export data parts: %w", err)
 	}
 	if partNum == finalPartNum {
-		// Make sure the (final) RBD snapshot is created.
-		snapshot, err := ceph.FindRBDSnapshot(
-			r.ceph,
-			snapshotTarget.poolName,
-			snapshotTarget.imageName,
-			backup.GetName(),
-		)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to find imported RBD snapshot: %w", err)
-		}
-
-		// Update the status of the MantleBackup to set True to the ReadyToUse condition.
-		if err := updateStatus(ctx, r.Client, backup, func() error {
-			backup.Status.SnapID = &snapshot.Id
-			meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
-				Type:   mantlev1.BackupConditionReadyToUse,
-				Status: metav1.ConditionTrue,
-				Reason: mantlev1.ConditionReasonReadyToUseNoProblem,
-			})
-			return nil
-		}); err != nil {
-			return ctrl.Result{}, err
-		}
-
 		return ctrl.Result{}, nil
 	}
 
@@ -2723,6 +2706,39 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 	})
 
 	return err
+}
+
+// markSecondaryReadyToUse marks the MantleBackup ReadyToUse as True.
+func (r *MantleBackupReconciler) markSecondaryReadyToUse(
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
+	snapshotTarget *snapshotTarget,
+) error {
+	// Find the RBD snapshot created for the imported backup.
+	snapshot, err := ceph.FindRBDSnapshot(
+		r.ceph,
+		snapshotTarget.poolName,
+		snapshotTarget.imageName,
+		backup.GetName(),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to find imported RBD snapshot: %w", err)
+	}
+
+	// Update the status of the MantleBackup to set True to the ReadyToUse condition.
+	if err := updateStatus(ctx, r.Client, backup, func() error {
+		backup.Status.SnapID = &snapshot.Id
+		meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
+			Type:   mantlev1.BackupConditionReadyToUse,
+			Status: metav1.ConditionTrue,
+			Reason: mantlev1.ConditionReasonReadyToUseNoProblem,
+		})
+		return nil
+	}); err != nil {
+		return fmt.Errorf("failed to update MantleBackup status: %w", err)
+	}
+
+	return nil
 }
 
 func (r *MantleBackupReconciler) primaryCleanup(
