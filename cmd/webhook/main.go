@@ -4,6 +4,8 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"net"
+	"strconv"
 
 	"github.com/spf13/cobra"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -32,6 +34,7 @@ var WebhookCmd = &cobra.Command{
 var (
 	metricsAddr     string
 	probeAddr       string
+	webhookAddr     string
 	webhookCertPath string
 	webhookKeyPath  string
 	zapOpts         zap.Options
@@ -44,6 +47,7 @@ func init() {
 	flags := WebhookCmd.Flags()
 	flags.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flags.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
+	flags.StringVar(&webhookAddr, "webhook-bind-address", ":9443", "The address the webhook server binds to.")
 	flags.StringVar(&webhookCertPath, "webhook-cert-path", "",
 		"The file path of the webhook certificate file. (required)")
 	flags.StringVar(&webhookKeyPath, "webhook-key-path", "",
@@ -90,11 +94,24 @@ func subMain() error {
 		config.GetCertificate = webhookCertWatcher.GetCertificate
 	})
 
+	webhookHost, webhookPortStr, err := net.SplitHostPort(webhookAddr)
+	if err != nil {
+		setupLog.Error(err, "Failed to parse webhook-bind-address")
+		return err
+	}
+	webhookPort, err := strconv.Atoi(webhookPortStr)
+	if err != nil {
+		setupLog.Error(err, "Failed to parse webhook port")
+		return err
+	}
+
 	mgrOptions := manager.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
 		HealthProbeBindAddress: probeAddr,
 		WebhookServer: webhook.NewServer(webhook.Options{
+			Host:    webhookHost,
+			Port:    webhookPort,
 			TLSOpts: webhookTLSOpts,
 		}),
 	}
