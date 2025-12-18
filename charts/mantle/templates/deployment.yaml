@@ -349,6 +349,7 @@ spec:
             - /manager
           args:
             - webhook
+            - --webhook-bind-address=:{{ .Values.webhook.service.targetPort }}
             - --webhook-cert-path=/mnt/webhook-tls-cert/tls.crt
             - --webhook-key-path=/mnt/webhook-tls-cert/tls.key
           ports:
