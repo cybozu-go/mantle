@@ -200,24 +200,33 @@ wait-deploy-ready:
 
 .PHONY: install-rook-ceph-operator
 install-rook-ceph-operator:
-	$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
-		--create-namespace --namespace $(CEPH_CLUSTER1_NAMESPACE) -f testdata/values.yaml --wait \
-		rook-ceph rook-ceph
+	for i in $$(seq 5); do \
+		$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
+			--create-namespace --namespace $(CEPH_CLUSTER1_NAMESPACE) -f testdata/values.yaml --wait \
+			rook-ceph rook-ceph \
+		&& break || sleep 10; \
+	done
 	$(MAKE) wait-deploy-ready NS=$(CEPH_CLUSTER1_NAMESPACE) DEPLOY=rook-ceph-operator
 
 .PHONY: install-rook-ceph-cluster1
 install-rook-ceph-cluster1:
-	$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
-		--namespace $(CEPH_CLUSTER1_NAMESPACE) -f testdata/values-cluster.yaml \
-		--wait rook-ceph-cluster rook-ceph-cluster
+	for i in $$(seq 5); do \
+		$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
+			--namespace $(CEPH_CLUSTER1_NAMESPACE) -f testdata/values-cluster.yaml \
+			--wait rook-ceph-cluster rook-ceph-cluster \
+		&& break || sleep 10; \
+	done
 	$(MAKE) wait-deploy-ready NS=$(CEPH_CLUSTER1_NAMESPACE) DEPLOY=rook-ceph-osd-0
 
 .PHONY: install-rook-ceph-cluster2
 install-rook-ceph-cluster2:
-	$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
-		--create-namespace --namespace $(CEPH_CLUSTER2_NAMESPACE) -f testdata/values-cluster.yaml \
-		--set cephClusterSpec.dataDirHostPath=/var/lib/rook2 \
-		--wait rook-ceph-cluster2 rook-ceph-cluster
+	for i in $$(seq 5); do \
+		$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
+			--create-namespace --namespace $(CEPH_CLUSTER2_NAMESPACE) -f testdata/values-cluster.yaml \
+			--set cephClusterSpec.dataDirHostPath=/var/lib/rook2 \
+			--wait rook-ceph-cluster2 rook-ceph-cluster \
+		&& break || sleep 10; \
+	done
 	$(MAKE) wait-deploy-ready NS=$(CEPH_CLUSTER2_NAMESPACE) DEPLOY=rook-ceph-osd-0
 
 .PHONY: install-ceph-object-store
@@ -234,9 +243,12 @@ install-ceph-object-store-secret:
 
 .PHONY: install-cert-manager
 install-cert-manager:
-	$(HELM) upgrade --install --version $(CERT_MANAGER_VERSION) --repo https://charts.jetstack.io \
-		--create-namespace --namespace cert-manager --set crds.enabled=true --wait \
-		cert-manager cert-manager
+	for i in $$(seq 5); do \
+		$(HELM) upgrade --install --version $(CERT_MANAGER_VERSION) --repo https://charts.jetstack.io \
+			--create-namespace --namespace cert-manager --set crds.enabled=true --wait \
+			cert-manager cert-manager \
+		&& break || sleep 10; \
+	done
 
 .PHONY: install-tls-certificates
 install-tls-certificates:
