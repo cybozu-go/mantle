@@ -31,6 +31,17 @@ MAKEFILE_DIR := $(shell pwd)
 export MINIKUBE_HOME
 export MAKEFILE_DIR
 
+# Retry a command up to 5 times with a 10 second delay between attempts.
+# Usage: $(call retry,command)
+define retry
+	success=0; \
+	for i in $$(seq 5); do \
+		$(1) \
+		&& success=1 && break || sleep 10; \
+	done; \
+	if [ $$success -ne 1 ]; then exit 1; fi
+endef
+
 .PHONY: setup
 setup:
 	$(MAKE) $(GINKGO)
@@ -181,24 +192,24 @@ create-loop-dev:
 
 .PHONY: install-rook-ceph-operator
 install-rook-ceph-operator:
-	$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
+	$(call retry,$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
 		--create-namespace --namespace $(CEPH_CLUSTER1_NAMESPACE) -f testdata/values.yaml --wait \
-		rook-ceph rook-ceph
+		rook-ceph rook-ceph)
 	$(KUBECTL) wait --timeout=60s --for=condition=available -n $(CEPH_CLUSTER1_NAMESPACE) deployment/rook-ceph-operator
 
 .PHONY: install-rook-ceph-cluster1
 install-rook-ceph-cluster1:
-	$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
+	$(call retry,$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
 		--namespace $(CEPH_CLUSTER1_NAMESPACE) -f testdata/values-cluster.yaml \
-		--wait rook-ceph-cluster rook-ceph-cluster
+		--wait rook-ceph-cluster rook-ceph-cluster)
 	$(KUBECTL) wait --timeout=300s --for=condition=Ready -n $(CEPH_CLUSTER1_NAMESPACE) cephclusters/rook-ceph
 
 .PHONY: install-rook-ceph-cluster2
 install-rook-ceph-cluster2:
-	$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
+	$(call retry,$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
 		--create-namespace --namespace $(CEPH_CLUSTER2_NAMESPACE) -f testdata/values-cluster.yaml \
 		--set cephClusterSpec.dataDirHostPath=/var/lib/rook2 \
-		--wait rook-ceph-cluster2 rook-ceph-cluster
+		--wait rook-ceph-cluster2 rook-ceph-cluster)
 	$(KUBECTL) wait --timeout=300s --for=condition=Ready -n $(CEPH_CLUSTER2_NAMESPACE) cephclusters/rook-ceph2
 
 .PHONY: install-ceph-object-store
@@ -215,9 +226,9 @@ install-ceph-object-store-secret:
 
 .PHONY: install-cert-manager
 install-cert-manager:
-	$(HELM) upgrade --install --version $(CERT_MANAGER_VERSION) --repo https://charts.jetstack.io \
+	$(call retry,$(HELM) upgrade --install --version $(CERT_MANAGER_VERSION) --repo https://charts.jetstack.io \
 		--create-namespace --namespace cert-manager --set crds.enabled=true --wait \
-		cert-manager cert-manager
+		cert-manager cert-manager)
 
 .PHONY: install-tls-certificates
 install-tls-certificates:
