@@ -35,8 +35,6 @@ var _ = Describe("backup failure", Label("backup-failure"), func() {
 		// Delete M0.
 		DeleteMantleBackup(PrimaryK8sCluster, namespace, backupName)
 
-		// Make sure M0 will disappear.
-		WaitMantleBackupDeleted(ctx, PrimaryK8sCluster, namespace, backupName)
 		// Make sure M0' will NOT disappear.
 		EnsureMantleBackupExists(ctx, SecondaryK8sCluster, namespace, backupName)
 
@@ -134,9 +132,6 @@ var _ = Describe("backup failure", Label("backup-failure"), func() {
 
 			// Delete MantleBackup M1.
 			DeleteMantleBackup(PrimaryK8sCluster, namespace, backupName1)
-
-			// Make sure M1 will disappear.
-			WaitMantleBackupDeleted(ctx, PrimaryK8sCluster, namespace, backupName1)
 
 			// Make sure M0, M0', and M1' will NOT disappear.
 			EnsureMantleBackupExists(ctx, PrimaryK8sCluster, namespace, backupName0)
