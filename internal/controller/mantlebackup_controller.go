@@ -464,6 +464,8 @@ func (r *MantleBackupReconciler) reconcileAsPrimary(ctx context.Context, backup 
 func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
+	logger.Info(">>>>>> 11111111111", "uid", string(backup.GetUID()), "deletionTimestamp", backup.DeletionTimestamp)
+
 	if err := r.prepareObjectStorageClient(ctx); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -475,10 +477,13 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 		return ctrl.Result{}, nil
 	}
 
+	logger.Info(">>>>>> 2222222222", "uid", string(backup.GetUID()))
+
 	target, result, err := r.getSnapshotTarget(ctx, backup)
 	notFound := aerrors.IsNotFound(err)
 	switch {
 	case errors.Is(err, errSkipProcessing):
+		logger.Info(">>>>>> 3333333333", "uid", string(backup.GetUID()))
 		return ctrl.Result{}, nil
 	case err != nil && !notFound:
 		return ctrl.Result{}, err
@@ -505,12 +510,16 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 		}
 	}
 
+	logger.Info(">>>>>> 5555555555", "uid", string(backup.GetUID()))
+
 	if backup.IsReady() && !backup.IsVerified() {
 		if err := r.verify(ctx, backup); err != nil {
 			return ctrl.Result{}, err
 		}
 		return requeueReconciliation(), nil
 	}
+
+	logger.Info(">>>>>> 6666666666", "uid", string(backup.GetUID()))
 
 	return r.secondaryCleanup(ctx, backup, true)
 }
@@ -925,10 +934,12 @@ func (r *MantleBackupReconciler) finalizeSecondary(
 ) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	if _, ok := backup.GetAnnotations()[annotDiffTo]; ok {
+		logger.Info(">>>>>> 4444444444", "uid", string(backup.GetUID()))
 		return ctrl.Result{}, nil
 	}
 
 	if !controllerutil.ContainsFinalizer(backup, MantleBackupFinalizerName) {
+		logger.Info(">>>>>> 7777777777", "uid", string(backup.GetUID()))
 		return ctrl.Result{}, nil
 	}
 
@@ -950,6 +961,7 @@ func (r *MantleBackupReconciler) finalizeSecondary(
 		return ctrl.Result{}, err
 	}
 
+	logger.Info(">>>>>> 8888888888", "uid", string(backup.GetUID()))
 	return ctrl.Result{}, nil
 }
 
@@ -1941,6 +1953,7 @@ func (r *MantleBackupReconciler) startImport(
 	if uploaded, err := r.isExportDataAlreadyUploaded(ctx, backup, 0); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to check if export data part 0 is already uploaded: %w", err)
 	} else if !uploaded {
+		logger.Info(">>>>>> export data is not uploaded", "uid", string(backup.GetUID()), "partNum", 0)
 		return requeueReconciliation(), nil
 	}
 
@@ -1951,6 +1964,7 @@ func (r *MantleBackupReconciler) startImport(
 
 	// Requeue if the PV is smaller than the PVC. (This may be the case if pvc-autoresizer is used.)
 	if isPVSmallerThanPVC(target.pv, target.pvc) {
+		logger.Info(">>>>>> bbbbbbbbbb", "uid", string(backup.GetUID()))
 		return requeueReconciliation(), nil
 	}
 
@@ -1971,6 +1985,7 @@ func (r *MantleBackupReconciler) startImport(
 		return result, err
 	}
 
+	logger.Info(">>>>>> reconciling import Job", "uid", string(backup.GetUID()), "largestCompletedPartNum", largestCompletedPartNum)
 	if result, err := r.reconcileImportJob(ctx, backup, target, largestCompletedPartNum); err != nil || !result.IsZero() {
 		return result, err
 	}
@@ -2484,6 +2499,7 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 	snapshotTarget *snapshotTarget,
 	largestCompletedPartNum int,
 ) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
 	partNum := largestCompletedPartNum + 1
 
 	// Check that all import Jobs are completed
@@ -2501,6 +2517,7 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 		return ctrl.Result{}, fmt.Errorf("failed to check if part of export data is not already uploaded: %d: %w", partNum, err)
 	}
 	if !uploaded {
+		logger.Info(">>>>>> export data is not uploaded", "uid", string(backup.GetUID()), "partNum", partNum)
 		return requeueReconciliation(), nil
 	}
 
@@ -2921,6 +2938,8 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 	target *mantlev1.MantleBackup,
 	deleteExportData bool,
 ) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
 	diffFrom, ok := target.GetAnnotations()[annotDiffFrom]
 	if ok {
 		var source mantlev1.MantleBackup
@@ -2992,6 +3011,7 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 		return ctrl.Result{}, fmt.Errorf("failed to delete middle snapshots: %w", err)
 	}
 
+	logger.Info(">>>>>> 9999999999", "uid", string(target.GetUID()))
 	return ctrl.Result{}, nil
 }
 

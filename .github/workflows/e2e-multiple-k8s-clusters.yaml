@@ -25,19 +25,23 @@ jobs:
         backup-transfer-part-size:
           - 3Mi # smaller than the PVC size
         label-filter:
-          - full-backup
-          - incr-backup
+        #  - full-backup
+        #  - incr-backup
           - backup-failure
-          - change-to-primary
-          - change-to-secondary
-          - change-to-standalone
-          - lock
-          - "!//" # select unlabelled tests
-        include:
-          - backup-transfer-part-size: 10Mi # equal to the PVC size
-            label-filter: various-transfer-part-size
-          - backup-transfer-part-size: 200Gi # greater than the PVC size
-            label-filter: various-transfer-part-size
+          - backup-failure
+          - backup-failure
+          - backup-failure
+          - backup-failure
+        #  - change-to-primary
+        #  - change-to-secondary
+        #  - change-to-standalone
+        #  - lock
+        #  - "!//" # select unlabelled tests
+        #include:
+        #  - backup-transfer-part-size: 10Mi # equal to the PVC size
+        #    label-filter: various-transfer-part-size
+        #  - backup-transfer-part-size: 200Gi # greater than the PVC size
+        #    label-filter: various-transfer-part-size
     #runs-on: "ubuntu-22.04"
     runs-on: mantle_large_runner_16core
     timeout-minutes: 120
