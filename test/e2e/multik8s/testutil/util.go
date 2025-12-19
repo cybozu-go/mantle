@@ -98,7 +98,7 @@ func Kubectl(clusterNo int, input []byte, args ...string) ([]byte, []byte, error
 	}
 	fields = append(fields, args...)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
 	return execAtLocal(ctx, fields[0], input, fields[1:]...)
@@ -606,19 +606,6 @@ func EnsureCorrectRestoration(
 	}).Should(Succeed())
 }
 
-func WaitMantleBackupDeleted(ctx SpecContext, cluster int, namespace, backupName string) {
-	GinkgoHelper()
-	By("waiting for MantleBackup to be removed")
-	Eventually(ctx, func(g Gomega) {
-		mbs, err := GetMBList(cluster, namespace)
-		g.Expect(err).NotTo(HaveOccurred())
-		exists := slices.ContainsFunc(mbs.Items, func(mb mantlev1.MantleBackup) bool {
-			return mb.GetName() == backupName
-		})
-		g.Expect(exists).To(BeFalse())
-	}).Should(Succeed())
-}
-
 func ResumeObjectStorage(ctx SpecContext) {
 	GinkgoHelper()
 	By("resuming the object storage")
@@ -963,8 +950,8 @@ func WaitTemporaryResourcesDeleted(ctx SpecContext, primaryMB, secondaryMB *mant
 func DeleteMantleBackup(cluster int, namespace, backupName string) {
 	GinkgoHelper()
 	By("deleting MantleBackup")
-	_, _, err := Kubectl(cluster, nil, "delete", "-n", namespace, "mantlebackup", backupName, "--wait=false")
-	Expect(err).NotTo(HaveOccurred())
+	stdout, stderr, err := Kubectl(cluster, nil, "delete", "-n", namespace, "mantlebackup", backupName, "--timeout=3m")
+	Expect(err).NotTo(HaveOccurred(), "stdout: %s, stderr: %s", string(stdout), string(stderr))
 }
 
 func GetBackupTransferPartSize() (*resource.Quantity, error) {
