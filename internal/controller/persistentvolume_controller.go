@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/cybozu-go/mantle/internal/ceph"
@@ -70,13 +69,12 @@ func (r *PersistentVolumeReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	// Check if the PV is managed by the target Ceph cluster.
-	clusterID, err := getCephClusterIDFromSCName(ctx, r.client, pv.Spec.StorageClassName)
-	if err != nil {
-		if errors.Is(err, errEmptyClusterID) {
-			return ctrl.Result{}, nil
-		}
-
-		return ctrl.Result{}, err
+	if pv.Spec.CSI == nil || pv.Spec.CSI.VolumeAttributes == nil {
+		return ctrl.Result{}, nil
+	}
+	clusterID, ok := pv.Spec.CSI.VolumeAttributes["clusterID"]
+	if !ok {
+		return ctrl.Result{}, nil
 	}
 	if clusterID != r.managedCephClusterID {
 		logger.Info("PV is not provisioned by the target Ceph cluster", "pv", pv.Name, "clusterID", clusterID)
