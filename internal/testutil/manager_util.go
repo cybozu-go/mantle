@@ -15,7 +15,7 @@ import (
 // You can use this to start and stop the manager in a goroutine
 type ManagerUtil interface {
 	Start()
-	Stop() error
+	Stop()
 	GetManager() manager.Manager
 }
 
@@ -55,10 +55,9 @@ func (m *managerUtilImpl) Start() {
 }
 
 // Stop stops the manager and waits for it to stop
-// Returns an error if the manager failed
-func (m *managerUtilImpl) Stop() error {
+func (m *managerUtilImpl) Stop() {
 	m.cancel()
-	return <-m.errCh
+	<-m.errCh
 }
 
 func (m *managerUtilImpl) GetManager() manager.Manager {

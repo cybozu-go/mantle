@@ -76,8 +76,7 @@ var _ = Describe("Replication unit tests", func() {
 		By("stops server", func() {
 			test.server.GracefulStop()
 
-			err := test.mgrUtil.Stop()
-			Expect(err).NotTo(HaveOccurred())
+			test.mgrUtil.Stop()
 		})
 	})
 

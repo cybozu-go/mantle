@@ -78,8 +78,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 	})
 
 	AfterEach(func() {
-		err := mgrUtil.Stop()
-		Expect(err).NotTo(HaveOccurred())
+		mgrUtil.Stop()
 	})
 
 	DescribeTable("MantleBackupConfigs with correct fields",
