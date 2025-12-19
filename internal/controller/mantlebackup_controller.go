@@ -694,6 +694,9 @@ func (r *MantleBackupReconciler) verify(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
 ) error {
+	logger := log.FromContext(ctx)
+	logger.Info("starting verification reconciliation", "backupUID", string(backup.GetUID()))
+
 	var storedPVC corev1.PersistentVolumeClaim
 	if err := json.Unmarshal([]byte(backup.Status.PVCManifest), &storedPVC); err != nil {
 		return fmt.Errorf("failed to unmarshal PVC manifest: %w", err)
@@ -1932,6 +1935,13 @@ func (r *MantleBackupReconciler) startImport(
 	target *snapshotTarget,
 ) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
+	logger.Info("starting import reconciliation",
+		"backupUID", string(backup.GetUID()),
+		"pv", target.pv.GetName(),
+		"pvc", fmt.Sprintf("%s/%s", target.pvc.GetNamespace(), target.pvc.GetName()),
+		"pool", target.poolName,
+		"image", target.imageName,
+	)
 
 	if !r.doesMantleBackupHaveSyncModeAnnot(backup) {
 		// SetSynchronizing is not called yet or the cache is stale.
@@ -1941,6 +1951,7 @@ func (r *MantleBackupReconciler) startImport(
 	if uploaded, err := r.isExportDataAlreadyUploaded(ctx, backup, 0); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to check if export data part 0 is already uploaded: %w", err)
 	} else if !uploaded {
+		logger.Info("waiting for the export data to be uploaded", "partNum", 0)
 		return requeueReconciliation(), nil
 	}
 
@@ -2484,6 +2495,16 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 	snapshotTarget *snapshotTarget,
 	largestCompletedPartNum int,
 ) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	logger.Info("reconciling import job",
+		"backupUID", string(backup.GetUID()),
+		"pv", snapshotTarget.pv.GetName(),
+		"pvc", fmt.Sprintf("%s/%s", snapshotTarget.pvc.GetNamespace(), snapshotTarget.pvc.GetName()),
+		"pool", snapshotTarget.poolName,
+		"image", snapshotTarget.imageName,
+		"largestCompletedPartNum", largestCompletedPartNum,
+	)
+
 	partNum := largestCompletedPartNum + 1
 
 	// Check that all import Jobs are completed
@@ -2501,6 +2522,7 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 		return ctrl.Result{}, fmt.Errorf("failed to check if part of export data is not already uploaded: %d: %w", partNum, err)
 	}
 	if !uploaded {
+		logger.Info("export data for the next part is not yet uploaded", "partNum", partNum)
 		return requeueReconciliation(), nil
 	}
 
@@ -2921,6 +2943,9 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 	target *mantlev1.MantleBackup,
 	deleteExportData bool,
 ) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	logger.Info("starting cleanup in secondary", "backupUID", string(target.GetUID()), "deleteExportData", deleteExportData)
+
 	diffFrom, ok := target.GetAnnotations()[annotDiffFrom]
 	if ok {
 		var source mantlev1.MantleBackup
