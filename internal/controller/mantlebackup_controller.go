@@ -1935,7 +1935,8 @@ func (r *MantleBackupReconciler) startImport(
 
 	if !r.doesMantleBackupHaveSyncModeAnnot(backup) {
 		// SetSynchronizing is not called yet or the cache is stale.
-		return ctrl.Result{}, nil
+		// Note that we should not return ctrl.Result{}, nil here because we can't proceed to secondaryCleanup.
+		return requeueReconciliation(), nil
 	}
 
 	if uploaded, err := r.isExportDataAlreadyUploaded(ctx, backup, 0); err != nil {
