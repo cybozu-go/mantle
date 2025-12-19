@@ -44,6 +44,12 @@ var _ = Describe("incremental backup", Label("incr-backup"), func() {
 		Expect(err).NotTo(HaveOccurred())
 		WaitTemporaryResourcesDeleted(ctx, primaryMB1, secondaryMB1)
 
+		// Make sure verification step has completed in both clusters.
+		WaitMantleBackupVerified(PrimaryK8sCluster, namespace, backupName0)
+		WaitMantleBackupVerified(SecondaryK8sCluster, namespace, backupName0)
+		WaitMantleBackupVerified(PrimaryK8sCluster, namespace, backupName1)
+		WaitMantleBackupVerified(SecondaryK8sCluster, namespace, backupName1)
+
 		// Make sure M1 and M1' have the same contents.
 		EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName1, restoreName1, writtenDataHash1)
 		EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName1, restoreName1, writtenDataHash1)
@@ -90,6 +96,13 @@ var _ = Describe("incremental backup", Label("incr-backup"), func() {
 		secondaryMB2, err := GetMB(SecondaryK8sCluster, namespace, backupName2)
 		Expect(err).NotTo(HaveOccurred())
 		WaitTemporaryResourcesDeleted(ctx, primaryMB2, secondaryMB2)
+
+		// Make sure verification step has completed in both clusters.
+		WaitMantleBackupVerified(PrimaryK8sCluster, namespace, backupName0)
+		WaitMantleBackupVerified(SecondaryK8sCluster, namespace, backupName0)
+		WaitMantleBackupVerified(PrimaryK8sCluster, namespace, backupName1)
+		WaitMantleBackupVerified(PrimaryK8sCluster, namespace, backupName2)
+		WaitMantleBackupVerified(SecondaryK8sCluster, namespace, backupName2)
 
 		// Make sure M2 and M2' have the same contents.
 		EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName2, restoreName2, writtenDataHash2)
@@ -147,6 +160,13 @@ var _ = Describe("incremental backup", Label("incr-backup"), func() {
 		secondaryMB2, err := GetMB(SecondaryK8sCluster, namespace, backupName2)
 		Expect(err).NotTo(HaveOccurred())
 		WaitTemporaryResourcesDeleted(ctx, primaryMB2, secondaryMB2)
+
+		// Make sure verification step has completed in both clusters.
+		WaitMantleBackupVerified(PrimaryK8sCluster, namespace, backupName0)
+		WaitMantleBackupVerified(SecondaryK8sCluster, namespace, backupName0)
+		WaitMantleBackupVerified(SecondaryK8sCluster, namespace, backupName1)
+		WaitMantleBackupVerified(PrimaryK8sCluster, namespace, backupName2)
+		WaitMantleBackupVerified(SecondaryK8sCluster, namespace, backupName2)
 
 		// Make sure M2 and M2' have the same contents.
 		EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName2, restoreName2, writtenDataHash2)

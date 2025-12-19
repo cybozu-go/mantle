@@ -77,6 +77,7 @@ var _ = Describe("change to secondary", Label("change-to-secondary"), func() {
 		writtenDataHash10 = WriteRandomDataToPV(ctx, SecondaryK8sCluster, namespace, pvcName1)
 		CreateMantleBackup(SecondaryK8sCluster, namespace, pvcName1, backupName10)
 		WaitMantleBackupReadyToUse(SecondaryK8sCluster, namespace, backupName10)
+		WaitMantleBackupVerified(SecondaryK8sCluster, namespace, backupName10)
 	})
 
 	It("should ensure the MantleBackup created by standalone mantle doesn't exist in the primary k8s cluster",
@@ -100,6 +101,15 @@ var _ = Describe("change to secondary", Label("change-to-secondary"), func() {
 		writtenDataHash21 = WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName2)
 		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName2, backupName21)
 		WaitMantleBackupSynced(namespace, backupName21)
+	})
+
+	It("should verify MantleBackups correctly", func(ctx SpecContext) {
+		WaitMantleBackupVerified(PrimaryK8sCluster, namespace, backupName00)
+		WaitMantleBackupVerified(SecondaryK8sCluster, namespace, backupName00)
+		WaitMantleBackupVerified(PrimaryK8sCluster, namespace, backupName20)
+		WaitMantleBackupVerified(SecondaryK8sCluster, namespace, backupName20)
+		WaitMantleBackupVerified(PrimaryK8sCluster, namespace, backupName21)
+		WaitMantleBackupVerified(SecondaryK8sCluster, namespace, backupName21)
 	})
 
 	It("should restore MantleBackups correctly", func(ctx SpecContext) {

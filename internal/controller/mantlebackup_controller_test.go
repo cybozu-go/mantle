@@ -1623,9 +1623,9 @@ var _ = Describe("export and upload", func() {
 			origSize := *resource.NewQuantity(testutil.FakeRBDSnapshotSize-1, resource.BinarySI)
 			mbr.backupTransferPartSize = origSize
 
-			// We use reconcileAsStandalone to focus on the part size update logic.
+			// We use reconcilePre to focus on the part size update logic.
 			Eventually(func(g Gomega) {
-				result, err := mbr.reconcileAsStandalone(ctx, backup)
+				result, err := mbr.reconcilePre(ctx, backup)
 				g.Expect(result.IsZero()).To(BeTrue())
 				g.Expect(err).NotTo(HaveOccurred())
 
@@ -1639,7 +1639,7 @@ var _ = Describe("export and upload", func() {
 			mbr.backupTransferPartSize = newSize
 
 			Eventually(func(g Gomega) {
-				result, err := mbr.reconcileAsStandalone(ctx, backup)
+				result, err := mbr.reconcilePre(ctx, backup)
 				g.Expect(result.IsZero()).To(BeTrue())
 				g.Expect(err).NotTo(HaveOccurred())
 			}, "10s").Should(Succeed())
@@ -2593,7 +2593,7 @@ var _ = Describe("MantleBackupReconciler", func() {
 			GinkgoHelper()
 			var pv corev1.PersistentVolume
 			err := k8sClient.Get(ctx, types.NamespacedName{
-				Name: makeVerifyPVName(backup),
+				Name: MakeVerifyPVName(backup),
 			}, &pv)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -2614,7 +2614,7 @@ var _ = Describe("MantleBackupReconciler", func() {
 							"pool":          pvSrc.Spec.CSI.VolumeAttributes["pool"],
 							"staticVolume":  "true",
 						},
-						VolumeHandle: makeVerifyImageName(backup),
+						VolumeHandle: MakeVerifyImageName(backup),
 					},
 				},
 				PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimRetain,
@@ -2627,7 +2627,7 @@ var _ = Describe("MantleBackupReconciler", func() {
 			GinkgoHelper()
 			var pvc corev1.PersistentVolumeClaim
 			err := k8sClient.Get(ctx, types.NamespacedName{
-				Name:      makeVerifyPVCName(backup),
+				Name:      MakeVerifyPVCName(backup),
 				Namespace: podNamespace,
 			}, &pvc)
 			Expect(err).NotTo(HaveOccurred())
@@ -2639,7 +2639,7 @@ var _ = Describe("MantleBackupReconciler", func() {
 				Resources:        pvcSrc.Spec.Resources,
 				StorageClassName: ptr.To(""),
 				VolumeMode:       ptr.To(corev1.PersistentVolumeBlock),
-				VolumeName:       makeVerifyPVName(backup),
+				VolumeName:       MakeVerifyPVName(backup),
 			}))
 		}
 
@@ -2647,7 +2647,7 @@ var _ = Describe("MantleBackupReconciler", func() {
 			GinkgoHelper()
 			var job batchv1.Job
 			err := k8sClient.Get(ctx, types.NamespacedName{
-				Name:      makeVerifyJobName(backup),
+				Name:      MakeVerifyJobName(backup),
 				Namespace: podNamespace,
 			}, &job)
 			Expect(err).NotTo(HaveOccurred())
@@ -2683,7 +2683,7 @@ var _ = Describe("MantleBackupReconciler", func() {
 				Name: "verify-rbd",
 				VolumeSource: corev1.VolumeSource{
 					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-						ClaimName: makeVerifyPVCName(backup),
+						ClaimName: MakeVerifyPVCName(backup),
 					},
 				},
 			}))
@@ -2770,10 +2770,10 @@ var _ = Describe("MantleBackupReconciler", func() {
 
 		It("generates correct names", func(ctx SpecContext) {
 			for _, backup := range []*mantlev1.MantleBackup{backupSuccess, backupFail} {
-				Expect(makeVerifyImageName(backup)).To(Equal(mantleVerifyImagePrefix + string(backup.GetUID())))
-				Expect(makeVerifyJobName(backup)).To(Equal(mantleVerifyJobPrefix + string(backup.GetUID())))
-				Expect(makeVerifyPVName(backup)).To(Equal(mantleVerifyPVPrefix + string(backup.GetUID())))
-				Expect(makeVerifyPVCName(backup)).To(Equal(mantleVerifyPVCPrefix + string(backup.GetUID())))
+				Expect(MakeVerifyImageName(backup)).To(Equal(mantleVerifyImagePrefix + string(backup.GetUID())))
+				Expect(MakeVerifyJobName(backup)).To(Equal(MantleVerifyJobPrefix + string(backup.GetUID())))
+				Expect(MakeVerifyPVName(backup)).To(Equal(mantleVerifyPVPrefix + string(backup.GetUID())))
+				Expect(MakeVerifyPVCName(backup)).To(Equal(mantleVerifyPVCPrefix + string(backup.GetUID())))
 			}
 		})
 
@@ -2795,7 +2795,7 @@ var _ = Describe("MantleBackupReconciler", func() {
 			// Update the Job to Completed
 			var currentJob batchv1.Job
 			err := k8sClient.Get(ctx, types.NamespacedName{
-				Name:      makeVerifyJobName(backupSuccess),
+				Name:      MakeVerifyJobName(backupSuccess),
 				Namespace: podNamespace,
 			}, &currentJob)
 			Expect(err).NotTo(HaveOccurred())
@@ -2843,7 +2843,7 @@ var _ = Describe("MantleBackupReconciler", func() {
 			// Update the Job to Failed
 			var currentJob batchv1.Job
 			err = k8sClient.Get(ctx, types.NamespacedName{
-				Name:      makeVerifyJobName(backupFail),
+				Name:      MakeVerifyJobName(backupFail),
 				Namespace: podNamespace,
 			}, &currentJob)
 			Expect(err).NotTo(HaveOccurred())

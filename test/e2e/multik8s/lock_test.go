@@ -96,12 +96,14 @@ var _ = Describe("Locking", Label("lock"), func() {
 	})
 
 	It("should not exist locks after backup completion", func() {
-		stdout, _, err := Kubectl(SecondaryK8sCluster, nil, "exec", "-n", CephClusterNamespace, controllerPod, "--",
-			"rbd", "-p", poolName, "--format", "json", "lock", "ls", imageName)
-		Expect(err).NotTo(HaveOccurred())
-		var locks []*ceph.RBDLock
-		err = json.Unmarshal(stdout, &locks)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(locks).To(HaveLen(0))
+		Eventually(func(g Gomega) {
+			stdout, _, err := Kubectl(SecondaryK8sCluster, nil, "exec", "-n", CephClusterNamespace, controllerPod, "--",
+				"rbd", "-p", poolName, "--format", "json", "lock", "ls", imageName)
+			g.Expect(err).NotTo(HaveOccurred())
+			var locks []*ceph.RBDLock
+			err = json.Unmarshal(stdout, &locks)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(locks).To(HaveLen(0))
+		}).Should(Succeed())
 	})
 })

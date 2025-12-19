@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 
 	"github.com/cybozu-go/mantle/internal/ceph"
 	corev1 "k8s.io/api/core/v1"
@@ -130,27 +129,5 @@ func (r *PersistentVolumeReconciler) removeRBDImage(ctx context.Context, pv *cor
 	pool := pv.Spec.CSI.VolumeAttributes["pool"]
 	logger.Info("removing image", "pool", pool, "image", image)
 
-	images, err := r.ceph.RBDLs(pool)
-	if err != nil {
-		return fmt.Errorf("failed to list RBD images: %w", err)
-	}
-
-	if !slices.Contains(images, image) {
-		return nil
-	}
-
-	imageInfo, err := r.ceph.RBDInfo(pool, image)
-	if err != nil {
-		return fmt.Errorf("failed to get info about the RBD image: %s/%s: %w", pool, image, err)
-	}
-
-	if err := r.ceph.RBDTrashMv(pool, image); err != nil {
-		return fmt.Errorf("failed to move the RBD image to trash: %s/%s: %w", pool, image, err)
-	}
-
-	if err := r.ceph.CephRBDTaskAddTrashRemove(pool, imageInfo.ID); err != nil {
-		return fmt.Errorf("failed to add task to remove the RBD image from trash: %s/%s: %w", pool, image, err)
-	}
-
-	return nil
+	return deleteRBDImageAsynchronously(r.ceph, pool, image)
 }
