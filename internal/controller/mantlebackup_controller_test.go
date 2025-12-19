@@ -1622,9 +1622,9 @@ var _ = Describe("export and upload", func() {
 			origSize := *resource.NewQuantity(testutil.FakeRBDSnapshotSize-1, resource.BinarySI)
 			mbr.backupTransferPartSize = origSize
 
-			// We use reconcilePre to focus on the part size update logic.
+			// We use reconcileLocalBackup to focus on the part size update logic.
 			Eventually(func(g Gomega) {
-				result, err := mbr.reconcilePre(ctx, backup)
+				result, err := mbr.reconcileLocalBackup(ctx, backup)
 				g.Expect(result.IsZero()).To(BeTrue())
 				g.Expect(err).NotTo(HaveOccurred())
 
@@ -1638,7 +1638,7 @@ var _ = Describe("export and upload", func() {
 			mbr.backupTransferPartSize = newSize
 
 			Eventually(func(g Gomega) {
-				result, err := mbr.reconcilePre(ctx, backup)
+				result, err := mbr.reconcileLocalBackup(ctx, backup)
 				g.Expect(result.IsZero()).To(BeTrue())
 				g.Expect(err).NotTo(HaveOccurred())
 			}, "10s").Should(Succeed())

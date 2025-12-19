@@ -355,7 +355,7 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	panic("unreachable")
 }
 
-func (r *MantleBackupReconciler) reconcilePre(ctx context.Context, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
+func (r *MantleBackupReconciler) reconcileLocalBackup(ctx context.Context, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	if isCreatedWhenMantleControllerWasSecondary(backup) {
@@ -420,7 +420,7 @@ func (r *MantleBackupReconciler) reconcilePre(ctx context.Context, backup *mantl
 }
 
 func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
-	result, err := r.reconcilePre(ctx, backup)
+	result, err := r.reconcileLocalBackup(ctx, backup)
 	if err != nil || !result.IsZero() {
 		return result, err
 	}
@@ -436,7 +436,7 @@ func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, back
 }
 
 func (r *MantleBackupReconciler) reconcileAsPrimary(ctx context.Context, backup *mantlev1.MantleBackup) (ctrl.Result, error) {
-	result, err := r.reconcilePre(ctx, backup)
+	result, err := r.reconcileLocalBackup(ctx, backup)
 	if err != nil || !result.IsZero() {
 		return result, err
 	}
