@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
@@ -16,6 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
@@ -146,7 +148,7 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPV() {
 	})
 
 	It("should create a correct PV", func(ctx SpecContext) {
-		err := test.reconciler.createOrUpdateRestoringPV(ctx, restore, test.backup)
+		err := test.reconciler.createRestoringPVIfNotExists(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: fmt.Sprintf("mr-%s-%s", test.tenantNamespace, restore.Name)}, &pv1)
@@ -154,26 +156,36 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPV() {
 
 		Expect(pv1.UID).NotTo(BeEmpty())
 		Expect(pv1.Annotations[PVAnnotationRestoredBy]).To(Equal(string(restore.UID)))
-		Expect(pv1.Spec.AccessModes).To(Equal(test.srcPV.Spec.AccessModes))
-		// CSATEST-1490
-		pvCapacity, ok := pv1.Spec.Capacity.Storage().AsInt64()
-		Expect(ok).To(BeTrue())
-		Expect(pvCapacity).To(Equal(int64(testutil.FakeRBDSnapshotSize)))
-		Expect(pv1.Spec.ClaimRef).To(BeNil())
-		Expect(pv1.Spec.PersistentVolumeSource.CSI.Driver).To(Equal(test.srcPV.Spec.CSI.Driver))
-		Expect(pv1.Spec.PersistentVolumeSource.CSI.VolumeAttributes).To(HaveLen(4))
-		Expect(pv1.Spec.PersistentVolumeSource.CSI.VolumeAttributes["clusterID"]).To(Equal(test.srcPV.Spec.CSI.VolumeAttributes["clusterID"]))
-		Expect(pv1.Spec.PersistentVolumeSource.CSI.VolumeAttributes["imageFeatures"]).To(Equal(test.srcPV.Spec.CSI.VolumeAttributes["imageFeatures"] + ",deep-flatten"))
-		Expect(pv1.Spec.PersistentVolumeSource.CSI.VolumeAttributes["pool"]).To(Equal(test.srcPV.Spec.CSI.VolumeAttributes["pool"]))
-		Expect(pv1.Spec.PersistentVolumeSource.CSI.VolumeAttributes["staticVolume"]).To(Equal("true"))
-		Expect(pv1.Spec.PersistentVolumeSource.CSI.VolumeHandle).To(Equal(fmt.Sprintf("mantle-%s-%s", restore.Namespace, restore.Name)))
-		Expect(pv1.Spec.StorageClassName).To(Equal(test.srcPV.Spec.StorageClassName))
-		Expect(pv1.Spec.VolumeMode).To(Equal(test.srcPV.Spec.VolumeMode))
-		Expect(pv1.Spec.PersistentVolumeReclaimPolicy).To(Equal(corev1.PersistentVolumeReclaimRetain))
+		Expect(pv1.Spec).To(Equal(corev1.PersistentVolumeSpec{
+			AccessModes: test.srcPV.Spec.AccessModes,
+			Capacity: corev1.ResourceList{
+				// CSATEST-1490
+				corev1.ResourceStorage: resource.MustParse(strconv.Itoa(testutil.FakeRBDSnapshotSize)),
+			},
+			ClaimRef: &corev1.ObjectReference{
+				Namespace: test.tenantNamespace,
+				Name:      restore.Name,
+			},
+			PersistentVolumeSource: corev1.PersistentVolumeSource{
+				CSI: &corev1.CSIPersistentVolumeSource{
+					Driver: test.srcPV.Spec.CSI.Driver,
+					VolumeAttributes: map[string]string{
+						"clusterID":     test.srcPV.Spec.CSI.VolumeAttributes["clusterID"],
+						"imageFeatures": test.srcPV.Spec.CSI.VolumeAttributes["imageFeatures"] + ",deep-flatten",
+						"pool":          test.srcPV.Spec.CSI.VolumeAttributes["pool"],
+						"staticVolume":  "true",
+					},
+					VolumeHandle: fmt.Sprintf("mantle-%s-%s", restore.Namespace, restore.Name),
+				},
+			},
+			PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimRetain,
+			StorageClassName:              "",
+			VolumeMode:                    test.srcPV.Spec.VolumeMode,
+		}))
 	})
 
 	It("should skip creating a PV if it already exists", func(ctx SpecContext) {
-		err := test.reconciler.createOrUpdateRestoringPV(ctx, restore, test.backup)
+		err := test.reconciler.createRestoringPVIfNotExists(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
 		By("PV should not be updated")
@@ -188,7 +200,7 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPV() {
 		restoreDifferent := restore.DeepCopy()
 		restoreDifferent.UID = types.UID(util.GetUniqueName("uid-"))
 
-		err := test.reconciler.createOrUpdateRestoringPV(ctx, restoreDifferent, test.backup)
+		err := test.reconciler.createRestoringPVIfNotExists(ctx, restoreDifferent, test.backup)
 		Expect(err).To(HaveOccurred())
 
 		By("PV should not be updated")
@@ -230,7 +242,7 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPVC() {
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &pvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = test.reconciler.createOrUpdateRestoringPVC(ctx, restore, test.backup)
+		err = test.reconciler.createRestoringPVCIfNotExists(ctx, restore, test.backup)
 		Expect(err).To(HaveOccurred())
 
 		By("PVC should not be updated")
@@ -251,7 +263,7 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPVC() {
 	})
 
 	It("should create a correct PVC", func(ctx SpecContext) {
-		err := test.reconciler.createOrUpdateRestoringPVC(ctx, restore, test.backup)
+		err := test.reconciler.createRestoringPVCIfNotExists(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &pvc1)
@@ -259,22 +271,27 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPVC() {
 
 		Expect(pvc1.UID).NotTo(BeEmpty())
 		Expect(pvc1.Annotations[PVCAnnotationRestoredBy]).To(Equal(string(restore.UID)))
-		Expect(pvc1.Spec.AccessModes).To(Equal(test.srcPVC.Spec.AccessModes))
-		// CSATEST-1489
-		pvcCapacity, ok := pvc1.Spec.Resources.Requests.Storage().AsInt64()
-		Expect(ok).To(BeTrue())
-		Expect(pvcCapacity).To(Equal(int64(testutil.FakeRBDSnapshotSize)))
-		Expect(pvc1.Spec.StorageClassName).To(Equal(test.srcPVC.Spec.StorageClassName))
-		Expect(pvc1.Spec.VolumeMode).To(Equal(test.srcPVC.Spec.VolumeMode))
-		Expect(pvc1.Spec.VolumeName).To(Equal(fmt.Sprintf("mr-%s-%s", test.tenantNamespace, restore.Name)))
 		Expect(controllerutil.HasControllerReference(&pvc1)).To(BeTrue())
-		Expect(*pvc1.GetObjectMeta().GetOwnerReferences()[0].Controller).To(BeTrue())
-		Expect(pvc1.GetObjectMeta().GetOwnerReferences()[0].Kind).To(Equal("MantleRestore"))
-		Expect(pvc1.GetObjectMeta().GetOwnerReferences()[0].UID).To(Equal(restore.GetUID()))
+		ownerRefs := pvc1.GetObjectMeta().GetOwnerReferences()[0]
+		Expect(*ownerRefs.Controller).To(BeTrue())
+		Expect(ownerRefs.Kind).To(Equal("MantleRestore"))
+		Expect(ownerRefs.UID).To(Equal(restore.GetUID()))
+		Expect(pvc1.Spec).To(Equal(corev1.PersistentVolumeClaimSpec{
+			AccessModes: test.srcPVC.Spec.AccessModes,
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					// CSATEST-1489
+					corev1.ResourceStorage: resource.MustParse(strconv.Itoa(testutil.FakeRBDSnapshotSize)),
+				},
+			},
+			StorageClassName: ptr.To(""),
+			VolumeMode:       test.srcPVC.Spec.VolumeMode,
+			VolumeName:       fmt.Sprintf("mr-%s-%s", test.tenantNamespace, restore.Name),
+		}))
 	})
 
 	It("should skip creating a PVC if it already exists", func(ctx SpecContext) {
-		err := test.reconciler.createOrUpdateRestoringPVC(ctx, restore, test.backup)
+		err := test.reconciler.createRestoringPVCIfNotExists(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
 		By("PVC should not be updated")
@@ -289,7 +306,7 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPVC() {
 		restoreDifferent := restore.DeepCopy()
 		restoreDifferent.UID = types.UID(util.GetUniqueName("uid-"))
 
-		err := test.reconciler.createOrUpdateRestoringPVC(ctx, restoreDifferent, test.backup)
+		err := test.reconciler.createRestoringPVCIfNotExists(ctx, restoreDifferent, test.backup)
 		Expect(err).To(HaveOccurred())
 
 		By("PVC should not be updated")
@@ -311,7 +328,7 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPVC() {
 	It("should delete the PVC", func(ctx SpecContext) {
 		var pvc corev1.PersistentVolumeClaim
 
-		err := test.reconciler.createOrUpdateRestoringPVC(ctx, restore, test.backup)
+		err := test.reconciler.createRestoringPVCIfNotExists(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(ctx, func(g Gomega) {
@@ -346,7 +363,7 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPVC() {
 		restoreDifferent := restore.DeepCopy()
 		restoreDifferent.UID = types.UID(util.GetUniqueName("uid-"))
 
-		err := test.reconciler.createOrUpdateRestoringPVC(ctx, restore, test.backup)
+		err := test.reconciler.createRestoringPVCIfNotExists(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
 		err = test.reconciler.deleteRestoringPVC(ctx, restoreDifferent)
@@ -375,7 +392,7 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPV() {
 	It("should delete the PV", func(ctx SpecContext) {
 		var pv corev1.PersistentVolume
 
-		err := test.reconciler.createOrUpdateRestoringPV(ctx, restore, test.backup)
+		err := test.reconciler.createRestoringPVIfNotExists(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(ctx, func(g Gomega) {
@@ -410,7 +427,7 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPV() {
 		restoreDifferent := restore.DeepCopy()
 		restoreDifferent.UID = types.UID(util.GetUniqueName("uid-"))
 
-		err := test.reconciler.createOrUpdateRestoringPV(ctx, restore, test.backup)
+		err := test.reconciler.createRestoringPVIfNotExists(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
 		// Make sure the client cache stores the restoring PV.

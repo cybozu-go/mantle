@@ -3,17 +3,19 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/ceph"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	aerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -70,7 +72,7 @@ func (r *MantleRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	var restore mantlev1.MantleRestore
 	err := r.client.Get(ctx, req.NamespacedName, &restore)
-	if errors.IsNotFound(err) {
+	if aerrors.IsNotFound(err) {
 		logger.Info("MantleRestore resource not found", "error", err)
 
 		return ctrl.Result{}, nil
@@ -167,14 +169,14 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, restore *mantlev1
 	}
 
 	// create a restore PV with the clone image
-	if err := r.createOrUpdateRestoringPV(ctx, restore, &backup); err != nil {
+	if err := r.createRestoringPVIfNotExists(ctx, restore, &backup); err != nil {
 		logger.Error(err, "failed to create PV")
 
 		return ctrl.Result{}, err
 	}
 
 	// create a restore PVC with the restore PV
-	if err := r.createOrUpdateRestoringPVC(ctx, restore, &backup); err != nil {
+	if err := r.createRestoringPVCIfNotExists(ctx, restore, &backup); err != nil {
 		logger.Error(err, "failed to create PVC")
 
 		return ctrl.Result{}, err
@@ -214,112 +216,164 @@ func (r *MantleRestoreReconciler) cloneImageFromBackup(ctx context.Context, rest
 	return createCloneByPV(ctx, r.ceph, &pv, backup.Name, r.restoringRBDImageName(restore))
 }
 
-func (r *MantleRestoreReconciler) createOrUpdateRestoringPV(ctx context.Context, restore *mantlev1.MantleRestore, backup *mantlev1.MantleBackup) error {
+// createRestoringPVIfNotExists creates a PersistentVolume (PV) for restoring from the backup if it does not exist.
+// If the PV already exists, it checks its validity.
+func (r *MantleRestoreReconciler) createRestoringPVIfNotExists(ctx context.Context, restore *mantlev1.MantleRestore, backup *mantlev1.MantleBackup) error {
 	pvName := r.restoringPVName(restore)
-	restoredBy := string(restore.UID)
-
-	var pv corev1.PersistentVolume
-	pv.SetName(pvName)
-	_, err := ctrl.CreateOrUpdate(ctx, r.client, &pv, func() error {
-		if !pv.GetDeletionTimestamp().IsZero() {
-			return fmt.Errorf("the restoring PV already began to be deleted: %s", pvName)
-		}
-
-		if pv.Annotations == nil {
-			pv.Annotations = map[string]string{}
-		}
-		if annot, ok := pv.Annotations[PVAnnotationRestoredBy]; ok && annot != restoredBy {
-			return fmt.Errorf("the existing PV is having different MantleRestore UID: %s, %s",
-				pvName, pv.Annotations[PVAnnotationRestoredBy])
-		}
-		pv.Annotations[PVAnnotationRestoredBy] = restoredBy
-		pv.Annotations[PVAnnotationRestoredByName] = restore.GetName()
-		pv.Annotations[PVAnnotationRestoredByNamespace] = restore.GetNamespace()
-
-		// get the source PV from the backup
-		srcPV := corev1.PersistentVolume{}
-		if err := json.Unmarshal([]byte(backup.Status.PVManifest), &srcPV); err != nil {
-			return fmt.Errorf("failed to unmarshal PV manifest: %w", err)
-		}
-
-		controllerutil.AddFinalizer(&pv, RestoringPVFinalizerName)
-
-		if pv.Labels == nil {
-			pv.Labels = map[string]string{}
-		}
-		pv.Labels[labelRestoringPVKey] = labelRestoringPVValue
-
-		pv.Spec = *srcPV.Spec.DeepCopy()
-		capacity, err := resource.ParseQuantity(strconv.FormatInt(*backup.Status.SnapSize, 10))
-		if err != nil {
-			return fmt.Errorf("failed to parse quantity: %w", err)
-		}
-		pv.Spec.Capacity[corev1.ResourceStorage] = capacity
-		pv.Spec.ClaimRef = nil
-		pv.Spec.CSI.VolumeAttributes = map[string]string{
-			"clusterID":     srcPV.Spec.CSI.VolumeAttributes["clusterID"],
-			"pool":          srcPV.Spec.CSI.VolumeAttributes["pool"],
-			"staticVolume":  "true",
-			"imageFeatures": srcPV.Spec.CSI.VolumeAttributes["imageFeatures"] + ",deep-flatten",
-		}
-		pv.Spec.CSI.VolumeHandle = r.restoringRBDImageName(restore)
-		pv.Spec.PersistentVolumeReclaimPolicy = corev1.PersistentVolumeReclaimRetain
-
-		return nil
-	})
-
-	return err
-}
-
-func (r *MantleRestoreReconciler) createOrUpdateRestoringPVC(ctx context.Context, restore *mantlev1.MantleRestore, backup *mantlev1.MantleBackup) error {
 	pvcName := restore.Name
 	pvcNamespace := restore.Namespace
 	restoredBy := string(restore.UID)
 
-	var pvc corev1.PersistentVolumeClaim
-	pvc.SetName(pvcName)
-	pvc.SetNamespace(pvcNamespace)
-	_, err := ctrl.CreateOrUpdate(ctx, r.client, &pvc, func() error {
-		if pvc.Annotations == nil {
-			pvc.Annotations = map[string]string{}
+	var currentPV corev1.PersistentVolume
+	err := r.client.Get(ctx, client.ObjectKey{Name: pvName}, &currentPV)
+	if err == nil {
+		// If the PV already exists, we check its validity.
+		annotations := currentPV.GetAnnotations()
+		if annotations == nil {
+			annotations = map[string]string{}
 		}
-		annotatedRestoredBy, ok := pvc.Annotations[PVCAnnotationRestoredBy]
-		if !pvc.CreationTimestamp.IsZero() && !ok {
+		existingRestoredBy, ok := annotations[PVAnnotationRestoredBy]
+		if !ok {
+			return fmt.Errorf("the existing PV was not created by mantle-controller: %s", pvName)
+		}
+		if existingRestoredBy != restoredBy {
+			return fmt.Errorf("the existing PV has a different MantleRestore UID: %s, %s",
+				pvName, existingRestoredBy)
+		}
+		// PV already exists and is valid.
+		return nil
+	} else if !aerrors.IsNotFound(err) {
+		return fmt.Errorf("failed to get PV %s: %w", pvName, err)
+	}
+
+	// Get the source PV from the backup.
+	var srcPV corev1.PersistentVolume
+	if err := json.Unmarshal([]byte(backup.Status.PVManifest), &srcPV); err != nil {
+		return fmt.Errorf("failed to unmarshal PV manifest: %w", err)
+	}
+	if srcPV.Spec.CSI == nil {
+		return errors.New("PV is not a CSI volume")
+	}
+	// Use the snapshot size as the capacity of the restoring PV.
+	capacity, err := resource.ParseQuantity(strconv.FormatInt(*backup.Status.SnapSize, 10))
+	if err != nil {
+		return fmt.Errorf("failed to parse quantity: %w", err)
+	}
+
+	// Create a new PV.
+	newPV := &corev1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: pvName,
+			Annotations: map[string]string{
+				PVAnnotationRestoredBy:          restoredBy,
+				PVAnnotationRestoredByName:      restore.GetName(),
+				PVAnnotationRestoredByNamespace: restore.GetNamespace(),
+			},
+			Labels: map[string]string{
+				labelRestoringPVKey: labelRestoringPVValue,
+			},
+			Finalizers: []string{
+				RestoringPVFinalizerName,
+			},
+		},
+	}
+	newPV.Spec = *srcPV.Spec.DeepCopy()
+	newPV.Spec.Capacity[corev1.ResourceStorage] = capacity
+	// Set ClaimRef to bind only to the restoring PVC.
+	newPV.Spec.ClaimRef = &corev1.ObjectReference{
+		Namespace: pvcNamespace,
+		Name:      pvcName,
+	}
+	newPV.Spec.CSI.VolumeAttributes = map[string]string{
+		"clusterID":     srcPV.Spec.CSI.VolumeAttributes["clusterID"],
+		"pool":          srcPV.Spec.CSI.VolumeAttributes["pool"],
+		"staticVolume":  "true",
+		"imageFeatures": srcPV.Spec.CSI.VolumeAttributes["imageFeatures"] + ",deep-flatten",
+	}
+	newPV.Spec.CSI.VolumeHandle = r.restoringRBDImageName(restore)
+	newPV.Spec.PersistentVolumeReclaimPolicy = corev1.PersistentVolumeReclaimRetain
+	// No StorageClass to indicate static provisioning.
+	newPV.Spec.StorageClassName = ""
+
+	if err := r.client.Create(ctx, newPV); err != nil {
+		return fmt.Errorf("failed to create PV %s: %w", pvName, err)
+	}
+
+	return nil
+}
+
+// createRestoringPVCIfNotExists creates a PersistentVolumeClaim (PVC) for restoring from the backup if it does not exist.
+// If the PVC already exists, it checks its validity.
+func (r *MantleRestoreReconciler) createRestoringPVCIfNotExists(ctx context.Context, restore *mantlev1.MantleRestore, backup *mantlev1.MantleBackup) error {
+	pvName := r.restoringPVName(restore)
+	pvcName := restore.Name
+	pvcNamespace := restore.Namespace
+	restoredBy := string(restore.UID)
+
+	var currentPVC corev1.PersistentVolumeClaim
+	err := r.client.Get(ctx, client.ObjectKey{Namespace: pvcNamespace, Name: pvcName}, &currentPVC)
+	if err == nil {
+		// If the PVC already exists, we check its validity.
+		annotations := currentPVC.GetAnnotations()
+		if annotations == nil {
+			annotations = map[string]string{}
+		}
+		existingRestoredBy, ok := annotations[PVCAnnotationRestoredBy]
+		if !ok {
 			return fmt.Errorf("the existing PVC was not created by any mantle-controller: %s/%s",
 				pvcNamespace, pvcName)
 		}
-		if ok && annotatedRestoredBy != restoredBy {
-			return fmt.Errorf("the existing PVC was created by different mantle-controller: %s, %s",
-				pvcName, pvc.Annotations[PVCAnnotationRestoredBy])
+		if existingRestoredBy != restoredBy {
+			return fmt.Errorf("the existing PVC has a different MantleRestore UID: %s, %s",
+				pvcName, existingRestoredBy)
 		}
-		pvc.Annotations[PVCAnnotationRestoredBy] = restoredBy
-
-		// get the source PVC from the backup
-		srcPVC := corev1.PersistentVolumeClaim{}
-		if err := json.Unmarshal([]byte(backup.Status.PVCManifest), &srcPVC); err != nil {
-			return fmt.Errorf("failed to unmarshal PVC manifest: %w", err)
-		}
-
-		pvc.Spec = *srcPVC.Spec.DeepCopy()
-		capacity, err := resource.ParseQuantity(strconv.FormatInt(*backup.Status.SnapSize, 10))
-		if err != nil {
-			return fmt.Errorf("failed to parse quantity: %w", err)
-		}
-		pvc.Spec.Resources = corev1.VolumeResourceRequirements{
-			Requests: corev1.ResourceList{
-				corev1.ResourceStorage: capacity,
-			},
-		}
-		pvc.Spec.VolumeName = r.restoringPVName(restore)
-
-		if err := controllerutil.SetControllerReference(restore, &pvc, r.Scheme); err != nil {
-			return fmt.Errorf("failed to set controller reference: %w", err)
-		}
-
+		// PVC already exists and is valid.
 		return nil
-	})
+	} else if !aerrors.IsNotFound(err) {
+		return fmt.Errorf("failed to get PVC %s/%s: %w", pvcNamespace, pvcName, err)
+	}
 
-	return err
+	// Get the source PVC from the backup.
+	srcPVC := corev1.PersistentVolumeClaim{}
+	if err := json.Unmarshal([]byte(backup.Status.PVCManifest), &srcPVC); err != nil {
+		return fmt.Errorf("failed to unmarshal PVC manifest: %w", err)
+	}
+	// Use the snapshot size as the capacity of the restoring PVC.
+	capacity, err := resource.ParseQuantity(strconv.FormatInt(*backup.Status.SnapSize, 10))
+	if err != nil {
+		return fmt.Errorf("failed to parse quantity: %w", err)
+	}
+
+	// Create a new PVC.
+	newPVC := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: pvcNamespace,
+			Name:      pvcName,
+			Annotations: map[string]string{
+				PVCAnnotationRestoredBy: restoredBy,
+			},
+		},
+	}
+	newPVC.Spec = *srcPVC.Spec.DeepCopy()
+	newPVC.Spec.Resources = corev1.VolumeResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceStorage: capacity,
+		},
+	}
+	// No StorageClass to indicate static provisioning.
+	// and ensure this PVC statically binds to the specific PV.
+	newPVC.Spec.StorageClassName = ptr.To("")
+	newPVC.Spec.VolumeName = pvName
+
+	if err := controllerutil.SetControllerReference(restore, newPVC, r.Scheme); err != nil {
+		return fmt.Errorf("failed to set controller reference: %w", err)
+	}
+
+	if err := r.client.Create(ctx, newPVC); err != nil {
+		return fmt.Errorf("failed to create PVC %s/%s: %w", pvcNamespace, pvcName, err)
+	}
+
+	return nil
 }
 
 func (r *MantleRestoreReconciler) cleanup(ctx context.Context, restore *mantlev1.MantleRestore) (ctrl.Result, error) {
@@ -364,7 +418,7 @@ func (r *MantleRestoreReconciler) deleteRestoringPVC(ctx context.Context, restor
 	pvcNamespace := restore.Namespace
 	pvc := corev1.PersistentVolumeClaim{}
 	if err := r.client.Get(ctx, client.ObjectKey{Name: pvcName, Namespace: pvcNamespace}, &pvc); err != nil {
-		if errors.IsNotFound(err) {
+		if aerrors.IsNotFound(err) {
 			return nil
 		}
 
@@ -386,7 +440,7 @@ func (r *MantleRestoreReconciler) deleteRestoringPVC(ctx context.Context, restor
 func (r *MantleRestoreReconciler) deleteRestoringPV(ctx context.Context, restore *mantlev1.MantleRestore) error {
 	pv := corev1.PersistentVolume{}
 	if err := r.client.Get(ctx, client.ObjectKey{Name: r.restoringPVName(restore)}, &pv); err != nil {
-		if errors.IsNotFound(err) {
+		if aerrors.IsNotFound(err) {
 			// NOTE: Since the cache of the client may be stale, we may look
 			// over some PVs that should be removed here.  Such PVs will be
 			// removed by GarbageCollectorRunner.

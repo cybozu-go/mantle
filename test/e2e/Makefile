@@ -332,6 +332,12 @@ do-test-multik8s: $(GINKGO)
 		echo "Secondary MBs"; \
 		$${KUBECTL_SECONDARY} get mantlebackups -A -o yaml; \
 		echo ""; \
+		echo "Primary MRs"; \
+		$${KUBECTL_PRIMARY} get mantlerestores -A -o yaml; \
+		echo ""; \
+		echo "Secondary MRs"; \
+		$${KUBECTL_SECONDARY} get mantlerestores -A -o yaml; \
+		echo ""; \
 		echo "Primary PVCs"; \
 		$${KUBECTL_PRIMARY} get pvc -A -o yaml; \
 		echo ""; \
