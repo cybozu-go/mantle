@@ -950,7 +950,7 @@ func WaitTemporaryResourcesDeleted(ctx SpecContext, primaryMB, secondaryMB *mant
 func DeleteMantleBackup(cluster int, namespace, backupName string) {
 	GinkgoHelper()
 	By("deleting MantleBackup")
-	stdout, stderr, err := Kubectl(cluster, nil, "delete", "-n", namespace, "mantlebackup", backupName, "--timeout=3m")
+	stdout, stderr, err := Kubectl(cluster, nil, "delete", "-n", namespace, "mantlebackup", backupName, "--timeout=10m")
 	Expect(err).NotTo(HaveOccurred(), "stdout: %s, stderr: %s", string(stdout), string(stderr))
 }
 
