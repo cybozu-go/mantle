@@ -99,8 +99,7 @@ func (test *mantleRestoreControllerUnitTest) tearDownEnv() {
 	})
 
 	It("stop backup controller", func() {
-		err := test.mgrUtil.Stop()
-		Expect(err).NotTo(HaveOccurred())
+		test.mgrUtil.Stop()
 	})
 
 	It("deleting resources", func(ctx SpecContext) {

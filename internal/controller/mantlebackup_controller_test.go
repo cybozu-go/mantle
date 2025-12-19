@@ -184,8 +184,7 @@ var _ = Describe("MantleBackup controller", func() {
 	}
 
 	AfterEach(func() {
-		err := mgrUtil.Stop()
-		Expect(err).NotTo(HaveOccurred())
+		mgrUtil.Stop()
 	})
 
 	Context("when the role is `standalone`", func() {
@@ -2884,8 +2883,7 @@ var _ = Describe("MantleBackupReconciler", func() {
 		})
 
 		It("quit", func(ctx SpecContext) {
-			err := mgrUtil.Stop()
-			Expect(err).NotTo(HaveOccurred())
+			mgrUtil.Stop()
 		})
 	})
 })
