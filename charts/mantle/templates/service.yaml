@@ -15,7 +15,8 @@ spec:
     nodePort: {{ . }}
     {{- end }}
   selector:
-    {{- include "mantle.selectorLabels" . | nindent 4 }}
+    {{- include "mantle.controllerSelectorLabels" . | nindent 4 }}
+{{ end }}
 {{- if .Values.webhook.enabled }}
 ---
 apiVersion: v1
@@ -30,6 +31,5 @@ spec:
     protocol: TCP
     name: webhook
   selector:
-    {{- include "mantle.selectorLabels" . | nindent 4 }}
-{{ end }}
+    {{- include "mantle.webhookSelectorLabels" . | nindent 4 }}
 {{ end }}

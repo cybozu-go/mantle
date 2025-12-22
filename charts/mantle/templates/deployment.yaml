@@ -4,7 +4,7 @@ metadata:
   name: {{ include "mantle.fullname" . }}-controller
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "mantle.labels" . | nindent 4 }}
+    {{- include "mantle.controllerLabels" . | nindent 4 }}
     {{- with .Values.labels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
@@ -16,7 +16,7 @@ spec:
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      {{- include "mantle.selectorLabels" . | nindent 6 }}
+      {{- include "mantle.controllerSelectorLabels" . | nindent 6 }}
   template:
     metadata:
       {{- with .Values.podAnnotations }}
@@ -24,7 +24,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       labels:
-        {{- include "mantle.labels" . | nindent 8 }}
+        {{- include "mantle.controllerLabels" . | nindent 8 }}
         {{- with .Values.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -117,8 +117,6 @@ spec:
             - --replication-tls-server-cert-path=/mnt/replication-tls-server-cert/tls.crt
             - --replication-tls-server-key-path=/mnt/replication-tls-server-cert/tls.key
             - --replication-tls-client-ca-path=/mnt/replication-tls-client-cert/ca.crt
-            - --webhook-cert-path=/mnt/webhook-tls-cert/tls.crt
-            - --webhook-key-path=/mnt/webhook-tls-cert/tls.key
             {{- end }}
           env:
             - name: POD_NAME
@@ -144,10 +142,6 @@ spec:
               mountPath: /mnt/replication-tls-server-cert
             - name: replication-tls-client-cert
               mountPath: /mnt/replication-tls-client-cert
-            {{- end }}
-            {{- if eq .Values.controller.role "secondary" }}
-            - name: webhook-tls-cert
-              mountPath: /mnt/webhook-tls-cert
             {{- end }}
         - command:
             - /bin/bash
@@ -268,9 +262,6 @@ spec:
         - name: replication-tls-client-cert
           configMap:
             name: {{ .Values.controller.mtls.clientCACertConfigMap }}
-        - name: webhook-tls-cert
-          secret:
-            secretName: {{ template "mantle.fullname" . }}-webhook
         {{- end }}
       terminationGracePeriodSeconds: 10
       {{- with .Values.nodeSelector }}
@@ -289,3 +280,101 @@ spec:
           tolerationSeconds: 5
         {{- toYaml . | nindent 8 }}
       {{- end }}
+{{- if .Values.webhook.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mantle.fullname" . }}-webhook
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "mantle.webhookLabels" . | nindent 4 }}
+    {{- with .Values.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.webhook.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "mantle.webhookSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.webhook.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "mantle.webhookLabels" . | nindent 8 }}
+        {{- with .Values.webhook.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "mantle.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: webhook
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - "ALL"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          {{- with .Values.image.pullPolicy }}
+          imagePullPolicy: {{ . }}
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.webhook.resources | nindent 12 }}
+          command:
+            - /manager
+          args:
+            - webhook
+            - --webhook-bind-address=:{{ .Values.webhook.service.targetPort }}
+            - --webhook-cert-path=/mnt/webhook-tls-cert/tls.crt
+            - --webhook-key-path=/mnt/webhook-tls-cert/tls.key
+          ports:
+            - name: webhook
+              containerPort: {{ .Values.webhook.service.targetPort }}
+              protocol: TCP
+          volumeMounts:
+            - name: webhook-tls-cert
+              mountPath: /mnt/webhook-tls-cert
+              readOnly: true
+      volumes:
+        - name: webhook-tls-cert
+          secret:
+            secretName: {{ template "mantle.fullname" . }}-webhook
+      terminationGracePeriodSeconds: 10
+      {{- with .Values.webhook.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.webhook.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.webhook.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
