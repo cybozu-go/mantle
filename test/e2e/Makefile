@@ -179,38 +179,19 @@ create-loop-dev:
 	$(MINIKUBE) ssh -- $(SUDO) $(LOSETUP) $(LOOP_DEV2) $(LOOP_FILE2) || :
 	$(MINIKUBE) ssh -- lsblk
 
-.PHONY: wait-deploy-ready
-wait-deploy-ready: NS=
-wait-deploy-ready: DEPLOY=
-wait-deploy-ready:
-	is_ok="false"; \
-	for ((i=0;i<$(TIMEOUT_SECS);i+=$(POLLING_INTERVAL))); do \
-		available_replicas=$$($(KUBECTL) -n $(CEPH_CLUSTER1_NAMESPACE) get deploy $(DEPLOY) -o json | jq -r ".status.availableReplicas"); \
-		if [ "$$available_replicas" = 1 ]; then \
-			is_ok="true"; \
-			break; \
-		fi; \
-		echo "waiting for deploy $(DEPLOY) to be available" > /dev/stderr; \
-		sleep $(POLLING_INTERVAL); \
-	done; \
-	if [ "$$is_ok" = "false" ]; then \
-		echo "failed to start deploy $(DEPLOY)" > /dev/stderr; \
-		exit 1; \
-	fi
-
 .PHONY: install-rook-ceph-operator
 install-rook-ceph-operator:
 	$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
 		--create-namespace --namespace $(CEPH_CLUSTER1_NAMESPACE) -f testdata/values.yaml --wait \
 		rook-ceph rook-ceph
-	$(MAKE) wait-deploy-ready NS=$(CEPH_CLUSTER1_NAMESPACE) DEPLOY=rook-ceph-operator
+	$(KUBECTL) wait --timeout=60s --for=condition=available -n $(CEPH_CLUSTER1_NAMESPACE) deployment/rook-ceph-operator
 
 .PHONY: install-rook-ceph-cluster1
 install-rook-ceph-cluster1:
 	$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
 		--namespace $(CEPH_CLUSTER1_NAMESPACE) -f testdata/values-cluster.yaml \
 		--wait rook-ceph-cluster rook-ceph-cluster
-	$(MAKE) wait-deploy-ready NS=$(CEPH_CLUSTER1_NAMESPACE) DEPLOY=rook-ceph-osd-0
+	$(KUBECTL) wait --timeout=300s --for=condition=Ready -n $(CEPH_CLUSTER1_NAMESPACE) cephclusters/rook-ceph
 
 .PHONY: install-rook-ceph-cluster2
 install-rook-ceph-cluster2:
@@ -218,7 +199,7 @@ install-rook-ceph-cluster2:
 		--create-namespace --namespace $(CEPH_CLUSTER2_NAMESPACE) -f testdata/values-cluster.yaml \
 		--set cephClusterSpec.dataDirHostPath=/var/lib/rook2 \
 		--wait rook-ceph-cluster2 rook-ceph-cluster
-	$(MAKE) wait-deploy-ready NS=$(CEPH_CLUSTER2_NAMESPACE) DEPLOY=rook-ceph-osd-0
+	$(KUBECTL) wait --timeout=300s --for=condition=Ready -n $(CEPH_CLUSTER2_NAMESPACE) cephclusters/rook-ceph2
 
 .PHONY: install-ceph-object-store
 install-ceph-object-store:
