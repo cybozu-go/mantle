@@ -9,7 +9,7 @@ check-git-branches(){
         echo "ERROR: call me from the main branch."
         exit 1
     fi
-    if [ "$(git rev-parse main)" != $(git rev-parse origin/main) ]; then
+    if [ "$(git rev-parse main)" != "$(git rev-parse origin/main)" ]; then
         echo "ERROR: run 'git pull' beforehand."
         exit 1
     fi
@@ -19,7 +19,7 @@ list-prs(){
     commit_range=$1
     shift
     # Get the commits related to the topic.
-    git log --pretty=%h $commit_range -- "$@" | \
+    git log --pretty=%h "$commit_range" -- "$@" | \
         # Group the commits in sets of 10.
         awk 'NR == 1 { a = $1 } NR != 1 && NR % 10 == 1 { print a; a = $1 } { a = a "," $1 } END { print a }' | \
         # Get the PRs of the commits.
@@ -79,7 +79,7 @@ case-mantle-helm-chart(){
     MANTLE_HELM_CHART_PRS=$(list-prs $MANTLE_HELM_CHART_LATEST_TAG...HEAD charts/mantle)
 
     MANTLE_LATEST_TAG=$(get-mantle-latest-tag)
-    MANTLE_CURRENT_APP_VERSION_IN_CHART=$(cat charts/mantle/Chart.yaml | yq .appVersion)
+    MANTLE_CURRENT_APP_VERSION_IN_CHART=$(yq .appVersion charts/mantle/Chart.yaml)
 
     if [ "$MANTLE_HELM_CHART_PRS" = "" ] && [ "$MANTLE_CURRENT_APP_VERSION_IN_CHART" = "$MANTLE_LATEST_TAG" ]; then
         echo "You don't have to release mantle Helm Chart."
@@ -95,8 +95,14 @@ case-mantle-helm-chart(){
         echo
         echo "The detected Mantle version is" $MANTLE_LATEST_TAG
         echo "The current version is" $MANTLE_HELM_CHART_LATEST_TAG
-        echo -n "Next version (only numbers and dots accepted)? "
-        read MANTLE_HELM_CHART_NEXT_VERSION
+        while :; do
+            echo -n "Next version (only numbers and dots accepted, e.g. 1.2.3)? "
+            read MANTLE_HELM_CHART_NEXT_VERSION
+            if [[ "$MANTLE_HELM_CHART_NEXT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                break
+            fi
+            echo "ERROR: Invalid version. Please enter a version like '1.2.3' using only digits and dots."
+        done
         echo "Run the following code:"
         echo
         echo -e "\tAPPVERSION=$MANTLE_LATEST_TAG"
@@ -133,14 +139,21 @@ case-mantle-cluster-wide-helm-chart(){
         echo
         echo "$MANTLE_CLUSTER_WIDE_HELM_CHART_PRS"
         echo
-        echo "The current version is" $MANTLE_CLUSTER_WIDE_HELM_CHART_LATEST_TAG
+        echo "The current version is $MANTLE_CLUSTER_WIDE_HELM_CHART_LATEST_TAG"
         echo -n "Next version (only numbers and dots accepted)? "
-        read MANTLE_CLUSTER_WIDE_HELM_CHART_NEXT_VERSION
+        while true; do
+            read MANTLE_CLUSTER_WIDE_HELM_CHART_NEXT_VERSION
+            if [[ "$MANTLE_CLUSTER_WIDE_HELM_CHART_NEXT_VERSION" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+                break
+            fi
+            echo "ERROR: Version must contain only numbers and dots (e.g., 1.2.3)."
+            echo -n "Next version (only numbers and dots accepted)? "
+        done
         echo "Run the following code:"
         echo
         MANTLE_LATEST_TAG=$(get-mantle-latest-tag)
-        echo -e "\tAPPVERSION=$MANTLE_LATEST_TAG"
-        echo -e "\tCHARTVERSION=$MANTLE_CLUSTER_WIDE_HELM_CHART_NEXT_VERSION"
+        echo -e "\tAPPVERSION=\"$MANTLE_LATEST_TAG\""
+        echo -e "\tCHARTVERSION=\"$MANTLE_CLUSTER_WIDE_HELM_CHART_NEXT_VERSION\""
         echo -e "\tgit switch main"
         echo -e "\tgit pull"
         echo -e "\tgit" 'switch -c bump-mantle-cluster-wide-chart-${CHARTVERSION}'
