@@ -138,8 +138,8 @@ case-mantle-cluster-wide-helm-chart(){
         echo -e "\tgit switch main"
         echo -e "\tgit pull"
         echo -e "\tgit" 'switch -c bump-mantle-cluster-wide-chart-${CHARTVERSION}'
-        echo -e "\tsed" '-r -i "s/appVersion: \"[[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+\"/appVersion: \"${APPVERSION}\"/g" charts/mantle-cluster-wide/Chart.yaml'
-        echo -e "\tsed" '-r -i "s/^version: [[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+/version: ${CHARTVERSION}/g" charts/mantle-cluster-wide/Chart.yaml'
+        echo -e "\tsed" '-r -i "s/appVersion: \"[[:digit:]]+(\.[[:digit:]]+)*\"/appVersion: \"${APPVERSION}\"/g" charts/mantle-cluster-wide/Chart.yaml'
+        echo -e "\tsed" '-r -i "s/^version: [[:digit:]]+(\.[[:digit:]]+)*/version: ${CHARTVERSION}/g" charts/mantle-cluster-wide/Chart.yaml'
         echo -e "\tgit" 'commit -a -s -m "Bump mantle-cluster-wide chart version to ${CHARTVERSION}"'
         echo -e "\tgit" 'push --set-upstream origin bump-mantle-cluster-wide-chart-${CHARTVERSION}'
         echo
