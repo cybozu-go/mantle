@@ -49,8 +49,14 @@ case-mantle(){
         echo "$MANTLE_PRS"
         echo
         echo "The current version is $MANTLE_LATEST_TAG"
-        echo -n "Next version? (only numbers and dots accepted) "
-        read NEXT_MANTLE_VERSION
+        while :; do
+            echo -n "Next version? (only numbers and dots accepted) "
+            read NEXT_MANTLE_VERSION
+            if [[ "$NEXT_MANTLE_VERSION" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+                break
+            fi
+            echo "ERROR: Version must contain only numbers and dots (e.g. 1.2.3). Please try again."
+        done
         echo "Run the following code:"
         echo
         echo -e "\tgit switch main"
