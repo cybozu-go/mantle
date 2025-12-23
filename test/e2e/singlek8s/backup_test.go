@@ -158,12 +158,12 @@ func (test *backupTest) testCase1() {
 
 		By("Checking that the status.conditions of the MantleBackup resource becomes \"SnapshotCaptured\"")
 		Eventually(func() error {
-			ready, err := isMantleBackupSnapshotCaptured(test.tenantNamespace, test.mantleBackupName3)
+			captured, err := isMantleBackupSnapshotCaptured(test.tenantNamespace, test.mantleBackupName3)
 			if err != nil {
 				return err
 			}
-			if !ready {
-				return fmt.Errorf("not ready")
+			if !captured {
+				return fmt.Errorf("not captured")
 			}
 			return nil
 		}).Should(Succeed())
@@ -223,9 +223,9 @@ func (test *backupTest) testCase1() {
 		}).Should(Succeed())
 
 		By("Checking that the status.conditions of the MantleBackup resource remain \"SnapshotCaptured\"")
-		ready, err := isMantleBackupSnapshotCaptured(test.tenantNamespace, test.mantleBackupName3)
+		captured, err := isMantleBackupSnapshotCaptured(test.tenantNamespace, test.mantleBackupName3)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(ready).To(Equal(true))
+		Expect(captured).To(Equal(true))
 	})
 
 	It("should delete MantleBackup resource", func() {

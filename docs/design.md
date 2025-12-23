@@ -134,7 +134,7 @@ spec:
   expire: 2w # when the MantleBackup should expire.
 status:
   conditions:
-    # The corresponding backup data is ready to use if `status` is "True"
+    # The corresponding backup data has been captured if `status` is "True".
     - type: "SnapshotCaptured"
       status: "True"
 ```

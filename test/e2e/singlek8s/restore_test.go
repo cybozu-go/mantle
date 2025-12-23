@@ -457,7 +457,7 @@ func (test *restoreTest) testCloneImageFromBackup() {
 			}
 
 			if !backup.IsSnapshotCaptured() {
-				return fmt.Errorf("backup is not ready")
+				return fmt.Errorf("backup is not captured")
 			}
 			return nil
 		}).Should(Succeed())
