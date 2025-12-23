@@ -48,7 +48,7 @@ case-mantle(){
         echo
         echo "$MANTLE_PRS"
         echo
-        echo "The current version is" $MANTLE_LATEST_TAG
+        echo "The current version is $MANTLE_LATEST_TAG"
         echo -n "Next version? (only numbers and dots accepted) "
         read NEXT_MANTLE_VERSION
         echo "Run the following code:"
