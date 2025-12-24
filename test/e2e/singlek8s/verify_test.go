@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"slices"
 
+	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/controller"
 	"github.com/cybozu-go/mantle/test/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 )
 
 type verifyTest struct {
@@ -64,14 +66,14 @@ func (test *verifyTest) testVerificationFailure(ctx SpecContext) {
 	Expect(err).NotTo(HaveOccurred())
 
 	By("confirming that the MantleBackup fails in verification")
+	// Get MB
+	mb, err := getMB(test.tenantNamespace, mantleBackupName)
+	Expect(err).NotTo(HaveOccurred())
 	Eventually(ctx, func(g Gomega) {
-		// Get MB
-		mb, err := getMB(test.tenantNamespace, mantleBackupName)
-		Expect(err).NotTo(HaveOccurred())
-
 		// List verify Pods
 		verifyJobName := controller.MakeVerifyJobName(mb)
-		stdout, _, err := kubectl("get", "pod", "-n", cephCluster1Namespace, "-l", "job-name="+verifyJobName, "-o", "json")
+		stdout, _, err := kubectl("get", "pod", "-n", cephCluster1Namespace,
+			"-l", "batch.kubernetes.io/job-name="+verifyJobName, "-o", "json")
 		g.Expect(err).NotTo(HaveOccurred())
 		podList := corev1.PodList{}
 		err = json.Unmarshal(stdout, &podList)
@@ -84,10 +86,24 @@ func (test *verifyTest) testVerificationFailure(ctx SpecContext) {
 		g.Expect(index).NotTo(Equal(-1))
 	}).Should(Succeed())
 
-	By("confirming that the MantleBackup doesn't have Verified condition")
-	mb, err := getMB(test.tenantNamespace, mantleBackupName)
-	Expect(err).NotTo(HaveOccurred())
-	Expect(mb.IsVerified()).To(BeFalse())
+	By("confirming that the MantleBackup has Verified=False condition eventually")
+	Eventually(ctx, func(g Gomega) {
+		mb, err := getMB(test.tenantNamespace, mantleBackupName)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(mb.IsVerified()).To(BeFalse())
+		g.Expect(meta.IsStatusConditionFalse(mb.Status.Conditions, mantlev1.BackupConditionVerified)).To(BeTrue())
+	}).Should(Succeed())
+
+	By("confirming that the number of the verify Pods is equal to or less than 1", func() {
+		verifyJobName := controller.MakeVerifyJobName(mb)
+		stdout, _, err := kubectl("get", "pod", "-n", cephCluster1Namespace,
+			"-l", "batch.kubernetes.io/job-name="+verifyJobName, "-o", "json")
+		Expect(err).NotTo(HaveOccurred())
+		podList := corev1.PodList{}
+		err = json.Unmarshal(stdout, &podList)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(len(podList.Items)).To(BeNumerically("<=", 1))
+	})
 
 	By("confirming that the MantleRestore never becomes ready")
 	Expect(isMantleRestoreReady(test.tenantNamespace, mantleRestoreName)).To(BeFalse())
