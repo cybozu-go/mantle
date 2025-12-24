@@ -121,7 +121,7 @@ func (test *restoreTest) testRestore() {
 		}).Should(BeTrue())
 	})
 
-	It("should wait for the MantleBackup to be ReadyToUse", func() {
+	It("should wait for the MantleBackup to be SnapshotCaptured", func() {
 		test.cleanup()
 
 		err := applyMantleBackupTemplate(test.tenantNamespace, test.pvcName, test.mantleBackupName1)
@@ -456,8 +456,8 @@ func (test *restoreTest) testCloneImageFromBackup() {
 				return err
 			}
 
-			if !backup.IsReady() {
-				return fmt.Errorf("backup is not ready")
+			if !backup.IsSnapshotCaptured() {
+				return fmt.Errorf("backup is not captured")
 			}
 			return nil
 		}).Should(Succeed())

@@ -156,14 +156,14 @@ func (test *backupTest) testCase1() {
 			return checkSnapshotExist(cephCluster1Namespace, test.poolName, imageName, test.mantleBackupName3)
 		}).Should(Succeed())
 
-		By("Checking that the status.conditions of the MantleBackup resource becomes \"ReadyToUse\"")
+		By("Checking that the status.conditions of the MantleBackup resource becomes \"SnapshotCaptured\"")
 		Eventually(func() error {
-			ready, err := isMantleBackupReady(test.tenantNamespace, test.mantleBackupName3)
+			captured, err := isMantleBackupSnapshotCaptured(test.tenantNamespace, test.mantleBackupName3)
 			if err != nil {
 				return err
 			}
-			if !ready {
-				return fmt.Errorf("not ready")
+			if !captured {
+				return fmt.Errorf("not captured")
 			}
 			return nil
 		}).Should(Succeed())
@@ -222,10 +222,10 @@ func (test *backupTest) testCase1() {
 			return fmt.Errorf("PVC %s still exists. stdout: %s", test.pvcName2, stdout)
 		}).Should(Succeed())
 
-		By("Checking that the status.conditions of the MantleBackup resource remain \"ReadyToUse\"")
-		ready, err := isMantleBackupReady(test.tenantNamespace, test.mantleBackupName3)
+		By("Checking that the status.conditions of the MantleBackup resource remain \"SnapshotCaptured\"")
+		captured, err := isMantleBackupSnapshotCaptured(test.tenantNamespace, test.mantleBackupName3)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(ready).To(Equal(true))
+		Expect(captured).To(Equal(true))
 	})
 
 	It("should delete MantleBackup resource", func() {
