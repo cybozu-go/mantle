@@ -2413,6 +2413,32 @@ func (r *MantleBackupReconciler) createOrUpdateVerifyJob(ctx context.Context, jo
 		job.SetLabels(labels)
 
 		job.Spec.BackoffLimit = ptr.To(int32(65535))
+
+		/*
+			According to the e2fsck man page:
+
+			> The exit code returned by e2fsck is the sum of the following conditions:
+			>      0    - No errors
+			>      1    - File system errors corrected
+			>      2    - File system errors corrected, system should
+			>             be rebooted
+			>      4    - File system errors left uncorrected
+			>      8    - Operational error
+			>      16   - Usage or syntax error
+			>      32   - E2fsck canceled by user request
+			>      128  - Shared library error
+
+			We should retry e2fsck when it's canceled by signals like SIGTERM or
+			SIGINT, so the expected failure exit codes should NOT include
+			numbers that have bit 5 (value 32) set. In addition, when e2fsck is
+			killed by SIGKILL, it will return a code larger than 128.  We should
+			retry in that case as well. To sum up, we should set the expected
+			failure exit codes to [1,32).
+		*/
+		expectedFailureExitCodes := []int32{}
+		for i := 1; i < 32; i++ {
+			expectedFailureExitCodes = append(expectedFailureExitCodes, int32(i))
+		}
 		job.Spec.PodFailurePolicy = &batchv1.PodFailurePolicy{
 			Rules: []batchv1.PodFailurePolicyRule{
 				{
@@ -2420,7 +2446,7 @@ func (r *MantleBackupReconciler) createOrUpdateVerifyJob(ctx context.Context, jo
 					OnExitCodes: &batchv1.PodFailurePolicyOnExitCodesRequirement{
 						ContainerName: ptr.To("verify"),
 						Operator:      batchv1.PodFailurePolicyOnExitCodesOpIn,
-						Values:        []int32{1, 2, 3, 4, 5, 6, 7}, // File system errors
+						Values:        expectedFailureExitCodes,
 					},
 				},
 			},
