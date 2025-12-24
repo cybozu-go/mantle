@@ -321,10 +321,10 @@ do-test-multik8s: $(GINKGO)
 	$(GINKGO) --fail-fast -v $(GINKGO_FLAGS) multik8s; \
 	if [ "$$?" -ne 0 ]; then \
 		echo "Controller logs for $(MINIKUBE_PROFILE_PRIMARY):"; \
-		$${KUBECTL_PRIMARY} logs --tail 1000 -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle -c mantle; \
+		$${KUBECTL_PRIMARY} logs --tail 1000 -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle,app.kubernetes.io/component=controller -c mantle; \
 		echo ""; \
 		echo "Controller logs for $(MINIKUBE_PROFILE_SECONDARY):"; \
-		$${KUBECTL_SECONDARY}  logs --tail 1000 -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle -c mantle; \
+		$${KUBECTL_SECONDARY} logs --tail 1000 -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle,app.kubernetes.io/component=controller -c mantle; \
 		echo ""; \
 		echo "Primary MBs"; \
 		$${KUBECTL_PRIMARY} get mantlebackups -A -o yaml; \
