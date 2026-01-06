@@ -38,6 +38,7 @@ func (f *FakeRBD) RBDClone(pool, srcImage, srcSnap, dstImage, features string) e
 	if f.err != nil {
 		return f.err
 	}
+
 	return nil
 }
 
@@ -45,6 +46,7 @@ func (f *FakeRBD) RBDInfo(pool, image string) (*ceph.RBDImageInfo, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
+
 	return nil, nil
 }
 
@@ -52,6 +54,7 @@ func (f *FakeRBD) RBDLs(pool string) ([]string, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
+
 	return nil, nil
 }
 
@@ -86,6 +89,7 @@ func (f *FakeRBD) RBDLockLs(pool, image string) ([]*ceph.RBDLock, error) {
 	}
 
 	key := pool + "/" + image
+
 	return f.locks[key], nil
 }
 
@@ -100,6 +104,7 @@ func (f *FakeRBD) RBDLockRm(pool, image string, lock *ceph.RBDLock) error {
 			f.locks[key] = slices.DeleteFunc(f.locks[key], func(r *ceph.RBDLock) bool {
 				return r.LockID == lock.LockID && r.Locker == lock.Locker
 			})
+
 			return nil
 		}
 	}
@@ -111,6 +116,7 @@ func (f *FakeRBD) RBDRm(pool, image string) error {
 	if f.err != nil {
 		return f.err
 	}
+
 	return nil
 }
 
@@ -118,6 +124,7 @@ func (f *FakeRBD) RBDTrashMv(pool, image string) error {
 	if f.err != nil {
 		return f.err
 	}
+
 	return nil
 }
 
@@ -125,6 +132,7 @@ func (f *FakeRBD) CephRBDTaskAddTrashRemove(pool, image string) error {
 	if f.err != nil {
 		return f.err
 	}
+
 	return nil
 }
 
@@ -157,6 +165,7 @@ func (f *FakeRBD) RBDSnapLs(pool, image string) ([]ceph.RBDSnapshot, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
+
 	return f.snapshots[pool+"/"+image], nil
 }
 

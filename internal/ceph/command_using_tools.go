@@ -33,5 +33,6 @@ func (c *commandToolsImpl) execute(cephCommand ...string) ([]byte, []byte, error
 	command.Stderr = &stderr
 
 	err := command.Run()
+
 	return stdout.Bytes(), stderr.Bytes(), err
 }

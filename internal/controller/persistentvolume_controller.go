@@ -60,6 +60,7 @@ func (r *PersistentVolumeReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		if aerrors.IsNotFound(err) {
 			return ctrl.Result{}, nil
 		}
+
 		return ctrl.Result{}, fmt.Errorf("failed to get PersistentVolume: %w", err)
 	}
 
@@ -74,10 +75,12 @@ func (r *PersistentVolumeReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		if errors.Is(err, errEmptyClusterID) {
 			return ctrl.Result{}, nil
 		}
+
 		return ctrl.Result{}, err
 	}
 	if clusterID != r.managedCephClusterID {
 		logger.Info("PV is not provisioned by the target Ceph cluster", "pv", pv.Name, "clusterID", clusterID)
+
 		return ctrl.Result{}, nil
 	}
 

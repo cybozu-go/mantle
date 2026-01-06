@@ -157,6 +157,7 @@ var _ = Describe("full backup", Label("full-backup"), func() {
 						return nil
 					}
 				}
+
 				return errors.New("pod not found or not running")
 			}).Should(Succeed())
 
@@ -174,6 +175,7 @@ var _ = Describe("full backup", Label("full-backup"), func() {
 						}
 					}
 				}
+
 				return errors.New("expected event not found")
 			}).Should(Succeed())
 

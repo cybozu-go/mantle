@@ -164,11 +164,14 @@ func (r *MantleBackupReconciler) removeRBDSnapshot(ctx context.Context, poolName
 		if findErr == nil || !errors.Is(findErr, ceph.ErrSnapshotNotFound) {
 			err := errors.Join(rmErr, findErr)
 			logger.Error(err, "failed to remove rbd snapshot", "poolName", poolName, "imageName", imageName, "snapshotName", snapshotName)
+
 			return fmt.Errorf("failed to remove rbd snapshot: %w", err)
 		}
 		logger.Info("rbd snapshot has already been removed", "poolName", poolName, "imageName", imageName, "snapshotName", snapshotName)
+
 		return nil
 	}
+
 	return nil
 }
 
@@ -178,8 +181,10 @@ func (r *MantleBackupReconciler) createRBDSnapshot(ctx context.Context, poolName
 	snap, findErr := ceph.FindRBDSnapshot(r.ceph, poolName, imageName, backup.Name)
 	if findErr != nil {
 		logger.Error(errors.Join(createErr, findErr), "failed to find rbd snapshot")
+
 		return nil, errors.Join(createErr, findErr)
 	}
+
 	return snap, nil
 }
 
@@ -188,10 +193,12 @@ func (r *MantleBackupReconciler) checkPVCInManagedCluster(ctx context.Context, p
 	clusterID, err := getCephClusterIDFromPVC(ctx, r.Client, pvc)
 	if err != nil {
 		logger.Error(err, "failed to get clusterID from PVC", "namespace", pvc.Namespace, "name", pvc.Name)
+
 		return err
 	}
 	if clusterID != r.managedCephClusterID {
 		logger.Info("clusterID not matched", "pvc", pvc.Name, "clusterID", clusterID, "managedCephClusterID", r.managedCephClusterID)
+
 		return errSkipProcessing
 	}
 
@@ -205,9 +212,11 @@ func (r *MantleBackupReconciler) isPVCBound(ctx context.Context, pvc *corev1.Per
 			return false, nil
 		} else {
 			logger.Info("PVC phase is neither bound nor pending", "status.phase", pvc.Status.Phase)
+
 			return false, fmt.Errorf("PVC phase is neither bound nor pending (status.phase: %s)", pvc.Status.Phase)
 		}
 	}
+
 	return true, nil
 }
 
@@ -232,6 +241,7 @@ func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *
 	err := r.Get(ctx, types.NamespacedName{Namespace: pvcNamespace, Name: pvcName}, &pvc)
 	if err != nil {
 		logger.Error(err, "failed to get PVC", "namespace", pvcNamespace, "name", pvcName)
+
 		return nil, ctrl.Result{}, fmt.Errorf("failed to get PVC: %w", err)
 	}
 
@@ -250,6 +260,7 @@ func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *
 	}
 	if !ok {
 		logger.Info("waiting for PVC bound.")
+
 		return nil, requeueReconciliation(), nil
 	}
 
@@ -258,6 +269,7 @@ func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *
 	err = r.Get(ctx, types.NamespacedName{Name: pvName}, &pv)
 	if err != nil {
 		logger.Error(err, "failed to get PV", "name", pvName)
+
 		return nil, ctrl.Result{}, err
 	}
 
@@ -297,6 +309,7 @@ func (r *MantleBackupReconciler) expire(ctx context.Context, backup *mantlev1.Ma
 	if time.Now().UTC().After(expireAt) {
 		// already expired, delete it immediately.
 		logger.Info("delete expired backup", "createdAt", backup.Status.CreatedAt, "expire", expire)
+
 		return r.Delete(ctx, backup)
 	}
 
@@ -336,10 +349,12 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	err := r.Get(ctx, req.NamespacedName, &backup)
 	if aerrors.IsNotFound(err) {
 		logger.Info("MantleBackup is not found", "error", err)
+
 		return ctrl.Result{}, nil
 	}
 	if err != nil {
 		logger.Error(err, "failed to get MantleBackup")
+
 		return ctrl.Result{}, err
 	}
 
@@ -362,6 +377,7 @@ func (r *MantleBackupReconciler) reconcileLocalBackup(ctx context.Context, backu
 		logger.Info(
 			"skipping to reconcile the MantleBackup created by a remote mantle-controller to prevent accidental data loss",
 		)
+
 		return ctrl.Result{}, nil
 	}
 
@@ -392,6 +408,7 @@ func (r *MantleBackupReconciler) reconcileLocalBackup(ctx context.Context, backu
 
 		if err := r.Update(ctx, backup); err != nil {
 			logger.Error(err, "failed to add label", "label", labelLocalBackupTargetPVCUID)
+
 			return ctrl.Result{}, err
 		}
 	}
@@ -401,8 +418,10 @@ func (r *MantleBackupReconciler) reconcileLocalBackup(ctx context.Context, backu
 
 		if err := r.Update(ctx, backup); err != nil {
 			logger.Error(err, "failed to add finalizer", "finalizer", MantleBackupFinalizerName)
+
 			return ctrl.Result{}, err
 		}
+
 		return ctrl.Result{}, nil
 	}
 
@@ -429,6 +448,7 @@ func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, back
 		if err := r.verify(ctx, backup); err != nil {
 			return ctrl.Result{}, err
 		}
+
 		return requeueReconciliation(), nil
 	}
 
@@ -472,6 +492,7 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 		logger.Info(
 			"skipping to reconcile the MantleBackup created by a different mantle-controller to prevent accidental data loss",
 		)
+
 		return ctrl.Result{}, nil
 	}
 
@@ -509,6 +530,7 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 		if err := r.verify(ctx, backup); err != nil {
 			return ctrl.Result{}, err
 		}
+
 		return requeueReconciliation(), nil
 	}
 
@@ -792,6 +814,7 @@ func (r *MantleBackupReconciler) checkJobStatus(ctx context.Context, jobName str
 			// The cache must be stale.
 			return false, false, nil
 		}
+
 		return false, false, fmt.Errorf("failed to get Job for checking job status: %w", err)
 	}
 
@@ -840,6 +863,7 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 		pvcJs, err := json.Marshal(target.pvc)
 		if err != nil {
 			logger.Error(err, "failed to marshal PVC")
+
 			return err
 		}
 		backup.Status.PVCManifest = string(pvcJs)
@@ -847,6 +871,7 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 		pvJs, err := json.Marshal(target.pv)
 		if err != nil {
 			logger.Error(err, "failed to marshal PV")
+
 			return err
 		}
 		backup.Status.PVManifest = string(pvJs)
@@ -864,9 +889,11 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 
 		meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
 			Type: mantlev1.BackupConditionReadyToUse, Status: metav1.ConditionTrue, Reason: mantlev1.ConditionReasonReadyToUseNoProblem})
+
 		return nil
 	}); err != nil {
 		logger.Error(err, "failed to update MantleBackup status", "status", backup.Status)
+
 		return err
 	}
 	logger.Info("succeeded to create a backup")
@@ -878,6 +905,7 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 // is created by the secondary mantle.
 func isCreatedWhenMantleControllerWasSecondary(backup *mantlev1.MantleBackup) bool {
 	_, ok := backup.Annotations[annotRemoteUID]
+
 	return ok
 }
 
@@ -913,6 +941,7 @@ func (r *MantleBackupReconciler) finalizeStandalone(
 	controllerutil.RemoveFinalizer(backup, MantleBackupFinalizerName)
 	if err := r.Update(ctx, backup); err != nil {
 		logger.Error(err, "failed to remove finalizer", "finalizer", MantleBackupFinalizerName)
+
 		return ctrl.Result{}, err
 	}
 	logger.Info("succeeded to delete a backup")
@@ -950,6 +979,7 @@ func (r *MantleBackupReconciler) finalizeSecondary(
 	controllerutil.RemoveFinalizer(backup, MantleBackupFinalizerName)
 	if err := r.Update(ctx, backup); err != nil {
 		logger.Error(err, "failed to remove finalizer", "finalizer", MantleBackupFinalizerName)
+
 		return ctrl.Result{}, err
 	}
 
@@ -1061,6 +1091,7 @@ func convertToMap(mantleBackups []mantlev1.MantleBackup) map[string]*mantlev1.Ma
 	for _, mantleBackup := range mantleBackups {
 		m[mantleBackup.GetName()] = &mantleBackup
 	}
+
 	return m
 }
 
@@ -1382,6 +1413,7 @@ func (r *MantleBackupReconciler) getPoolAndImageFromStatusPVManifest(backup *man
 	if err := json.Unmarshal([]byte(backup.Status.PVManifest), &pv); err != nil {
 		return "", "", fmt.Errorf("failed to unmarshal status.PVManifest: %w", err)
 	}
+
 	return pv.Spec.CSI.VolumeAttributes["pool"], pv.Spec.CSI.VolumeAttributes["imageName"], nil
 }
 
@@ -1403,6 +1435,7 @@ func (r *MantleBackupReconciler) getNumberOfParts(backup *mantlev1.MantleBackup)
 	if *backup.Status.SnapSize%transferPartSize != 0 {
 		numParts++
 	}
+
 	return int(numParts), nil
 }
 
@@ -1411,6 +1444,7 @@ func (r *MantleBackupReconciler) haveAllExportJobsCompleted(backup *mantlev1.Man
 	if err != nil {
 		return false, fmt.Errorf("failed to get the number of the parts of the exported data: %w", err)
 	}
+
 	return largestCompletedPartNum+1 == limit, nil
 }
 
@@ -1440,8 +1474,10 @@ func (r *MantleBackupReconciler) handleCompletedUploadJobs(ctx context.Context, 
 		if err := r.Delete(ctx, &pvc); err != nil && !aerrors.IsNotFound(err) {
 			return fmt.Errorf("failed to delete export data PVC: %s/%s: %w", pvc.GetNamespace(), pvc.GetName(), err)
 		}
+
 		return nil
 	}
+
 	return r.handleCompletedJobsOfComponent(
 		ctx,
 		backup,
@@ -1578,6 +1614,7 @@ func ExtractPartNumFromComponentJobName(componentPrefix string, jobName string, 
 	if err != nil {
 		return 0, false
 	}
+
 	return partNum, true
 }
 
@@ -1953,6 +1990,7 @@ func (r *MantleBackupReconciler) startImport(
 		return ctrl.Result{}, fmt.Errorf("failed to check if export data part 0 is already uploaded: %w", err)
 	} else if !uploaded {
 		logger.Info("waiting for the export data to be uploaded", "partNum", 0)
+
 		return requeueReconciliation(), nil
 	}
 
@@ -1976,6 +2014,7 @@ func (r *MantleBackupReconciler) startImport(
 	}
 	if !succeed {
 		logger.Info("the volume is locked by another process", "uid", string(backup.GetUID()))
+
 		return requeueReconciliation(), nil
 	}
 
@@ -2001,6 +2040,7 @@ func (r *MantleBackupReconciler) startImport(
 func (r *MantleBackupReconciler) doesMantleBackupHaveSyncModeAnnot(backup *mantlev1.MantleBackup) bool {
 	annots := backup.GetAnnotations()
 	syncMode, ok := annots[annotSyncMode]
+
 	return ok && (syncMode == syncModeFull || syncMode == syncModeIncremental)
 }
 
@@ -2073,6 +2113,7 @@ func (r *MantleBackupReconciler) isExportDataAlreadyUploaded(
 	if err != nil {
 		return false, fmt.Errorf("failed to check if an object exists in the object storage: %s: %w", key, err)
 	}
+
 	return uploaded, nil
 }
 
@@ -2096,6 +2137,7 @@ func (r *MantleBackupReconciler) updateStatusManifests(
 	if backup.Status.PVManifest != "" || backup.Status.PVCManifest != "" {
 		return nil
 	}
+
 	return updateStatus(ctx, r.Client, backup, func() error {
 		pvJSON, err := json.Marshal(*pv)
 		if err != nil {
@@ -2169,6 +2211,7 @@ func (r *MantleBackupReconciler) unlockVolume(
 			if err := r.ceph.RBDLockRm(poolName, imageName, lock); err != nil {
 				return fmt.Errorf("failed to remove the lock from the volume %s/%s: %w", poolName, imageName, err)
 			}
+
 			return nil
 		}
 	}
@@ -2219,6 +2262,7 @@ func (r *MantleBackupReconciler) reconcileZeroOutJob(
 	if completed {
 		return ctrl.Result{}, nil
 	}
+
 	return requeueReconciliation(), nil
 }
 
@@ -2289,6 +2333,7 @@ func (r *MantleBackupReconciler) createOrUpdateStaticPV(
 
 		return nil
 	})
+
 	return err
 }
 
@@ -2333,6 +2378,7 @@ func (r *MantleBackupReconciler) createOrUpdateStaticPVC(
 
 		return nil
 	})
+
 	return err
 }
 
@@ -2396,6 +2442,7 @@ blkdiscard -z /dev/zeroout-rbd
 
 		return nil
 	})
+
 	return err
 }
 
@@ -2491,6 +2538,7 @@ func (r *MantleBackupReconciler) createOrUpdateVerifyJob(ctx context.Context, jo
 
 		return nil
 	})
+
 	return err
 }
 
@@ -2504,12 +2552,14 @@ func (r *MantleBackupReconciler) hasZeroOutJobCompleted(ctx context.Context, bac
 		if aerrors.IsNotFound(err) {
 			return false, nil // The cache must be stale. Let's just requeue.
 		}
+
 		return false, err
 	}
 
 	if IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete) {
 		return true, nil
 	}
+
 	return false, nil
 }
 
@@ -2550,6 +2600,7 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 	}
 	if !uploaded {
 		logger.Info("export data for the next part is not yet uploaded", "partNum", partNum)
+
 		return requeueReconciliation(), nil
 	}
 
@@ -2795,6 +2846,7 @@ func (r *MantleBackupReconciler) markSecondaryReadyToUse(
 			Status: metav1.ConditionTrue,
 			Reason: mantlev1.ConditionReasonReadyToUseNoProblem,
 		})
+
 		return nil
 	}); err != nil {
 		return fmt.Errorf("failed to update MantleBackup status: %w", err)
@@ -2861,6 +2913,7 @@ func (r *MantleBackupReconciler) getNumberOfPartsForResourceDeletion(backup *man
 	if backup.Status.SnapSize == nil || backup.Status.TransferPartSize == nil {
 		return 0, nil
 	}
+
 	return r.getNumberOfParts(backup)
 }
 
@@ -2925,6 +2978,7 @@ func (r *MantleBackupReconciler) deleteVerifyJob(ctx context.Context, backup *ma
 	}); err != nil && !aerrors.IsNotFound(err) {
 		return fmt.Errorf("failed to delete verify Job: %s/%s: %w", job.GetNamespace(), job.GetName(), err)
 	}
+
 	return nil
 }
 
@@ -2934,6 +2988,7 @@ func (r *MantleBackupReconciler) deleteVerifyPV(ctx context.Context, backup *man
 	if err := r.Delete(ctx, &pv); err != nil && !aerrors.IsNotFound(err) {
 		return fmt.Errorf("failed to delete verify PV: %w", err)
 	}
+
 	return nil
 }
 
@@ -2944,6 +2999,7 @@ func (r *MantleBackupReconciler) deleteVerifyPVC(ctx context.Context, backup *ma
 	if err := r.Delete(ctx, &pvc); err != nil && !aerrors.IsNotFound(err) {
 		return fmt.Errorf("failed to delete verify PVC: %w", err)
 	}
+
 	return nil
 }
 
@@ -2962,6 +3018,7 @@ func (r *MantleBackupReconciler) deleteVerifyRBDImage(backup *mantlev1.MantleBac
 		return errors.New("pool name is missing in the PV manifest")
 	}
 	image := MakeVerifyImageName(backup)
+
 	return deleteRBDImageAsynchronously(r.ceph, pool, image)
 }
 
@@ -3130,5 +3187,6 @@ func (r *MantleBackupReconciler) updateMantleBackupCondition(
 	if err := r.Client.Status().Patch(ctx, willBeApplied, client.MergeFrom(target)); err != nil {
 		return fmt.Errorf("failed to update MantleBackup condition by patch: %w", err)
 	}
+
 	return nil
 }

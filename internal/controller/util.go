@@ -66,6 +66,7 @@ func createCloneByPV(ctx context.Context, cephCmd ceph.CephCmd, pv *corev1.Persi
 
 		if info.Parent.Pool == pool && info.Parent.Image == bkImage && info.Parent.Snapshot == snapshotName {
 			logger.Info("image already exists", "image", cloneName)
+
 			return nil
 		}
 		// If the clone image already exists but is not a clone of the snapshot, it returns an error.
@@ -108,6 +109,7 @@ func getCephClusterIDFromPVC(ctx context.Context, k8sClient client.Client, pvc *
 	storageClassName := pvc.Spec.StorageClassName
 	if storageClassName == nil {
 		logger.Info("not managed storage class", "namespace", pvc.Namespace, "pvc", pvc.Name)
+
 		return "", nil
 	}
 
@@ -118,6 +120,7 @@ func getCephClusterIDFromPVC(ctx context.Context, k8sClient client.Client, pvc *
 		if errors.Is(err, errEmptyClusterID) {
 			return "", nil
 		}
+
 		return "", err
 	}
 
@@ -134,6 +137,7 @@ func updateStatus(ctx context.Context, client client.Client, obj client.Object, 
 	if err := client.Status().Update(ctx, obj); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -146,6 +150,7 @@ func IsJobConditionTrue(conditions []batchv1.JobCondition, conditionType batchv1
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -158,6 +163,7 @@ func requeueReconciliation() ctrl.Result {
 	if err != nil {
 		panic(fmt.Sprintf("Set REQUEUE_RECONCILIATION_AFTER properly: %v", err))
 	}
+
 	return ctrl.Result{RequeueAfter: duration}
 }
 

@@ -12,5 +12,6 @@ func Quantity2Str(qStr string) string {
 
 func Quantity2Int(qStr string) uint64 {
 	q := resource.MustParse(qStr)
+
 	return uint64(q.Value())
 }

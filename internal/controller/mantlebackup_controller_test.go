@@ -65,6 +65,7 @@ func getEnvValue(envVarAry []corev1.EnvVar, name string) (string, error) {
 			return env.Value, nil
 		}
 	}
+
 	return "", errors.New("name not found")
 }
 
@@ -77,6 +78,7 @@ func setJobCondition(job *batchv1.Job, condition batchv1.JobConditionType, statu
 		if job.Status.Conditions[i].Type == condition {
 			job.Status.Conditions[i].Status = status
 			updated = true
+
 			break
 		}
 	}
@@ -484,6 +486,7 @@ var _ = Describe("MantleBackup controller", func() {
 						panic(err)
 					}
 					capacity, _ := pvc.Spec.Resources.Requests.Storage().AsInt64()
+
 					return capacity == testutil.FakeRBDSnapshotSize
 				},
 				describe: fmt.Sprintf("CreateOrUpdatePVCRequest contains PVC with spec capacity %d", testutil.FakeRBDSnapshotSize),
@@ -507,6 +510,7 @@ var _ = Describe("MantleBackup controller", func() {
 							panic(err)
 						}
 						secondaryBackups = append(secondaryBackups, &secondaryBackup)
+
 						return &proto.CreateMantleBackupResponse{}, nil
 					})
 			grpcClient.EXPECT().ListMantleBackup(gomock.Any(), gomock.Any()).
@@ -521,6 +525,7 @@ var _ = Describe("MantleBackup controller", func() {
 						if err != nil {
 							panic(err)
 						}
+
 						return &proto.ListMantleBackupResponse{
 							MantleBackupList: data,
 						}, nil
@@ -637,6 +642,7 @@ var _ = Describe("MantleBackup controller", func() {
 					&jobUpload,
 				)
 				g.Expect(aerrors.IsNotFound(err)).To(BeTrue())
+
 				return nil
 			}, "1s").Should(Succeed())
 
@@ -699,6 +705,7 @@ var _ = Describe("MantleBackup controller", func() {
 					Status: metav1.ConditionTrue,
 					Reason: mantlev1.ConditionReasonReadyToUseNoProblem,
 				})
+
 				return nil
 			})
 			Expect(err).NotTo(HaveOccurred())
@@ -868,6 +875,7 @@ func newMantleBackup(
 		Type:   mantlev1.BackupConditionSyncedToRemote,
 		Status: syncedToRemote,
 	})
+
 	return newMB
 }
 
@@ -1166,6 +1174,7 @@ var _ = Describe("SetSynchronizing", func() {
 				if _, ok := target.GetAnnotations()[annotDiffFrom]; ok {
 					return errors.New("diffFrom should not exist")
 				}
+
 				return nil
 			},
 		),
@@ -1187,6 +1196,7 @@ var _ = Describe("SetSynchronizing", func() {
 				if !ok || diffTo != target.GetName() {
 					return errors.New("diffTo is invalid")
 				}
+
 				return nil
 			},
 		),
@@ -1309,6 +1319,7 @@ func createMantleBackupUsingDummyPVC(ctx context.Context, name, ns string) (*man
 	if err := updateStatus(ctx, k8sClient, target, func() error {
 		target.Status.PVManifest = string(dummyPVManifest)
 		target.Status.PVCManifest = string(dummyPVCManifest)
+
 		return nil
 	}); err != nil {
 		return nil, err
@@ -1339,10 +1350,12 @@ func createSnapshotForMantleBackupUsingDummyPVC(
 		backup.Status.SnapID = &snaps[index].Id
 		backup.Status.SnapSize = &snaps[index].Size
 		backup.Status.TransferPartSize = &transferPartSize
+
 		return nil
 	}); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -1529,6 +1542,7 @@ var _ = Describe("export and upload", func() {
 						"app.kubernetes.io/component": labelComponentExportJob,
 					}),
 				})
+
 				return len(jobs.Items), err
 			}
 
@@ -1542,6 +1556,7 @@ var _ = Describe("export and upload", func() {
 				numJobs, err := getNumOfExportJobs(nsController)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(numJobs).To(Equal(1))
+
 				return nil
 			}, "1s").Should(Succeed())
 
@@ -1570,6 +1585,7 @@ var _ = Describe("export and upload", func() {
 				numJobs, err := getNumOfExportJobs(nsController2)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(numJobs).To(Equal(1))
+
 				return nil
 			}).Should(Succeed())
 		})
@@ -1734,6 +1750,7 @@ var _ = Describe("import", func() {
 					if gotError {
 						return gotExist, errors.New("error")
 					}
+
 					return gotExist, nil
 				})
 			uploaded, err := mbr.isExportDataAlreadyUploaded(ctx, &mantlev1.MantleBackup{
@@ -1766,6 +1783,7 @@ var _ = Describe("import", func() {
 				backup.Status.SnapSize = ptr.To(int64(testutil.FakeRBDSnapshotSize))
 				transferPartSize := resource.MustParse("1Gi")
 				backup.Status.TransferPartSize = &transferPartSize
+
 				return nil
 			})
 			Expect(err).NotTo(HaveOccurred())
@@ -1850,6 +1868,7 @@ var _ = Describe("import", func() {
 		Expect(err).NotTo(HaveOccurred())
 		err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, backup, defaultTransferPartSize)
 		Expect(err).NotTo(HaveOccurred())
+
 		return backup
 	}
 	createJob := func(ctx context.Context, name string) {
@@ -2403,6 +2422,7 @@ var _ = Describe("import", func() {
 					}
 					err := k8sClient.Create(ctx, &job)
 					Expect(err).NotTo(HaveOccurred())
+
 					return &job
 				}
 
@@ -2484,10 +2504,12 @@ var _ = Describe("MantleBackupReconciler", func() {
 			for _, lock := range locks {
 				if lock.LockID == lockID {
 					lockExists = true
+
 					break
 				}
 			}
 			Expect(locked).To(Equal(lockExists))
+
 			return locked, nil
 		}
 
@@ -2721,6 +2743,7 @@ var _ = Describe("MantleBackupReconciler", func() {
 					return &cond.Status
 				}
 			}
+
 			return nil
 		}
 

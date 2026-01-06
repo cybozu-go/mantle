@@ -51,6 +51,7 @@ func execAtLocal(cmd string, input []byte, args ...string) ([]byte, []byte, erro
 	}
 
 	err := command.Run()
+
 	return stdout.Bytes(), stderr.Bytes(), err
 }
 
@@ -58,6 +59,7 @@ func execAtPod(ns, pod, cmd string, input []byte, args ...string) ([]byte, []byt
 	if len(kubectlPath) == 0 {
 		panic("KUBECTL environment variable is not set")
 	}
+
 	return execAtLocal(kubectlPath, input, append([]string{"exec", "-n", ns, pod, "--", cmd}, args...)...)
 }
 
@@ -65,6 +67,7 @@ func kubectl(args ...string) ([]byte, []byte, error) {
 	if len(kubectlPath) == 0 {
 		panic("KUBECTL environment variable is not set")
 	}
+
 	return execAtLocal(kubectlPath, nil, args...)
 }
 
@@ -72,6 +75,7 @@ func kubectlWithInput(input []byte, args ...string) ([]byte, []byte, error) {
 	if len(kubectlPath) == 0 {
 		panic("KUBECTL environment variable is not set")
 	}
+
 	return execAtLocal(kubectlPath, input, args...)
 }
 
@@ -84,6 +88,7 @@ func listMantleBackupsByMBCUID(namespace, uid string) ([]mantlev1.MantleBackup, 
 	if err := json.Unmarshal(stdout, &mbs); err != nil {
 		return nil, err
 	}
+
 	return mbs.Items, nil
 }
 
@@ -120,6 +125,7 @@ func applyMantleBackupConfigTemplate(namespace, pvcName, mbcName string) error {
 	if err != nil {
 		return fmt.Errorf("kubectl apply mantlebackupconfig failed. err: %w", err)
 	}
+
 	return nil
 }
 
@@ -129,6 +135,7 @@ func applyMantleBackupTemplate(namespace, pvcName, backupName string) error {
 	if err != nil {
 		return fmt.Errorf("kubectl apply mantlebackup failed. err: %w", err)
 	}
+
 	return nil
 }
 
@@ -138,6 +145,7 @@ func applyMantleRestoreTemplate(namespace, restoreName, backupName string) error
 	if err != nil {
 		return fmt.Errorf("kubectl apply mantlerestore failed. err: %w", err)
 	}
+
 	return nil
 }
 
@@ -147,6 +155,7 @@ func applyPodMountVolumeTemplate(namespace, podName, pvcName string) error {
 	if err != nil {
 		return fmt.Errorf("kubectl apply pod failed. err: %w", err)
 	}
+
 	return nil
 }
 
@@ -156,6 +165,7 @@ func applyPVCTemplate(namespace, name, storageClassName string) error {
 	if err != nil {
 		return fmt.Errorf("kubectl apply pvc failed. err: %w", err)
 	}
+
 	return nil
 }
 
@@ -167,6 +177,7 @@ func applyRBDPoolAndSCTemplate(namespace, poolName, storageClassName string) err
 	if err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -175,12 +186,14 @@ func checkDeploymentReady(namespace, name string) error {
 	if err != nil {
 		return fmt.Errorf("kubectl wait deploy failed. stderr: %s, err: %w", string(stderr), err)
 	}
+
 	return nil
 }
 
 func checkSnapshotExist(namespace, poolName, imageName, backupName string) error {
 	cephCmd := ceph.NewCephCmdWithTools(namespace)
 	_, err := ceph.FindRBDSnapshot(cephCmd, poolName, imageName, backupName)
+
 	return err
 }
 
@@ -189,6 +202,7 @@ func createNamespace(name string) error {
 	if err != nil {
 		return fmt.Errorf("kubectl create ns failed. err: %w", err)
 	}
+
 	return nil
 }
 
@@ -199,6 +213,7 @@ func createRBDImage(namespace, poolName, imageName string, siz uint) error {
 	if err != nil {
 		return fmt.Errorf("rbd create failed. stderr: %s, err: %w", string(stderr), err)
 	}
+
 	return nil
 }
 
@@ -212,6 +227,7 @@ func createRBDCloneImage(namespace, poolName, snapName, cloneName string) error 
 	if err != nil {
 		return fmt.Errorf("rbd clone failed. stderr: %s, err: %w", string(stderr), err)
 	}
+
 	return nil
 }
 
@@ -222,6 +238,7 @@ func removeRBDImage(namespace, poolName, imageName string) error {
 	if err != nil {
 		return fmt.Errorf("rbd rm failed. stderr: %s, err: %w", string(stderr), err)
 	}
+
 	return nil
 }
 
@@ -232,6 +249,7 @@ func createRBDSnap(namespace, poolName, imageName, snapName string) error {
 	if err != nil {
 		return fmt.Errorf("rbd snap create failed. stderr: %s, err: %w", string(stderr), err)
 	}
+
 	return nil
 }
 
@@ -242,6 +260,7 @@ func removeRBDSnap(namespace, poolName, imageName, snapName string) error {
 	if err != nil {
 		return fmt.Errorf("rbd snap rm failed. stderr: %s, err: %w", string(stderr), err)
 	}
+
 	return nil
 }
 
@@ -295,6 +314,7 @@ func removeAllRBDImageAndSnap(namespace, pool string) error {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -330,6 +350,7 @@ func getImageNameFromPVName(pvName string) (string, error) {
 		return "", err
 	}
 	imageName := pv.Spec.CSI.VolumeAttributes["imageName"]
+
 	return imageName, nil
 }
 
@@ -395,6 +416,7 @@ func isMantleBackupReady(namespace, name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+
 	return backup.IsReady(), nil
 }
 
@@ -413,6 +435,7 @@ func isMantleRestoreReady(namespace, name string) bool {
 	if restore.Status.Conditions == nil {
 		return false
 	}
+
 	return restore.IsReady()
 }
 
@@ -510,5 +533,6 @@ func checkJobExists(namespace, jobName string) (bool, error) {
 	found := slices.ContainsFunc(jobList.Items, func(j batchv1.Job) bool {
 		return j.Name == jobName
 	})
+
 	return found, nil
 }

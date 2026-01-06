@@ -215,6 +215,7 @@ func (test *restoreTest) testRestore() {
 		Consistently(func() []byte {
 			data, err := readTestData(test.tenantNamespace, test.mantleRestoreName1)
 			Expect(err).NotTo(HaveOccurred())
+
 			return data
 		}, 30*time.Second).Should(Equal(testData1))
 	})
@@ -328,6 +329,7 @@ func (test *restoreTest) testCleanup() {
 			g.Expect(err).NotTo(HaveOccurred())
 
 			_, err = getRBDInfo(cephCluster1Namespace, test.poolName, imageName)
+
 			return err
 		}, 30*time.Second).Should(Succeed())
 
@@ -459,6 +461,7 @@ func (test *restoreTest) testCloneImageFromBackup() {
 			if !backup.IsReady() {
 				return fmt.Errorf("backup is not ready")
 			}
+
 			return nil
 		}).Should(Succeed())
 

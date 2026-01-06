@@ -71,6 +71,7 @@ func (b *S3Bucket) Exists(ctx context.Context, key string) (bool, error) {
 		if errors.As(err, &notFound) {
 			return false, nil
 		}
+
 		return false, fmt.Errorf("HeadObject failed: %s: %s: %s: %w", b.endpoint, b.bucketName, key, err)
 	}
 
@@ -86,7 +87,9 @@ func (b *S3Bucket) Delete(ctx context.Context, key string) error {
 		if errors.As(err, &notFound) {
 			return nil
 		}
+
 		return fmt.Errorf("Delete failed: %s: %s: %s: %w", b.endpoint, b.bucketName, key, err)
 	}
+
 	return nil
 }

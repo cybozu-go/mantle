@@ -53,6 +53,7 @@ func createMBC(ctx context.Context, mbcName, mbcNamespace, pvcName, schedule, ex
 	if err := k8sClient.Create(ctx, &mbc); err != nil {
 		return err
 	}
+
 	return nil
 }
 

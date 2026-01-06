@@ -158,6 +158,7 @@ func (s *SecondaryServer) CreateMantleBackup(
 		if err := s.client.Status().Update(ctx, &backupReceived); err != nil {
 			return nil, fmt.Errorf("failed to update status of MantleBackup: %w", err)
 		}
+
 		return &proto.CreateMantleBackupResponse{}, nil
 	}
 
@@ -214,6 +215,7 @@ func (s *SecondaryServer) ListMantleBackup(
 	if err != nil {
 		return nil, err
 	}
+
 	return &proto.ListMantleBackupResponse{MantleBackupList: data}, nil
 }
 

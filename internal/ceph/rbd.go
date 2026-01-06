@@ -33,6 +33,7 @@ func (c *cephCmdImpl) RBDInfo(pool, image string) (*RBDImageInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal RBD info: %w, stdout: %s", err, stdout)
 	}
+
 	return imageInfo, nil
 }
 
@@ -104,6 +105,7 @@ func (c *cephCmdImpl) RBDTrashMv(pool, image string) error {
 	if err != nil {
 		return fmt.Errorf("failed to move RBD image to trash: %w, stderr: %s", err, string(stderr))
 	}
+
 	return nil
 }
 
@@ -113,6 +115,7 @@ func (c *cephCmdImpl) CephRBDTaskAddTrashRemove(pool, imageID string) error {
 	if err != nil {
 		return fmt.Errorf("failed to add task to remove the image from trash: %w, stderr: %s", err, string(stderr))
 	}
+
 	return nil
 }
 

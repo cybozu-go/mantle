@@ -17,6 +17,7 @@ func ZeroOutBlock(namespace, deployName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to zero out volume: %w", err)
 	}
+
 	return nil
 }
 
@@ -27,6 +28,7 @@ func WriteRandomBlock(namespace, deployName string, offset, size uint64) error {
 	if err != nil {
 		return fmt.Errorf("failed to write random block: %w", err)
 	}
+
 	return nil
 }
 
@@ -67,7 +69,9 @@ func CompareBlockWithFile(namespace, deployName, filename string) error {
 	if err != nil {
 		showMD5Sum(path.Join(workDir, filename))
 		showMD5Sum(path.Join(workDir, workFilename))
+
 		return fmt.Errorf("the devices having differences: %w", err)
 	}
+
 	return nil
 }

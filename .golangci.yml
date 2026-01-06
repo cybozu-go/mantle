@@ -36,7 +36,6 @@ linters:
     - nestif
     - nilerr
     - nilnil
-    - nlreturn
     - noctx
     - noinlineerr
     - nolintlint

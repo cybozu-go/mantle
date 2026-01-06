@@ -56,6 +56,7 @@ var _ = Describe("Locking", Label("lock"), func() {
 		Eventually(func() error {
 			var err error
 			mb1, err = GetMB(SecondaryK8sCluster, namespace, backupName1)
+
 			return err
 		}).Should(Succeed())
 

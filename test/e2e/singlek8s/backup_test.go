@@ -165,6 +165,7 @@ func (test *backupTest) testCase1() {
 			if !ready {
 				return fmt.Errorf("not ready")
 			}
+
 			return nil
 		}).Should(Succeed())
 	})
@@ -217,8 +218,10 @@ func (test *backupTest) testCase1() {
 				if strings.Contains(string(stderr), kubectlIsNotFoundMessage) {
 					return nil
 				}
+
 				return fmt.Errorf("get pvc %s failed. stderr: %s, err: %w", test.pvcName2, string(stderr), err)
 			}
+
 			return fmt.Errorf("PVC %s still exists. stdout: %s", test.pvcName2, stdout)
 		}).Should(Succeed())
 
@@ -250,8 +253,10 @@ func (test *backupTest) testCase1() {
 				if strings.Contains(string(stderr), kubectlIsNotFoundMessage) {
 					return nil
 				}
+
 				return fmt.Errorf("get mantlebackup %s failed. stderr: %s, err: %w", test.mantleBackupName1, string(stderr), err)
 			}
+
 			return fmt.Errorf("MantleBackup resource %s still exists. stdout: %s", test.mantleBackupName1, stdout)
 		}).Should(Succeed())
 	})
@@ -268,8 +273,10 @@ func (test *backupTest) testCase1() {
 				if strings.Contains(string(stderr), kubectlIsNotFoundMessage) {
 					return nil
 				}
+
 				return fmt.Errorf("get mantlebackup %s failed. stderr: %s, err: %w", test.mantleBackupName3, string(stderr), err)
 			}
+
 			return fmt.Errorf("MantleBackup resource %s still exists. stdout: %s", test.mantleBackupName3, stdout)
 		}).Should(Succeed())
 	})
@@ -287,6 +294,7 @@ func (test *backupTest) testCase2() {
 		cronJobName := "mbc-" + string(mbc.UID)
 		Eventually(func() error {
 			_, err := getCronJob(cephCluster1Namespace, cronJobName)
+
 			return err
 		}).Should(Succeed())
 
@@ -302,6 +310,7 @@ func (test *backupTest) testCase2() {
 			if len(mbs) > 0 {
 				return nil
 			}
+
 			return errors.New("MantleBackup not found")
 		}).Should(Succeed())
 	})
@@ -322,19 +331,23 @@ func (test *backupTest) testCase2() {
 			}
 			if len(mbs) != 0 {
 				mb = mbs[0]
+
 				return nil
 			}
+
 			return errors.New("MantleBackup not found")
 		}).Should(Succeed())
 
 		By("Deleting the MantleBackupConfig")
 		Eventually(func() error {
 			_, _, err := kubectl("delete", "mantlebackupconfig", "-n", mbc.Namespace, mbc.Name)
+
 			return err
 		}).Should(Succeed())
 
 		Consistently(func() error {
 			_, err := getMB(mb.Namespace, mb.Name)
+
 			return err
 		}, "5s", "1s").Should(Succeed())
 	})
@@ -350,6 +363,7 @@ func (test *backupTest) testCase2() {
 		cronJobName := "mbc-" + string(mbc.UID)
 		Eventually(func() error {
 			_, err := getCronJob(cephCluster1Namespace, cronJobName)
+
 			return err
 		}).Should(Succeed())
 
@@ -360,6 +374,7 @@ func (test *backupTest) testCase2() {
 		By("Waiting for a CronJob to be created")
 		Eventually(func() error {
 			_, err := getCronJob(cephCluster1Namespace, cronJobName)
+
 			return err
 		}).Should(Succeed())
 	})

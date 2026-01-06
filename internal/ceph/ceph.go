@@ -27,6 +27,7 @@ func NewRBDTimeStamp(t time.Time) RBDTimeStamp {
 func (t *RBDTimeStamp) UnmarshalJSON(data []byte) error {
 	var err error
 	t.Time, err = time.Parse("Mon Jan  2 15:04:05 2006", strings.Trim(string(data), `"`))
+
 	return err
 }
 
@@ -79,5 +80,6 @@ func NewCephCmdWithTools(namespace string) CephCmd {
 	if len(envKubectlPath) == 0 {
 		panic("KUBECTL environment variable is not set")
 	}
+
 	return NewCephCmdWithToolsAndCustomKubectl([]string{envKubectlPath}, namespace)
 }

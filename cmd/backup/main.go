@@ -77,6 +77,7 @@ func fetchJobID() (string, error) {
 	if len(jobName) < 8 {
 		return "", fmt.Errorf("the length of JOB_NAME must be >= 8")
 	}
+
 	return jobName[len(jobName)-8:], nil
 }
 
@@ -127,6 +128,7 @@ func createMantleBackup(ctx context.Context, cli client.Client, mbc *mantlev1.Ma
 		logger.Info("a new MantleBackup resource created",
 			"mbName", mbName, "mbNamespace", mbNamespace,
 			"mbcName", mbcName, "mbcNamespace", mbcNamespace)
+
 		return nil
 	}
 	if !errors.IsAlreadyExists(err) {
@@ -151,5 +153,6 @@ func createMantleBackup(ctx context.Context, cli client.Client, mbc *mantlev1.Ma
 	logger.Info("MantleBackup already exists",
 		"mbName", mbName, "mbNamespace", mbNamespace,
 		"mbcName", mbcName, "mbcNamespace", mbcNamespace)
+
 	return nil
 }

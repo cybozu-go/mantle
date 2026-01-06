@@ -20,5 +20,6 @@ func GetUniqueName(prefix string) string {
 		return GetUniqueName(prefix)
 	}
 	usedResourceNames[name] = true
+
 	return name
 }
