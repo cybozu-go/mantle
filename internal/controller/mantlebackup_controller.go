@@ -227,7 +227,7 @@ type snapshotTarget struct {
 	poolName  string
 }
 
-var errSkipProcessing = fmt.Errorf("skip processing")
+var errSkipProcessing = errors.New("skip processing")
 
 func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *mantlev1.MantleBackup) (
 	*snapshotTarget,
@@ -247,7 +247,7 @@ func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *
 
 	// Return an error if the PVC has been re-created after the first call.
 	if uid, ok := backup.GetLabels()[labelLocalBackupTargetPVCUID]; ok && uid != string(pvc.GetUID()) {
-		return nil, ctrl.Result{}, fmt.Errorf("PVC UID does not match the backup target")
+		return nil, ctrl.Result{}, errors.New("PVC UID does not match the backup target")
 	}
 
 	if err := r.checkPVCInManagedCluster(ctx, &pvc); err != nil {
@@ -275,11 +275,11 @@ func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *
 
 	imageName, ok := pv.Spec.CSI.VolumeAttributes["imageName"]
 	if !ok {
-		return nil, ctrl.Result{}, fmt.Errorf("failed to get imageName from PV")
+		return nil, ctrl.Result{}, errors.New("failed to get imageName from PV")
 	}
 	poolName, ok := pv.Spec.CSI.VolumeAttributes["pool"]
 	if !ok {
-		return nil, ctrl.Result{}, fmt.Errorf("failed to get pool from PV")
+		return nil, ctrl.Result{}, errors.New("failed to get pool from PV")
 	}
 
 	return &snapshotTarget{&pvc, &pv, imageName, poolName}, ctrl.Result{}, nil
@@ -652,7 +652,7 @@ func (r *MantleBackupReconciler) replicateManifests(
 		annotRemoteUID: string(pvc.GetUID()),
 	})
 	pvcSent.Spec = *pvc.Spec.DeepCopy()
-	capacity, err := resource.ParseQuantity(fmt.Sprintf("%d", *backup.Status.SnapSize))
+	capacity, err := resource.ParseQuantity(strconv.FormatInt(*backup.Status.SnapSize, 10))
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to parse quantity: %w", err)
 	}
@@ -1933,7 +1933,7 @@ func (r *MantleBackupReconciler) createOrUpdateUploadJobs(
 					container.Env,
 					corev1.EnvVar{
 						Name:  "CERT_FILE",
-						Value: fmt.Sprintf("/mantle_ca_cert/%s", *r.objectStorageSettings.CACertKey),
+						Value: "/mantle_ca_cert/" + *r.objectStorageSettings.CACertKey,
 					},
 				)
 				container.VolumeMounts = append(

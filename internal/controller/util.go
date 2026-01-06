@@ -42,11 +42,11 @@ func createCloneByPV(ctx context.Context, cephCmd ceph.CephCmd, pv *corev1.Persi
 
 	bkImage := pv.Spec.CSI.VolumeAttributes["imageName"]
 	if len(bkImage) == 0 {
-		return fmt.Errorf("imageName not found in PV manifest")
+		return errors.New("imageName not found in PV manifest")
 	}
 	pool := pv.Spec.CSI.VolumeAttributes["pool"]
 	if len(pool) == 0 {
-		return fmt.Errorf("pool not found in PV manifest")
+		return errors.New("pool not found in PV manifest")
 	}
 
 	images, err := cephCmd.RBDLs(pool)
@@ -61,7 +61,7 @@ func createCloneByPV(ctx context.Context, cephCmd ceph.CephCmd, pv *corev1.Persi
 			return fmt.Errorf("failed to get RBD info: %w", err)
 		}
 		if info.Parent == nil {
-			return fmt.Errorf("failed to get RBD info: parent field is empty")
+			return errors.New("failed to get RBD info: parent field is empty")
 		}
 
 		if info.Parent.Pool == pool && info.Parent.Image == bkImage && info.Parent.Snapshot == snapshotName {

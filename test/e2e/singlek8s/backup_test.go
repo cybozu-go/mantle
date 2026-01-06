@@ -163,7 +163,7 @@ func (test *backupTest) testCase1() {
 				return err
 			}
 			if !ready {
-				return fmt.Errorf("not ready")
+				return errors.New("not ready")
 			}
 
 			return nil

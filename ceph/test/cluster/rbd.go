@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -34,7 +35,7 @@ func ImportDiff(filename, pool, image, rollbackTo, namespace, deployName, pvcNam
 	return RunWithStopPod(namespace, deployName, func() error {
 		if rollbackTo == "" {
 			if len(pvcName) == 0 {
-				return fmt.Errorf("rollbackTo or pvcName must be specified")
+				return errors.New("rollbackTo or pvcName must be specified")
 			}
 			err := zeroOutVolume(namespace, pvcName)
 			if err != nil {

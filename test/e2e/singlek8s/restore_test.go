@@ -2,6 +2,7 @@ package singlek8s
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -459,7 +460,7 @@ func (test *restoreTest) testCloneImageFromBackup() {
 			}
 
 			if !backup.IsReady() {
-				return fmt.Errorf("backup is not ready")
+				return errors.New("backup is not ready")
 			}
 
 			return nil

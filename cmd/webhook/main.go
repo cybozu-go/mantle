@@ -2,8 +2,8 @@ package webhook
 
 import (
 	"crypto/tls"
+	"errors"
 	"flag"
-	"fmt"
 	"net"
 	"strconv"
 
@@ -64,10 +64,10 @@ func init() {
 
 func checkCommandlineArgs() error {
 	if webhookCertPath == "" {
-		return fmt.Errorf("--webhook-cert-path must be specified")
+		return errors.New("--webhook-cert-path must be specified")
 	}
 	if webhookKeyPath == "" {
-		return fmt.Errorf("--webhook-key-path must be specified")
+		return errors.New("--webhook-key-path must be specified")
 	}
 
 	return nil

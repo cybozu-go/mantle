@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -208,7 +209,7 @@ func createNamespace(name string) error {
 func createRBDImage(namespace, poolName, imageName string, siz uint) error {
 	_, stderr, err := kubectl(
 		"-n", namespace, "exec", "deploy/rook-ceph-tools", "--",
-		"rbd", "create", "--size", fmt.Sprintf("%d", siz), poolName+"/"+imageName)
+		"rbd", "create", "--size", strconv.FormatUint(uint64(siz), 10), poolName+"/"+imageName)
 	if err != nil {
 		return fmt.Errorf("rbd create failed. stderr: %s, err: %w", string(stderr), err)
 	}
@@ -475,7 +476,7 @@ func readTestData(namespace, pvc string) ([]byte, error) {
 		return nil, fmt.Errorf("kubectl wait pod failed. err: %w", err)
 	}
 
-	stdout, stderr, err := execAtPod(namespace, podName, "sh", nil, "-c", fmt.Sprintf("cat /mnt/%s", testDataFilename))
+	stdout, stderr, err := execAtPod(namespace, podName, "sh", nil, "-c", "cat /mnt/"+testDataFilename)
 	if err != nil {
 		return nil, fmt.Errorf("read file failed. stderr: %s, err: %w", string(stderr), err)
 	}

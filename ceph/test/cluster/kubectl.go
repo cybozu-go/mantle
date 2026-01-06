@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -42,7 +43,7 @@ func Kubectl(args ...string) ([]byte, error) {
 
 func KubectlWithInput(stdin []byte, args ...string) ([]byte, error) {
 	if len(kubectlCmd) == 0 {
-		return nil, fmt.Errorf("KUBECTL environment variable should be set")
+		return nil, errors.New("KUBECTL environment variable should be set")
 	}
 
 	icon := "⚓"
@@ -183,7 +184,7 @@ func ResizePVC(namespace, pvcName, size string) error {
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	return fmt.Errorf("PVC size is not changed")
+	return errors.New("PVC size is not changed")
 }
 
 func CreateSC(scName, poolName string) error {

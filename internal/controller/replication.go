@@ -242,7 +242,7 @@ func (s *SecondaryServer) SetSynchronizing(
 			return nil, fmt.Errorf("annotated sync-mode is full but req.DiffFrom is not nil: %s", *req.DiffFrom)
 		}
 		if syncMode == syncModeIncremental && req.DiffFrom == nil {
-			return nil, fmt.Errorf("annotated sync-mode is incremental but req.DiffFrom is nil")
+			return nil, errors.New("annotated sync-mode is incremental but req.DiffFrom is nil")
 		}
 	}
 

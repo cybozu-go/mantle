@@ -1376,11 +1376,11 @@ func getSnapshotTargetByDummyMB(
 
 	imageName, ok := pv.Spec.CSI.VolumeAttributes["imageName"]
 	if !ok {
-		return nil, fmt.Errorf("failed to get imageName from PV")
+		return nil, errors.New("failed to get imageName from PV")
 	}
 	poolName, ok := pv.Spec.CSI.VolumeAttributes["pool"]
 	if !ok {
-		return nil, fmt.Errorf("failed to get pool from PV")
+		return nil, errors.New("failed to get pool from PV")
 	}
 
 	return &snapshotTarget{

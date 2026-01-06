@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/ceph"
@@ -249,7 +250,7 @@ func (r *MantleRestoreReconciler) createOrUpdateRestoringPV(ctx context.Context,
 		pv.Labels[labelRestoringPVKey] = labelRestoringPVValue
 
 		pv.Spec = *srcPV.Spec.DeepCopy()
-		capacity, err := resource.ParseQuantity(fmt.Sprintf("%d", *backup.Status.SnapSize))
+		capacity, err := resource.ParseQuantity(strconv.FormatInt(*backup.Status.SnapSize, 10))
 		if err != nil {
 			return fmt.Errorf("failed to parse quantity: %w", err)
 		}
@@ -300,7 +301,7 @@ func (r *MantleRestoreReconciler) createOrUpdateRestoringPVC(ctx context.Context
 		}
 
 		pvc.Spec = *srcPVC.Spec.DeepCopy()
-		capacity, err := resource.ParseQuantity(fmt.Sprintf("%d", *backup.Status.SnapSize))
+		capacity, err := resource.ParseQuantity(strconv.FormatInt(*backup.Status.SnapSize, 10))
 		if err != nil {
 			return fmt.Errorf("failed to parse quantity: %w", err)
 		}

@@ -39,7 +39,6 @@ linters:
     - noctx
     - noinlineerr
     - paralleltest
-    - perfsprint
     - protogetter
     - revive
     - tagliatelle

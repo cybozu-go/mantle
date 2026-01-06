@@ -4,13 +4,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 
 	"github.com/spf13/cobra"
-	"k8s.io/apimachinery/pkg/api/errors"
+	aerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -72,10 +73,10 @@ func getMBName(mbc *mantlev1.MantleBackupConfig, jobID string) string {
 func fetchJobID() (string, error) {
 	jobName, ok := os.LookupEnv("JOB_NAME")
 	if !ok {
-		return "", fmt.Errorf("JOB_NAME not found")
+		return "", errors.New("JOB_NAME not found")
 	}
 	if len(jobName) < 8 {
-		return "", fmt.Errorf("the length of JOB_NAME must be >= 8")
+		return "", errors.New("the length of JOB_NAME must be >= 8")
 	}
 
 	return jobName[len(jobName)-8:], nil
@@ -131,7 +132,7 @@ func createMantleBackup(ctx context.Context, cli client.Client, mbc *mantlev1.Ma
 
 		return nil
 	}
-	if !errors.IsAlreadyExists(err) {
+	if !aerrors.IsAlreadyExists(err) {
 		return fmt.Errorf("couldn't create a MantleBackup: %s: %s: %w", mbName, mbNamespace, err)
 	}
 
