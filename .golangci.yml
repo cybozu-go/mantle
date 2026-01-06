@@ -31,7 +31,6 @@ linters:
     - ireturn
     - maintidx
     - mnd
-    - modernize
     - nestif
     - nilerr
     - nilnil
@@ -53,6 +52,10 @@ linters:
 
           # kubebuiler generates code that triggers godot, so we disable it for the api/ directory.
           - godot
+
+          # modernize rejects omitempty on nested structs, but we admit them due to kubebuiler conventions.
+          # cf. https://github.com/golang/go/issues/76649
+          - modernize
         path: api/*
       - linters:
           - dupl

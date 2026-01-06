@@ -324,8 +324,8 @@ func deleteNamespacedResource(namespace, kind string) error {
 		return fmt.Errorf("kubectl get failed. stderr: %s, err: %w", string(stderr), err)
 	}
 
-	names := strings.Split(string(stdout), " ")
-	for _, name := range names {
+	names := strings.SplitSeq(string(stdout), " ")
+	for name := range names {
 		if name == "" {
 			continue
 		}
