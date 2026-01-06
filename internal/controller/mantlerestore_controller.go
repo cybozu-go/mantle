@@ -143,7 +143,7 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, restore *mantlev1
 	}
 
 	// check if the backup is verified or verification is skipped
-	if skip, ok := backup.GetAnnotations()[mbAnnotationSkipVerifyKey]; !backup.IsVerified() && (!ok || skip != mbAnnotationSkipVerifyValue) {
+	if skip, ok := backup.GetAnnotations()[mbAnnotationSkipVerifyKey]; !backup.IsVerifiedTrue() && (!ok || skip != mbAnnotationSkipVerifyValue) {
 		logger.Info("verification is not completed", "backup", backup.Name, "namespace", backup.Namespace)
 		return requeueReconciliation(), nil
 	}

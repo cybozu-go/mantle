@@ -541,7 +541,7 @@ func WaitMantleBackupVerified(cluster int, namespace, backupName string) {
 		if err != nil {
 			return err
 		}
-		if !mb.IsVerified() {
+		if !mb.IsVerifiedTrue() {
 			return errors.New("status of Verified condition is not True")
 		}
 		return nil
