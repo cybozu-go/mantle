@@ -225,7 +225,7 @@ func (test *backupTest) testCase1() {
 		By("Checking that the status.conditions of the MantleBackup resource remain \"ReadyToUse\"")
 		ready, err := isMantleBackupReady(test.tenantNamespace, test.mantleBackupName3)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(ready).To(Equal(true))
+		Expect(ready).To(BeTrue())
 	})
 
 	It("should delete MantleBackup resource", func() {

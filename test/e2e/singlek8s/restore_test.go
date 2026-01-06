@@ -329,7 +329,7 @@ func (test *restoreTest) testCleanup() {
 
 			_, err = getRBDInfo(cephCluster1Namespace, test.poolName, imageName)
 			return err
-		}, 30*time.Second).Should(BeNil())
+		}, 30*time.Second).Should(Succeed())
 
 		By("deleting the pod")
 		_, _, err = kubectl("delete", "pod", "-n", test.tenantNamespace, podName)

@@ -103,7 +103,7 @@ var _ = Describe("Locking", Label("lock"), func() {
 			var locks []*ceph.RBDLock
 			err = json.Unmarshal(stdout, &locks)
 			g.Expect(err).NotTo(HaveOccurred())
-			g.Expect(locks).To(HaveLen(0))
+			g.Expect(locks).To(BeEmpty())
 		}).Should(Succeed())
 	})
 })

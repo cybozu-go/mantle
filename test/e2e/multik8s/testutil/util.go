@@ -498,7 +498,7 @@ func WriteRandomDataToPV(ctx SpecContext, cluster int, namespace, pvcName string
 	}).Should(Succeed())
 	stdout, _, err := Kubectl(cluster, nil, "logs", "-n", namespace, "job/"+writeJobName)
 	Expect(err).NotTo(HaveOccurred())
-	Expect(stdout).NotTo(HaveLen(0))
+	Expect(stdout).NotTo(BeEmpty())
 	return string(stdout)
 }
 
@@ -700,7 +700,7 @@ func PauseObjectStorage(ctx SpecContext) {
 		exist := slices.ContainsFunc(pods.Items, func(pod corev1.Pod) bool {
 			return strings.HasPrefix(pod.GetName(), RgwDeployName)
 		})
-		g.Expect(exist).NotTo(BeFalse())
+		g.Expect(exist).To(BeTrue())
 	}).Should(Succeed())
 }
 

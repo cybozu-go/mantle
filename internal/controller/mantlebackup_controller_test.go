@@ -612,7 +612,7 @@ var _ = Describe("MantleBackup controller", func() {
 				g.Expect(*jobExport.Spec.Template.Spec.SecurityContext.FSGroup).To(Equal(nonRootFSGroup))
 				g.Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsUser).To(Equal(nonRootUserID))
 				g.Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsGroup).To(Equal(nonRootGroupID))
-				g.Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsNonRoot).To(Equal(true))
+				g.Expect(*jobExport.Spec.Template.Spec.SecurityContext.RunAsNonRoot).To(BeTrue())
 
 				// Make sure FROM_SNAP_NAME is empty because we're performing a full backup.
 				isFromSnapNameFound := false
@@ -677,7 +677,7 @@ var _ = Describe("MantleBackup controller", func() {
 				g.Expect(*jobUpload.Spec.Template.Spec.SecurityContext.FSGroup).To(Equal(nonRootFSGroup))
 				g.Expect(*jobUpload.Spec.Template.Spec.SecurityContext.RunAsUser).To(Equal(nonRootUserID))
 				g.Expect(*jobUpload.Spec.Template.Spec.SecurityContext.RunAsGroup).To(Equal(nonRootGroupID))
-				g.Expect(*jobUpload.Spec.Template.Spec.SecurityContext.RunAsNonRoot).To(Equal(true))
+				g.Expect(*jobUpload.Spec.Template.Spec.SecurityContext.RunAsNonRoot).To(BeTrue())
 
 				// Make sure HTTP_PROXY, HTTPS_PROXY, and NO_PROXY environment variables are correctly set.
 				httpProxy, err := getEnvValue(jobUpload.Spec.Template.Spec.Containers[0].Env, "HTTP_PROXY")
@@ -2788,7 +2788,7 @@ var _ = Describe("MantleBackupReconciler", func() {
 			checkPVC(ctx, backupSuccess, pvc)
 			job := checkJobSpec(ctx, backupSuccess)
 			// Job should not be completed yet
-			Expect(job.Status.Conditions).To(HaveLen(0))
+			Expect(job.Status.Conditions).To(BeEmpty())
 			// `verified` field in status should not be set yet
 			Expect(getVerifyCondition(ctx, backupSuccess)).To(BeNil())
 		})
