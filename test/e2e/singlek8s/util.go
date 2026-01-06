@@ -106,7 +106,6 @@ func getObject[T any](kind, namespace, name string) (*T, error) {
 	return &obj, nil
 }
 
-//nolint:unparam
 func getCronJob(namespace, name string) (*batchv1.CronJob, error) {
 	return getObject[batchv1.CronJob]("cronjob", namespace, name)
 }

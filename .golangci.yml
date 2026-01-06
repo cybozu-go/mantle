@@ -38,7 +38,6 @@ linters:
     - nilnil
     - noctx
     - noinlineerr
-    - nolintlint
     - paralleltest
     - perfsprint
     - protogetter

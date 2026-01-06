@@ -224,7 +224,7 @@ func CreateNamespace(clusterNo int, name string) error {
 	return nil
 }
 
-func ApplyRBDPoolAndSCTemplate(clusterNo int, namespace string) error { //nolint:unparam
+func ApplyRBDPoolAndSCTemplate(clusterNo int, namespace string) error {
 	manifest := fmt.Sprintf(
 		testRBDPoolSCTemplate, namespace,
 		namespace, namespace, namespace, namespace)
