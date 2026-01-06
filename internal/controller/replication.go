@@ -49,7 +49,7 @@ func (s *SecondaryServer) CreateOrUpdatePVC(
 ) (*proto.CreateOrUpdatePVCResponse, error) {
 	// Unmarshal the request
 	var pvcReceived corev1.PersistentVolumeClaim
-	if err := json.Unmarshal(req.Pvc, &pvcReceived); err != nil {
+	if err := json.Unmarshal(req.GetPvc(), &pvcReceived); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal the requested PVC: %w", err)
 	}
 
@@ -115,7 +115,7 @@ func (s *SecondaryServer) CreateMantleBackup(
 	req *proto.CreateMantleBackupRequest,
 ) (*proto.CreateMantleBackupResponse, error) {
 	var backupReceived mantlev1.MantleBackup
-	if err := json.Unmarshal(req.MantleBackup, &backupReceived); err != nil {
+	if err := json.Unmarshal(req.GetMantleBackup(), &backupReceived); err != nil {
 		return nil, err
 	}
 
@@ -205,8 +205,8 @@ func (s *SecondaryServer) ListMantleBackup(
 ) (*proto.ListMantleBackupResponse, error) {
 	var backupList mantlev1.MantleBackupList
 	err := s.client.List(ctx, &backupList, &client.ListOptions{
-		LabelSelector: labels.SelectorFromSet(map[string]string{labelRemoteBackupTargetPVCUID: req.PvcUID}),
-		Namespace:     req.Namespace,
+		LabelSelector: labels.SelectorFromSet(map[string]string{labelRemoteBackupTargetPVCUID: req.GetPvcUID()}),
+		Namespace:     req.GetNamespace(),
 	})
 	if err != nil {
 		return nil, err
@@ -226,7 +226,7 @@ func (s *SecondaryServer) SetSynchronizing(
 	target := mantlev1.MantleBackup{}
 	if err := s.client.Get(
 		ctx,
-		types.NamespacedName{Name: req.Name, Namespace: req.Namespace},
+		types.NamespacedName{Name: req.GetName(), Namespace: req.GetNamespace()},
 		&target,
 	); err != nil {
 		return nil, err
@@ -239,7 +239,7 @@ func (s *SecondaryServer) SetSynchronizing(
 	// make sure sync-mode is correct.
 	if syncMode, ok := target.GetAnnotations()[annotSyncMode]; ok {
 		if syncMode == syncModeFull && req.DiffFrom != nil {
-			return nil, fmt.Errorf("annotated sync-mode is full but req.DiffFrom is not nil: %s", *req.DiffFrom)
+			return nil, fmt.Errorf("annotated sync-mode is full but req.DiffFrom is not nil: %s", req.GetDiffFrom())
 		}
 		if syncMode == syncModeIncremental && req.DiffFrom == nil {
 			return nil, errors.New("annotated sync-mode is incremental but req.DiffFrom is nil")
@@ -251,8 +251,8 @@ func (s *SecondaryServer) SetSynchronizing(
 		if req.DiffFrom == nil {
 			return nil, errors.New("annotated diff-from is not nil but req.DiffFrom is nil")
 		}
-		if *req.DiffFrom != diffFrom {
-			return nil, fmt.Errorf("annotated diff-from is not equal to req.DiffFrom: %s: %s", diffFrom, *req.DiffFrom)
+		if req.GetDiffFrom() != diffFrom {
+			return nil, fmt.Errorf("annotated diff-from is not equal to req.DiffFrom: %s: %s", diffFrom, req.GetDiffFrom())
 		}
 	}
 
@@ -260,13 +260,13 @@ func (s *SecondaryServer) SetSynchronizing(
 		source := mantlev1.MantleBackup{}
 		if err := s.client.Get(
 			ctx,
-			types.NamespacedName{Name: *req.DiffFrom, Namespace: req.Namespace},
+			types.NamespacedName{Name: req.GetDiffFrom(), Namespace: req.GetNamespace()},
 			&source,
 		); err != nil {
 			return nil, err
 		}
 
-		if diffTo, ok := source.GetAnnotations()[annotDiffTo]; ok && diffTo != req.Name {
+		if diffTo, ok := source.GetAnnotations()[annotDiffTo]; ok && diffTo != req.GetName() {
 			return nil, errors.New("diffTo is invalid")
 		}
 
@@ -274,7 +274,7 @@ func (s *SecondaryServer) SetSynchronizing(
 		if annot == nil {
 			annot = map[string]string{}
 		}
-		annot[annotDiffTo] = req.Name
+		annot[annotDiffTo] = req.GetName()
 		source.SetAnnotations(annot)
 
 		if err := s.client.Update(ctx, &source); err != nil {
@@ -290,7 +290,7 @@ func (s *SecondaryServer) SetSynchronizing(
 		annot[annotSyncMode] = syncModeFull
 	} else {
 		annot[annotSyncMode] = syncModeIncremental
-		annot[annotDiffFrom] = *req.DiffFrom
+		annot[annotDiffFrom] = req.GetDiffFrom()
 	}
 	target.SetAnnotations(annot)
 

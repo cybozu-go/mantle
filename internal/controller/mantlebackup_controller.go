@@ -686,7 +686,7 @@ func (r *MantleBackupReconciler) replicateManifests(
 		annotRemoteUID: string(backup.GetUID()),
 	})
 	backupSent.SetLabels(map[string]string{
-		labelLocalBackupTargetPVCUID:  resp.Uid,
+		labelLocalBackupTargetPVCUID:  resp.GetUid(),
 		labelRemoteBackupTargetPVCUID: string(pvc.GetUID()),
 	})
 	backupSent.SetFinalizers([]string{MantleBackupFinalizerName})
@@ -1012,7 +1012,7 @@ func (r *MantleBackupReconciler) prepareForDataSynchronization(
 		return nil, err
 	}
 	secondaryBackups := make([]mantlev1.MantleBackup, 0)
-	err = json.Unmarshal(resp.MantleBackupList, &secondaryBackups)
+	err = json.Unmarshal(resp.GetMantleBackupList(), &secondaryBackups)
 	if err != nil {
 		return nil, err
 	}

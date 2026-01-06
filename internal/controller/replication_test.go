@@ -117,7 +117,7 @@ func (test *replicationUnitTest) testCreateUpdatePVCAfterResizing() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res).NotTo(BeNil())
-		uid := res.Uid
+		uid := res.GetUid()
 
 		By("updating the PVC with the different storage size")
 		// this annotation is to verify that fields besides PVC size are updated
@@ -131,7 +131,7 @@ func (test *replicationUnitTest) testCreateUpdatePVCAfterResizing() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res).NotTo(BeNil())
 
-		Expect(res.Uid).To(Equal(uid))
+		Expect(res.GetUid()).To(Equal(uid))
 
 		By("getting PVC")
 		pvc := &corev1.PersistentVolumeClaim{}
