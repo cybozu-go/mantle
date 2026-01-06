@@ -334,7 +334,7 @@ func getImageNameFromPVName(pvName string) (string, error) {
 }
 
 func getPVFromPVC(namespace, pvcName string) (string, error) {
-	for i := 0; i < 60; i++ {
+	for range 60 {
 		stdout, stderr, err := kubectl("-n", namespace, "get", "pvc", pvcName, "-o", "json")
 		if err != nil {
 			return "", fmt.Errorf("kubectl get pvc failed. stderr: %s, err: %w", string(stderr), err)

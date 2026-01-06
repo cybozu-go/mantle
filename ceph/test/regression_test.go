@@ -73,7 +73,7 @@ func (t *regressionTest) setupEnv() {
 		// creating snapshots
 		// snapshots[0] and snapshots[1] have diff with the image
 		// snapshots[2] and snapshots[3] has no diff with the image
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			err := cluster.MakeRandomFile(t.snapshots[i], int(Quantity2Int("5Mi")))
 			Expect(err).NotTo(HaveOccurred())
 			err = cluster.PushFileToPod(t.snapshots[i], t.namespace, t.srcDeployName, "/mnt/data")

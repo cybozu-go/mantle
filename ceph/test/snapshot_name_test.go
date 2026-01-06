@@ -67,7 +67,7 @@ func (t *snapshotNameTest) setupEnv() {
 		t.dstImageName = imageName
 
 		// creating snapshots
-		for i := 0; i < 2; i++ {
+		for i := range 2 {
 			err = cluster.SnapCreate(t.poolName, t.srcImageName, t.snapshots[i])
 			Expect(err).NotTo(HaveOccurred())
 		}

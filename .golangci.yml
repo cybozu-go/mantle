@@ -29,7 +29,6 @@ linters:
     - godox
     - gosec
     - interfacebloat
-    - intrange
     - ireturn
     - maintidx
     - mnd

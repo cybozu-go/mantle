@@ -1533,7 +1533,7 @@ var _ = Describe("export and upload", func() {
 			}
 
 			// create 5 different MantleBackup resources and call export() for each of them
-			for i := 0; i < 5; i++ {
+			for i := range 5 {
 				createAndExportMantleBackup(ctx, mbr, fmt.Sprintf("target1-%d", i), ns, false, false, nil)
 			}
 
@@ -1583,7 +1583,7 @@ var _ = Describe("export and upload", func() {
 				target1 := createAndExportMantleBackup(ctx, mbr, "target1", ns, false, false, nil)
 				target2 := createAndExportMantleBackup(ctx, mbr, "target2", ns, false, false, nil)
 
-				for partNum := 0; partNum < numOfParts; partNum++ {
+				for partNum := range numOfParts {
 					completeJob(ctx, MakeExportJobName(target1, partNum))
 					runStartExportAndUpload(ctx, target1)
 					runStartExportAndUpload(ctx, target2)
@@ -1661,7 +1661,7 @@ var _ = Describe("export and upload", func() {
 				target2 := createAndExportMantleBackup(ctx, mbr, "target2", ns, false, false, nil)
 
 				// Complete all export Jobs
-				for partNum := 0; partNum < numOfParts; partNum++ {
+				for partNum := range numOfParts {
 					completeJob(ctx, MakeExportJobName(target1, partNum))
 					runStartExportAndUpload(ctx, target1)
 					completeJob(ctx, MakeExportJobName(target2, partNum))
@@ -1669,7 +1669,7 @@ var _ = Describe("export and upload", func() {
 				}
 
 				// Complete upload Jobs and check that they are deleted.
-				for partNum := 0; partNum < numOfParts; partNum++ {
+				for partNum := range numOfParts {
 					completeJob(ctx, MakeUploadJobName(target1, partNum))
 					runStartExportAndUpload(ctx, target1)
 					runStartExportAndUpload(ctx, target2)

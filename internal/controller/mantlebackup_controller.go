@@ -2874,7 +2874,7 @@ func (r *MantleBackupReconciler) deleteAllJobsOfComponent(
 		return fmt.Errorf("failed to get the number of the parts of the exported data: %w", err)
 	}
 
-	for partNum := 0; partNum < numParts; partNum++ {
+	for partNum := range numParts {
 		var job batchv1.Job
 		job.SetName(makeJobName(backup, partNum))
 		job.SetNamespace(r.managedCephClusterID)
@@ -2902,7 +2902,7 @@ func (r *MantleBackupReconciler) deleteAllExportDataPVCs(ctx context.Context, ba
 		return fmt.Errorf("failed to get the number of the parts of the exported data: %w", err)
 	}
 
-	for partNum := 0; partNum < numParts; partNum++ {
+	for partNum := range numParts {
 		pvc := corev1.PersistentVolumeClaim{}
 		pvc.SetName(MakeExportDataPVCName(backup, partNum))
 		pvc.SetNamespace(r.managedCephClusterID)
@@ -3057,7 +3057,7 @@ func (r *MantleBackupReconciler) deleteAllExportedData(ctx context.Context, back
 		return fmt.Errorf("failed to get the number of the parts of the exported data: %w", err)
 	}
 
-	for partNum := 0; partNum < numParts; partNum++ {
+	for partNum := range numParts {
 		key := MakeObjectNameOfExportedData(backup.GetName(), backup.GetAnnotations()[annotRemoteUID], partNum)
 		if err := r.objectStorageClient.Delete(ctx, key); err != nil {
 			return fmt.Errorf("failed to delete exported data in the object storage: %s: %w", key, err)
@@ -3097,7 +3097,7 @@ func (r *MantleBackupReconciler) deleteMiddleSnapshots(backup *mantlev1.MantleBa
 		return fmt.Errorf("failed to list snapshots: %s: %s: %w", pool, image, err)
 	}
 
-	for i := 0; i < numParts; i++ {
+	for i := range numParts {
 		snapIndex := slices.IndexFunc(snaps, func(snap ceph.RBDSnapshot) bool {
 			return snap.Name == MakeMiddleSnapshotName(backup, i*int(transferPartSize))
 		})

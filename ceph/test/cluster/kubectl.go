@@ -165,7 +165,7 @@ func ResizePVC(namespace, pvcName, size string) error {
 		return fmt.Errorf("failed to patch PVC: %w", err)
 	}
 
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		after, err := Kubectl("get", "-n", namespace, "pvc", pvcName, "-o", "jsonpath={.status.capacity.storage}")
 		if err != nil {
 			return fmt.Errorf("failed to get PVC size: %w", err)
