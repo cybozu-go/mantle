@@ -425,7 +425,7 @@ func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, back
 		return result, err
 	}
 
-	if !backup.IsVerified() {
+	if !backup.IsVerifiedTrue() && !backup.IsVerifiedFalse() {
 		if err := r.verify(ctx, backup); err != nil {
 			return ctrl.Result{}, err
 		}

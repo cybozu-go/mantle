@@ -105,6 +105,14 @@ func (test *verifyTest) testVerificationFailure(ctx SpecContext) {
 		Expect(len(podList.Items)).To(BeNumerically("<=", 1))
 	})
 
+	By("confirming that the verify Job is deleted", func() {
+		Eventually(ctx, func(g Gomega) {
+			found, err := checkJobExists(cephCluster1Namespace, controller.MakeVerifyJobName(mb))
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(found).To(BeFalse())
+		}).Should(Succeed())
+	})
+
 	By("confirming that the MantleRestore never becomes ready")
 	Expect(isMantleRestoreReady(test.tenantNamespace, mantleRestoreName)).To(BeFalse())
 }
@@ -135,4 +143,25 @@ func (test *verifyTest) testVerificationSkip(ctx SpecContext) {
 	Eventually(ctx, func(g Gomega) {
 		g.Expect(isMantleRestoreReady(test.tenantNamespace, mantleRestoreName)).To(BeTrue())
 	}).Should(Succeed())
+
+	// We check that the verification indeed failed after we confirm the
+	// MantleRestore is ready, so that we can test that the restoration process
+	// can run concurrently with the verification process.
+	By("confirming that the MantleBackup has Verified=False condition eventually")
+	Eventually(ctx, func(g Gomega) {
+		mb, err := getMB(test.tenantNamespace, mantleBackupName)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(mb.IsVerifiedFalse()).To(BeTrue())
+	}).Should(Succeed())
+
+	By("confirming that the verify Job is deleted eventually", func() {
+		mb, err := getMB(test.tenantNamespace, mantleBackupName)
+		Expect(err).NotTo(HaveOccurred())
+
+		Eventually(ctx, func(g Gomega) {
+			found, err := checkJobExists(cephCluster1Namespace, controller.MakeVerifyJobName(mb))
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(found).To(BeFalse())
+		}).Should(Succeed())
+	})
 }
