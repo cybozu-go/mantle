@@ -110,7 +110,7 @@ type ProxySettings struct {
 	NoProxy    string
 }
 
-// MantleBackupReconciler reconciles a MantleBackup object
+// MantleBackupReconciler reconciles a MantleBackup object.
 type MantleBackupReconciler struct {
 	client.Client
 	Scheme                 *runtime.Scheme

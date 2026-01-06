@@ -12,7 +12,7 @@ import (
 )
 
 // ManagerUtil is a utility interface for managing a controller-runtime manager
-// You can use this to start and stop the manager in a goroutine
+// You can use this to start and stop the manager in a goroutine.
 type ManagerUtil interface {
 	Start()
 	Stop()
@@ -47,14 +47,14 @@ func NewManagerUtil(ctxRoot context.Context, restConfig *rest.Config, schema *ru
 	}
 }
 
-// Start starts the manager in a goroutine
+// Start starts the manager in a goroutine.
 func (m *managerUtilImpl) Start() {
 	go func() {
 		m.errCh <- m.mgr.Start(m.ctx)
 	}()
 }
 
-// Stop stops the manager and waits for it to stop
+// Stop stops the manager and waits for it to stop.
 func (m *managerUtilImpl) Stop() {
 	m.cancel()
 	<-m.errCh

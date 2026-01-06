@@ -33,7 +33,7 @@ const (
 	MantleBackupConfigCronJobNamePrefix          = "mbc-"
 )
 
-// MantleBackupConfigReconciler reconciles a MantleBackupConfig object
+// MantleBackupConfigReconciler reconciles a MantleBackupConfig object.
 type MantleBackupConfigReconciler struct {
 	Client               client.Client
 	Scheme               *runtime.Scheme

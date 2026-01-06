@@ -17,7 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
 
-// PersistentVolumeReconciler reconciles a PersistentVolume object
+// PersistentVolumeReconciler reconciles a PersistentVolume object.
 type PersistentVolumeReconciler struct {
 	client               client.Client
 	Scheme               *runtime.Scheme

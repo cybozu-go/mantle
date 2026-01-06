@@ -102,7 +102,7 @@ func getKubectlInvocation(clusterNo int) ([]string, error) {
 	return strings.Fields(kubectlPrefix), nil
 }
 
-// input can be nil
+// input can be nil.
 func Kubectl(clusterNo int, input []byte, args ...string) ([]byte, []byte, error) {
 	fields, err := getKubectlInvocation(clusterNo)
 	if err != nil {

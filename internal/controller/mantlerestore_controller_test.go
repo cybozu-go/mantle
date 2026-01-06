@@ -435,7 +435,7 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPV() {
 	})
 }
 
-// helper function to get MantleRestore object
+// helper function to get MantleRestore object.
 func (test *mantleRestoreControllerUnitTest) restoreResource() *mantlev1.MantleRestore {
 	return &mantlev1.MantleRestore{
 		ObjectMeta: metav1.ObjectMeta{

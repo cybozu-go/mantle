@@ -20,7 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-// MantleRestoreReconciler reconciles a MantleRestore object
+// MantleRestoreReconciler reconciles a MantleRestore object.
 type MantleRestoreReconciler struct {
 	client               client.Client
 	Scheme               *runtime.Scheme
