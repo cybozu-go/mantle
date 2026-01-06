@@ -441,7 +441,7 @@ func (r *MantleBackupReconciler) reconcileAsPrimary(ctx context.Context, backup 
 		return result, err
 	}
 
-	if !backup.IsVerified() {
+	if !backup.IsVerifiedTrue() && !backup.IsVerifiedFalse() {
 		if err := r.verify(ctx, backup); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -454,7 +454,7 @@ func (r *MantleBackupReconciler) reconcileAsPrimary(ctx context.Context, backup 
 		}
 	}
 
-	if !backup.IsVerified() || !backup.IsSynced() {
+	if (!backup.IsVerifiedTrue() && !backup.IsVerifiedFalse()) || !backup.IsSynced() {
 		return requeueReconciliation(), nil
 	}
 
@@ -505,7 +505,7 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 		}
 	}
 
-	if backup.IsReady() && !backup.IsVerified() {
+	if backup.IsReady() && !backup.IsVerifiedTrue() && !backup.IsVerifiedFalse() {
 		if err := r.verify(ctx, backup); err != nil {
 			return ctrl.Result{}, err
 		}

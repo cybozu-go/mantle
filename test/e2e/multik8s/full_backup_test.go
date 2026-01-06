@@ -272,4 +272,74 @@ var _ = Describe("full backup", Label("full-backup"), func() {
 		// Make sure M0' can be used for restoration.
 		EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName0, restoreName0, writtenDataHash0)
 	})
+
+	It("should handle correctly the case where verify Job fails", func(ctx SpecContext) {
+		namespace := util.GetUniqueName("ns-")
+		pvcName := util.GetUniqueName("pvc-")
+		backupName := util.GetUniqueName("mb-")
+
+		SetupEnvironment(namespace)
+
+		// Create a PVC, a MantleBackup for it, and wait for the MantleBackup to
+		// be synced.  We intentionally write no data to the PVC to make
+		// verification fail.
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
+		WaitMantleBackupSynced(namespace, backupName)
+
+		By("making sure that the MantleBackup has the Verified=False condition in both clusters", func() {
+			Eventually(func(g Gomega) {
+				primaryMB, err := GetMB(PrimaryK8sCluster, namespace, backupName)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(primaryMB.IsVerifiedFalse()).To(BeTrue())
+			}).Should(Succeed())
+			Eventually(func(g Gomega) {
+				secondaryMB, err := GetMB(SecondaryK8sCluster, namespace, backupName)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(secondaryMB.IsVerifiedFalse()).To(BeTrue())
+			}).Should(Succeed())
+		})
+
+		By("making sure that no temporary resources remain", func() {
+			primaryMB1, err := GetMB(PrimaryK8sCluster, namespace, backupName)
+			Expect(err).NotTo(HaveOccurred())
+			secondaryMB1, err := GetMB(SecondaryK8sCluster, namespace, backupName)
+			Expect(err).NotTo(HaveOccurred())
+			WaitTemporaryResourcesDeleted(ctx, primaryMB1, secondaryMB1)
+		})
+
+		// Make sure restoration works correctly.
+		for _, cluster := range []int{PrimaryK8sCluster, SecondaryK8sCluster} {
+			restoreName := util.GetUniqueName("mr-")
+			clusterName := GetClusterName(cluster)
+
+			By(clusterName+": creating MantleRestore", func() {
+				Eventually(ctx, func() error {
+					return ApplyMantleRestoreTemplate(cluster, namespace, restoreName, backupName)
+				}).Should(Succeed())
+			})
+
+			By(clusterName+": checking the MantleRestore won't be ready to use", func() {
+				Consistently(ctx, func(g Gomega) {
+					mr, err := GetMR(cluster, namespace, restoreName)
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(mr.IsReady()).To(BeFalse())
+				}, "10s").Should(Succeed())
+			})
+
+			By(clusterName+": attaching skip-verify annotation to the MantleBackup", func() {
+				_, _, err := Kubectl(cluster, nil, "annotate", "mb", "-n", namespace, backupName,
+					"mantle.cybozu.io/skip-verify=true")
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			By(clusterName+": checking the MantleRestore becomes ready to use", func() {
+				Eventually(ctx, func(g Gomega) {
+					mr, err := GetMR(cluster, namespace, restoreName)
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(mr.IsReady()).To(BeTrue())
+				}).Should(Succeed())
+			})
+		}
+	})
 })

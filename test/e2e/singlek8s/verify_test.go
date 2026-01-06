@@ -5,13 +5,11 @@ import (
 	"fmt"
 	"slices"
 
-	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/controller"
 	"github.com/cybozu-go/mantle/test/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/meta"
 )
 
 type verifyTest struct {
@@ -90,8 +88,7 @@ func (test *verifyTest) testVerificationFailure(ctx SpecContext) {
 	Eventually(ctx, func(g Gomega) {
 		mb, err := getMB(test.tenantNamespace, mantleBackupName)
 		g.Expect(err).NotTo(HaveOccurred())
-		g.Expect(mb.IsVerified()).To(BeFalse())
-		g.Expect(meta.IsStatusConditionFalse(mb.Status.Conditions, mantlev1.BackupConditionVerified)).To(BeTrue())
+		g.Expect(mb.IsVerifiedFalse()).To(BeTrue())
 	}).Should(Succeed())
 
 	By("confirming that the number of the verify Pods is equal to or less than 1", func() {
