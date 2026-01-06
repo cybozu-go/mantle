@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -494,4 +495,20 @@ func getImageAndSnapNames(namespace, pool string) ([]string, error) {
 	}
 
 	return append(images, snaps...), nil
+}
+
+func checkJobExists(namespace, jobName string) (bool, error) {
+	stdout, _, err := kubectl("get", "job", "-n", namespace, "-o", "json")
+	if err != nil {
+		return false, err
+	}
+	jobList := batchv1.JobList{}
+	err = json.Unmarshal(stdout, &jobList)
+	if err != nil {
+		return false, err
+	}
+	found := slices.ContainsFunc(jobList.Items, func(j batchv1.Job) bool {
+		return j.Name == jobName
+	})
+	return found, nil
 }
