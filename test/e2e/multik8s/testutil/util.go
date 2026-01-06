@@ -60,6 +60,16 @@ var (
 	kubectlPrefixSecondary = os.Getenv("KUBECTL_SECONDARY")
 )
 
+func GetClusterName(clusterNo int) string {
+	switch clusterNo {
+	case PrimaryK8sCluster:
+		return "primary"
+	case SecondaryK8sCluster:
+		return "secondary"
+	}
+	panic("invalid clusterNo")
+}
+
 func execAtLocal(ctx context.Context, cmd string, input []byte, args ...string) ([]byte, []byte, error) {
 	var stdout, stderr bytes.Buffer
 	command := exec.CommandContext(ctx, cmd, args...)
@@ -580,10 +590,7 @@ func EnsureCorrectRestoration(
 ) {
 	GinkgoHelper()
 	mountDeployName := util.GetUniqueName("deploy-")
-	clusterName := "primary"
-	if clusterNo == SecondaryK8sCluster {
-		clusterName = "secondary"
-	}
+	clusterName := GetClusterName(clusterNo)
 	By(fmt.Sprintf("%s: %s: creating MantleRestore by using the MantleBackup replicated above",
 		clusterName, backupName))
 	Eventually(ctx, func() error {
