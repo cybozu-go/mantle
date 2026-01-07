@@ -20,6 +20,7 @@ func MakeRandomFile(filename string, size int) error {
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
 	defer showMD5Sum(path.Join(workDir, filename))
+
 	return command.Run()
 }
 
@@ -34,6 +35,7 @@ func PushFileToPod(filename, namespace, deployName, dst string) error {
 	}
 
 	_, err = Kubectl("exec", "-n", namespace, podName, "--", "sync")
+
 	return err
 }
 
@@ -48,6 +50,7 @@ func RemoveFileByPod(namespace, deployName, target string) error {
 	}
 
 	_, err = Kubectl("exec", "-n", namespace, podName, "--", "sync")
+
 	return err
 }
 
@@ -73,8 +76,10 @@ func CompareFilesInPod(filename, namespace, deployName, target string) error {
 	if err != nil {
 		showMD5Sum(path.Join(workDir, filename))
 		showMD5Sum(path.Join(workDir, workFilename))
+
 		return fmt.Errorf("the files having differences: %w", err)
 	}
+
 	return nil
 }
 

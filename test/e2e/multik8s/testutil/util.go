@@ -81,6 +81,7 @@ func execAtLocal(ctx context.Context, cmd string, input []byte, args ...string) 
 	}
 
 	err := command.Run()
+
 	return stdout.Bytes(), stderr.Bytes(), err
 }
 
@@ -97,10 +98,11 @@ func getKubectlInvocation(clusterNo int) ([]string, error) {
 	if len(kubectlPrefix) == 0 {
 		return nil, errors.New("either KUBECTL_PRIMARY or KUBECTL_SECONDARY environment variable is not set")
 	}
+
 	return strings.Fields(kubectlPrefix), nil
 }
 
-// input can be nil
+// input can be nil.
 func Kubectl(clusterNo int, input []byte, args ...string) ([]byte, []byte, error) {
 	fields, err := getKubectlInvocation(clusterNo)
 	if err != nil {
@@ -127,6 +129,7 @@ func runMakeCommand(args ...string) error {
 		return fmt.Errorf("make failed. stdout: %s, stderr: %s, err: %w",
 			string(stdout), string(stderr), err)
 	}
+
 	return nil
 }
 
@@ -138,6 +141,7 @@ func CheckDeploymentReady(clusterNo int, namespace, name string) error {
 	if err != nil {
 		return fmt.Errorf("kubectl wait deploy failed. stderr: %s, err: %w", string(stderr), err)
 	}
+
 	return nil
 }
 
@@ -147,6 +151,7 @@ func ApplyMantleBackupTemplate(clusterNo int, namespace, pvcName, backupName str
 	if err != nil {
 		return fmt.Errorf("kubectl apply mantlebackup failed. err: %w", err)
 	}
+
 	return nil
 }
 
@@ -156,6 +161,7 @@ func ApplyMantleBackupConfigTemplate(clusterNo int, namespace, pvcName, backupCo
 	if err != nil {
 		return fmt.Errorf("kubectl apply mantlebackupconfig failed. err: %w", err)
 	}
+
 	return nil
 }
 
@@ -165,6 +171,7 @@ func ApplyMantleRestoreTemplate(clusterNo int, namespace, restoreName, backupNam
 	if err != nil {
 		return fmt.Errorf("kubectl apply mantlerestore failed. err: %w", err)
 	}
+
 	return nil
 }
 
@@ -174,6 +181,7 @@ func applyPodMountVolumeTemplate(clusterNo int, namespace, podName, pvcName stri
 	if err != nil {
 		return fmt.Errorf("kubectl apply failed. err: %w", err)
 	}
+
 	return nil
 }
 
@@ -183,6 +191,7 @@ func applyPVCTemplate(clusterNo int, namespace, name string) error {
 	if err != nil {
 		return fmt.Errorf("kubectl apply pvc failed. err: %w", err)
 	}
+
 	return nil
 }
 
@@ -192,6 +201,7 @@ func ApplyMountDeployTemplate(clusterNo int, namespace, name, pvcName string) er
 	if err != nil {
 		return fmt.Errorf("kubectl apply mount deploy failed. err: %w", err)
 	}
+
 	return nil
 }
 
@@ -201,6 +211,7 @@ func ApplyWriteJobTemplate(clusterNo int, namespace, name, pvcName string) error
 	if err != nil {
 		return fmt.Errorf("kubectl apply write job failed. err: %w", err)
 	}
+
 	return nil
 }
 
@@ -209,10 +220,11 @@ func CreateNamespace(clusterNo int, name string) error {
 	if err != nil {
 		return fmt.Errorf("kubectl create ns failed. err: %w", err)
 	}
+
 	return nil
 }
 
-func ApplyRBDPoolAndSCTemplate(clusterNo int, namespace string) error { //nolint:unparam
+func ApplyRBDPoolAndSCTemplate(clusterNo int, namespace string) error {
 	manifest := fmt.Sprintf(
 		testRBDPoolSCTemplate, namespace,
 		namespace, namespace, namespace, namespace)
@@ -220,6 +232,7 @@ func ApplyRBDPoolAndSCTemplate(clusterNo int, namespace string) error { //nolint
 	if err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -432,12 +445,14 @@ func IsJobConditionTrue(conditions []batchv1.JobCondition, conditionType batchv1
 			return true
 		}
 	}
+
 	return false
 }
 
 func GetControllerPodName(clusterNo int) (string, error) {
 	stdout, _, err := Kubectl(clusterNo, nil, "get", "pod", "-n", CephClusterNamespace,
 		"-l", "app.kubernetes.io/name=mantle", "-o", "jsonpath={.items[0].metadata.name}")
+
 	return string(stdout), err
 }
 
@@ -498,7 +513,8 @@ func WriteRandomDataToPV(ctx SpecContext, cluster int, namespace, pvcName string
 	}).Should(Succeed())
 	stdout, _, err := Kubectl(cluster, nil, "logs", "-n", namespace, "job/"+writeJobName)
 	Expect(err).NotTo(HaveOccurred())
-	Expect(stdout).NotTo(HaveLen(0))
+	Expect(stdout).NotTo(BeEmpty())
+
 	return string(stdout)
 }
 
@@ -529,6 +545,7 @@ func WaitMantleBackupReadyToUse(cluster int, namespace, backupName string) {
 		if !mb.IsReady() {
 			return errors.New("status of ReadyToUse condition is not True")
 		}
+
 		return nil
 	}, "10m", "1s").Should(Succeed())
 }
@@ -544,6 +561,7 @@ func WaitMantleBackupVerified(cluster int, namespace, backupName string) {
 		if !mb.IsVerifiedTrue() {
 			return errors.New("status of Verified condition is not True")
 		}
+
 		return nil
 	}, "10m", "1s").Should(Succeed())
 }
@@ -559,6 +577,7 @@ func WaitMantleBackupSynced(namespace, backupName string) {
 		if !mb.IsSynced() {
 			return errors.New("status of SyncedToRemote condition is not True")
 		}
+
 		return nil
 	}, "10m", "1s").Should(Succeed())
 }
@@ -700,7 +719,7 @@ func PauseObjectStorage(ctx SpecContext) {
 		exist := slices.ContainsFunc(pods.Items, func(pod corev1.Pod) bool {
 			return strings.HasPrefix(pod.GetName(), RgwDeployName)
 		})
-		g.Expect(exist).NotTo(BeFalse())
+		g.Expect(exist).To(BeTrue())
 	}).Should(Succeed())
 }
 
@@ -718,6 +737,7 @@ func ListRBDSnapshotsInPVC(cluster int, namespace, pvcName string) ([]ceph.RBDSn
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ceph cmd: %w", err)
 	}
+
 	return snaps, nil
 }
 
@@ -731,6 +751,7 @@ func FindRBDSnapshotInPVC(cluster int, namespace, pvcName, snapName string) (*ce
 	if index == -1 {
 		return nil, fmt.Errorf("failed to find the RBD snapshot in PVC: %s/%s: %s: %w", namespace, pvcName, snapName, err)
 	}
+
 	return &snaps[index], nil
 }
 
@@ -758,6 +779,7 @@ func createCephCmd(cluster int) ceph.CephCmd {
 	if err != nil {
 		panic(err)
 	}
+
 	return ceph.NewCephCmdWithToolsAndCustomKubectl(kubectl, CephClusterNamespace)
 }
 
@@ -780,6 +802,7 @@ func CheckJobExist(clusterNo int, namespace, jobName string) bool {
 	GinkgoHelper()
 	jobs, err := GetJobList(clusterNo, namespace)
 	Expect(err).NotTo(HaveOccurred())
+
 	return slices.ContainsFunc(jobs.Items, func(job batchv1.Job) bool {
 		return job.GetName() == jobName
 	})
@@ -799,6 +822,7 @@ func WaitComponentJobsDeleted(
 		g.Expect(err).NotTo(HaveOccurred())
 		exist := slices.ContainsFunc(jobs.Items, func(job batchv1.Job) bool {
 			_, ok := controller.ExtractPartNumFromComponentJobName(componentPrefix, job.GetName(), backup)
+
 			return ok
 		})
 		g.Expect(exist).To(BeFalse())
@@ -1006,6 +1030,7 @@ func GetNumberOfBackupParts(snapshotSize *resource.Quantity) (int, error) {
 			expectedNumOfParts++
 		}
 	}
+
 	return int(expectedNumOfParts), nil
 }
 
@@ -1169,6 +1194,7 @@ func WaitControllerLog(ctx SpecContext, clusterNo int, pattern string, duration 
 			line := scanner.Text()
 			if matcher.MatchString(line) {
 				close(found)
+
 				return
 			}
 		}

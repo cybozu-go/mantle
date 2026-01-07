@@ -73,6 +73,7 @@ var _ = Describe("webhook independence test", func() {
 				if event.InvolvedObject.Namespace == namespace && event.InvolvedObject.Name == podName {
 					if event.Reason == events.FailedAttachVolume {
 						found = true
+
 						break
 					}
 				}

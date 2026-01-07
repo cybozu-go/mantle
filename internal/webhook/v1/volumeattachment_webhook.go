@@ -57,6 +57,7 @@ func (v *VolumeAttachmentCustomValidator) ValidateCreate(ctx context.Context, ob
 	var pv corev1.PersistentVolume
 	if err := v.client.Get(ctx, types.NamespacedName{Name: *pvName}, &pv); err != nil {
 		logger.Error(err, "failed to get PV", "name", *pvName)
+
 		return nil, err
 	}
 
@@ -64,6 +65,7 @@ func (v *VolumeAttachmentCustomValidator) ValidateCreate(ctx context.Context, ob
 	var pvc corev1.PersistentVolumeClaim
 	if err := v.client.Get(ctx, types.NamespacedName{Namespace: claimRef.Namespace, Name: claimRef.Name}, &pvc); err != nil {
 		logger.Error(err, "failed to get PVC", "namespace", claimRef.Namespace, "name", claimRef.Name)
+
 		return nil, err
 	}
 	if _, ok := pvc.Annotations[annotRemoteUID]; ok {

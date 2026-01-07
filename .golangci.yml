@@ -7,28 +7,52 @@ linters:
       dot-import-whitelist: # allow dot imports for the following packages
         - github.com/onsi/gomega
         - github.com/onsi/ginkgo/v2
-  default: none
-  enable:
-    - copyloopvar
-    - dupl
-    - errcheck
-    - errorlint
-    - goconst
-    - gocyclo
-    - govet
-    - ineffassign
-    - lll
-    - misspell
-    - nakedret
-    - prealloc
-    - staticcheck
-    - unconvert
-    - unparam
-    - unused
+  default: all
+  disable:
+    - containedctx
+    - contextcheck
+    - cyclop
+    - depguard
+    - embeddedstructfieldcheck
+    - err113
+    - exhaustruct
+    - forbidigo
+    - forcetypeassert
+    - funcorder
+    - funlen
+    - gochecknoglobals
+    - gochecknoinits
+    - gocognit
+    - gocritic
+    - godoclint
+    - godox
+    - gosec
+    - interfacebloat
+    - ireturn
+    - maintidx
+    - mnd
+    - modernize
+    - nestif
+    - nilerr
+    - nilnil
+    - noctx
+    - noinlineerr
+    - paralleltest
+    - revive
+    - tagliatelle
+    - testpackage
+    - varnamelen
+    - wastedassign
+    - wrapcheck
+    - wsl
+    - wsl_v5
   exclusions:
     rules:
       - linters:
           - lll
+
+          # kubebuiler generates code that triggers godot, so we disable it for the api/ directory.
+          - godot
         path: api/*
       - linters:
           - dupl

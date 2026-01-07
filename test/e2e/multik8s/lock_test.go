@@ -56,6 +56,7 @@ var _ = Describe("Locking", Label("lock"), func() {
 		Eventually(func() error {
 			var err error
 			mb1, err = GetMB(SecondaryK8sCluster, namespace, backupName1)
+
 			return err
 		}).Should(Succeed())
 
@@ -103,7 +104,7 @@ var _ = Describe("Locking", Label("lock"), func() {
 			var locks []*ceph.RBDLock
 			err = json.Unmarshal(stdout, &locks)
 			g.Expect(err).NotTo(HaveOccurred())
-			g.Expect(locks).To(HaveLen(0))
+			g.Expect(locks).To(BeEmpty())
 		}).Should(Succeed())
 	})
 })

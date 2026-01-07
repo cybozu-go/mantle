@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -26,6 +27,7 @@ func ExportDiff(filename string, args ...string) error {
 	if err != nil {
 		return fmt.Errorf("failed to run rbd export-diff command: %w, %s", err, string(stdout))
 	}
+
 	return nil
 }
 
@@ -33,7 +35,7 @@ func ImportDiff(filename, pool, image, rollbackTo, namespace, deployName, pvcNam
 	return RunWithStopPod(namespace, deployName, func() error {
 		if rollbackTo == "" {
 			if len(pvcName) == 0 {
-				return fmt.Errorf("rollbackTo or pvcName must be specified")
+				return errors.New("rollbackTo or pvcName must be specified")
 			}
 			err := zeroOutVolume(namespace, pvcName)
 			if err != nil {
@@ -51,6 +53,7 @@ func ImportDiff(filename, pool, image, rollbackTo, namespace, deployName, pvcNam
 		if err != nil {
 			return fmt.Errorf("failed to import diff: %w, %s", err, string(stdout))
 		}
+
 		return nil
 	})
 }
@@ -177,6 +180,7 @@ func SnapCreate(pool, image, snap string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create snapshot: %w, %s", err, string(stdout))
 	}
+
 	return nil
 }
 
@@ -187,6 +191,7 @@ func SnapRemove(pool, image string, snaps []string) error {
 			return fmt.Errorf("failed to remove snapshot: %w, %s", err, string(stdout))
 		}
 	}
+
 	return nil
 }
 
@@ -215,6 +220,7 @@ func SnapRollback(pool, image, snap, namespace, deployName string) error {
 		if err != nil {
 			return fmt.Errorf("failed to rollback snapshot: %w, %s", err, string(stdout))
 		}
+
 		return nil
 	})
 }
@@ -239,5 +245,6 @@ func SnapExists(pool, image, snap string) (bool, error) {
 			return true, nil
 		}
 	}
+
 	return false, nil
 }

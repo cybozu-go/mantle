@@ -8,7 +8,7 @@ import (
 )
 
 // MantleRestoreReconcilerE2E is a wrapper of MantleRestoreReconciler
-// this module is for testing cloneImageFromBackup and removeRBDImage in e2e tests
+// this module is for testing cloneImageFromBackup and removeRBDImage in e2e tests.
 type MantleRestoreReconcilerE2E struct {
 	MantleRestoreReconciler
 }

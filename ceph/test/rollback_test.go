@@ -75,7 +75,7 @@ func (t *rollbackTest) setupEnv() {
 		t.dstImageName = imageName
 
 		// creating snapshots
-		for i := 0; i < 2; i++ {
+		for i := range 2 {
 			err := cluster.MakeRandomFile(t.snapshots[i], int(Quantity2Int("1Mi")))
 			Expect(err).NotTo(HaveOccurred())
 			err = cluster.PushFileToPod(t.snapshots[i], t.namespace, t.srcDeployName, "/mnt/data")

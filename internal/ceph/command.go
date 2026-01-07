@@ -23,5 +23,6 @@ func (c *commandImpl) execute(command ...string) ([]byte, []byte, error) {
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
+
 	return stdout.Bytes(), stderr.Bytes(), err
 }

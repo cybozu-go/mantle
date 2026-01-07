@@ -2,8 +2,8 @@ package webhook
 
 import (
 	"crypto/tls"
+	"errors"
 	"flag"
-	"fmt"
 	"net"
 	"strconv"
 
@@ -64,11 +64,12 @@ func init() {
 
 func checkCommandlineArgs() error {
 	if webhookCertPath == "" {
-		return fmt.Errorf("--webhook-cert-path must be specified")
+		return errors.New("--webhook-cert-path must be specified")
 	}
 	if webhookKeyPath == "" {
-		return fmt.Errorf("--webhook-key-path must be specified")
+		return errors.New("--webhook-key-path must be specified")
 	}
+
 	return nil
 }
 
@@ -77,6 +78,7 @@ func subMain() error {
 
 	if err := checkCommandlineArgs(); err != nil {
 		setupLog.Error(err, "invalid command line arguments")
+
 		return err
 	}
 
@@ -87,6 +89,7 @@ func subMain() error {
 	webhookCertWatcher, err := certwatcher.New(webhookCertPath, webhookKeyPath)
 	if err != nil {
 		setupLog.Error(err, "Failed to initialize webhook certificate watcher")
+
 		return err
 	}
 
@@ -97,11 +100,13 @@ func subMain() error {
 	webhookHost, webhookPortStr, err := net.SplitHostPort(webhookAddr)
 	if err != nil {
 		setupLog.Error(err, "Failed to parse webhook-bind-address")
+
 		return err
 	}
 	webhookPort, err := strconv.Atoi(webhookPortStr)
 	if err != nil {
 		setupLog.Error(err, "Failed to parse webhook port")
+
 		return err
 	}
 
@@ -119,32 +124,38 @@ func subMain() error {
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), mgrOptions)
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
+
 		return err
 	}
 
 	if err := webhookv1.SetupVolumeAttachmentWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "failed to setup VolumeAttachment webhook")
+
 		return err
 	}
 
 	setupLog.Info("Adding webhook certificate watcher to manager")
 	if err := mgr.Add(webhookCertWatcher); err != nil {
 		setupLog.Error(err, "unable to add webhook certificate watcher to manager")
+
 		return err
 	}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
+
 		return err
 	}
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up ready check")
+
 		return err
 	}
 
 	setupLog.Info("starting webhook server")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running webhook server")
+
 		return err
 	}
 

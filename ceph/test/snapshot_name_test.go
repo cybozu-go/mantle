@@ -2,6 +2,7 @@ package test
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/cybozu-go/mantle/ceph/test/cluster"
 	"github.com/cybozu-go/mantle/test/util"
@@ -67,7 +68,7 @@ func (t *snapshotNameTest) setupEnv() {
 		t.dstImageName = imageName
 
 		// creating snapshots
-		for i := 0; i < 2; i++ {
+		for i := range 2 {
 			err = cluster.SnapCreate(t.poolName, t.srcImageName, t.snapshots[i])
 			Expect(err).NotTo(HaveOccurred())
 		}
@@ -200,7 +201,7 @@ func (t *snapshotNameTest) test1() {
 				importsBefore:        []string{"/tmp/snapshot0-offset-1Ki.bin"},
 				exportArgs: []string{
 					"--read-offset", Quantity2Str("1Ki"),
-					"--read-length", fmt.Sprintf("%d", Quantity2Int("10Mi")-1024),
+					"--read-length", strconv.FormatUint(Quantity2Int("10Mi")-1024, 10),
 					"--mid-snap-prefix", "snapshot0",
 					fmt.Sprintf("%s/%s@%s", t.poolName, t.srcImageName, t.snapshots[0]),
 				},
@@ -311,7 +312,7 @@ func (t *snapshotNameTest) test1() {
 				importsBefore:        []string{"/tmp/snapshot0.bin", "/tmp/snapshot1-offset-1Ki.bin"},
 				exportArgs: []string{
 					"--read-offset", Quantity2Str("1Ki"),
-					"--read-length", fmt.Sprintf("%d", Quantity2Int("10Mi")-1024),
+					"--read-length", strconv.FormatUint(Quantity2Int("10Mi")-1024, 10),
 					"--mid-snap-prefix", "snapshot1",
 					"--from-snap", t.snapshots[0],
 					fmt.Sprintf("%s/%s@%s", t.poolName, t.srcImageName, t.snapshots[1]),

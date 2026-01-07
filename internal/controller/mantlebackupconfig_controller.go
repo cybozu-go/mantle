@@ -2,12 +2,13 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
 	"strings"
 
-	"k8s.io/apimachinery/pkg/api/errors"
+	aerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -32,7 +33,7 @@ const (
 	MantleBackupConfigCronJobNamePrefix          = "mbc-"
 )
 
-// MantleBackupConfigReconciler reconciles a MantleBackupConfig object
+// MantleBackupConfigReconciler reconciles a MantleBackupConfig object.
 type MantleBackupConfigReconciler struct {
 	Client               client.Client
 	Scheme               *runtime.Scheme
@@ -82,10 +83,12 @@ func (r *MantleBackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.R
 	// Get MantleBackupConfig.
 	var mbc mantlev1.MantleBackupConfig
 	if err := r.Client.Get(ctx, req.NamespacedName, &mbc); err != nil {
-		if errors.IsNotFound(err) {
+		if aerrors.IsNotFound(err) {
 			logger.Info("MantleBackupConfig not found", "error", err)
+
 			return ctrl.Result{}, nil
 		}
+
 		return ctrl.Result{}, fmt.Errorf("failed to get MantleBackupConfig: %w", err)
 	}
 
@@ -101,7 +104,7 @@ func (r *MantleBackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.R
 
 			// Delete the CronJob. If we failed to delete it because it's not found, ignore the error.
 			logger.Info("start deleting cronjobs")
-			if err := r.deleteCronJob(ctx, &mbc, cronJobInfo.namespace); err != nil && !errors.IsNotFound(err) {
+			if err := r.deleteCronJob(ctx, &mbc, cronJobInfo.namespace); err != nil && !aerrors.IsNotFound(err) {
 				return ctrl.Result{}, fmt.Errorf("failed to delete cronjob: %w", err)
 			}
 
@@ -110,6 +113,7 @@ func (r *MantleBackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.R
 				return ctrl.Result{}, fmt.Errorf("failed to remove mbc finalizer: %w", err)
 			}
 		}
+
 		return ctrl.Result{}, nil
 	}
 
@@ -124,6 +128,7 @@ func (r *MantleBackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 	if clusterID != r.managedCephClusterID {
 		logger.Info("the target pvc is not managed by this controller")
+
 		return ctrl.Result{}, nil
 	}
 
@@ -180,6 +185,7 @@ func (r *MantleBackupConfigReconciler) SetupWithManager(mgr ctrl.Manager) error 
 			if mbc.UID == "" {
 				return nil
 			}
+
 			return []string{string(mbc.UID)}
 		}); err != nil {
 		return err
@@ -201,11 +207,13 @@ func (r *MantleBackupConfigReconciler) SetupWithManager(mgr ctrl.Manager) error 
 					FieldSelector: fields.OneTermEqualSelector(".metadata.uid", uid),
 				}); err != nil {
 					mgr.GetLogger().Info("List of MantleBackup failed", "error", err)
+
 					return []reconcile.Request{}
 				}
 				if len(mbcs.Items) != 1 {
 					return []reconcile.Request{}
 				}
+
 				return []reconcile.Request{
 					{
 						NamespacedName: types.NamespacedName{
@@ -281,7 +289,7 @@ func (r *MantleBackupConfigReconciler) createOrUpdateCronJob(ctx context.Context
 		return fmt.Errorf("failed to create CronJob: %s: %w", cronJobName, err)
 	}
 	if op != controllerutil.OperationResultNone {
-		logger.Info(fmt.Sprintf("CronJob successfully created: %s", cronJobName))
+		logger.Info("CronJob successfully created: " + cronJobName)
 	}
 
 	return nil
@@ -299,6 +307,7 @@ func (r *MantleBackupConfigReconciler) deleteCronJob(ctx context.Context, mbc *m
 
 	uid := cronJob.GetUID()
 	resourceVersion := cronJob.GetResourceVersion()
+
 	return r.Client.Delete(
 		ctx,
 		&cronJob,
@@ -320,16 +329,17 @@ var getRunningPod func(ctx context.Context, client client.Client) (*corev1.Pod, 
 func getRunningPodImpl(ctx context.Context, client client.Client) (*corev1.Pod, error) {
 	name, ok := os.LookupEnv("POD_NAME")
 	if !ok {
-		return nil, fmt.Errorf("POD_NAME not found")
+		return nil, errors.New("POD_NAME not found")
 	}
 	namespace, ok := os.LookupEnv("POD_NAMESPACE")
 	if !ok {
-		return nil, fmt.Errorf("POD_NAMESPACE not found")
+		return nil, errors.New("POD_NAMESPACE not found")
 	}
 	var pod corev1.Pod
 	if err := client.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, &pod); err != nil {
 		return nil, fmt.Errorf("failed to get pod: %w", err)
 	}
+
 	return &pod, nil
 }
 
@@ -343,10 +353,11 @@ func getCronJobInfo(ctx context.Context, client client.Client) (*cronJobInfo, er
 		return nil, fmt.Errorf("failed to get running pod: %w", err)
 	}
 	if len(runningPod.Spec.Containers) == 0 {
-		return nil, fmt.Errorf("failed to get running container")
+		return nil, errors.New("failed to get running container")
 	}
 	namespace := runningPod.Namespace
 	serviceAccountName := runningPod.Spec.ServiceAccountName
 	image := runningPod.Spec.Containers[0].Image
+
 	return &cronJobInfo{namespace, serviceAccountName, image}, nil
 }

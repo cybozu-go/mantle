@@ -13,7 +13,7 @@ PROTOC_VERSION := 31.1
 # https://github.com/rook/rook/releases
 ROOK_CHART_VERSION := v1.18.6
 # https://github.com/golangci/golangci-lint/releases
-GOLANGCI_LINT_VERSION := v2.1.6
+GOLANGCI_LINT_VERSION := v2.7.2
 # https://github.com/cert-manager/cert-manager/releases
 CERT_MANAGER_VERSION := v1.17.2
 

@@ -53,6 +53,7 @@ func createMBC(ctx context.Context, mbcName, mbcNamespace, pvcName, schedule, ex
 	if err := k8sClient.Create(ctx, &mbc); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -118,8 +119,8 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		schedules := []string{}
-		for m := 0; m < 60; m++ {
-			for h := 0; h < 24; h++ {
+		for m := range 60 {
+			for h := range 24 {
 				schedules = append(schedules, fmt.Sprintf("%d %d * * *", m, h))
 				if m < 10 {
 					schedules = append(schedules, fmt.Sprintf("%02d %d * * *", m, h))

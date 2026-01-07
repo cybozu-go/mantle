@@ -2,6 +2,7 @@ package singlek8s
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -215,6 +216,7 @@ func (test *restoreTest) testRestore() {
 		Consistently(func() []byte {
 			data, err := readTestData(test.tenantNamespace, test.mantleRestoreName1)
 			Expect(err).NotTo(HaveOccurred())
+
 			return data
 		}, 30*time.Second).Should(Equal(testData1))
 	})
@@ -328,8 +330,9 @@ func (test *restoreTest) testCleanup() {
 			g.Expect(err).NotTo(HaveOccurred())
 
 			_, err = getRBDInfo(cephCluster1Namespace, test.poolName, imageName)
+
 			return err
-		}, 30*time.Second).Should(BeNil())
+		}, 30*time.Second).Should(Succeed())
 
 		By("deleting the pod")
 		_, _, err = kubectl("delete", "pod", "-n", test.tenantNamespace, podName)
@@ -457,8 +460,9 @@ func (test *restoreTest) testCloneImageFromBackup() {
 			}
 
 			if !backup.IsReady() {
-				return fmt.Errorf("backup is not ready")
+				return errors.New("backup is not ready")
 			}
+
 			return nil
 		}).Should(Succeed())
 

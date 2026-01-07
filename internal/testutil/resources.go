@@ -61,6 +61,7 @@ func (r *ResourceManager) CreateNamespace() string {
 	}
 	err := r.client.Create(context.Background(), &ns)
 	Expect(err).NotTo(HaveOccurred())
+
 	return name
 }
 
@@ -74,6 +75,7 @@ func (r *ResourceManager) CreateStorageClass(ctx context.Context) error {
 			"clusterID": r.ClusterID,
 		},
 	}
+
 	return r.client.Create(ctx, &sc)
 }
 
@@ -240,6 +242,7 @@ func (r *ResourceManager) ChangeJobCondition(ctx context.Context, job *batchv1.J
 		if job.Status.Conditions[i].Type == condType {
 			job.Status.Conditions[i].Status = condStatus
 			updated = true
+
 			break
 		}
 	}
@@ -249,6 +252,7 @@ func (r *ResourceManager) ChangeJobCondition(ctx context.Context, job *batchv1.J
 			Status: corev1.ConditionTrue,
 		})
 	}
+
 	return r.client.Status().Update(ctx, job)
 }
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -42,7 +43,7 @@ func Kubectl(args ...string) ([]byte, error) {
 
 func KubectlWithInput(stdin []byte, args ...string) ([]byte, error) {
 	if len(kubectlCmd) == 0 {
-		return nil, fmt.Errorf("KUBECTL environment variable should be set")
+		return nil, errors.New("KUBECTL environment variable should be set")
 	}
 
 	icon := "⚓"
@@ -59,6 +60,7 @@ func KubectlWithInput(stdin []byte, args ...string) ([]byte, error) {
 	command.Stderr = os.Stderr
 
 	err := command.Run()
+
 	return stdout.Bytes(), err
 }
 
@@ -92,6 +94,7 @@ func DeleteObject(kind, namespace, name string) error {
 	if err != nil {
 		return fmt.Errorf("failed to delete %s %s/%s: %w", kind, namespace, name, err)
 	}
+
 	return nil
 }
 
@@ -100,6 +103,7 @@ func DeleteAllObjects(kind, namespace string) error {
 	if err != nil {
 		return fmt.Errorf("failed to delete %s in %s: %w", kind, namespace, err)
 	}
+
 	return nil
 }
 
@@ -108,6 +112,7 @@ func CreateNamespace(namespace string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create namespace: %w", err)
 	}
+
 	return nil
 }
 
@@ -132,6 +137,7 @@ func CreateDeployment(namespace, deployName, pvcName string, volumeMode VolumeMo
 	if err != nil {
 		return fmt.Errorf("failed to wait for deployment: %w", err)
 	}
+
 	return nil
 }
 
@@ -141,6 +147,7 @@ func CreatePool(poolName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create pool: %w", err)
 	}
+
 	return nil
 }
 
@@ -150,6 +157,7 @@ func CreatePVC(namespace, pvcName, scName, size string, volumeMode VolumeMode) e
 	if err != nil {
 		return fmt.Errorf("failed to create PVC: %w", err)
 	}
+
 	return nil
 }
 
@@ -165,7 +173,7 @@ func ResizePVC(namespace, pvcName, size string) error {
 		return fmt.Errorf("failed to patch PVC: %w", err)
 	}
 
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		after, err := Kubectl("get", "-n", namespace, "pvc", pvcName, "-o", "jsonpath={.status.capacity.storage}")
 		if err != nil {
 			return fmt.Errorf("failed to get PVC size: %w", err)
@@ -175,7 +183,8 @@ func ResizePVC(namespace, pvcName, size string) error {
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	return fmt.Errorf("PVC size is not changed")
+
+	return errors.New("PVC size is not changed")
 }
 
 func CreateSC(scName, poolName string) error {
@@ -184,6 +193,7 @@ func CreateSC(scName, poolName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create SC: %w", err)
 	}
+
 	return nil
 }
 
@@ -202,6 +212,7 @@ func CleanupNamespace(namespace string) error {
 	if err != nil {
 		return fmt.Errorf("failed to delete namespace: %w", err)
 	}
+
 	return nil
 }
 
@@ -263,6 +274,7 @@ func ScaleDeployment(namespace, deployName string, replicas int) error {
 			return fmt.Errorf("failed to wait for deployment available: %w", err)
 		}
 	}
+
 	return nil
 }
 
@@ -272,6 +284,7 @@ func GetPodNameByDeploy(namespace, deployName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	return string(stdout), nil
 }
 
@@ -288,5 +301,6 @@ func RunWithStopPod(namespace, deployName string, f func() error) error {
 	if err := f(); err != nil {
 		return err
 	}
+
 	return ScaleDeployment(namespace, deployName, 1)
 }

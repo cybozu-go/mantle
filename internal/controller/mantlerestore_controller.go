@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/ceph"
@@ -19,7 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-// MantleRestoreReconciler reconciles a MantleRestore object
+// MantleRestoreReconciler reconciles a MantleRestore object.
 type MantleRestoreReconciler struct {
 	client               client.Client
 	Scheme               *runtime.Scheme
@@ -71,10 +72,12 @@ func (r *MantleRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	err := r.client.Get(ctx, req.NamespacedName, &restore)
 	if errors.IsNotFound(err) {
 		logger.Info("MantleRestore resource not found", "error", err)
+
 		return ctrl.Result{}, nil
 	}
 	if err != nil {
 		logger.Error(err, "failed to get MantleRestore")
+
 		return ctrl.Result{}, err
 	}
 
@@ -99,6 +102,7 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, restore *mantlev1
 	err := r.client.Get(ctx, client.ObjectKey{Name: restore.Spec.Backup, Namespace: restore.Namespace}, &backup)
 	if err != nil {
 		logger.Error(err, "failed to get MantleBackup", "name", restore.Spec.Backup, "namespace", restore.Namespace)
+
 		return ctrl.Result{}, err
 	}
 
@@ -106,6 +110,7 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, restore *mantlev1
 	err = json.Unmarshal([]byte(backup.Status.PVCManifest), &pvc)
 	if err != nil {
 		logger.Error(err, "failed to unmarshal PVC manifest", "backup", backup.Name, "namespace", backup.Namespace)
+
 		return ctrl.Result{}, err
 	}
 
@@ -113,10 +118,12 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, restore *mantlev1
 	clusterID, err := getCephClusterIDFromPVC(ctx, r.client, &pvc)
 	if err != nil {
 		logger.Error(err, "failed to get Ceph cluster ID", "backup", backup.Name, "namespace", backup.Namespace)
+
 		return ctrl.Result{}, err
 	}
 	if clusterID != r.managedCephClusterID {
 		logger.Info("backup is not managed by the target Ceph cluster", "backup", backup.Name, "namespace", backup.Namespace, "clusterID", clusterID)
+
 		return ctrl.Result{}, nil
 	}
 
@@ -125,6 +132,7 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, restore *mantlev1
 	err = r.client.Status().Update(ctx, restore)
 	if err != nil {
 		logger.Error(err, "failed to update status.clusterID", "status", restore.Status)
+
 		return ctrl.Result{}, err
 	}
 
@@ -133,36 +141,42 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, restore *mantlev1
 	err = r.client.Update(ctx, restore)
 	if err != nil {
 		logger.Error(err, "failed to add finalizer")
+
 		return ctrl.Result{}, err
 	}
 
 	// check if the backup is ReadyToUse
 	if !backup.IsReady() {
 		logger.Info("backup is not ready to use", "backup", backup.Name, "namespace", backup.Namespace)
+
 		return requeueReconciliation(), nil
 	}
 
 	// check if the backup is verified or verification is skipped
 	if skip, ok := backup.GetAnnotations()[mbAnnotationSkipVerifyKey]; !backup.IsVerifiedTrue() && (!ok || skip != mbAnnotationSkipVerifyValue) {
 		logger.Info("verification is not completed", "backup", backup.Name, "namespace", backup.Namespace)
+
 		return requeueReconciliation(), nil
 	}
 
 	// create a clone image from the backup
 	if err := r.cloneImageFromBackup(ctx, restore, &backup); err != nil {
 		logger.Error(err, "failed to clone image from backup", "backup", backup.Name, "namespace", backup.Namespace)
+
 		return ctrl.Result{}, err
 	}
 
 	// create a restore PV with the clone image
 	if err := r.createOrUpdateRestoringPV(ctx, restore, &backup); err != nil {
 		logger.Error(err, "failed to create PV")
+
 		return ctrl.Result{}, err
 	}
 
 	// create a restore PVC with the restore PV
 	if err := r.createOrUpdateRestoringPVC(ctx, restore, &backup); err != nil {
 		logger.Error(err, "failed to create PVC")
+
 		return ctrl.Result{}, err
 	}
 
@@ -175,6 +189,7 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, restore *mantlev1
 	err = r.client.Status().Update(ctx, restore)
 	if err != nil {
 		logger.Error(err, "failed to update status", "status", restore.Status)
+
 		return ctrl.Result{}, err
 	}
 
@@ -235,7 +250,7 @@ func (r *MantleRestoreReconciler) createOrUpdateRestoringPV(ctx context.Context,
 		pv.Labels[labelRestoringPVKey] = labelRestoringPVValue
 
 		pv.Spec = *srcPV.Spec.DeepCopy()
-		capacity, err := resource.ParseQuantity(fmt.Sprintf("%d", *backup.Status.SnapSize))
+		capacity, err := resource.ParseQuantity(strconv.FormatInt(*backup.Status.SnapSize, 10))
 		if err != nil {
 			return fmt.Errorf("failed to parse quantity: %w", err)
 		}
@@ -286,7 +301,7 @@ func (r *MantleRestoreReconciler) createOrUpdateRestoringPVC(ctx context.Context
 		}
 
 		pvc.Spec = *srcPVC.Spec.DeepCopy()
-		capacity, err := resource.ParseQuantity(fmt.Sprintf("%d", *backup.Status.SnapSize))
+		capacity, err := resource.ParseQuantity(strconv.FormatInt(*backup.Status.SnapSize, 10))
 		if err != nil {
 			return fmt.Errorf("failed to parse quantity: %w", err)
 		}
@@ -319,6 +334,7 @@ func (r *MantleRestoreReconciler) cleanup(ctx context.Context, restore *mantlev1
 	// delete the PVC
 	if err := r.deleteRestoringPVC(ctx, restore); err != nil {
 		logger.Error(err, "failed to delete PVC")
+
 		return ctrl.Result{}, err
 	}
 
@@ -326,6 +342,7 @@ func (r *MantleRestoreReconciler) cleanup(ctx context.Context, restore *mantlev1
 	err := r.deleteRestoringPV(ctx, restore)
 	if err != nil {
 		logger.Error(err, "failed to get PV")
+
 		return ctrl.Result{}, err
 	}
 
@@ -334,6 +351,7 @@ func (r *MantleRestoreReconciler) cleanup(ctx context.Context, restore *mantlev1
 	err = r.client.Update(ctx, restore)
 	if err != nil {
 		logger.Error(err, "failed to remove finalizer")
+
 		return ctrl.Result{}, err
 	}
 
@@ -349,6 +367,7 @@ func (r *MantleRestoreReconciler) deleteRestoringPVC(ctx context.Context, restor
 		if errors.IsNotFound(err) {
 			return nil
 		}
+
 		return fmt.Errorf("failed to get PVC: %w", err)
 	}
 
@@ -373,6 +392,7 @@ func (r *MantleRestoreReconciler) deleteRestoringPV(ctx context.Context, restore
 			// removed by GarbageCollectorRunner.
 			return nil
 		}
+
 		return fmt.Errorf("failed to get PV: %w", err)
 	}
 

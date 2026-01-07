@@ -2,6 +2,7 @@ package test
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/cybozu-go/mantle/ceph/test/cluster"
 	"github.com/cybozu-go/mantle/test/util"
@@ -139,7 +140,7 @@ func (t *extendTest) test() {
 
 		err = cluster.ExportDiff("/tmp/snapshot1-offset-1Mi+1Ki.bin",
 			"--read-offset", "0",
-			"--read-length", fmt.Sprintf("%d", Quantity2Int("1Mi")+1024),
+			"--read-length", strconv.FormatUint(Quantity2Int("1Mi")+1024, 10),
 			"--mid-snap-prefix", "snapshot1",
 			"--from-snap", t.snapshots[0],
 			fmt.Sprintf("%s/%s@%s", t.poolName, t.srcImageName, t.snapshots[1]),
@@ -157,7 +158,7 @@ func (t *extendTest) test() {
 
 		err = cluster.ExportDiff("/tmp/snapshot2-offset-1Mi+1Ki.bin",
 			"--read-offset", "0",
-			"--read-length", fmt.Sprintf("%d", Quantity2Int("1Mi")+1024),
+			"--read-length", strconv.FormatUint(Quantity2Int("1Mi")+1024, 10),
 			"--mid-snap-prefix", "snapshot2",
 			"--from-snap", t.snapshots[0],
 			fmt.Sprintf("%s/%s@%s", t.poolName, t.srcImageName, t.snapshots[2]),
@@ -188,7 +189,7 @@ func (t *extendTest) test() {
 				importsBefore:    []string{"/tmp/snapshot0.bin", "/tmp/snapshot1-offset-1Ki.bin"},
 				exportArgs1: []string{
 					"--read-offset", Quantity2Str("1Ki"),
-					"--read-length", fmt.Sprintf("%d", Quantity2Int("1Mi")-1024),
+					"--read-length", strconv.FormatUint(Quantity2Int("1Mi")-1024, 10),
 					"--mid-snap-prefix", "snapshot1",
 					"--from-snap", t.snapshots[0],
 					fmt.Sprintf("%s/%s@%s", t.poolName, t.srcImageName, t.snapshots[1]),
@@ -210,7 +211,7 @@ func (t *extendTest) test() {
 				importsBefore:    []string{"/tmp/snapshot0.bin", "/tmp/snapshot1-offset-1Ki.bin"},
 				exportArgs1: []string{
 					"--read-offset", Quantity2Str("1Ki"),
-					"--read-length", fmt.Sprintf("%d", Quantity2Int("2Mi")-1024),
+					"--read-length", strconv.FormatUint(Quantity2Int("2Mi")-1024, 10),
 					"--mid-snap-prefix", "snapshot1",
 					"--from-snap", t.snapshots[0],
 					fmt.Sprintf("%s/%s@%s", t.poolName, t.srcImageName, t.snapshots[1]),
@@ -238,7 +239,7 @@ func (t *extendTest) test() {
 				expectedDataName: t.snapshots[1],
 				importsBefore:    []string{"/tmp/snapshot0.bin", "/tmp/snapshot1-offset-1Mi+1Ki.bin"},
 				exportArgs1: []string{
-					"--read-offset", fmt.Sprintf("%d", Quantity2Int("1Mi")+1024),
+					"--read-offset", strconv.FormatUint(Quantity2Int("1Mi")+1024, 10),
 					"--read-length", Quantity2Str("1Ki"),
 					"--mid-snap-prefix", "snapshot1",
 					"--from-snap", t.snapshots[0],
@@ -246,8 +247,8 @@ func (t *extendTest) test() {
 				},
 				rollbackTo1: "snapshot1-offset-1049600",
 				exportArgs2: []string{
-					"--read-offset", fmt.Sprintf("%d", Quantity2Int("1Mi")+2048),
-					"--read-length", fmt.Sprintf("%d", Quantity2Int("1Mi")-2048),
+					"--read-offset", strconv.FormatUint(Quantity2Int("1Mi")+2048, 10),
+					"--read-length", strconv.FormatUint(Quantity2Int("1Mi")-2048, 10),
 					"--mid-snap-prefix", "snapshot1",
 					"--from-snap", t.snapshots[0],
 					fmt.Sprintf("%s/%s@%s", t.poolName, t.srcImageName, t.snapshots[1]),
@@ -260,8 +261,8 @@ func (t *extendTest) test() {
 				expectedDataName: t.snapshots[1],
 				importsBefore:    []string{"/tmp/snapshot0.bin", "/tmp/snapshot1-offset-1Mi+1Ki.bin"},
 				exportArgs1: []string{
-					"--read-offset", fmt.Sprintf("%d", Quantity2Int("1Mi")+1024),
-					"--read-length", fmt.Sprintf("%d", Quantity2Int("1Mi")-1024),
+					"--read-offset", strconv.FormatUint(Quantity2Int("1Mi")+1024, 10),
+					"--read-length", strconv.FormatUint(Quantity2Int("1Mi")-1024, 10),
 					"--mid-snap-prefix", "snapshot1",
 					"--from-snap", t.snapshots[0],
 					fmt.Sprintf("%s/%s@%s", t.poolName, t.srcImageName, t.snapshots[1]),
@@ -274,7 +275,7 @@ func (t *extendTest) test() {
 				expectedDataName: t.snapshots[1],
 				importsBefore:    []string{"/tmp/snapshot0.bin", "/tmp/snapshot1-offset-1Mi+1Ki.bin"},
 				exportArgs1: []string{
-					"--read-offset", fmt.Sprintf("%d", Quantity2Int("1Mi")+1024),
+					"--read-offset", strconv.FormatUint(Quantity2Int("1Mi")+1024, 10),
 					"--read-length", Quantity2Str("5Mi"),
 					"--mid-snap-prefix", "snapshot1",
 					"--from-snap", t.snapshots[0],
@@ -290,7 +291,7 @@ func (t *extendTest) test() {
 				importsBefore:    []string{"/tmp/snapshot0.bin", "/tmp/snapshot2-offset-1Ki.bin"},
 				exportArgs1: []string{
 					"--read-offset", Quantity2Str("1Ki"),
-					"--read-length", fmt.Sprintf("%d", Quantity2Int("1Mi")-1024),
+					"--read-length", strconv.FormatUint(Quantity2Int("1Mi")-1024, 10),
 					"--mid-snap-prefix", "snapshot2",
 					"--from-snap", t.snapshots[0],
 					fmt.Sprintf("%s/%s@%s", t.poolName, t.srcImageName, t.snapshots[2]),
@@ -312,7 +313,7 @@ func (t *extendTest) test() {
 				importsBefore:    []string{"/tmp/snapshot0.bin", "/tmp/snapshot2-offset-1Ki.bin"},
 				exportArgs1: []string{
 					"--read-offset", Quantity2Str("1Ki"),
-					"--read-length", fmt.Sprintf("%d", Quantity2Int("2Mi")-1024),
+					"--read-length", strconv.FormatUint(Quantity2Int("2Mi")-1024, 10),
 					"--mid-snap-prefix", "snapshot2",
 					"--from-snap", t.snapshots[0],
 					fmt.Sprintf("%s/%s@%s", t.poolName, t.srcImageName, t.snapshots[2]),
@@ -340,7 +341,7 @@ func (t *extendTest) test() {
 				expectedDataName: t.snapshots[2],
 				importsBefore:    []string{"/tmp/snapshot0.bin", "/tmp/snapshot2-offset-1Mi+1Ki.bin"},
 				exportArgs1: []string{
-					"--read-offset", fmt.Sprintf("%d", Quantity2Int("1Mi")+1024),
+					"--read-offset", strconv.FormatUint(Quantity2Int("1Mi")+1024, 10),
 					"--read-length", Quantity2Str("1Ki"),
 					"--mid-snap-prefix", "snapshot2",
 					"--from-snap", t.snapshots[0],
@@ -348,8 +349,8 @@ func (t *extendTest) test() {
 				},
 				rollbackTo1: "snapshot2-offset-1049600",
 				exportArgs2: []string{
-					"--read-offset", fmt.Sprintf("%d", Quantity2Int("1Mi")+2048),
-					"--read-length", fmt.Sprintf("%d", Quantity2Int("1Mi")-2048),
+					"--read-offset", strconv.FormatUint(Quantity2Int("1Mi")+2048, 10),
+					"--read-length", strconv.FormatUint(Quantity2Int("1Mi")-2048, 10),
 					"--mid-snap-prefix", "snapshot2",
 					"--from-snap", t.snapshots[0],
 					fmt.Sprintf("%s/%s@%s", t.poolName, t.srcImageName, t.snapshots[2]),
@@ -362,8 +363,8 @@ func (t *extendTest) test() {
 				expectedDataName: t.snapshots[2],
 				importsBefore:    []string{"/tmp/snapshot0.bin", "/tmp/snapshot2-offset-1Mi+1Ki.bin"},
 				exportArgs1: []string{
-					"--read-offset", fmt.Sprintf("%d", Quantity2Int("1Mi")+1024),
-					"--read-length", fmt.Sprintf("%d", Quantity2Int("1Mi")-1024),
+					"--read-offset", strconv.FormatUint(Quantity2Int("1Mi")+1024, 10),
+					"--read-length", strconv.FormatUint(Quantity2Int("1Mi")-1024, 10),
 					"--mid-snap-prefix", "snapshot2",
 					"--from-snap", t.snapshots[0],
 					fmt.Sprintf("%s/%s@%s", t.poolName, t.srcImageName, t.snapshots[2]),
@@ -376,7 +377,7 @@ func (t *extendTest) test() {
 				expectedDataName: t.snapshots[2],
 				importsBefore:    []string{"/tmp/snapshot0.bin", "/tmp/snapshot2-offset-1Mi+1Ki.bin"},
 				exportArgs1: []string{
-					"--read-offset", fmt.Sprintf("%d", Quantity2Int("1Mi")+1024),
+					"--read-offset", strconv.FormatUint(Quantity2Int("1Mi")+1024, 10),
 					"--read-length", Quantity2Str("5Mi"),
 					"--mid-snap-prefix", "snapshot2",
 					"--from-snap", t.snapshots[0],

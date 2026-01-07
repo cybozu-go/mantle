@@ -237,12 +237,14 @@ func setupReconcilers(mgr manager.Manager, primarySettings *controller.PrimarySe
 	managedCephClusterID := os.Getenv("POD_NAMESPACE")
 	if managedCephClusterID == "" {
 		setupLog.Error(errors.New("POD_NAMESPACE is empty"), "POD_NAMESPACE is empty")
+
 		return errors.New("POD_NAMESPACE is empty")
 	}
 
 	podImage := os.Getenv("POD_IMAGE")
 	if podImage == "" {
 		setupLog.Error(errors.New("POD_IMAGE must not be empty"), "POD_IMAGE must not be empty")
+
 		return errors.New("POD_IMAGE is empty")
 	}
 
@@ -254,17 +256,20 @@ func setupReconcilers(mgr manager.Manager, primarySettings *controller.PrimarySe
 	parsedGCInterval, err := time.ParseDuration(gcInterval)
 	if err != nil {
 		setupLog.Error(err, "faield to parse gc interval", "gcInterval", gcInterval)
+
 		return err
 	}
 	if parsedGCInterval < 1*time.Second {
 		err := fmt.Errorf("the specified gc interval is too short: %s", parsedGCInterval.String())
 		setupLog.Error(err, "failed to validate gc interval", "gcInterval", gcInterval)
+
 		return err
 	}
 
 	parsedBackupTransferPartSize, err := resource.ParseQuantity(backupTransferPartSize)
 	if err != nil {
 		setupLog.Error(err, "failed to parse backup-transfer-part-size", "value", backupTransferPartSize)
+
 		return fmt.Errorf("failed to parse backup-transfer-part-size: %w", err)
 	}
 
@@ -291,6 +296,7 @@ func setupReconcilers(mgr manager.Manager, primarySettings *controller.PrimarySe
 	)
 	if err := backupReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MantleBackup")
+
 		return err
 	}
 
@@ -302,6 +308,7 @@ func setupReconcilers(mgr manager.Manager, primarySettings *controller.PrimarySe
 	)
 	if err := restoreReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MantleRestore")
+
 		return err
 	}
 
@@ -313,6 +320,7 @@ func setupReconcilers(mgr manager.Manager, primarySettings *controller.PrimarySe
 		role,
 	).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MantleBackupConfig")
+
 		return err
 	}
 
@@ -322,6 +330,7 @@ func setupReconcilers(mgr manager.Manager, primarySettings *controller.PrimarySe
 		managedCephClusterID,
 	).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "PersistentVolumeReconciler")
+
 		return err
 	}
 
@@ -331,6 +340,7 @@ func setupReconcilers(mgr manager.Manager, primarySettings *controller.PrimarySe
 		controller.NewGarbageCollectorRunner(mgr.GetClient(), parsedGCInterval, managedCephClusterID),
 	); err != nil {
 		setupLog.Error(err, "unable to create runner", "runner", "GarbageCollectorRunner")
+
 		return err
 	}
 
@@ -347,14 +357,17 @@ func setupPrimary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup) 
 	// cf. https://pkg.go.dev/golang.org/x/net/http/httpproxy
 	if err := os.Setenv("HTTP_PROXY", httpProxy); err != nil {
 		setupLog.Error(err, "failed to set HTTP_PROXY environment variable")
+
 		return err
 	}
 	if err := os.Setenv("HTTPS_PROXY", httpsProxy); err != nil {
 		setupLog.Error(err, "failed to set HTTPS_PROXY environment variable")
+
 		return err
 	}
 	if err := os.Setenv("NO_PROXY", noProxy); err != nil {
 		setupLog.Error(err, "failed to set NO_PROXY environment variable")
+
 		return err
 	}
 
@@ -385,6 +398,7 @@ func setupPrimary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup) 
 	)
 	if err != nil {
 		setupLog.Error(err, "failed to create a new client for the secondary mantle")
+
 		return err
 	}
 
@@ -470,6 +484,7 @@ func subMain() error {
 
 	if err := checkCommandlineArgs(); err != nil {
 		setupLog.Error(err, "invalid command line arguments")
+
 		return err
 	}
 
@@ -505,6 +520,7 @@ func subMain() error {
 		mgr, err = ctrl.NewManager(ctrl.GetConfigOrDie(), mgrOptions)
 		if err != nil {
 			setupLog.Error(err, "unable to start manager")
+
 			return err
 		}
 
@@ -515,6 +531,7 @@ func subMain() error {
 		mgr, err = ctrl.NewManager(ctrl.GetConfigOrDie(), mgrOptions)
 		if err != nil {
 			setupLog.Error(err, "unable to start manager")
+
 			return err
 		}
 
@@ -525,6 +542,7 @@ func subMain() error {
 		mgr, err = ctrl.NewManager(ctrl.GetConfigOrDie(), mgrOptions)
 		if err != nil {
 			setupLog.Error(err, "unable to start manager")
+
 			return err
 		}
 		if err := setupSecondary(ctx, mgr, &wg, cancel); err != nil {
@@ -534,16 +552,19 @@ func subMain() error {
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
+
 		return err
 	}
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up ready check")
+
 		return err
 	}
 
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
+
 		return err
 	}
 
