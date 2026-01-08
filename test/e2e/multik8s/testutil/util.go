@@ -1210,3 +1210,18 @@ func WaitControllerLog(ctx SpecContext, clusterNo int, pattern string, duration 
 		return nil
 	}
 }
+
+func CountMantleControllerPods(cluster int) int {
+	GinkgoHelper()
+	pods, err := GetPodList(cluster, CephClusterNamespace)
+	Expect(err).NotTo(HaveOccurred())
+	count := 0
+	for _, pod := range pods.Items {
+		if pod.Labels["app.kubernetes.io/name"] == "mantle" &&
+			pod.Labels["app.kubernetes.io/component"] == "controller" {
+			count++
+		}
+	}
+
+	return count
+}
