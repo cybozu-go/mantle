@@ -38,20 +38,14 @@ var _ = Describe("webhook independence test", func() {
 		}).Should(Succeed())
 
 		By("scaling down the controller deployment to 0 on secondary cluster")
+		Expect(CountMantleControllerPods(SecondaryK8sCluster)).To(Equal(1))
 		_, stderr, err := Kubectl(SecondaryK8sCluster, nil,
 			"scale", "deploy", "-n", CephClusterNamespace, "mantle-controller", "--replicas=0")
 		Expect(err).NotTo(HaveOccurred(), string(stderr))
 
 		By("waiting for the controller pods to be terminated")
 		Eventually(ctx, func(g Gomega) {
-			pods, err := GetPodList(SecondaryK8sCluster, CephClusterNamespace)
-			g.Expect(err).NotTo(HaveOccurred())
-			count := 0
-			for _, pod := range pods.Items {
-				if pod.Labels["app.kubernetes.io/name"] == "mantle-controller" {
-					count++
-				}
-			}
+			count := CountMantleControllerPods(SecondaryK8sCluster)
 			g.Expect(count).To(Equal(0))
 		}).Should(Succeed())
 
