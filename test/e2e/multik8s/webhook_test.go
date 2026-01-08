@@ -1,6 +1,8 @@
 package multik8s
 
 import (
+	"slices"
+
 	. "github.com/cybozu-go/mantle/test/e2e/multik8s/testutil"
 	"github.com/cybozu-go/mantle/test/util"
 	. "github.com/onsi/ginkgo/v2"
@@ -80,6 +82,22 @@ var _ = Describe("webhook independence test", func() {
 			}
 			g.Expect(found).To(BeTrue(), "expected FailedAttachVolume event not found")
 		}).Should(Succeed())
+
+		By("checking that it is allowed to create a Pod that mounts a PVC without remote-uid annotation", func() {
+			podName := util.GetUniqueName("pod-")
+			pvcName := util.GetUniqueName("pvc-")
+			CreatePVC(ctx, SecondaryK8sCluster, namespace, pvcName)
+			CreatePod(SecondaryK8sCluster, namespace, podName, pvcName)
+			Eventually(ctx, func(g Gomega) {
+				pods, err := GetPodList(SecondaryK8sCluster, namespace)
+				g.Expect(err).NotTo(HaveOccurred())
+				i := slices.IndexFunc(pods.Items, func(p corev1.Pod) bool {
+					return p.Name == podName
+				})
+				g.Expect(i).NotTo(Equal(-1))
+				g.Expect(pods.Items[i].Status.Phase).To(Equal(corev1.PodRunning))
+			}).Should(Succeed())
+		})
 
 		By("scaling the controller deployment back to 1 replica on secondary cluster")
 		_, stderr, err = Kubectl(SecondaryK8sCluster, nil,
