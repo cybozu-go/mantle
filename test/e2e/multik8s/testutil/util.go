@@ -534,16 +534,16 @@ func CreateMantleBackupConfig(cluster int, namespace, pvcName, backupConfigName 
 	}).Should(Succeed())
 }
 
-func WaitMantleBackupReadyToUse(cluster int, namespace, backupName string) {
+func WaitMantleBackupSnapshotCaptured(cluster int, namespace, backupName string) {
 	GinkgoHelper()
-	By("checking MantleBackup's ReadyToUse status")
+	By("checking MantleBackup's SnapshotCaptured status")
 	Eventually(func() error {
 		mb, err := GetMB(cluster, namespace, backupName)
 		if err != nil {
 			return err
 		}
-		if !mb.IsReady() {
-			return errors.New("status of ReadyToUse condition is not True")
+		if !mb.IsSnapshotCaptured() {
+			return errors.New("status of SnapshotCaptured condition is not True")
 		}
 
 		return nil

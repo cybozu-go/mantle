@@ -112,8 +112,8 @@ var _ = Describe("full backup", Label("full-backup"), func() {
 				if secondaryMB.Status.CreatedAt.IsZero() {
 					return errors.New(".Status.CreatedAt is zero")
 				}
-				if !secondaryMB.IsReady() {
-					return errors.New("ReadyToUse of .Status.Conditions is not True")
+				if !secondaryMB.IsSnapshotCaptured() {
+					return errors.New("SnapshotCaptured of .Status.Conditions is not True")
 				}
 
 				// Check if snapshots are created correctly in the secondary Rook/Ceph cluster

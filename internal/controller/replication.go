@@ -232,8 +232,8 @@ func (s *SecondaryServer) SetSynchronizing(
 		return nil, err
 	}
 
-	if target.IsReady() {
-		return nil, errors.New("ReadyToUse is true")
+	if target.IsSnapshotCaptured() {
+		return nil, errors.New("SnapshotCaptured is true")
 	}
 
 	// make sure sync-mode is correct.

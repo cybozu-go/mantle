@@ -215,12 +215,12 @@ func (r *ResourceManager) CreateUniqueBackupFor(ctx context.Context, pvc *corev1
 	return backup, nil
 }
 
-func (r *ResourceManager) WaitForBackupReady(ctx context.Context, backup *mantlev1.MantleBackup) {
+func (r *ResourceManager) WaitForBackupSnapshotCaptured(ctx context.Context, backup *mantlev1.MantleBackup) {
 	EventuallyWithOffset(1, func(g Gomega, ctx context.Context) {
 		err := r.client.Get(ctx, types.NamespacedName{Name: backup.Name, Namespace: backup.Namespace}, backup)
 		g.Expect(err).NotTo(HaveOccurred())
 
-		g.Expect(backup.IsReady()).Should(BeTrue())
+		g.Expect(backup.IsSnapshotCaptured()).Should(BeTrue())
 	}).WithContext(ctx).Should(Succeed())
 }
 
