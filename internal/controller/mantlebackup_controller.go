@@ -735,7 +735,7 @@ func (r *MantleBackupReconciler) verify(
 	}
 
 	// create a static PV with the clone
-	if err := r.createOrUpdateStaticPV(
+	if err := r.createStaticPVIfNotExists(
 		ctx,
 		&storedPV,
 		MakeVerifyImageName(backup),
@@ -743,6 +743,7 @@ func (r *MantleBackupReconciler) verify(
 			corev1.ResourceStorage: *resource.NewQuantity(*backup.Status.SnapSize, resource.BinarySI),
 		},
 		MakeVerifyPVName(backup),
+		MakeVerifyPVCName(backup),
 		labelComponentVerifyVolume,
 		true,
 	); err != nil {
@@ -750,7 +751,7 @@ func (r *MantleBackupReconciler) verify(
 	}
 
 	// create a PVC with the PV
-	if err := r.createOrUpdateStaticPVC(
+	if err := r.createStaticPVCIfNotExists(
 		ctx,
 		MakeVerifyPVCName(backup),
 		MakeVerifyPVName(backup),
@@ -2229,19 +2230,20 @@ func (r *MantleBackupReconciler) reconcileZeroOutJob(
 		return ctrl.Result{}, nil
 	}
 
-	if err := r.createOrUpdateStaticPV(
+	if err := r.createStaticPVIfNotExists(
 		ctx,
 		snapshotTarget.pv,
 		snapshotTarget.pv.Spec.CSI.VolumeAttributes["imageName"],
 		snapshotTarget.pv.Spec.Capacity,
 		MakeZeroOutPVName(backup),
+		MakeZeroOutPVCName(backup),
 		labelComponentZeroOutVolume,
 		false,
 	); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	if err := r.createOrUpdateStaticPVC(
+	if err := r.createStaticPVCIfNotExists(
 		ctx,
 		MakeZeroOutPVCName(backup),
 		MakeZeroOutPVName(backup),
@@ -2266,7 +2268,7 @@ func (r *MantleBackupReconciler) reconcileZeroOutJob(
 	return requeueReconciliation(), nil
 }
 
-// createOrUpdateStaticPV creates or updates a static PersistentVolume (PV) resource.
+// createStaticPVIfNotExists creates a static PersistentVolume (PV) if it does not exist.
 // It copies relevant CSI and metadata fields from the basePV, sets the provided volume handle,
 // capacity, and component label, and ensures the PV is configured for static provisioning.
 //
@@ -2276,70 +2278,85 @@ func (r *MantleBackupReconciler) reconcileZeroOutJob(
 //	basePV        - source PV to copy CSI and metadata fields from
 //	volume        - volume handle to assign to the new PV
 //	capacity      - resource capacity for the PV
-//	newPvName     - name for the new or updated PV
+//	newPvName     - name for the new PV
 //	componentName - label value for the component
 //	addFlatten    - whether to add deep-flatten feature to the volume attributes
 //
-// Returns an error if creation or update fails.
-func (r *MantleBackupReconciler) createOrUpdateStaticPV(
+// Returns an error if creation fails.
+func (r *MantleBackupReconciler) createStaticPVIfNotExists(
 	ctx context.Context,
 	basePV *corev1.PersistentVolume,
 	volume string,
 	capacity corev1.ResourceList,
-	newPvName, componentName string,
+	newPvName, pvcName, componentName string,
 	addFlatten bool,
 ) error {
-	var pv corev1.PersistentVolume
-	pv.SetName(newPvName)
-	_, err := ctrl.CreateOrUpdate(ctx, r.Client, &pv, func() error {
-		labels := pv.GetLabels()
-		if labels == nil {
-			labels = map[string]string{}
+	if basePV.Spec.CSI == nil {
+		return errors.New("PV is not a CSI volume")
+	}
+	feature := basePV.Spec.CSI.VolumeAttributes["imageFeatures"]
+	if addFlatten {
+		if len(feature) > 0 {
+			feature = feature + ",deep-flatten"
+		} else {
+			feature = "deep-flatten"
 		}
-		labels["app.kubernetes.io/name"] = labelAppNameValue
-		labels["app.kubernetes.io/component"] = componentName
-		pv.SetLabels(labels)
+	}
 
-		pv.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
-		pv.Spec.Capacity = capacity
-		pv.Spec.PersistentVolumeReclaimPolicy = corev1.PersistentVolumeReclaimRetain
-		pv.Spec.StorageClassName = ""
-		pv.Spec.VolumeMode = ptr.To(corev1.PersistentVolumeBlock)
+	err := r.Create(ctx, &corev1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: newPvName,
+			Labels: map[string]string{
+				"app.kubernetes.io/name":      labelAppNameValue,
+				"app.kubernetes.io/component": componentName,
+			},
+		},
+		Spec: corev1.PersistentVolumeSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			Capacity:    capacity,
+			// Set ClaimRef to bind only to the specific PVC.
+			ClaimRef: &corev1.ObjectReference{
+				Namespace: r.managedCephClusterID,
+				Name:      pvcName,
+			},
+			PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimRetain,
+			// No StorageClass to indicate static provisioning.
+			StorageClassName: "",
+			VolumeMode:       ptr.To(corev1.PersistentVolumeBlock),
 
-		if pv.Spec.CSI == nil {
-			pv.Spec.CSI = &corev1.CSIPersistentVolumeSource{}
-		}
-		pv.Spec.CSI.Driver = basePV.Spec.CSI.Driver
-		pv.Spec.CSI.ControllerExpandSecretRef = basePV.Spec.CSI.ControllerExpandSecretRef
-		pv.Spec.CSI.NodeStageSecretRef = basePV.Spec.CSI.NodeStageSecretRef
-		pv.Spec.CSI.VolumeHandle = volume
-
-		if pv.Spec.CSI.VolumeAttributes == nil {
-			pv.Spec.CSI.VolumeAttributes = map[string]string{}
-		}
-		feature := basePV.Spec.CSI.VolumeAttributes["imageFeatures"]
-		if addFlatten {
-			if len(feature) > 0 {
-				feature = feature + ",deep-flatten"
-			} else {
-				feature = "deep-flatten"
-			}
-		}
-		pv.Spec.CSI.VolumeAttributes["clusterID"] = basePV.Spec.CSI.VolumeAttributes["clusterID"]
-		pv.Spec.CSI.VolumeAttributes["imageFeatures"] = feature
-		pv.Spec.CSI.VolumeAttributes["imageFormat"] = basePV.Spec.CSI.VolumeAttributes["imageFormat"]
-		pv.Spec.CSI.VolumeAttributes["pool"] = basePV.Spec.CSI.VolumeAttributes["pool"]
-		pv.Spec.CSI.VolumeAttributes["staticVolume"] = "true"
-
-		return nil
+			PersistentVolumeSource: corev1.PersistentVolumeSource{
+				CSI: &corev1.CSIPersistentVolumeSource{
+					Driver:                    basePV.Spec.CSI.Driver,
+					ControllerExpandSecretRef: basePV.Spec.CSI.ControllerExpandSecretRef,
+					NodeStageSecretRef:        basePV.Spec.CSI.NodeStageSecretRef,
+					VolumeAttributes: map[string]string{
+						"clusterID":     basePV.Spec.CSI.VolumeAttributes["clusterID"],
+						"imageFeatures": feature,
+						"imageFormat":   basePV.Spec.CSI.VolumeAttributes["imageFormat"],
+						"pool":          basePV.Spec.CSI.VolumeAttributes["pool"],
+						"staticVolume":  "true",
+					},
+					VolumeHandle: volume,
+				},
+			},
+		},
 	})
 
-	return err
+	if err != nil {
+		// Ignore AlreadyExists error
+		if aerrors.IsAlreadyExists(err) {
+			return nil
+		}
+
+		return fmt.Errorf("failed to create PV %s: %w", newPvName, err)
+	}
+
+	return nil
 }
 
-// createOrUpdateStaticPVC creates or updates a PersistentVolumeClaim (PVC) for binding to a static PersistentVolume (PV).
-// This function configures the PVC to reference the specified static PV, sets labels, access modes, storage class,
-// and resource requirements for static volume provisioning.
+// createStaticPVCIfNotExists creates a PersistentVolumeClaim (PVC) for binding to a static PersistentVolume (PV) if it does not
+// exist. This function configures the PVC to reference the specified static PV, sets labels,
+// access modes, storage class, and resource requirements for static volume provisioning.
 //
 // Parameters:
 //
@@ -2349,37 +2366,42 @@ func (r *MantleBackupReconciler) createOrUpdateStaticPV(
 //	componentName - label value for the component
 //	resources     - resource requirements for the PVC
 //
-// Returns an error if creation or update fails.
-func (r *MantleBackupReconciler) createOrUpdateStaticPVC(
+// Returns an error if creation fails.
+func (r *MantleBackupReconciler) createStaticPVCIfNotExists(
 	ctx context.Context,
 	pvcName, pvName, componentName string,
 	resources corev1.VolumeResourceRequirements,
 ) error {
-	var pvc corev1.PersistentVolumeClaim
-	pvc.SetName(pvcName)
-	pvc.SetNamespace(r.managedCephClusterID)
-	_, err := ctrl.CreateOrUpdate(ctx, r.Client, &pvc, func() error {
-		labels := pvc.GetLabels()
-		if labels == nil {
-			labels = map[string]string{}
-		}
-		labels["app.kubernetes.io/name"] = labelAppNameValue
-		labels["app.kubernetes.io/component"] = componentName
-		pvc.SetLabels(labels)
-
-		storageClassName := ""
-		pvc.Spec.StorageClassName = &storageClassName
-		pvc.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
-		pvc.Spec.Resources = resources
-		pvc.Spec.VolumeName = pvName
-
-		volumeMode := corev1.PersistentVolumeBlock
-		pvc.Spec.VolumeMode = &volumeMode
-
-		return nil
+	err := r.Create(ctx, &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: r.managedCephClusterID,
+			Name:      pvcName,
+			Labels: map[string]string{
+				"app.kubernetes.io/name":      labelAppNameValue,
+				"app.kubernetes.io/component": componentName,
+			},
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			Resources:   resources,
+			// No StorageClass to indicate static provisioning.
+			// and ensure this PVC statically binds to the specific PV.
+			StorageClassName: ptr.To(""),
+			VolumeName:       pvName,
+			VolumeMode:       ptr.To(corev1.PersistentVolumeBlock),
+		},
 	})
 
-	return err
+	if err != nil {
+		// Ignore AlreadyExists error
+		if aerrors.IsAlreadyExists(err) {
+			return nil
+		}
+
+		return fmt.Errorf("failed to create PVC %s: %w", pvcName, err)
+	}
+
+	return nil
 }
 
 func (r *MantleBackupReconciler) createOrUpdateZeroOutJob(

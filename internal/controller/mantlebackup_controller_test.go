@@ -1717,7 +1717,7 @@ var _ = Describe("import", func() {
 		mockCtrl = gomock.NewController(t)
 		mockObjectStorage = objectstorage.NewMockBucket(mockCtrl)
 
-		nsController = resMgr.CreateNamespace()
+		nsController = resMgr.ClusterID
 
 		mbr = NewMantleBackupReconciler(
 			k8sClient,
@@ -2324,53 +2324,85 @@ var _ = Describe("import", func() {
 			Expect(result.RequeueAfter).NotTo(BeZero())
 
 			var pv corev1.PersistentVolume
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeZeroOutPVName(backup), Namespace: nsController}, &pv)
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeZeroOutPVName(backup)}, &pv)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(pv.GetLabels()["app.kubernetes.io/name"]).To(Equal(labelAppNameValue))
 			Expect(pv.GetLabels()["app.kubernetes.io/component"]).To(Equal(labelComponentZeroOutVolume))
-			Expect(pv.Spec.AccessModes).To(HaveLen(1))
-			Expect(pv.Spec.AccessModes[0]).To(Equal(corev1.ReadWriteOnce))
-			Expect(pv.Spec.Capacity).To(Equal(pvCapacity))
-			Expect(pv.Spec.CSI.Driver).To(Equal(pvDriver))
-			Expect(*pv.Spec.CSI.ControllerExpandSecretRef).To(Equal(pvControllerExpandSecretRef))
-			Expect(*pv.Spec.CSI.NodeStageSecretRef).To(Equal(pvNodeStageSecretRef))
-			Expect(pv.Spec.CSI.VolumeAttributes["clusterID"]).To(Equal(pvClusterID))
-			Expect(pv.Spec.CSI.VolumeAttributes["imageFeatures"]).To(Equal(pvImageFeatures))
-			Expect(pv.Spec.CSI.VolumeAttributes["imageFormat"]).To(Equal(pvImageFormat))
-			Expect(pv.Spec.CSI.VolumeAttributes["pool"]).To(Equal(pvPool))
-			Expect(pv.Spec.CSI.VolumeAttributes["staticVolume"]).To(Equal("true"))
-			Expect(pv.Spec.CSI.VolumeHandle).To(Equal(pvImageName))
-			Expect(pv.Spec.PersistentVolumeReclaimPolicy).To(Equal(corev1.PersistentVolumeReclaimRetain))
-			Expect(*pv.Spec.VolumeMode).To(Equal(corev1.PersistentVolumeBlock))
-			Expect(pv.Spec.StorageClassName).To(Equal(""))
+			Expect(pv.Spec).To(Equal(corev1.PersistentVolumeSpec{
+				AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+				Capacity:    pvCapacity,
+				ClaimRef: &corev1.ObjectReference{
+					Namespace: resMgr.ClusterID,
+					Name:      MakeZeroOutPVName(backup),
+				},
+				PersistentVolumeSource: corev1.PersistentVolumeSource{
+					CSI: &corev1.CSIPersistentVolumeSource{
+						Driver:                    pvDriver,
+						ControllerExpandSecretRef: &pvControllerExpandSecretRef,
+						NodeStageSecretRef:        &pvNodeStageSecretRef,
+						VolumeAttributes: map[string]string{
+							"clusterID":     pvClusterID,
+							"imageFeatures": pvImageFeatures,
+							"imageFormat":   pvImageFormat,
+							"pool":          pvPool,
+							"staticVolume":  "true",
+						},
+						VolumeHandle: pvImageName,
+					},
+				},
+				PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimRetain,
+				StorageClassName:              "",
+				VolumeMode:                    ptr.To(corev1.PersistentVolumeBlock),
+			}))
 
 			var pvc corev1.PersistentVolumeClaim
 			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeZeroOutPVName(backup), Namespace: nsController}, &pvc)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(pvc.GetLabels()["app.kubernetes.io/name"]).To(Equal(labelAppNameValue))
 			Expect(pvc.GetLabels()["app.kubernetes.io/component"]).To(Equal(labelComponentZeroOutVolume))
-			Expect(*pvc.Spec.StorageClassName).To(Equal(""))
-			Expect(pvc.Spec.AccessModes).To(HaveLen(1))
-			Expect(pvc.Spec.AccessModes[0]).To(Equal(corev1.ReadWriteOnce))
-			Expect(pvc.Spec.Resources).To(Equal(pvcResources))
-			Expect(*pvc.Spec.VolumeMode).To(Equal(corev1.PersistentVolumeBlock))
-			Expect(pvc.Spec.VolumeName).To(Equal(MakeZeroOutPVName(backup)))
+			Expect(pvc.Spec).To(Equal(corev1.PersistentVolumeClaimSpec{
+				AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+				Resources:        pvcResources,
+				StorageClassName: ptr.To(""),
+				VolumeMode:       ptr.To(corev1.PersistentVolumeBlock),
+				VolumeName:       MakeZeroOutPVName(backup),
+			}))
 
 			var job batchv1.Job
 			err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeZeroOutJobName(backup), Namespace: nsController}, &job)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(job.GetLabels()["app.kubernetes.io/name"]).To(Equal(labelAppNameValue))
 			Expect(job.GetLabels()["app.kubernetes.io/component"]).To(Equal(labelComponentZeroOutJob))
-			Expect(*job.Spec.BackoffLimit).To(Equal(int32(65535)))
+			Expect(job.Spec.BackoffLimit).To(Equal(ptr.To(int32(65535))))
 			Expect(job.Spec.Template.Spec.Containers).To(HaveLen(1))
-			Expect(job.Spec.Template.Spec.Containers[0].Name).To(Equal("zeroout"))
-			Expect(*job.Spec.Template.Spec.Containers[0].SecurityContext.Privileged).To(BeTrue())
-			Expect(*job.Spec.Template.Spec.Containers[0].SecurityContext.RunAsGroup).To(Equal(int64(0)))
-			Expect(*job.Spec.Template.Spec.Containers[0].SecurityContext.RunAsUser).To(Equal(int64(0)))
-			Expect(job.Spec.Template.Spec.Containers[0].Image).To(Equal(mbr.podImage))
-			Expect(job.Spec.Template.Spec.Containers[0].VolumeDevices).To(HaveLen(1))
-			Expect(job.Spec.Template.Spec.Containers[0].VolumeDevices[0].Name).To(Equal("zeroout-rbd"))
-			Expect(job.Spec.Template.Spec.Containers[0].VolumeDevices[0].DevicePath).To(Equal("/dev/zeroout-rbd"))
+			// ignore fields set by the system
+			container := job.Spec.Template.Spec.Containers[0].DeepCopy()
+			container.TerminationMessagePath = ""
+			container.TerminationMessagePolicy = ""
+			Expect(*container).To(Equal(corev1.Container{
+				Name: "zeroout",
+				Command: []string{
+					"/bin/bash",
+					"-c",
+					`
+set -e
+blkdiscard -z /dev/zeroout-rbd
+`,
+				},
+				Image:           mbr.podImage,
+				ImagePullPolicy: corev1.PullIfNotPresent,
+				SecurityContext: &corev1.SecurityContext{
+					Privileged: ptr.To(true),
+					RunAsGroup: ptr.To(int64(0)),
+					RunAsUser:  ptr.To(int64(0)),
+				},
+				VolumeDevices: []corev1.VolumeDevice{
+					{
+						Name:       "zeroout-rbd",
+						DevicePath: "/dev/zeroout-rbd",
+					},
+				},
+			}))
 			Expect(job.Spec.Template.Spec.RestartPolicy).To(Equal(corev1.RestartPolicyOnFailure))
 			Expect(job.Spec.Template.Spec.Volumes).To(HaveLen(1))
 			Expect(job.Spec.Template.Spec.Volumes[0]).To(Equal(corev1.Volume{
@@ -2623,6 +2655,10 @@ var _ = Describe("MantleBackupReconciler", func() {
 			Expect(pv.Spec).To(Equal(corev1.PersistentVolumeSpec{
 				AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 				Capacity:    pvSrc.Spec.Capacity,
+				ClaimRef: &corev1.ObjectReference{
+					Namespace: resMgr.ClusterID,
+					Name:      MakeVerifyPVCName(backup),
+				},
 				PersistentVolumeSource: corev1.PersistentVolumeSource{
 					CSI: &corev1.CSIPersistentVolumeSource{
 						Driver:                    pvSrc.Spec.CSI.Driver,
