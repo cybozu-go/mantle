@@ -202,7 +202,7 @@ install-rook-ceph-cluster1:
 	$(call retry,$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
 		--namespace $(CEPH_CLUSTER1_NAMESPACE) -f testdata/values-cluster.yaml \
 		--wait rook-ceph-cluster rook-ceph-cluster)
-	$(KUBECTL) wait --timeout=300s --for=condition=Ready -n $(CEPH_CLUSTER1_NAMESPACE) cephclusters/rook-ceph
+	$(MAKE) wait-ceph-ready NAMESPACE=$(CEPH_CLUSTER1_NAMESPACE)
 
 .PHONY: install-rook-ceph-cluster2
 install-rook-ceph-cluster2:
@@ -210,7 +210,24 @@ install-rook-ceph-cluster2:
 		--create-namespace --namespace $(CEPH_CLUSTER2_NAMESPACE) -f testdata/values-cluster.yaml \
 		--set cephClusterSpec.dataDirHostPath=/var/lib/rook2 \
 		--wait rook-ceph-cluster2 rook-ceph-cluster)
-	$(KUBECTL) wait --timeout=300s --for=condition=Ready -n $(CEPH_CLUSTER2_NAMESPACE) cephclusters/rook-ceph2
+	$(MAKE) wait-ceph-ready NAMESPACE=$(CEPH_CLUSTER2_NAMESPACE)
+
+.PHONY: wait-ceph-ready
+wait-ceph-ready:
+	is_ok="false"; \
+	for ((i=0;i<$(TIMEOUT_SECS);i+=$(POLLING_INTERVAL))); do \
+		$(KUBECTL) -n $(NAMESPACE) exec deploy/rook-ceph-tools -- ceph -s >/dev/null 2>&1 && { \
+			echo "ceph -s succeeded in namespace $(NAMESPACE)"; \
+			is_ok="true"; \
+			break; \
+		}; \
+		echo "waiting for ceph -s to succeed in namespace $(NAMESPACE)" > /dev/stderr; \
+		sleep $(POLLING_INTERVAL); \
+	done; \
+	if [ "$$is_ok" = "false" ]; then \
+		echo "ceph -s failed to become ready in namespace $(NAMESPACE)" > /dev/stderr; \
+		exit 1; \
+	fi
 
 .PHONY: install-ceph-object-store
 install-ceph-object-store:
