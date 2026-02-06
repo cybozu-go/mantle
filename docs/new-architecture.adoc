@@ -1,0 +1,110 @@
+= Mantle（再）設計案
+
+== 用語集
+
+MUST, SHOULD, MAY 他:: RFC 2119 に従う。
+ユニットテスト（単体テスト）:: ソフトウェアの外部に依存せず（MUST NOT）実行できるテスト。メモリ上で構築されるモックやフェイクには依存しても良い（MAY）。この文書では主に envtest に依存しないテストを指す。
+E2E テスト:: ソフトウェアと、ソフトウェアが依存する外部システムを全て動作させた状態で実行するテスト。この文書では主に kind や minikube を使って動作させるテストを指す。
+インテグレーションテスト（統合テスト）:: ユニットテストでもなく、かつ E2E テストでもないテスト。この文書では主に envtest に依存するテストを指す。
+（コード（上）の）依存:: あるコード A が別のコード B を参照して書かれているとき、A から B へのコード（上）の依存があるという。文脈から明らかな場合、単に依存があるともいう。依存があるからといって、必ずしもコードの動作順序と依存の方向が一致しないことに注意する（cf. 依存性逆転の原則）。また A から B へ依存があることは、A と B が異なるディレクトリや（Go の）異なるパッケージに存在することを必ずしも含意しない。
+
+== 方針
+
+Mantle のアーキテクチャとしてポートとアダプタ（<<learning-ddd>> P.149）を採用し、Mantle 全体を以下の三層に分割するfootnote:[各層の名前は <<learning-ddd>> とは異なる。ドメイン層は業務ロジック層に、ユースケース層はアプリケーション層に、インフラ層はインフラストラクチャ層に対応する。]：
+
+* ドメイン層
+* ユースケース層
+* インフラ層
+
+ドメイン層は他のどの層にもコード上の依存がなく、ユースケース層はドメイン層のみに依存があり、インフラ層はドメイン層・ユースケース層の双方に依存がある。
+
+各層の詳細は次の通り。
+
+=== ドメイン層
+
+Mantle がどのように振る舞うべきかを定義する。他のどの層にもコード上の依存がない（MUST NOT）。
+
+ドメインモデル（<<learning-ddd>> P.90）によって設計する。カスタムリソースを含む Kubernetes のリソース（ `CronJob`, `Job`, `MantleBackup` など）を集約（<<learning-ddd>> P.100）footnote:[Kubernetes にはトランザクションが無いため、集約とエンティティはほとんど同義語だと思って良いはず。]とし、それらを扱うドメインサービス（<<learning-ddd>> P.110）としてリコンサイラを定義する。
+
+Mantle が実施すべき処理の大部分はドメイン層に記述される。例えば以下のような処理を書く：
+
+* Export Job part=1 が完了したことを確認し、Upload Job part=1 を作成する。
+* バックアップの全ての処理が完了したことを確認し `.status.conditions` に `ReadyToUse=True` を設定する。
+* `MantleBackup` リソースに `deletionTimestamp` がついていることを確認し、スナップショットの削除を行う。
+* part 番号に従った RBD snapshot を作成する。
+* 作成されようとしている `VolumeAttachment` リソースが妥当かを確認する。
+
+ドメイン層が使用したい外部サービス（Kubernetes や Ceph など）は、ドメイン層中でインターフェースとして定義されるか、ドメインイベント（<<learning-ddd>> P.108）を経由して使用される。他に障害がなければ、ドメインイベントを用いる方が（関数が純粋になるため）テスト容易性の観点から望ましい（SHOULD）<<a-better-domain-events-pattern>>footnote:[特にリコンサイラの関数の場合は、引数として受け取った情報から現在の状態を推定し、次にどの状態に遷移するべきかを返す純粋な関数として書きたい。これは理想であって実際はそんなにうまくいかないかもしれないが。]。またドメインイベントとして実装することで、ドメイン層の中で Kubernetes のリソースを複数回更新してしまい、楽観ロックに失敗する機会を減らせる。
+
+その定義から、ドメイン層に記述されるコードにはドメイン層以外への依存がない。そのためドメイン層のコードのユニットテストは容易に書ける。これにより Mantle のテスト容易性を高める。なぜユニットテストを重視するのかは<<why-unit-tests-are-important>>を参照。
+
+FIXME 具体的なコード例を書く
+
+=== ユースケース層
+
+ドメイン層のファサード。ドメイン層に依存し、インフラ層には依存しない（MUST NOT）。
+
+基本的に、Kubernetes へアクセスして必要なリソースを GET し、それらをまとめてドメイン層へ渡し、その結果書き換えられたリソースをインフラ層を経由し Kubernetes に永続化するという処理を行う。ドメイン層が求めるのであれば Ceph への操作も行う。
+
+通常の Kubernetes コントローラでは、ドメイン層が呼び出されるのは controller-runtime から `Reconcile()` 関数が呼び出されたときだけであるため、この層で定義されるのもそれに対応する処理だけになる。そのため、あえてこの層を設ける必要は無いかもしれない。
+
+しかし Mantle では多種多様な Job や gRPC 経由でドメイン層の処理が呼び出される。これらに対して窓口を提供し、可能であれば処理を共通化して提供するためにユースケース層が重要である。例えば Mantle であれば、secondary mantle-controller の一部の処理が controller-runtime 経由と gRPC 経由の両方で呼び出されうる。このような処理をユースケース層で一本化できるだろう。
+
+ユースケース層のコードは比較的定型的なもの（リソースを取得し、それをドメイン層に渡して、帰ってきたものを永続化する処理）が多くなるはずである。定型化することで可能な限りバグが入り込む余地を減らす。
+
+FIXME 具体的なコード例を書く
+
+=== インフラ層
+
+Kubernetes を含む外部コンポーネントにアクセスする。ドメイン層・ユースケース層に依存する。特に、ドメイン層のインターフェースを実装し、またドメインイベントが指示する処理を行う。
+
+Mantle では主に以下のコンポーネントから構成される：
+
+Kubernetes コンポーネント:: Kubernetes にアクセスする処理は全てこの部分に記述される。例えば controller-runtime が生成する `Reconcile()` 関数や、Kubernetes クライアントを用いた `Create` や `Update` などを含む。
+Ceph コンポーネント:: Ceph にアクセスする処理は全てこの部分に記述される。主に RBD コマンドの呼び出しによって実装される。
+Fake コンポーネント:: テストで使用するための fake の実装。テストで必要になったものを必要に応じて実装する。
+
+インフラ層に書かれるコードは、外部サービスへの依存があるものが多いため、統合テスト・E2E テストに頼ってテストすることになり、十分テストし尽くせるとは言い難い。そのため、インフラ層のコードは直観的で簡単なものとし、バグが入り込む余地を可能な限り減らす。
+
+== PoC
+
+https://github.com/cybozu-go/mantle/pull/244
+
+[#why-unit-tests-are-important]
+== なぜ単体テストを重視するのか
+
+FIXME 以下をまともな日本語にする。
+
+* E2E テストはフレーキーで、実行にも時間がかかる。スモークテストや、どうしても E2E でないとテストできないようなことに使う。
+* envtest は以下の問題がある：
+** 全てのテストで同じ環境が使い回されるため、リソースの名前などに乱数を取り入れるなどの工夫が必要になる。
+** `kubectl` などを使ってクラスタの状態を確認できないため、テストのデバッグが難しい。
+** 本物の Kubernetes クライアントを使用する必要がある。その結果 controller-runtime に存在するキャッシュの影響をうける。特にテスト中に（Gomega の） `Eventually` を多用する必要があり、これによりフレーキーなテストを書きがち。
+** テスト用のリソースを作成する際に、コントローラの処理では本来不要なフィールドまで埋める必要がある。
+* 以上を考えると、なにかテストしたい挙動がある場合にはまず単体テストで実装し、それが不十分な場合は統合テストで行い、それでも不十分なら E2E テストで実施するべき。
+** 一方で envtest・E2E テストでしか実装できないテストというものは存在する<<achilles-sdk-why-use-envtest>>ので単体テストだけでは不十分。
+* 単体テストを書きやすいアーキテクチャとしてドメインモデルが知られている（<<learning-ddd>> P.194）ので、この設計ではそれを採用している。
+
+== その他考慮すべきこと（まだまとまっていないこと）
+
+* リコンサイラは `deletionTimestamp` がついているときとついていない時で異なる関数を呼び出すようにすると見通しがよくなりそう。それぞれ `Provision` ・ `Deprovision` <<k8sup-reconciler>> と命名されたり `Sync` ・ `Finalize` <<reconciler-io-sync>> と命名されたり `ReconcileKind` ・ `FinalizeKind` <<knative-injection-generated-reconcilers>> と命名されたりしている。
+* `.status.conditions` はユーザー向けなので処理が依存するべきではないが `.status` は観測結果を書く限りにおいて依存して良さそう。
+** fast and offline reconciliation <<controller-pitfalls-fast-and-offline-reconciliation>> を達成するためには `.status` への依存は避けられなさそう。
+** `.status.conditions` に存在しうるフィールドは、いれるべき値が無いような状況でも `Unknown` を入れておかないといけないらしい。が、今からあえて Mantle の公開 API を変更する必要もなさそう。
+** リソースが変更された場合 `.status.conditions` の中身は全て `Unknown` に設定してからリコンサイラ本体を呼ぶべきらしい。これをやるためには observed generation を正しく取り扱う必要がある。ただ、Mantle の場合、あとからガリガリ書き換えるリソースというものがあまりないので、そんなに重要ではない気もする。
+* このドキュメントで採用している設計手法は Clean Architecture<<clean-architecture>> とは明確に異なり、かつ ドメイン駆動設計（DDD）<<learning-ddd>>そのものでもないので、一発で呼称する方法がなさそう。レイヤードアーキテクチャと言うしかない？
+* Mantle の Job 数管理は Expectation pattern を用いる必要がありそう。Expectation pattern がどのレイヤで実装されるべきなのかは微妙によくわからない。インフラ層だけで吸収できる？　実装しながら考えないといけないかも。
+* Kubernetes クラスタに対して実施したい操作をオブジェクトとしてためておき、後から全部実行するというのは https://github.com/reddit/achilles-sdk の `OutputSet` が似たことをやっている。
+* https://github.com/knative/pkg/blob/accfe36491888e45ce8bd923ff8996283c055ae1/reconciler/reconcile_common.go#L51-L91[Knative] の `PreProcessReconcile`・`PostProcessReconcile` のような処理や https://github.com/reconcilerio/runtime[Reconciler.io の ResourceReconciler] が実施しているような処理は、外部サービスに依存しないのでドメイン層に入るべきっぽいが、少し自信がない。
+
+[bibliography]
+== 参考文献
+
+* [[[learning-ddd,1]]] 『ドメイン駆動設計をはじめよう』（Vlad Khononov　著、増田 亨、綿引 琢磨　訳、オライリー・ジャパン）
+* [[[clean-architecture,2]]] 『Clean Architecture 達人に学ぶソフトウェアの構造と設計』（ Robert C.Martin (著), 角 征典 (翻訳), 高木 正弘 (翻訳) 、KADOKAWA）
+* [[[a-better-domain-events-pattern,3]]] https://lostechies.com/jimmybogard/2014/05/13/a-better-domain-events-pattern/
+* [[[achilles-sdk-why-use-envtest,4]]] https://github.com/reddit/achilles-sdk/blob/7cb89358a19c577d6144f587b26ccd8b9026bb5f/docs/envtest.md#why-use-envtest
+* [[[k8sup-reconciler,5]]] https://github.com/k8up-io/k8up/blob/60247ebab3f0c836a8e40f06d2081b93e848bd9c/operator/reconciler/reconciler.go#L20-L24
+* [[[reconciler-io-sync,6]]] https://github.com/reconcilerio/runtime/blob/e09497450de8e76d3499020913364a08f31a4d04/reconcilers/sync.go#L51-L74
+* [[[controller-pitfalls-fast-and-offline-reconciliation,7]]] https://ahmet.im/blog/controller-pitfalls/#fast-and-offline-reconciliation
+* [[[knative-injection-generated-reconcilers,8]]] https://github.com/knative/pkg/tree/4a022ed9999a874caca69595f8ba27a8f25cfa76/injection#generated-reconcilers-1
