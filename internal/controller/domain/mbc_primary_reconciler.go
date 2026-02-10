@@ -5,12 +5,17 @@ import (
 	"strings"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
-	"github.com/cybozu-go/mantle/internal/controller"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+)
+
+const (
+	MantleBackupConfigFinalizerName              = "mantlebackupconfig.mantle.cybozu.io/finalizer"
+	MantleBackupConfigAnnotationManagedClusterID = "mantlebackupconfig.mantle.cybozu.io/managed-cluster-id"
+	MantleBackupConfigCronJobNamePrefix          = "mbc-"
 )
 
 type CreateOrUpdateMBCCronJobEvent struct {
@@ -21,11 +26,16 @@ type DeleteMBCCronJobEvent struct {
 	CronJob *batchv1.CronJob
 }
 
+func GetMBCCronJobName(mbc *mantlev1.MantleBackupConfig) string {
+	return MantleBackupConfigCronJobNamePrefix + string(mbc.UID)
+}
+
 type MBCPrimaryReconciler struct {
 	overwriteMBCSchedule      string
 	managedCephClusterID      string
 	cronJobServiceAccountName string
 	cronJobImage              string
+	cronJobNamespace          string
 	Events                    *ReconcilerEvents
 }
 
@@ -34,12 +44,14 @@ func NewMBCPrimaryReconciler(
 	managedCephClusterID string,
 	cronJobServiceAccountName string,
 	cronJobImage string,
+	cronJobNamespace string,
 ) *MBCPrimaryReconciler {
 	return &MBCPrimaryReconciler{
 		overwriteMBCSchedule:      overwriteMBCSchedule,
 		managedCephClusterID:      managedCephClusterID,
 		cronJobServiceAccountName: cronJobServiceAccountName,
 		cronJobImage:              cronJobImage,
+		cronJobNamespace:          cronJobNamespace,
 		Events:                    NewReconcilerEvents(),
 	}
 }
@@ -56,7 +68,7 @@ func (r *MBCPrimaryReconciler) Provision(in *MBCPrimaryReconcilerProvisionInput)
 		return nil
 	}
 
-	if !controllerutil.ContainsFinalizer(in.MBC, controller.MantleBackupConfigFinalizerName) {
+	if !controllerutil.ContainsFinalizer(in.MBC, MantleBackupConfigFinalizerName) {
 		r.attachAnnotAndFinalizer(in.MBC)
 
 		// We should return here because we need to create the CronJob after the
@@ -88,8 +100,8 @@ func (r *MBCPrimaryReconciler) attachAnnotAndFinalizer(mbc *mantlev1.MantleBacku
 	if mbc.Annotations == nil {
 		mbc.Annotations = make(map[string]string)
 	}
-	mbc.Annotations[controller.MantleBackupConfigAnnotationManagedClusterID] = r.managedCephClusterID
-	controllerutil.AddFinalizer(mbc, controller.MantleBackupConfigFinalizerName)
+	mbc.Annotations[MantleBackupConfigAnnotationManagedClusterID] = r.managedCephClusterID
+	controllerutil.AddFinalizer(mbc, MantleBackupConfigFinalizerName)
 }
 
 func (r *MBCPrimaryReconciler) createOrUpdateCronJob(mbc *mantlev1.MantleBackupConfig, cronJob *batchv1.CronJob) {
@@ -102,8 +114,8 @@ func (r *MBCPrimaryReconciler) createOrUpdateCronJob(mbc *mantlev1.MantleBackupC
 		cronJob = &batchv1.CronJob{}
 	}
 
-	cronJob.Name = controller.GetMBCronJobName(mbc)
-	cronJob.Namespace = "FIXME"
+	cronJob.Name = GetMBCCronJobName(mbc)
+	cronJob.Namespace = r.cronJobNamespace
 
 	cronJob.Spec.Schedule = schedule
 	cronJob.Spec.Suspend = ptr.To(mbc.Spec.Suspend)
@@ -157,10 +169,10 @@ type MBCPrimaryReconcilerFinalizeInput struct {
 }
 
 func (r *MBCPrimaryReconciler) Finalize(in *MBCPrimaryReconcilerFinalizeInput) error {
-	if !controllerutil.ContainsFinalizer(in.MBC, controller.MantleBackupConfigFinalizerName) {
+	if !controllerutil.ContainsFinalizer(in.MBC, MantleBackupConfigFinalizerName) {
 		return nil
 	}
-	if in.MBC.Annotations[controller.MantleBackupConfigAnnotationManagedClusterID] != r.managedCephClusterID {
+	if in.MBC.Annotations[MantleBackupConfigAnnotationManagedClusterID] != r.managedCephClusterID {
 		return nil
 	}
 
@@ -171,7 +183,7 @@ func (r *MBCPrimaryReconciler) Finalize(in *MBCPrimaryReconcilerFinalizeInput) e
 		return nil
 	}
 
-	controllerutil.RemoveFinalizer(in.MBC, controller.MantleBackupConfigFinalizerName)
+	controllerutil.RemoveFinalizer(in.MBC, MantleBackupConfigFinalizerName)
 
 	return nil
 }

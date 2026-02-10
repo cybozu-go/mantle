@@ -1,22 +1,23 @@
 package domain
 
+type Event any
 type ReconcilerEvents struct {
-	events []any // FIXME: should not be any
+	events []Event // FIXME: should not be any
 }
 
 func NewReconcilerEvents() *ReconcilerEvents {
 	return &ReconcilerEvents{
-		events: []any{},
+		events: []Event{},
 	}
 }
 
-func (e *ReconcilerEvents) Append(event any) {
+func (e *ReconcilerEvents) Append(event Event) {
 	e.events = append(e.events, event)
 }
 
-func (e *ReconcilerEvents) TakeAll() []any {
+func (e *ReconcilerEvents) TakeAll() []Event {
 	events := e.events
-	e.events = []any{}
+	e.events = []Event{}
 
 	return events
 }
