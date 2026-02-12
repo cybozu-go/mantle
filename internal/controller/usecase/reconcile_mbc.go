@@ -57,16 +57,13 @@ func (r *ReconcileMBCInPrimary) runProvision(ctx context.Context, mbc *mantlev1.
 	}
 
 	// Persist changes
-	if !equality.Semantic.DeepEqual(origMBC.ObjectMeta, mbc.ObjectMeta) {
-		// Assume that origMBC.Spec is equal to mbc.Spec.
+	if !equality.Semantic.DeepEqual(origMBC, mbc) {
 		if err := r.k8sClient.Update(ctx, mbc); err != nil {
 			return fmt.Errorf("failed to update MBC %s/%s: %w", mbc.GetNamespace(), mbc.GetName(), err)
 		}
 	}
 
-	r.k8sClient.DispatchReconcilerEvents(ctx, r.reconciler.Events.TakeAll())
-
-	return nil
+	return r.k8sClient.DispatchReconcilerEvents(ctx, r.reconciler.Events.TakeAll())
 }
 
 func (r *ReconcileMBCInPrimary) runFinalize(ctx context.Context, mbc *mantlev1.MantleBackupConfig, cronJob *batchv1.CronJob) error {
@@ -81,16 +78,14 @@ func (r *ReconcileMBCInPrimary) runFinalize(ctx context.Context, mbc *mantlev1.M
 	}
 
 	// Persist changes
-	if !equality.Semantic.DeepEqual(origMBC.ObjectMeta, mbc.ObjectMeta) {
+	if !equality.Semantic.DeepEqual(origMBC, mbc) {
 		// Assume that origMBC.Spec is equal to mbc.Spec.
 		if err := r.k8sClient.Update(ctx, mbc); err != nil {
 			return fmt.Errorf("failed to update MBC %s/%s: %w", mbc.GetNamespace(), mbc.GetName(), err)
 		}
 	}
 
-	r.k8sClient.DispatchReconcilerEvents(ctx, r.reconciler.Events.TakeAll())
-
-	return nil
+	return r.k8sClient.DispatchReconcilerEvents(ctx, r.reconciler.Events.TakeAll())
 }
 
 func (r *ReconcileMBCInPrimary) Run(

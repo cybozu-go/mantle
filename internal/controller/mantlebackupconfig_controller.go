@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -201,6 +202,33 @@ type kubernetesClient struct {
 	client.Client
 }
 
-func (c *kubernetesClient) DispatchReconcilerEvents(ctx context.Context, events []domain.Event) {
-	// No-op
+var _ usecase.KubernetesClient = (*kubernetesClient)(nil)
+
+func (c *kubernetesClient) DispatchReconcilerEvents(ctx context.Context, events []domain.Event) error {
+	var dispatchError error
+
+	for _, i := range events {
+		var err error
+
+		switch event := i.(type) {
+		case *domain.CreateOrUpdateMBCCronJobEvent:
+			if event.CronJob.CreationTimestamp.IsZero() { // Create
+				err = c.Create(ctx, event.CronJob)
+			} else { // Update
+				err = c.Update(ctx, event.CronJob)
+			}
+
+		case *domain.DeleteMBCCronJobEvent:
+			err = c.Delete(ctx, event.CronJob, &client.DeleteOptions{
+				Preconditions: &metav1.Preconditions{
+					UID:             &event.CronJob.UID,
+					ResourceVersion: &event.CronJob.ResourceVersion,
+				},
+			})
+		}
+
+		dispatchError = errors.Join(dispatchError, err)
+	}
+
+	return dispatchError
 }
