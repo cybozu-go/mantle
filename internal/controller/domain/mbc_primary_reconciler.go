@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
+	"github.com/cybozu-go/mantle/internal/controller/metrics"
+	"github.com/prometheus/client_golang/prometheus"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -77,6 +79,12 @@ func (r *MBCPrimaryReconciler) Provision(in *MBCPrimaryReconcilerProvisionInput)
 		// finalizer is attached.
 		return nil
 	}
+
+	metrics.BackupConfigInfo.With(prometheus.Labels{
+		"persistentvolumeclaim": in.MBC.Spec.PVC,
+		"resource_namespace":    in.MBC.ObjectMeta.Namespace,
+		"mantlebackupconfig":    in.MBC.ObjectMeta.Name,
+	}).Set(1)
 
 	r.createOrUpdateCronJob(in.MBC, in.CronJob)
 
@@ -177,6 +185,12 @@ func (r *MBCPrimaryReconciler) Finalize(in *MBCPrimaryReconcilerFinalizeInput) e
 	if in.MBC.Annotations[MantleBackupConfigAnnotationManagedClusterID] != r.managedCephClusterID {
 		return nil
 	}
+
+	_ = metrics.BackupConfigInfo.Delete(prometheus.Labels{
+		"persistentvolumeclaim": in.MBC.Spec.PVC,
+		"resource_namespace":    in.MBC.Namespace,
+		"mantlebackupconfig":    in.MBC.Name,
+	})
 
 	if in.CronJob != nil { // CronJob still exists
 		r.Operations.Append(&DeleteMBCCronJobOperation{CronJob: in.CronJob})
