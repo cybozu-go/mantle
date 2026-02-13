@@ -80,13 +80,13 @@ func (r *MantleBackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.R
 		}
 		r.cronJobInfo = cronJobInfo
 		r.uc = usecase.NewReconcileMBCInPrimary(
-			domain.NewMBCPrimaryReconciler(
-				r.overwriteMBCSchedule,
-				r.managedCephClusterID,
-				r.cronJobInfo.serviceAccountName,
-				r.cronJobInfo.image,
-				r.cronJobInfo.namespace,
-			),
+			domain.NewMBCPrimaryReconciler(&domain.NewMBCPrimaryReconcilerInput{
+				OverwriteMBCSchedule:      r.overwriteMBCSchedule,
+				ManagedCephClusterID:      r.managedCephClusterID,
+				CronJobServiceAccountName: r.cronJobInfo.serviceAccountName,
+				CronJobImage:              r.cronJobInfo.image,
+				CronJobNamespace:          r.cronJobInfo.namespace,
+			}),
 			&kubernetesClient{r.Client},
 			r.cronJobInfo.namespace,
 		)

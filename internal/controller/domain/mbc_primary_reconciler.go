@@ -39,19 +39,21 @@ type MBCPrimaryReconciler struct {
 	Operations                *ReconcilerOperations
 }
 
-func NewMBCPrimaryReconciler(
-	overwriteMBCSchedule string,
-	managedCephClusterID string,
-	cronJobServiceAccountName string,
-	cronJobImage string,
-	cronJobNamespace string,
-) *MBCPrimaryReconciler {
+type NewMBCPrimaryReconcilerInput struct {
+	OverwriteMBCSchedule      string
+	ManagedCephClusterID      string
+	CronJobServiceAccountName string
+	CronJobImage              string
+	CronJobNamespace          string
+}
+
+func NewMBCPrimaryReconciler(in *NewMBCPrimaryReconcilerInput) *MBCPrimaryReconciler {
 	return &MBCPrimaryReconciler{
-		overwriteMBCSchedule:      overwriteMBCSchedule,
-		managedCephClusterID:      managedCephClusterID,
-		cronJobServiceAccountName: cronJobServiceAccountName,
-		cronJobImage:              cronJobImage,
-		cronJobNamespace:          cronJobNamespace,
+		overwriteMBCSchedule:      in.OverwriteMBCSchedule,
+		managedCephClusterID:      in.ManagedCephClusterID,
+		cronJobServiceAccountName: in.CronJobServiceAccountName,
+		cronJobImage:              in.CronJobImage,
+		cronJobNamespace:          in.CronJobNamespace,
 		Operations:                NewReconcilerOperations(),
 	}
 }
