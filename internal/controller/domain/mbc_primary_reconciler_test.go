@@ -89,6 +89,7 @@ func newReconciler(sc *storagev1.StorageClass, opts ...optionReconciler) *domain
 	for _, opt := range opts {
 		opt(in)
 	}
+
 	return domain.NewMBCPrimaryReconciler(in)
 }
 
