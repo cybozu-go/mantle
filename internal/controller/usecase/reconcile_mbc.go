@@ -88,7 +88,7 @@ func (r *ReconcileMBCInPrimary) runFinalize(ctx context.Context, mbc *mantlev1.M
 	return r.k8sClient.ApplyReconcilerOperations(ctx, r.reconciler.Operations.TakeAll())
 }
 
-func (r *ReconcileMBCInPrimary) Run(
+func (r *ReconcileMBCInPrimary) Reconcile(
 	ctx context.Context,
 	mbcName string,
 	mbcNamespace string,

@@ -92,7 +92,7 @@ func (r *MantleBackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.R
 		)
 	}
 
-	if err := r.uc.Run(ctx, req.Name, req.Namespace); err != nil {
+	if err := r.uc.Reconcile(ctx, req.Name, req.Namespace); err != nil {
 		return ctrl.Result{}, fmt.Errorf("usecase ReconcileMBCInPrimary failed: %w", err)
 	}
 

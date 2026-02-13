@@ -1,3 +1,5 @@
+:toc:
+
 = Mantle（再）設計案
 
 == 用語集
@@ -7,7 +9,9 @@ MUST, SHOULD, MAY 他:: RFC 2119 に従う。
 E2E テスト:: ソフトウェアと、ソフトウェアが依存する外部システムを全て動作させた状態で実行するテスト。この文書では主に kind や minikube を使って動作させるテストを指す。
 インテグレーションテスト（統合テスト）:: ユニットテストでもなく、かつ E2E テストでもないテスト。この文書では主に envtest に依存するテストを指す。
 （コード（上）の）依存:: あるコード A が別のコード B を参照して書かれているとき、A から B へのコード（上）の依存があるという。文脈から明らかな場合、単に依存があるともいう。依存があるからといって、必ずしもコードの動作順序と依存の方向が一致しないことに注意する（cf. 依存性逆転の原則）。また A から B へ依存があることは、A と B が異なるディレクトリや（Go の）異なるパッケージに存在することを必ずしも含意しない。
+リコンサイラ:: （カスタム）リソースを受け取り、そのリソースが理想とする状態になるように処理を行う（リコンサイルをする）関数を指す。controller-runtime が生成する `Reconcile` 関数を含むが、定義に合致すればそれに限定しない。例えばドメイン層の `Provision`・`Finalize` 関数やユースケース層の `Reconcile` 関数も含む。
 
+[#design-strategy]
 == 方針
 
 Mantle のアーキテクチャとしてポートとアダプタ（<<learning-ddd>> P.149）を採用し、Mantle 全体を以下の三層に分割するfootnote:[各層の名前は <<learning-ddd>> とは異なる。ドメイン層は業務ロジック層に、ユースケース層はアプリケーション層に、インフラ層はインフラストラクチャ層に対応する。]：
@@ -24,7 +28,9 @@ Mantle のアーキテクチャとしてポートとアダプタ（<<learning-dd
 
 Mantle がどのように振る舞うべきかを定義する。他のどの層にもコード上の依存がない（MUST NOT）。
 
-ドメインモデル（<<learning-ddd>> P.90）によって設計する。カスタムリソースを含む Kubernetes のリソース（ `CronJob`, `Job`, `MantleBackup` など）を集約（<<learning-ddd>> P.100）footnote:[Kubernetes にはトランザクションが無いため、集約とエンティティはほとんど同義語だと思って良いはず。]とし、それらを扱うドメインサービス（<<learning-ddd>> P.110）としてリコンサイラを定義する。
+ドメインモデル（<<learning-ddd>> P.90）によって設計する。カスタムリソースを含む Kubernetes のリソース（ `CronJob`, `Job`, `MantleBackup` など）それぞれを集約（<<learning-ddd>> P.100）footnote:[
+Kubernetes にはトランザクションが無いため、集約とエンティティはほとんど同義語だと思って良いはず。
+]とし、それらを扱うドメインサービス（<<learning-ddd>> P.110）としてリコンサイラを定義する。
 
 Mantle が実施すべき処理の大部分はドメイン層に記述される。例えば以下のような処理を書く：
 
@@ -34,11 +40,9 @@ Mantle が実施すべき処理の大部分はドメイン層に記述される�
 * part 番号に従った RBD snapshot を作成する。
 * 作成されようとしている `VolumeAttachment` リソースが妥当かを確認する。
 
-ドメイン層が使用したい外部サービス（Kubernetes や Ceph など）は、ドメイン層中でインターフェースとして定義されるか、ドメインイベント（<<learning-ddd>> P.108）を経由して使用される。他に障害がなければ、ドメインイベントを用いる方が（関数が純粋になるため）テスト容易性の観点から望ましい（SHOULD）<<a-better-domain-events-pattern>>footnote:[特にリコンサイラの関数の場合は、引数として受け取った情報から現在の状態を推定し、次にどの状態に遷移するべきかを返す純粋な関数として書きたい。これは理想であって実際はそんなにうまくいかないかもしれないが。]。またドメインイベントとして実装することで、ドメイン層の中で Kubernetes のリソースを複数回更新してしまい、楽観ロックに失敗する機会を減らせる。
+ドメイン層が使用したい外部サービス（Kubernetes や Ceph など）は、ドメイン層中でインターフェースとして定義されるか、ドメインイベント（<<learning-ddd>> P.108）を経由して使用される。他に障害がなければ、ドメインイベントを用いる方が（関数が純粋になるため）テスト容易性の観点から望ましい（SHOULD）<<a-better-domain-events-pattern>>。またドメインイベントとして実装することで、ドメイン層の中で Kubernetes のリソースを複数回更新してしまい、楽観ロックに失敗する機会を減らせる。
 
 その定義から、ドメイン層に記述されるコードにはドメイン層以外への依存がない。そのためドメイン層のコードのユニットテストは容易に書ける。これにより Mantle のテスト容易性を高める。なぜユニットテストを重視するのかは<<why-unit-tests-are-important>>を参照。
-
-FIXME 具体的なコード例を書く
 
 === ユースケース層
 
@@ -52,8 +56,6 @@ FIXME 具体的なコード例を書く
 
 ユースケース層のコードは比較的定型的なもの（リソースを取得し、それをドメイン層に渡して、帰ってきたものを永続化する処理）が多くなるはずである。定型化することで可能な限りバグが入り込む余地を減らす。
 
-FIXME 具体的なコード例を書く
-
 === インフラ層
 
 Kubernetes を含む外部コンポーネントにアクセスする。ドメイン層・ユースケース層に依存する。特に、ドメイン層のインターフェースを実装し、またドメインイベントが指示する処理を行う。
@@ -65,10 +67,6 @@ Ceph コンポーネント:: Ceph にアクセスする処理は全てこの部�
 Fake コンポーネント:: テストで使用するための fake の実装。テストで必要になったものを必要に応じて実装する。
 
 インフラ層に書かれるコードは、外部サービスへの依存があるものが多いため、統合テスト・E2E テストに頼ってテストすることになり、十分テストし尽くせるとは言い難い。そのため、インフラ層のコードは直観的で簡単なものとし、バグが入り込む余地を可能な限り減らす。
-
-== PoC
-
-https://github.com/cybozu-go/mantle/pull/244
 
 [#why-unit-tests-are-important]
 == なぜ単体テストを重視するのか
@@ -85,16 +83,69 @@ FIXME 以下をまともな日本語にする。
 ** 一方で envtest・E2E テストでしか実装できないテストというものは存在する<<achilles-sdk-why-use-envtest>>ので単体テストだけでは不十分。
 * 単体テストを書きやすいアーキテクチャとしてドメインモデルが知られている（<<learning-ddd>> P.194）ので、この設計ではそれを採用している。
 
+== 各層におけるリコンサイラの設計
+
+=== ドメイン層
+
+リコンサイルを必要とする各カスタムリソースに対して、ドメイン層で `Provision` 関数が定義・公開されなければならない（MUST）。また、そのリソースが finalizer を使用する場合、同様に `Finalize` 関数が定義・公開されなければならない（MUST）。これらの関数にリコンサイル処理を記述する。`Provision` 関数はリコンサイル対象のリソースに `deletionTimestamp` がついていないときに呼び出され、ついている場合は `Finalize` 関数が呼び出されるfootnote:[
+様々な OSS で、リコンサイル対象のリソースに `deletionTimestamp` がついているかどうかで関数が呼び分けられている<<k8sup-reconciler>><<reconciler-io-sync>><<knative-injection-generated-reconcilers>>ため、Mantle でもこれに習う。
+]。これらの関数は、特定の構造体のメソッドとして定義されても良い（MAY）。このセクションの以下の記述は、特記なき場合、`Provision`・`Finalize` 関数の双方に当てはまる。
+
+引数としてリコンサイル対象のカスタムリソースと、処理に必要なその他のリソースを受け取る。戻り値として `error` を返却しても良い（MAY）。関数の内容は、以下のような `if` 文の逐次実行で構成され、処理 i を実行すると条件 i が満たされるようになるべきである（SHOULDfootnote:[メトリクスの出力など、この制約に馴染まない処理は存在しうる。]）。どの条件も満たしていない場合、最後の処理 N が実行される。各処理 i は `error` を返却しても良い（MAY）。
+
+```go
+if (条件1) {
+    return 処理1;
+}
+if (条件2) {
+    return 処理2;
+}
+
+...
+
+return 処理N;
+```
+
+リコンサイル対象のリソースを変更したい場合、`Provision`・`Finalize` 関数の引数として渡されたカスタムリソースを変更する。その変更の永続化は `Provision`・`Finalize` 関数の呼び出し側で行う。一方で、リコンサイル対象以外のリソースを変更したり、Kubernetes 以外の外部サービスにアクセスしたい場合、以下のどちらかによって行う：
+
+* ドメインイベントを作成するfootnote:[使用するイベントのほとんどは外部サービスに対する「コマンド発行済みイベント」（<<learning-ddd>> P.183）になるだろう。例えば「CronJob を作成する（コマンドを発行した）」とか「MantleBackup を更新する（コマンドを発行した）」など。]。作成したドメインイベントは関数の実行中は一箇所（構造体のフィールドなど）に溜めておき、関数が完了した後に関数の呼び出し側がその内容を実行する<<a-better-domain-events-pattern>>。
+* インフラ層にアクセスする。<<design-strategy>>に従うため、アクセスは `interface` を介して行う。`interface` の定義はドメイン層に置くfootnote:[
+Kubernetes にアクセスしたい場合でも `client.Client` をそのまま使用するのではなく、`CreateHogeJob` といった必要なメソッドのみが定義された `interface` を実装するべきだろう。
+]。
+
+ドメインイベントを使ったアプローチは、リコンサイラが引数で受け取った入力のみを用いて処理を行うことを強制するため、関数の見通しがよくなりやすい。また、単体テストで fake や mock を使用する必要がない。そのため、こちらのアプローチが推奨されるfootnote:[
+似たアプローチをとっているものとして `OutputSet` がある<<achilles-sdk-output-set>>が、同じモチベーションなのかどうかはよく分からなかった。
+]。一方で、
+外部サービス呼び出しの結果を元にリコンサイルの内容を変更したい場合は、ドメインイベントでは達成できないため、`interface` を用いるアプローチを採用する。
+
+=== ユースケース層
+
+リコンサイルを必要とする各カスタムリソースに対して、ユースケース層で `Reconcile` 関数が定義・公開されなければならない（MUST）。この関数では以下の処理をこの順番で行う（SHOULDfootnote:[リソースによっては処理の順番が前後したり、追加の処理が必要になるかもしれない。]）：
+
+. リコンサイル対象のリソース（`r`）を取得する。
+. ドメイン層のリコンサイラが動作するために必要なリソースなどのデータを取得する。
+. ドメイン層のリコンサイラを呼び出す。呼び出し時には `r.DeletionTimestamp.IsZero()` を確認し `true` の場合は `Provision` を、`false` の場合は `Finalize` を呼び出す。
+. ドメイン層のリコンサイラによって `r` が変更されている場合、それを永続化する。永続化に失敗した場合はエラーを返却し、以下の手順を実行しない。
+. ドメイン層のリコンサイラが発行したドメインイベントをインフラ層に引き渡し実行する。
+
+=== インフラ層
+
+controller-runtime が生成する `Reconcile` 関数からユースケース層におけるリコンサイラを呼び出す。
+
+ユースケース層から渡されたドメインイベントを実行する。渡されたイベントが複数ある場合、エラーの有無に関わらず全てのイベントの実行を試行する。
+
+== PoC
+
+https://github.com/cybozu-go/mantle/pull/244
+
 == その他考慮すべきこと（まだまとまっていないこと）
 
-* リコンサイラは `deletionTimestamp` がついているときとついていない時で異なる関数を呼び出すようにすると見通しがよくなりそう。それぞれ `Provision` ・ `Deprovision` <<k8sup-reconciler>> と命名されたり `Sync` ・ `Finalize` <<reconciler-io-sync>> と命名されたり `ReconcileKind` ・ `FinalizeKind` <<knative-injection-generated-reconcilers>> と命名されたりしている。
 * `.status.conditions` はユーザー向けなので処理が依存するべきではないが `.status` は観測結果を書く限りにおいて依存して良さそう。
 ** fast and offline reconciliation <<controller-pitfalls-fast-and-offline-reconciliation>> を達成するためには `.status` への依存は避けられなさそう。
 ** `.status.conditions` に存在しうるフィールドは、いれるべき値が無いような状況でも `Unknown` を入れておかないといけないらしい。が、今からあえて Mantle の公開 API を変更する必要もなさそう。
 ** リソースが変更された場合 `.status.conditions` の中身は全て `Unknown` に設定してからリコンサイラ本体を呼ぶべきらしい。これをやるためには observed generation を正しく取り扱う必要がある。ただ、Mantle の場合、あとからガリガリ書き換えるリソースというものがあまりないので、そんなに重要ではない気もする。
 * このドキュメントで採用している設計手法は Clean Architecture<<clean-architecture>> とは明確に異なり、かつ ドメイン駆動設計（DDD）<<learning-ddd>>そのものでもないので、一発で呼称する方法がなさそう。レイヤードアーキテクチャと言うしかない？
 * Mantle の Job 数管理は Expectation pattern を用いる必要がありそう。Expectation pattern がどのレイヤで実装されるべきなのかは微妙によくわからない。インフラ層だけで吸収できる？　実装しながら考えないといけないかも。
-* Kubernetes クラスタに対して実施したい操作をオブジェクトとしてためておき、後から全部実行するというのは https://github.com/reddit/achilles-sdk の `OutputSet` が似たことをやっている。
 * https://github.com/knative/pkg/blob/accfe36491888e45ce8bd923ff8996283c055ae1/reconciler/reconcile_common.go#L51-L91[Knative] の `PreProcessReconcile`・`PostProcessReconcile` のような処理や https://github.com/reconcilerio/runtime[Reconciler.io の ResourceReconciler] が実施しているような処理は、外部サービスに依存しないのでドメイン層に入るべきっぽいが、少し自信がない。
 
 [bibliography]
@@ -108,3 +159,4 @@ FIXME 以下をまともな日本語にする。
 * [[[reconciler-io-sync,6]]] https://github.com/reconcilerio/runtime/blob/e09497450de8e76d3499020913364a08f31a4d04/reconcilers/sync.go#L51-L74
 * [[[controller-pitfalls-fast-and-offline-reconciliation,7]]] https://ahmet.im/blog/controller-pitfalls/#fast-and-offline-reconciliation
 * [[[knative-injection-generated-reconcilers,8]]] https://github.com/knative/pkg/tree/4a022ed9999a874caca69595f8ba27a8f25cfa76/injection#generated-reconcilers-1
+* [[[achilles-sdk-output-set,9]]] https://github.com/reddit/achilles-sdk/blob/8173c7ff221db680f3bdd3979cc6e5b7e14573cb/docs/sdk-apply-objects.md
