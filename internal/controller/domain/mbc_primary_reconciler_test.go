@@ -43,8 +43,16 @@ func newMBC(opts ...optionMBC) *mantlev1.MantleBackupConfig {
 	return mbc
 }
 
-func newSC() *storagev1.StorageClass {
-	return &storagev1.StorageClass{
+type optionSC func(*storagev1.StorageClass)
+
+func scWithClusterID(clusterID string) optionSC {
+	return func(sc *storagev1.StorageClass) {
+		sc.Parameters["clusterID"] = clusterID
+	}
+}
+
+func newSC(opts ...optionSC) *storagev1.StorageClass {
+	sc := &storagev1.StorageClass{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "sc-name",
 		},
@@ -53,6 +61,11 @@ func newSC() *storagev1.StorageClass {
 			"clusterID": "ceph-cluster-id",
 		},
 	}
+	for _, opt := range opts {
+		opt(sc)
+	}
+
+	return sc
 }
 
 type optionReconciler func(*domain.NewMBCPrimaryReconcilerInput)
@@ -77,6 +90,27 @@ func newReconciler(sc *storagev1.StorageClass, opts ...optionReconciler) *domain
 		opt(in)
 	}
 	return domain.NewMBCPrimaryReconciler(in)
+}
+
+func TestMBCPrimaryReconciler_Provision_NotResponsibleStorageClass(t *testing.T) {
+	// Arrange
+	sc1 := newSC(scWithClusterID("ceph-cluster-id"))
+	sc2 := newSC(scWithClusterID("different-ceph-cluster-id"))
+	reconciler := newReconciler(sc1)
+	mbc := newMBC()
+	origMBC := mbc.DeepCopy()
+
+	// Act
+	err := reconciler.Provision(&domain.MBCPrimaryReconcilerProvisionInput{
+		MBC:     mbc,
+		PVCSC:   sc2,
+		CronJob: nil,
+	})
+
+	// Assert
+	require.NoError(t, err)
+	require.Equal(t, origMBC, mbc)
+	require.Empty(t, reconciler.Operations.TakeAll())
 }
 
 func TestMBCPrimaryReconciler_Provision_AttachAnnotAndFinalizer(t *testing.T) {
@@ -235,4 +269,24 @@ func TestMBCPrimaryReconciler_Finalize_RemoveCronJob(t *testing.T) {
 	op, ok := ops[0].(*domain.DeleteMBCCronJobOperation)
 	require.True(t, ok)
 	require.Equal(t, cronJob, op.CronJob)
+}
+
+func TestMBCPrimaryReconciler_Finalize_NotResponsibleStorageClass(t *testing.T) {
+	// Arrange
+	sc1 := newSC(scWithClusterID("ceph-cluster-id"))
+	sc2 := newSC(scWithClusterID("different-ceph-cluster-id"))
+	reconciler := newReconciler(sc1)
+	mbc := newMBC(mbcWithAnnotAndFinalizer(sc2))
+	origMBC := mbc.DeepCopy()
+
+	// Act
+	err := reconciler.Finalize(&domain.MBCPrimaryReconcilerFinalizeInput{
+		MBC:     mbc,
+		CronJob: nil,
+	})
+
+	// Assert
+	require.NoError(t, err)
+	require.Equal(t, origMBC, mbc)
+	require.Empty(t, reconciler.Operations.TakeAll())
 }
