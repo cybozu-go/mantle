@@ -103,6 +103,7 @@ func TestMBCPrimaryReconciler_Provision_CreateCronJob(t *testing.T) {
 	// Arrange
 	sc := newSC()
 	mbc := newMBC(mbcWithAnnotAndFinalizer(sc))
+	origMBC := mbc.DeepCopy()
 	cronJobServiceAccount := "cron-job-service-account"
 	cronJobImage := "cron-job-image"
 	cronJobNamespace := "cron-job-namespace"
@@ -117,6 +118,7 @@ func TestMBCPrimaryReconciler_Provision_CreateCronJob(t *testing.T) {
 
 	// Assert
 	require.NoError(t, err)
+	require.Equal(t, origMBC, mbc)
 	operations := reconciler.Operations.TakeAll()
 	require.Len(t, operations, 1)
 	operation, ok := operations[0].(*domain.CreateOrUpdateMBCCronJobOperation)
@@ -136,6 +138,7 @@ func TestMBCPrimaryReconciler_Provision_UpdateCronJob(t *testing.T) {
 	// Arrange
 	sc := newSC()
 	mbc := newMBC(mbcWithAnnotAndFinalizer(sc))
+	origMBC := mbc.DeepCopy()
 	reconciler := newReconciler(sc)
 	err := reconciler.Provision(&domain.MBCPrimaryReconcilerProvisionInput{
 		MBC:     mbc,
@@ -156,6 +159,7 @@ func TestMBCPrimaryReconciler_Provision_UpdateCronJob(t *testing.T) {
 
 	// Assert
 	require.NoError(t, err)
+	require.Equal(t, origMBC, mbc)
 	operations := reconciler.Operations.TakeAll()
 	require.Len(t, operations, 1)
 	operation, ok := operations[0].(*domain.CreateOrUpdateMBCCronJobOperation)
@@ -164,4 +168,71 @@ func TestMBCPrimaryReconciler_Provision_UpdateCronJob(t *testing.T) {
 	assert.False(t, cronJob.CreationTimestamp.IsZero())
 	cronJob.CreationTimestamp = oldCronJob.CreationTimestamp
 	assert.Equal(t, oldCronJob, cronJob)
+}
+
+func TestMBCPrimaryReconciler_Finalize_NoProvision(t *testing.T) {
+	// Arrange
+	sc := newSC()
+	mbc := newMBC()
+	origMBC := mbc.DeepCopy()
+	reconciler := newReconciler(sc)
+
+	// Act
+	err := reconciler.Finalize(&domain.MBCPrimaryReconcilerFinalizeInput{
+		MBC:     mbc,
+		CronJob: nil,
+	})
+
+	// Assert
+	require.NoError(t, err)
+	require.Equal(t, origMBC, mbc)
+	require.Empty(t, reconciler.Operations.TakeAll())
+}
+
+func TestMBCPrimaryReconciler_Finalize_RemoveFinalizer(t *testing.T) {
+	// Arrange
+	sc := newSC()
+	mbc := newMBC(mbcWithAnnotAndFinalizer(sc))
+	reconciler := newReconciler(sc)
+
+	// Act
+	err := reconciler.Finalize(&domain.MBCPrimaryReconcilerFinalizeInput{
+		MBC:     mbc,
+		CronJob: nil,
+	})
+
+	// Assert
+	require.NoError(t, err)
+	require.Empty(t, mbc.Finalizers)
+	require.Empty(t, reconciler.Operations.TakeAll())
+}
+
+func TestMBCPrimaryReconciler_Finalize_RemoveCronJob(t *testing.T) {
+	// Arrange
+	sc := newSC()
+	mbc := newMBC(mbcWithAnnotAndFinalizer(sc))
+	origMBC := mbc.DeepCopy()
+	reconciler := newReconciler(sc)
+	err := reconciler.Provision(&domain.MBCPrimaryReconcilerProvisionInput{
+		MBC:     mbc,
+		PVCSC:   sc,
+		CronJob: nil,
+	})
+	require.NoError(t, err)
+	cronJob := reconciler.Operations.TakeAll()[0].(*domain.CreateOrUpdateMBCCronJobOperation).CronJob
+
+	// Act
+	err = reconciler.Finalize(&domain.MBCPrimaryReconcilerFinalizeInput{
+		MBC:     mbc,
+		CronJob: cronJob,
+	})
+
+	// Assert
+	require.NoError(t, err)
+	require.Equal(t, origMBC, mbc)
+	ops := reconciler.Operations.TakeAll()
+	require.Len(t, ops, 1)
+	op, ok := ops[0].(*domain.DeleteMBCCronJobOperation)
+	require.True(t, ok)
+	require.Equal(t, cronJob, op.CronJob)
 }
