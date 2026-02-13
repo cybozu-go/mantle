@@ -11,7 +11,7 @@ import (
 
 type KubernetesClient interface {
 	client.Client
-	DispatchReconcilerEvents(ctx context.Context, events []domain.Event) error
+	ApplyReconcilerOperations(ctx context.Context, operations []domain.Operation) error
 }
 
 func getResource[

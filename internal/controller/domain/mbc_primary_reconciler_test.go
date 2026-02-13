@@ -62,7 +62,7 @@ func TestMBCPrimaryReconciler_Provision_AttachAnnotAndFinalizer(t *testing.T) {
 
 	// Assert
 	require.NoError(t, err)
-	require.Empty(t, reconciler.Events.TakeAll())
+	require.Empty(t, reconciler.Operations.TakeAll())
 	require.True(t, controllerutil.ContainsFinalizer(mbc, domain.MantleBackupConfigFinalizerName))
 	require.Equal(t, "ceph-cluster-id", mbc.Annotations[domain.MantleBackupConfigAnnotationManagedClusterID])
 }
@@ -90,11 +90,11 @@ func TestMBCPrimaryReconciler_Provision_CreateCronJob(t *testing.T) {
 
 	// Assert
 	require.NoError(t, err)
-	events := reconciler.Events.TakeAll()
-	require.Len(t, events, 1)
-	event, ok := events[0].(*domain.CreateOrUpdateMBCCronJobEvent)
+	operations := reconciler.Operations.TakeAll()
+	require.Len(t, operations, 1)
+	operation, ok := operations[0].(*domain.CreateOrUpdateMBCCronJobOperation)
 	require.True(t, ok)
-	cronJob := event.CronJob
+	cronJob := operation.CronJob
 	assert.True(t, cronJob.CreationTimestamp.IsZero())
 	assert.Equal(t, domain.GetMBCCronJobName(mbc), cronJob.Name)
 	assert.Equal(t, "cronjob-namespace", cronJob.Namespace)

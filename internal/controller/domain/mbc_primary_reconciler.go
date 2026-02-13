@@ -18,11 +18,11 @@ const (
 	MantleBackupConfigCronJobNamePrefix          = "mbc-"
 )
 
-type CreateOrUpdateMBCCronJobEvent struct {
+type CreateOrUpdateMBCCronJobOperation struct {
 	CronJob *batchv1.CronJob
 }
 
-type DeleteMBCCronJobEvent struct {
+type DeleteMBCCronJobOperation struct {
 	CronJob *batchv1.CronJob
 }
 
@@ -36,7 +36,7 @@ type MBCPrimaryReconciler struct {
 	cronJobServiceAccountName string
 	cronJobImage              string
 	cronJobNamespace          string
-	Events                    *ReconcilerEvents
+	Operations                *ReconcilerOperations
 }
 
 func NewMBCPrimaryReconciler(
@@ -52,7 +52,7 @@ func NewMBCPrimaryReconciler(
 		cronJobServiceAccountName: cronJobServiceAccountName,
 		cronJobImage:              cronJobImage,
 		cronJobNamespace:          cronJobNamespace,
-		Events:                    NewReconcilerEvents(),
+		Operations:                NewReconcilerOperations(),
 	}
 }
 
@@ -160,7 +160,7 @@ func (r *MBCPrimaryReconciler) createOrUpdateCronJob(mbc *mantlev1.MantleBackupC
 	}
 	env.ValueFrom.FieldRef.FieldPath = "metadata.labels['batch.kubernetes.io/job-name']"
 
-	r.Events.Append(&CreateOrUpdateMBCCronJobEvent{CronJob: cronJob})
+	r.Operations.Append(&CreateOrUpdateMBCCronJobOperation{CronJob: cronJob})
 }
 
 type MBCPrimaryReconcilerFinalizeInput struct {
@@ -177,7 +177,7 @@ func (r *MBCPrimaryReconciler) Finalize(in *MBCPrimaryReconcilerFinalizeInput) e
 	}
 
 	if in.CronJob != nil { // CronJob still exists
-		r.Events.Append(&DeleteMBCCronJobEvent{CronJob: in.CronJob})
+		r.Operations.Append(&DeleteMBCCronJobOperation{CronJob: in.CronJob})
 
 		// We should return here because we need to wait until the CronJob is deleted.
 		return nil

@@ -47,7 +47,7 @@ func (r *ReconcileMBCInPrimary) runProvision(ctx context.Context, mbc *mantlev1.
 
 	// Run provision logic
 	origMBC := mbc.DeepCopy()
-	_ = r.reconciler.Events.TakeAll()
+	_ = r.reconciler.Operations.TakeAll()
 	if err := r.reconciler.Provision(&domain.MBCPrimaryReconcilerProvisionInput{
 		MBC:     mbc,
 		PVCSC:   sc,
@@ -63,13 +63,13 @@ func (r *ReconcileMBCInPrimary) runProvision(ctx context.Context, mbc *mantlev1.
 		}
 	}
 
-	return r.k8sClient.DispatchReconcilerEvents(ctx, r.reconciler.Events.TakeAll())
+	return r.k8sClient.ApplyReconcilerOperations(ctx, r.reconciler.Operations.TakeAll())
 }
 
 func (r *ReconcileMBCInPrimary) runFinalize(ctx context.Context, mbc *mantlev1.MantleBackupConfig, cronJob *batchv1.CronJob) error {
 	// Run finalize logic
 	origMBC := mbc.DeepCopy()
-	_ = r.reconciler.Events.TakeAll()
+	_ = r.reconciler.Operations.TakeAll()
 	if err := r.reconciler.Finalize(&domain.MBCPrimaryReconcilerFinalizeInput{
 		MBC:     mbc,
 		CronJob: cronJob,
@@ -85,7 +85,7 @@ func (r *ReconcileMBCInPrimary) runFinalize(ctx context.Context, mbc *mantlev1.M
 		}
 	}
 
-	return r.k8sClient.DispatchReconcilerEvents(ctx, r.reconciler.Events.TakeAll())
+	return r.k8sClient.ApplyReconcilerOperations(ctx, r.reconciler.Operations.TakeAll())
 }
 
 func (r *ReconcileMBCInPrimary) Run(

@@ -204,25 +204,25 @@ type kubernetesClient struct {
 
 var _ usecase.KubernetesClient = (*kubernetesClient)(nil)
 
-func (c *kubernetesClient) DispatchReconcilerEvents(ctx context.Context, events []domain.Event) error {
+func (c *kubernetesClient) ApplyReconcilerOperations(ctx context.Context, operations []domain.Operation) error {
 	var dispatchError error
 
-	for _, i := range events {
+	for _, i := range operations {
 		var err error
 
-		switch event := i.(type) {
-		case *domain.CreateOrUpdateMBCCronJobEvent:
-			if event.CronJob.CreationTimestamp.IsZero() { // Create
-				err = c.Create(ctx, event.CronJob)
+		switch operation := i.(type) {
+		case *domain.CreateOrUpdateMBCCronJobOperation:
+			if operation.CronJob.CreationTimestamp.IsZero() { // Create
+				err = c.Create(ctx, operation.CronJob)
 			} else { // Update
-				err = c.Update(ctx, event.CronJob)
+				err = c.Update(ctx, operation.CronJob)
 			}
 
-		case *domain.DeleteMBCCronJobEvent:
-			err = c.Delete(ctx, event.CronJob, &client.DeleteOptions{
+		case *domain.DeleteMBCCronJobOperation:
+			err = c.Delete(ctx, operation.CronJob, &client.DeleteOptions{
 				Preconditions: &metav1.Preconditions{
-					UID:             &event.CronJob.UID,
-					ResourceVersion: &event.CronJob.ResourceVersion,
+					UID:             &operation.CronJob.UID,
+					ResourceVersion: &operation.CronJob.ResourceVersion,
 				},
 			})
 		}
