@@ -2,7 +2,7 @@ package domain
 
 type Operation any
 type ReconcilerOperations struct {
-	operations []Operation // FIXME: should not be any
+	operations []Operation
 }
 
 func NewReconcilerOperations() *ReconcilerOperations {
