@@ -1544,6 +1544,9 @@ func (r *MantleBackupReconciler) createOrUpdateExportDataPVC(
 		}
 		pvc.Spec.Resources.Requests[corev1.ResourceStorage] = *pvcSize
 
+		if !pvc.CreationTimestamp.IsZero() {
+			return nil
+		}
 		pvc.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
 		pvc.Spec.StorageClassName = &r.primarySettings.ExportDataStorageClass
 
@@ -1673,6 +1676,9 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(
 
 		job.Spec.BackoffLimit = ptr.To(int32(65535))
 
+		if !job.CreationTimestamp.IsZero() {
+			return nil
+		}
 		job.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
 			FSGroup:      ptr.To(nonRootFSGroup),
 			RunAsGroup:   ptr.To(nonRootGroupID),
@@ -1841,6 +1847,9 @@ func (r *MantleBackupReconciler) createOrUpdateUploadJobs(
 
 			job.Spec.BackoffLimit = ptr.To(int32(65535))
 
+			if !job.CreationTimestamp.IsZero() {
+				return nil
+			}
 			job.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
 				FSGroup:      ptr.To(nonRootFSGroup),
 				RunAsGroup:   ptr.To(nonRootGroupID),
@@ -2422,6 +2431,9 @@ func (r *MantleBackupReconciler) createOrUpdateZeroOutJob(
 
 		job.Spec.BackoffLimit = ptr.To(int32(65535))
 
+		if !job.CreationTimestamp.IsZero() {
+			return nil
+		}
 		job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
 
 		job.Spec.Template.Spec.Containers = []corev1.Container{
@@ -2483,6 +2495,9 @@ func (r *MantleBackupReconciler) createOrUpdateVerifyJob(ctx context.Context, jo
 
 		job.Spec.BackoffLimit = ptr.To(int32(65535))
 
+		if !job.CreationTimestamp.IsZero() {
+			return nil
+		}
 		/*
 			According to the e2fsck man page:
 
@@ -2669,6 +2684,9 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 
 		job.Spec.BackoffLimit = ptr.To(int32(65535))
 
+		if !job.CreationTimestamp.IsZero() {
+			return nil
+		}
 		job.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
 			RunAsGroup:   ptr.To(nonRootGroupID),
 			RunAsNonRoot: ptr.To(true),
