@@ -183,7 +183,7 @@ func TestMBCPrimaryReconciler_Provision_UpdateCronJob(t *testing.T) {
 	require.NoError(t, err)
 	oldCronJob := reconciler.Operations.TakeAll()[0].(*domain.CreateOrUpdateMBCCronJobOperation).CronJob
 	require.NotNil(t, oldCronJob)
-	oldCronJob.CreationTimestamp = metav1.Now() // mock creation
+	oldCronJob.CreationTimestamp = metav1.Now()
 
 	// Act
 	err = reconciler.Provision(&domain.MBCPrimaryReconcilerProvisionInput{
