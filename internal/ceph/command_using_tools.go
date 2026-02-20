@@ -24,7 +24,7 @@ func newCommandTools(kubectl []string, namespace string) command {
 
 func (c *commandToolsImpl) execute(cephCommand ...string) ([]byte, []byte, error) {
 	var stdout, stderr bytes.Buffer
-	arg := []string{}
+	arg := make([]string, 0, len(c.kubectl)+5+len(cephCommand))
 	arg = append(arg, c.kubectl...)
 	arg = append(arg, "exec", "-n", c.namespace, "deploy/rook-ceph-tools", "--")
 	arg = append(arg, cephCommand...)

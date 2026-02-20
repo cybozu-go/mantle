@@ -82,7 +82,7 @@ func subMain() error {
 		return err
 	}
 
-	webhookTLSOpts := []func(*tls.Config){}
+	webhookTLSOpts := make([]func(*tls.Config), 0, 1)
 	setupLog.Info("Initializing webhook certificate watcher using provided certificates",
 		"webhook-cert-path", webhookCertPath, "webhook-key-path", webhookKeyPath)
 
