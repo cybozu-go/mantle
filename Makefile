@@ -88,6 +88,9 @@ mock: mockgen
 
 .PHONY: test
 test: manifests generate fmt vet mock ## Run tests.
+# Avoid 'go: no such tool "covdata"' error on CI.
+# cf. https://github.com/golang/go/issues/75031#issuecomment-3195256688
+	go env -w GOTOOLCHAIN=go1.25.0+auto
 # adding -p 1 -v to stream logs. see https://github.com/golang/go/issues/46959
 	ENVTEST_KUBERNETES_VERSION=$(ENVTEST_KUBERNETES_VERSION) ENVTEST_BIN_DIR=$(LOCALBIN) \
 	SKIP_CEPH_CMD_TEST=1 \

@@ -14,7 +14,7 @@ To use mantle on your real kubernetes cluster, read following sections.
 
 ### Conformed environments
 
-- Kubernetes cluster: v1.33.1+
+- Kubernetes cluster: v1.34.4+
 - Rook: v1.17.2+
 
 ### To Deploy on the cluster
