@@ -156,7 +156,7 @@ https://github.com/cybozu-go/mantle/pull/244
 
 * ユニットテストを書きやすくしたい
 ** e2e テストや envtest が長時間かかる上に flaky なので、できるだけ（高速な）ユニットテストで正しいことを保証したい。これにより開発のイテレーションが回しやすくなるはず。
-** Mantle の e2e テストではシナリオテスト（もどき）になっているため、何をテストしたいのかがわかりにくくなっている。回すのに時間がかかるのでおいそれとテストケースを増やしにくい。Arrange-Act-Assert がはっきりしたユニットテストに変えることで、テストの見通しが良くなり、不足しているテストが何であるかに気づきやすくなるだろう（cf. テストが存在しないことに気づけなかったためにデグレした例 https://github.com/cybozu-go/mantle/pull/233 ）。
+** Mantle の e2e テストではシナリオテスト（もどき）になっているため、何をテストしたいのかがわかりにくくなっている。回すのに時間がかかるのでおいそれとテストケースを増やしにくい。Arrange-Act-Assert<<xp123-3a>> がはっきりしたユニットテストに変えることで、テストの見通しが良くなり、不足しているテストが何であるかに気づきやすくなるだろう（cf. テストが存在しないことに気づけなかったためにデグレした例 https://github.com/cybozu-go/mantle/pull/233 ）。
 * 人にとってわかりやすいリコンサイラを書きたい
 ** 現在は巨大な Reconciler のための構造体が存在し、これに属するメソッドで全ての処理を行なっている。関心を分離して、Kubernetes クラスタや Ceph クラスタといった外部リソースにアクセスする部分と、コントローラが次に何を行うべきかを判定する部分を分けることで、コードの見通しをよくする。
 ** 現在の Mantle ではリソースの取得と更新が交互に行われている。その結果、古いキャッシュを掴んだり楽観的ロックに失敗したりして、リコンサイラの挙動が分かりにくくなっている。一度の reconciliation でリソースの取得と更新を一度のみ行うことで、このような問題を（ほぼ）解決できるはず。
@@ -174,3 +174,4 @@ https://github.com/cybozu-go/mantle/pull/244
 * [[[controller-pitfalls-fast-and-offline-reconciliation,7]]] https://ahmet.im/blog/controller-pitfalls/#fast-and-offline-reconciliation
 * [[[knative-injection-generated-reconcilers,8]]] https://github.com/knative/pkg/tree/4a022ed9999a874caca69595f8ba27a8f25cfa76/injection#generated-reconcilers-1
 * [[[achilles-sdk-output-set,9]]] https://github.com/reddit/achilles-sdk/blob/8173c7ff221db680f3bdd3979cc6e5b7e14573cb/docs/sdk-apply-objects.md
+* [[[xp123-3a,10]]] https://xp123.com/3a-arrange-act-assert/
