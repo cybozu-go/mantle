@@ -105,6 +105,9 @@ func newReconciler(sc *storagev1.StorageClass, opts ...optionReconciler) *domain
 	return domain.NewMBCPrimaryReconciler(in)
 }
 
+// TestMBCPrimaryReconciler_Provision_NotResponsibleStorageClass tests that
+// Provision does nothing when the PVC's StorageClass belongs to a different
+// Ceph cluster than this reconciler is responsible for.
 func TestMBCPrimaryReconciler_Provision_NotResponsibleStorageClass(t *testing.T) {
 	// Arrange
 	sc1 := newSC(scWithClusterID("ceph-cluster-id"))
@@ -126,6 +129,9 @@ func TestMBCPrimaryReconciler_Provision_NotResponsibleStorageClass(t *testing.T)
 	require.Empty(t, reconciler.Operations.TakeAll())
 }
 
+// TestMBCPrimaryReconciler_Provision_AttachAnnotAndFinalizer tests that
+// Provision adds the finalizer and managed cluster ID annotation to the MBC
+// when they are not already present.
 func TestMBCPrimaryReconciler_Provision_AttachAnnotAndFinalizer(t *testing.T) {
 	// Arrange
 	mbc := newMBC()
@@ -146,6 +152,9 @@ func TestMBCPrimaryReconciler_Provision_AttachAnnotAndFinalizer(t *testing.T) {
 	require.Equal(t, sc.Parameters["clusterID"], mbc.Annotations[domain.MantleBackupConfigAnnotationManagedClusterID])
 }
 
+// TestMBCPrimaryReconciler_Provision_CreateCronJob tests that Provision
+// emits a CreateMBCCronJobOperation when the CronJob does not exist yet
+// (i.e., when cronJob is nil).
 func TestMBCPrimaryReconciler_Provision_CreateCronJob(t *testing.T) {
 	// Arrange
 	sc := newSC()
@@ -181,6 +190,9 @@ func TestMBCPrimaryReconciler_Provision_CreateCronJob(t *testing.T) {
 	assert.Equal(t, cronJobImage, container.Image)
 }
 
+// TestMBCPrimaryReconciler_Provision_UpdateCronJob tests that Provision
+// emits an UpdateMBCCronJobOperation when the CronJob already exists
+// (i.e., when cronJob has a non-zero CreationTimestamp).
 func TestMBCPrimaryReconciler_Provision_UpdateCronJob(t *testing.T) {
 	// Arrange
 	sc := newSC()
@@ -217,6 +229,8 @@ func TestMBCPrimaryReconciler_Provision_UpdateCronJob(t *testing.T) {
 	assert.Equal(t, oldCronJob, cronJob)
 }
 
+// TestMBCPrimaryReconciler_Finalize_NoProvision tests that Finalize does
+// nothing when the MBC was never provisioned (i.e., has no finalizer).
 func TestMBCPrimaryReconciler_Finalize_NoProvision(t *testing.T) {
 	// Arrange
 	sc := newSC()
@@ -236,6 +250,9 @@ func TestMBCPrimaryReconciler_Finalize_NoProvision(t *testing.T) {
 	require.Empty(t, reconciler.Operations.TakeAll())
 }
 
+// TestMBCPrimaryReconciler_Finalize_RemoveFinalizer tests that Finalize
+// removes the finalizer when the CronJob has already been deleted
+// (i.e., when cronJob is nil).
 func TestMBCPrimaryReconciler_Finalize_RemoveFinalizer(t *testing.T) {
 	// Arrange
 	sc := newSC()
@@ -254,6 +271,9 @@ func TestMBCPrimaryReconciler_Finalize_RemoveFinalizer(t *testing.T) {
 	require.Empty(t, reconciler.Operations.TakeAll())
 }
 
+// TestMBCPrimaryReconciler_Finalize_RemoveCronJob tests that Finalize
+// emits a DeleteMBCCronJobOperation when the CronJob still exists.
+// The finalizer should not be removed until the CronJob is deleted.
 func TestMBCPrimaryReconciler_Finalize_RemoveCronJob(t *testing.T) {
 	// Arrange
 	sc := newSC()
@@ -284,6 +304,9 @@ func TestMBCPrimaryReconciler_Finalize_RemoveCronJob(t *testing.T) {
 	require.Equal(t, cronJob, op.CronJob)
 }
 
+// TestMBCPrimaryReconciler_Finalize_NotResponsibleStorageClass tests that
+// Finalize does nothing when the MBC was provisioned by a different reconciler
+// (identified by the managed cluster ID annotation).
 func TestMBCPrimaryReconciler_Finalize_NotResponsibleStorageClass(t *testing.T) {
 	// Arrange
 	sc1 := newSC(scWithClusterID("ceph-cluster-id"))
@@ -304,6 +327,8 @@ func TestMBCPrimaryReconciler_Finalize_NotResponsibleStorageClass(t *testing.T) 
 	require.Empty(t, reconciler.Operations.TakeAll())
 }
 
+// TestMBCPrimaryReconciler_Provision_OverwriteSchedule tests that Provision
+// uses OverwriteMBCSchedule instead of MBC's schedule when configured.
 func TestMBCPrimaryReconciler_Provision_OverwriteSchedule(t *testing.T) {
 	// Arrange
 	sc := newSC()
@@ -329,6 +354,8 @@ func TestMBCPrimaryReconciler_Provision_OverwriteSchedule(t *testing.T) {
 	assert.NotEqual(t, mbc.Spec.Schedule, cronJob.Spec.Schedule)
 }
 
+// TestMBCPrimaryReconciler_Provision_SuspendTrue tests that Provision
+// correctly propagates the Suspend field from MBC to the CronJob.
 func TestMBCPrimaryReconciler_Provision_SuspendTrue(t *testing.T) {
 	// Arrange
 	sc := newSC()
