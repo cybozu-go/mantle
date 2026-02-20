@@ -152,6 +152,16 @@ https://github.com/cybozu-go/mantle/pull/244
 * Mantle の Job 数管理は Expectation pattern を用いる必要がありそう。Expectation pattern がどのレイヤで実装されるべきなのかは微妙によくわからない。インフラ層だけで吸収できる？　実装しながら考えないといけないかも。
 * https://github.com/knative/pkg/blob/accfe36491888e45ce8bd923ff8996283c055ae1/reconciler/reconcile_common.go#L51-L91[Knative] の `PreProcessReconcile`・`PostProcessReconcile` のような処理や https://github.com/reconcilerio/runtime[Reconciler.io の ResourceReconciler] が実施しているような処理は、外部サービスに依存しないのでドメイン層に入るべきっぽいが、少し自信がない。
 
+== モチベ
+
+* ユニットテストを書きやすくしたい
+** e2e テストや envtest が長時間かかる上に flaky なので、できるだけ（高速な）ユニットテストで正しいことを保証したい。これにより開発のイテレーションが回しやすくなるはず。
+** Mantle の e2e テストではシナリオテスト（もどき）になっているため、何をテストしたいのかがわかりにくくなっている。回すのに時間がかかるのでおいそれとテストケースを増やしにくい。Arrange-Act-Assert がはっきりしたユニットテストに変えることで、テストの見通しが良くなり、不足しているテストが何であるかに気づきやすくなるだろう（cf. テストが存在しないことに気づけなかったためにデグレした例 https://github.com/cybozu-go/mantle/pull/233 ）。
+* 人にとってわかりやすいリコンサイラを書きたい
+** 現在は巨大な Reconciler のための構造体が存在し、これに属するメソッドで全ての処理を行なっている。関心を分離して、Kubernetes クラスタや Ceph クラスタといった外部リソースにアクセスする部分と、コントローラが次に何を行うべきかを判定する部分を分けることで、コードの見通しをよくする。
+** 現在の Mantle ではリソースの取得と更新が交互に行われている。その結果、古いキャッシュを掴んだり楽観的ロックに失敗したりして、リコンサイラの挙動が分かりにくくなっている。一度の reconciliation でリソースの取得と更新を一度のみ行うことで、このような問題を（ほぼ）解決できるはず。
+** primary・secondary で動くコードを分ける
+
 [bibliography]
 == 参考文献
 
