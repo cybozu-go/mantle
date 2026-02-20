@@ -168,7 +168,7 @@ func TestMBCPrimaryReconciler_Provision_CreateCronJob(t *testing.T) {
 	require.Equal(t, origMBC, mbc)
 	operations := reconciler.Operations.TakeAll()
 	require.Len(t, operations, 1)
-	operation, ok := operations[0].(*domain.CreateOrUpdateMBCCronJobOperation)
+	operation, ok := operations[0].(*domain.CreateMBCCronJobOperation)
 	require.True(t, ok)
 	cronJob := operation.CronJob
 	assert.True(t, cronJob.CreationTimestamp.IsZero())
@@ -193,7 +193,7 @@ func TestMBCPrimaryReconciler_Provision_UpdateCronJob(t *testing.T) {
 		CronJob: nil,
 	})
 	require.NoError(t, err)
-	oldCronJob := reconciler.Operations.TakeAll()[0].(*domain.CreateOrUpdateMBCCronJobOperation).CronJob
+	oldCronJob := reconciler.Operations.TakeAll()[0].(*domain.CreateMBCCronJobOperation).CronJob
 	require.NotNil(t, oldCronJob)
 
 	// Act
@@ -209,7 +209,7 @@ func TestMBCPrimaryReconciler_Provision_UpdateCronJob(t *testing.T) {
 	require.Equal(t, origMBC, mbc)
 	operations := reconciler.Operations.TakeAll()
 	require.Len(t, operations, 1)
-	operation, ok := operations[0].(*domain.CreateOrUpdateMBCCronJobOperation)
+	operation, ok := operations[0].(*domain.UpdateMBCCronJobOperation)
 	require.True(t, ok)
 	cronJob := operation.CronJob
 	assert.False(t, cronJob.CreationTimestamp.IsZero())
@@ -266,7 +266,7 @@ func TestMBCPrimaryReconciler_Finalize_RemoveCronJob(t *testing.T) {
 		CronJob: nil,
 	})
 	require.NoError(t, err)
-	cronJob := reconciler.Operations.TakeAll()[0].(*domain.CreateOrUpdateMBCCronJobOperation).CronJob
+	cronJob := reconciler.Operations.TakeAll()[0].(*domain.CreateMBCCronJobOperation).CronJob
 
 	// Act
 	err = reconciler.Finalize(&domain.MBCPrimaryReconcilerFinalizeInput{
@@ -322,7 +322,7 @@ func TestMBCPrimaryReconciler_Provision_OverwriteSchedule(t *testing.T) {
 	require.NoError(t, err)
 	operations := reconciler.Operations.TakeAll()
 	require.Len(t, operations, 1)
-	operation, ok := operations[0].(*domain.CreateOrUpdateMBCCronJobOperation)
+	operation, ok := operations[0].(*domain.CreateMBCCronJobOperation)
 	require.True(t, ok)
 	cronJob := operation.CronJob
 	assert.Equal(t, overwriteSchedule, cronJob.Spec.Schedule)
@@ -346,7 +346,7 @@ func TestMBCPrimaryReconciler_Provision_SuspendTrue(t *testing.T) {
 	require.NoError(t, err)
 	operations := reconciler.Operations.TakeAll()
 	require.Len(t, operations, 1)
-	operation, ok := operations[0].(*domain.CreateOrUpdateMBCCronJobOperation)
+	operation, ok := operations[0].(*domain.CreateMBCCronJobOperation)
 	require.True(t, ok)
 	cronJob := operation.CronJob
 	assert.True(t, *cronJob.Spec.Suspend)

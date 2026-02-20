@@ -20,7 +20,11 @@ const (
 	MantleBackupConfigCronJobNamePrefix          = "mbc-"
 )
 
-type CreateOrUpdateMBCCronJobOperation struct {
+type CreateMBCCronJobOperation struct {
+	CronJob *batchv1.CronJob
+}
+
+type UpdateMBCCronJobOperation struct {
 	CronJob *batchv1.CronJob
 }
 
@@ -170,7 +174,11 @@ func (r *MBCPrimaryReconciler) createOrUpdateCronJob(mbc *mantlev1.MantleBackupC
 	}
 	env.ValueFrom.FieldRef.FieldPath = "metadata.labels['batch.kubernetes.io/job-name']"
 
-	r.Operations.Append(&CreateOrUpdateMBCCronJobOperation{CronJob: cronJob})
+	if cronJob.CreationTimestamp.IsZero() {
+		r.Operations.Append(&CreateMBCCronJobOperation{CronJob: cronJob})
+	} else {
+		r.Operations.Append(&UpdateMBCCronJobOperation{CronJob: cronJob})
+	}
 }
 
 type MBCPrimaryReconcilerFinalizeInput struct {

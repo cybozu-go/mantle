@@ -211,12 +211,11 @@ func (c *kubernetesClient) ApplyReconcilerOperations(ctx context.Context, operat
 		var err error
 
 		switch operation := i.(type) {
-		case *domain.CreateOrUpdateMBCCronJobOperation:
-			if operation.CronJob.CreationTimestamp.IsZero() { // Create
-				err = c.Create(ctx, operation.CronJob)
-			} else { // Update
-				err = c.Update(ctx, operation.CronJob)
-			}
+		case *domain.CreateMBCCronJobOperation:
+			err = c.Create(ctx, operation.CronJob)
+
+		case *domain.UpdateMBCCronJobOperation:
+			err = c.Update(ctx, operation.CronJob)
 
 		case *domain.DeleteMBCCronJobOperation:
 			err = c.Delete(ctx, operation.CronJob, &client.DeleteOptions{
