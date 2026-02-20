@@ -21,6 +21,12 @@ func mbcWithAnnotAndFinalizer(sc *storagev1.StorageClass) optionMBC {
 	}
 }
 
+func mbcWithSuspend(suspend bool) optionMBC {
+	return func(mbc *mantlev1.MantleBackupConfig) {
+		mbc.Spec.Suspend = suspend
+	}
+}
+
 func newMBC(opts ...optionMBC) *mantlev1.MantleBackupConfig {
 	mbc := &mantlev1.MantleBackupConfig{
 		ObjectMeta: metav1.ObjectMeta{
@@ -75,6 +81,12 @@ func reconcilerWithCronJobInfo(serviceAccount, image, namespace string) optionRe
 		in.CronJobImage = image
 		in.CronJobNamespace = namespace
 		in.CronJobServiceAccountName = serviceAccount
+	}
+}
+
+func reconcilerWithOverwriteSchedule(schedule string) optionReconciler {
+	return func(in *domain.NewMBCPrimaryReconcilerInput) {
+		in.OverwriteMBCSchedule = schedule
 	}
 }
 
@@ -290,4 +302,52 @@ func TestMBCPrimaryReconciler_Finalize_NotResponsibleStorageClass(t *testing.T) 
 	require.NoError(t, err)
 	require.Equal(t, origMBC, mbc)
 	require.Empty(t, reconciler.Operations.TakeAll())
+}
+
+func TestMBCPrimaryReconciler_Provision_OverwriteSchedule(t *testing.T) {
+	// Arrange
+	sc := newSC()
+	mbc := newMBC(mbcWithAnnotAndFinalizer(sc))
+	overwriteSchedule := "*/5 * * * *"
+	reconciler := newReconciler(sc, reconcilerWithOverwriteSchedule(overwriteSchedule))
+
+	// Act
+	err := reconciler.Provision(&domain.MBCPrimaryReconcilerProvisionInput{
+		MBC:     mbc,
+		PVCSC:   sc,
+		CronJob: nil,
+	})
+
+	// Assert
+	require.NoError(t, err)
+	operations := reconciler.Operations.TakeAll()
+	require.Len(t, operations, 1)
+	operation, ok := operations[0].(*domain.CreateOrUpdateMBCCronJobOperation)
+	require.True(t, ok)
+	cronJob := operation.CronJob
+	assert.Equal(t, overwriteSchedule, cronJob.Spec.Schedule)
+	assert.NotEqual(t, mbc.Spec.Schedule, cronJob.Spec.Schedule)
+}
+
+func TestMBCPrimaryReconciler_Provision_SuspendTrue(t *testing.T) {
+	// Arrange
+	sc := newSC()
+	mbc := newMBC(mbcWithAnnotAndFinalizer(sc), mbcWithSuspend(true))
+	reconciler := newReconciler(sc)
+
+	// Act
+	err := reconciler.Provision(&domain.MBCPrimaryReconcilerProvisionInput{
+		MBC:     mbc,
+		PVCSC:   sc,
+		CronJob: nil,
+	})
+
+	// Assert
+	require.NoError(t, err)
+	operations := reconciler.Operations.TakeAll()
+	require.Len(t, operations, 1)
+	operation, ok := operations[0].(*domain.CreateOrUpdateMBCCronJobOperation)
+	require.True(t, ok)
+	cronJob := operation.CronJob
+	assert.True(t, *cronJob.Spec.Suspend)
 }
