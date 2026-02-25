@@ -106,7 +106,9 @@ if (条件2) {
 return 処理N;
 ```
 
-リコンサイル対象のリソースを変更したい場合、`Provision`・`Finalize` 関数の引数として渡されたカスタムリソースを変更する。その変更の永続化は `Provision`・`Finalize` 関数の呼び出し側で行う。一方で、リコンサイル対象以外のリソースを変更したり、Kubernetes 以外の外部サービスにアクセスしたい場合、以下のどちらかによって行う：
+リコンサイル対象のリソースを変更したい場合、`Provision`・`Finalize` 関数の引数として渡されたカスタムリソースを変更する。その変更の永続化は `Provision`・`Finalize` 関数の呼び出し側で行う。一方で、リコンサイル対象以外のリソースを変更したり、Kubernetes 以外の外部サービスにアクセスしたい場合、以下のどちらかによって行うfootnote:[
+このやり方は DDD の「ユーザーインターフェイスからのリクエストは、ひとつの集約のインスタンスに対する単一のコマンドにして実行しなければならない」（<<implementing-ddd>> P.341）というルールを参考にしている。
+]：
 
 * ドメインイベントを作成するfootnote:[
 使用するイベントのほとんどは外部サービスに対する「コマンド発行済みイベント」（<<learning-ddd>> P.183）になるだろう。例えば「CronJob を作成する（コマンドを発行した）」とか「MantleBackup を更新する（コマンドを発行した）」など。
@@ -188,3 +190,4 @@ FIXME まとめてどこかに配置する
 * [[[knative-injection-generated-reconcilers,8]]] https://github.com/knative/pkg/tree/4a022ed9999a874caca69595f8ba27a8f25cfa76/injection#generated-reconcilers-1
 * [[[achilles-sdk-output-set,9]]] https://github.com/reddit/achilles-sdk/blob/8173c7ff221db680f3bdd3979cc6e5b7e14573cb/docs/sdk-apply-objects.md
 * [[[xp123-3a,10]]] https://xp123.com/3a-arrange-act-assert/
+* [[[implementing-ddd,11]]] 『実践ドメイン駆動設計』（ヴォーン・ヴァーノン (著), 髙木 正弘 (翻訳)、翔泳社）
