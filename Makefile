@@ -106,6 +106,7 @@ golangci-lint:
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter & yamllint
 	$(GOLANGCI_LINT) run --timeout 3m
+	$(GOLANGCI_LINT) run -c .golangci-new.yml --timeout 3m internal/controller/domain internal/controller/usecase
 
 .PHONY: lint-fix
 lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
