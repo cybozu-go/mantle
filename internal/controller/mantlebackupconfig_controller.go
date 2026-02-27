@@ -7,6 +7,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 
 	aerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/fields"
@@ -20,12 +21,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
+	"github.com/cybozu-go/mantle/internal/controller/domain"
+	"github.com/cybozu-go/mantle/internal/controller/infra"
 	"github.com/cybozu-go/mantle/internal/controller/metrics"
 	"github.com/cybozu-go/mantle/internal/controller/usecase"
 	"github.com/prometheus/client_golang/prometheus"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -42,6 +44,14 @@ type MantleBackupConfigReconciler struct {
 	overwriteMBCSchedule string
 	role                 string
 	uc                   *usecase.ReconcileMBCPrimary
+
+	// ucOnce guards the lazy initialization of uc. We cannot initialize uc in
+	// the constructor because it depends on cronJobInfo, which requires a
+	// running API server to resolve. Since Reconcile can be called concurrently
+	// by controller-runtime, sync.Once is used to ensure thread-safe one-time
+	// initialization.
+	// cf. https://github.com/kubernetes-sigs/controller-runtime/issues/616
+	ucOnce sync.Once
 }
 
 func NewMantleBackupConfigReconciler(
@@ -57,7 +67,7 @@ func NewMantleBackupConfigReconciler(
 		role:                 role,
 		managedCephClusterID: managedCephClusterID,
 		overwriteMBCSchedule: overwriteMBCSchedule,
-		uc:                   usecase.NewReconcileMBCPrimary(),
+		uc:                   nil,
 	}
 }
 
@@ -83,14 +93,23 @@ func (r *MantleBackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return ctrl.Result{}, nil
 	}
 
-	if err := r.uc.Run(); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to run usecase: %w", err)
-	}
-
 	// Get the CronJob info to be created or updated
 	cronJobInfo, err := getCronJobInfo(ctx, r.Client)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("couldn't get cronjob info: %w", err)
+	}
+
+	// TODO: We can't initialize r.uc in NewMantleBackupConfigReconciler due to
+	// the testing architecture. See https://github.com/cybozu-go/mantle/pull/252#discussion_r3063499989
+	// for details. We should refactor the code as soon as the old tests are removed.
+	r.ucOnce.Do(func() {
+		r.uc = usecase.NewReconcileMBCPrimary(r.managedCephClusterID, infra.NewKubernetesClient(r.Client), cronJobInfo.namespace)
+	})
+
+	if err := r.uc.Run(ctx, req.NamespacedName); err == nil {
+		return ctrl.Result{}, nil
+	} else if !errors.Is(err, domain.ErrNotImplemented) {
+		return ctrl.Result{}, fmt.Errorf("failed to run usecase: %w", err)
 	}
 
 	// Get MantleBackupConfig.
@@ -103,31 +122,6 @@ func (r *MantleBackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.R
 		}
 
 		return ctrl.Result{}, fmt.Errorf("failed to get MantleBackupConfig: %w", err)
-	}
-
-	// When the deletionTimestamp is set, remove the finalizer and finish reconciling.
-	if !mbc.DeletionTimestamp.IsZero() {
-		if controllerutil.ContainsFinalizer(&mbc, MantleBackupConfigFinalizerName) &&
-			mbc.Annotations[MantleBackupConfigAnnotationManagedClusterID] == r.managedCephClusterID {
-			_ = metrics.BackupConfigInfo.Delete(prometheus.Labels{
-				"persistentvolumeclaim": mbc.Spec.PVC,
-				"resource_namespace":    mbc.Namespace,
-				"mantlebackupconfig":    mbc.Name,
-			})
-
-			// Delete the CronJob. If we failed to delete it because it's not found, ignore the error.
-			logger.Info("start deleting cronjobs")
-			if err := r.deleteCronJob(ctx, &mbc, cronJobInfo.namespace); err != nil && !aerrors.IsNotFound(err) {
-				return ctrl.Result{}, fmt.Errorf("failed to delete cronjob: %w", err)
-			}
-
-			controllerutil.RemoveFinalizer(&mbc, MantleBackupConfigFinalizerName)
-			if err := r.Client.Update(ctx, &mbc); err != nil {
-				return ctrl.Result{}, fmt.Errorf("failed to remove mbc finalizer: %w", err)
-			}
-		}
-
-		return ctrl.Result{}, nil
 	}
 
 	// Check if we're in charge of the given mbc.
@@ -306,31 +300,6 @@ func (r *MantleBackupConfigReconciler) createOrUpdateCronJob(ctx context.Context
 	}
 
 	return nil
-}
-
-func (r *MantleBackupConfigReconciler) deleteCronJob(ctx context.Context, mbc *mantlev1.MantleBackupConfig, namespace string) error {
-	var cronJob batchv1.CronJob
-	if err := r.Client.Get(
-		ctx,
-		types.NamespacedName{Name: getMBCCronJobName(mbc), Namespace: namespace},
-		&cronJob,
-	); err != nil {
-		return err
-	}
-
-	uid := cronJob.GetUID()
-	resourceVersion := cronJob.GetResourceVersion()
-
-	return r.Client.Delete(
-		ctx,
-		&cronJob,
-		&client.DeleteOptions{
-			Preconditions: &metav1.Preconditions{
-				UID:             &uid,
-				ResourceVersion: &resourceVersion,
-			},
-		},
-	)
 }
 
 func getMBCCronJobName(mbc *mantlev1.MantleBackupConfig) string {
