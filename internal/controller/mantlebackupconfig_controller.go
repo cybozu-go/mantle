@@ -57,7 +57,7 @@ func NewMantleBackupConfigReconciler(
 		role:                 role,
 		managedCephClusterID: managedCephClusterID,
 		overwriteMBCSchedule: overwriteMBCSchedule,
-		uc:                   usecase.NewReconcileMBCPrimary(),
+		uc:                   nil,
 	}
 }
 
@@ -83,14 +83,18 @@ func (r *MantleBackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return ctrl.Result{}, nil
 	}
 
-	if err := r.uc.Run(); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to run usecase: %w", err)
-	}
-
 	// Get the CronJob info to be created or updated
 	cronJobInfo, err := getCronJobInfo(ctx, r.Client)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("couldn't get cronjob info: %w", err)
+	}
+
+	if r.uc == nil {
+		r.uc = usecase.NewReconcileMBCPrimary(r.managedCephClusterID, &kubernetesClient{r.Client}, cronJobInfo.namespace)
+	}
+
+	if err := r.uc.Run(ctx, req.NamespacedName); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to run usecase: %w", err)
 	}
 
 	// Get MantleBackupConfig.

@@ -1,14 +1,17 @@
 package usecase_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/cybozu-go/mantle/internal/controller/usecase"
 	"github.com/go-openapi/testify/v2/require"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 func newUsecase() *usecase.ReconcileMBCPrimary {
-	return usecase.NewReconcileMBCPrimary()
+	// FIXME envtest
+	return usecase.NewReconcileMBCPrimary("managed-ceph-cluster-id", nil, "cronjob-namespace")
 }
 
 func TestProvision_Success(t *testing.T) {
@@ -18,7 +21,10 @@ func TestProvision_Success(t *testing.T) {
 	r := newUsecase()
 
 	// Act
-	err := r.Run()
+	err := r.Run(context.TODO(), types.NamespacedName{
+		Name:      "mbc-name",
+		Namespace: "mbc-namespace",
+	})
 
 	// Assert
 	require.NoError(t, err)
