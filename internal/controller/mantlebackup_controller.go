@@ -2541,9 +2541,16 @@ func (r *MantleBackupReconciler) createOrUpdateVerifyJob(ctx context.Context, jo
 				Name:  "verify",
 				Image: r.podImage,
 				Command: []string{
-					"/usr/sbin/e2fsck",
-					"-fn",
-					"/dev/verify-rbd",
+					"/bin/bash",
+					"-c",
+					// The first e2fsck with -E journal_only is to replay the
+					// journal and it may return non zero if there are errors
+					// that need to be fixed.
+					`
+set -eux -o pipefail
+/usr/sbin/e2fsck -y -E journal_only /dev/verify-rbd || true
+/usr/sbin/e2fsck -fnv /dev/verify-rbd
+`,
 				},
 				SecurityContext: &corev1.SecurityContext{
 					Privileged: ptr.To(true),
