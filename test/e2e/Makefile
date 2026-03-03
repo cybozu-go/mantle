@@ -226,6 +226,25 @@ wait-ceph-ready:
 	done; \
 	if [ "$$is_ok" = "false" ]; then \
 		echo "ceph -s failed to become ready in namespace $(NAMESPACE)" > /dev/stderr; \
+		$(KUBECTL) -n $(NAMESPACE) exec deploy/rook-ceph-tools -- ceph -s ; \
+		echo ; \
+		echo "=== Pod ===" ; \
+		$(KUBECTL) get -A pod ; \
+		echo ; \
+		echo "=== Job ===" ; \
+		$(KUBECTL) get -A job ; \
+		echo ; \
+		echo "=== PVC ===" ; \
+		$(KUBECTL) get -A pvc ; \
+		echo ; \
+		echo "=== PV ===" ; \
+		$(KUBECTL) get pv ; \
+		echo ; \
+		echo "=== Node ===" ; \
+		$(KUBECTL) get node ; \
+		echo ; \
+		echo "=== Service ===" ; \
+		$(KUBECTL) get -A svc ; \
 		exit 1; \
 	fi
 
