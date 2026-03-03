@@ -2718,8 +2718,16 @@ var _ = Describe("MantleBackupReconciler", func() {
 			container.TerminationMessagePath = ""
 			container.TerminationMessagePolicy = ""
 			Expect(*container).To(Equal(corev1.Container{
-				Name:            "verify",
-				Command:         []string{"/usr/sbin/e2fsck", "-fn", "/dev/verify-rbd"},
+				Name: "verify",
+				Command: []string{
+					"/bin/bash",
+					"-c",
+					`
+set -eux -o pipefail
+/usr/sbin/e2fsck -y -E journal_only /dev/verify-rbd || true
+/usr/sbin/e2fsck -fnv /dev/verify-rbd
+`,
+				},
 				Image:           podImage,
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				SecurityContext: &corev1.SecurityContext{
