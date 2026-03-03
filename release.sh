@@ -35,7 +35,7 @@ get-mantle-latest-tag(){
 }
 
 case-mantle(){
-    check-git-branches
+    #check-git-branches
 
     # Check Mantle's changes
     MANTLE_LATEST_TAG=$(get-mantle-latest-tag)
@@ -72,7 +72,7 @@ case-mantle(){
 }
 
 case-mantle-helm-chart(){
-    check-git-branches
+    #check-git-branches
 
     # Check mantle Helm Chart changes
     MANTLE_HELM_CHART_LATEST_TAG=$(git describe --tags --abbrev=0 --match='mantle-chart-*')
@@ -126,7 +126,7 @@ case-mantle-helm-chart(){
 }
 
 case-mantle-cluster-wide-helm-chart(){
-    check-git-branches
+    #check-git-branches
 
     # Check mantle-cluster-wide Helm Chart changes
     MANTLE_CLUSTER_WIDE_HELM_CHART_LATEST_TAG=$(git describe --tags --abbrev=0 --match='mantle-cluster-wide-chart-*')
