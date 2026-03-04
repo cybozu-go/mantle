@@ -18,7 +18,7 @@ LOSETUP := losetup
 LOOP_FILE := loop.img
 LOOP_FILE2 := loop2.img
 CNI_PLUGIN_INSTALL_DIR := /opt/cni/bin
-POLLING_INTERVAL := 5
+POLLING_INTERVAL := 30
 TIMEOUT_SECS := 900
 LOOP_DEV := /dev/loop0
 LOOP_DEV2 := /dev/loop1
@@ -216,11 +216,12 @@ install-rook-ceph-cluster2:
 wait-ceph-ready:
 	is_ok="false"; \
 	for ((i=0;i<$(TIMEOUT_SECS);i+=$(POLLING_INTERVAL))); do \
-		$(KUBECTL) -n $(NAMESPACE) exec deploy/rook-ceph-tools -- ceph -s >/dev/null 2>&1 && { \
+		$(KUBECTL) -n $(NAMESPACE) exec deploy/rook-ceph-tools -- ceph -s && { \
 			echo "ceph -s succeeded in namespace $(NAMESPACE)"; \
 			is_ok="true"; \
 			break; \
 		}; \
+		$(KUBECTL) -n $(NAMESPACE) rollout restart deploy rook-ceph-tools; \
 		echo "waiting for ceph -s to succeed in namespace $(NAMESPACE)" > /dev/stderr; \
 		sleep $(POLLING_INTERVAL); \
 	done; \
