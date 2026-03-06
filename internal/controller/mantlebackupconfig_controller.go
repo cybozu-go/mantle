@@ -21,6 +21,7 @@ import (
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/controller/metrics"
+	"github.com/cybozu-go/mantle/internal/controller/usecase"
 	"github.com/prometheus/client_golang/prometheus"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -40,6 +41,7 @@ type MantleBackupConfigReconciler struct {
 	managedCephClusterID string
 	overwriteMBCSchedule string
 	role                 string
+	uc                   *usecase.ReconcileMBCPrimary
 }
 
 func NewMantleBackupConfigReconciler(
@@ -49,7 +51,14 @@ func NewMantleBackupConfigReconciler(
 	overwriteMBCSchedule string,
 	role string,
 ) *MantleBackupConfigReconciler {
-	return &MantleBackupConfigReconciler{cli, scheme, managedCephClusterID, overwriteMBCSchedule, role}
+	return &MantleBackupConfigReconciler{
+		Client:               cli,
+		Scheme:               scheme,
+		role:                 role,
+		managedCephClusterID: managedCephClusterID,
+		overwriteMBCSchedule: overwriteMBCSchedule,
+		uc:                   usecase.NewReconcileMBCPrimary(),
+	}
 }
 
 //+kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlebackupconfigs,verbs=get;list;watch;create;update;patch;delete
@@ -72,6 +81,10 @@ func (r *MantleBackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.R
 
 	if r.role == RoleSecondary {
 		return ctrl.Result{}, nil
+	}
+
+	if err := r.uc.Run(); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to run usecase: %w", err)
 	}
 
 	// Get the CronJob info to be created or updated
