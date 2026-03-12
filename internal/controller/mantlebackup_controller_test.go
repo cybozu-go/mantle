@@ -599,7 +599,7 @@ var _ = Describe("MantleBackup controller", func() {
 				g.Expect(pvcExport.GetLabels()["app.kubernetes.io/component"]).To(Equal(labelComponentExportData))
 				g.Expect(pvcExport.Spec.AccessModes[0]).To(Equal(corev1.ReadWriteOnce))
 				g.Expect(*pvcExport.Spec.StorageClassName).To(Equal(resMgr.StorageClassName))
-				g.Expect(pvcExport.Spec.Resources.Requests.Storage().String()).To(Equal("1288490188")) // floor(1Gi*1.2)
+				g.Expect(pvcExport.Spec.Resources.Requests.Storage().String()).To(Equal("2Gi")) // transferPartSize * 2
 
 				// Make sure export() creates a Job to export data.
 				err = k8sClient.Get(
