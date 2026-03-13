@@ -1501,7 +1501,7 @@ func calculateExportDataPVCSize(transferPartSize *resource.Quantity) (*resource.
 	if pvcSizeI64 < 512*1024*1024 {
 		pvcSizeI64 = 512 * 1024 * 1024
 	}
-	pvcSizeI64 = int64(float64(pvcSizeI64) * 1.2)
+	pvcSizeI64 = pvcSizeI64 * 2
 
 	pvcSize := resource.NewQuantity(pvcSizeI64, transferPartSize.Format)
 	if pvcSize == nil {
