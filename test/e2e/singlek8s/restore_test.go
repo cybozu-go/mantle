@@ -567,6 +567,15 @@ func (test *restoreTest) testRemoveImage() {
 func (test *restoreTest) cleanup() {
 	err := deleteNamespacedResource(test.tenantNamespace, "mantlerestore")
 	Expect(err).NotTo(HaveOccurred())
+	for _, restoreName := range []string{test.mantleRestoreName1, test.mantleRestoreName2} {
+		pvName := fmt.Sprintf("mr-%s-%s", test.tenantNamespace, restoreName)
+		Eventually(func(g Gomega) {
+			_, _, err := kubectl("get", "pvc", "-n", test.tenantNamespace, restoreName)
+			g.Expect(err).To(HaveOccurred())
+			_, _, err = kubectl("get", "pv", pvName)
+			g.Expect(err).To(HaveOccurred())
+		}).Should(Succeed())
+	}
 	err = deleteNamespacedResource(test.tenantNamespace, "mantlebackup")
 	Expect(err).NotTo(HaveOccurred())
 	err = deleteNamespacedResource(test.tenantNamespace, "pvc")
