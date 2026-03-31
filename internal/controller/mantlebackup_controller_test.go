@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
+	runtimemetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
 const (
@@ -438,13 +439,12 @@ var _ = Describe("MantleBackup controller", func() {
 			NoProxy:    "no proxy",
 		}
 
-		It("should be synced to remote", func(ctx SpecContext) {
-			// CSATEST-1491
+		BeforeEach(func() {
 			mgrUtil = testutil.NewManagerUtil(context.Background(), cfg, scheme.Scheme)
 
 			var t reporter
 			mockCtrl = gomock.NewController(t)
-			defer mockCtrl.Finish()
+			DeferCleanup(mockCtrl.Finish)
 			grpcClient = proto.NewMockMantleServiceClient(mockCtrl)
 			reconciler = NewMantleBackupReconciler(
 				mgrUtil.GetManager().GetClient(),
@@ -473,7 +473,10 @@ var _ = Describe("MantleBackup controller", func() {
 
 			err := reconciler.SetupWithManager(mgrUtil.GetManager())
 			Expect(err).NotTo(HaveOccurred())
+		})
 
+		It("should be synced to remote", func(ctx SpecContext) {
+			// CSATEST-1491
 			setupExpireQueueSniffer()
 
 			grpcClient.EXPECT().CreateOrUpdatePVC(gomock.Any(), &customMatcherHelper{
@@ -768,6 +771,37 @@ var _ = Describe("MantleBackup controller", func() {
 
 			testutil.CheckDeletedEventually[mantlev1.MantleBackup](ctx, k8sClient, backup.Name, backup.Namespace)
 		})
+
+		It("should export BackupDurationSeconds even if no MantleBackup exists", func(ctx SpecContext) {
+			// SetupWithManager (called in BeforeEach) pre-registers the metric with empty
+			// labels. Verify it is exported without any MantleBackup existing.
+			mgrUtil.Start()
+
+			mfs, err := runtimemetrics.Registry.Gather()
+			Expect(err).NotTo(HaveOccurred())
+			found := false
+			for _, mf := range mfs {
+				if mf.GetName() != "mantle_backup_duration_seconds" {
+					continue
+				}
+				for _, m := range mf.GetMetric() {
+					var pvcVal, nsVal string
+					for _, l := range m.GetLabel() {
+						switch l.GetName() {
+						case "persistentvolumeclaim":
+							pvcVal = l.GetValue()
+						case "resource_namespace":
+							nsVal = l.GetValue()
+						}
+					}
+					if pvcVal == "" && nsVal == "" {
+						found = true
+					}
+				}
+			}
+			Expect(found).To(BeTrue())
+		})
+
 	})
 })
 
