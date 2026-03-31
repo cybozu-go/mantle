@@ -564,6 +564,12 @@ func newMantleBackupReconcilerRateLimiter[T comparable]() workqueue.TypedRateLim
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *MantleBackupReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// Ensure a zero-value metric is exported even if no MantleBackup exists.
+	metrics.BackupDurationSeconds.With(prometheus.Labels{
+		"persistentvolumeclaim": "",
+		"resource_namespace":    "",
+	})
+
 	return ctrl.NewControllerManagedBy(mgr).
 		WithOptions(controller.TypedOptions[reconcile.Request]{
 			RateLimiter: newMantleBackupReconcilerRateLimiter[reconcile.Request](),
