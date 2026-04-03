@@ -2,7 +2,7 @@
 
 ## How to change the supported Kubernetes minor versions
 
-Mantle depends on some Kubernetes repositories like `k8s.io/client-go` and supports only one Kubernetes version at a time.
+Mantle depends on some Kubernetes repositories like `k8s.io/client-go` and supports two Kubernetes versions at a time.
 
 Issues and PRs related the latest upgrade task also help you understand how to upgrade the supported versions, so checking them together with this guide is recommended when you do this task.
 
@@ -10,14 +10,14 @@ Issues and PRs related the latest upgrade task also help you understand how to u
 
 #### Kubernetes
 
-Choose the next version and check the [release note](https://kubernetes.io/docs/setup/release/notes/).
-e.g. 1.17 -> 1.18
+When upgrading, add the new version and drop the oldest to keep supporting two consecutive minor versions.
 
-To change the version, edit the following files.
+Choose the appropriate versions and check the [release note](https://kubernetes.io/docs/setup/release/notes/).
 
-<!--
-- `.github/workflows/e2e.yaml`
--->
+To change the versions, edit the following files.
+
+- `.github/workflows/e2e.yaml` (update the `kubernetes-version` entries in the matrix)
+- `.github/workflows/e2e-multiple-k8s-clusters.yaml` (update the `kubernetes-version` entries in the matrix)
 - `README.md`
 - `versions.mk`
 
