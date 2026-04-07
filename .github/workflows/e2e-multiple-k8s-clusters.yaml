@@ -22,6 +22,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        kubernetes-version:
+          - 1.34.4
         backup-transfer-part-size:
           - 3Mi # smaller than the PVC size
         label-filter:
@@ -34,10 +36,19 @@ jobs:
           - lock
           - "!//" # select unlabelled tests
         include:
-          - backup-transfer-part-size: 10Mi # equal to the PVC size
+          # testing various backup-transfer-part-size
+          - kubernetes-version: 1.34.4
+            backup-transfer-part-size: 10Mi # equal to the PVC size
             label-filter: various-transfer-part-size
-          - backup-transfer-part-size: 200Gi # greater than the PVC size
+          - kubernetes-version: 1.34.4
+            backup-transfer-part-size: 200Gi # greater than the PVC size
             label-filter: various-transfer-part-size
+
+          # only testing the full-backup feature with the previous Kubernetes version
+          # to reduce the usage of large runners.
+          - kubernetes-version: 1.33.1
+            backup-transfer-part-size: 3Mi
+            label-filter: full-backup
     #runs-on: "ubuntu-22.04"
     runs-on: mantle_large_runner_16core
     timeout-minutes: 120
@@ -48,8 +59,9 @@ jobs:
           go-version-file: "go.mod"
       - run: sudo apt-get update
       - uses: ./.github/actions/set-up-kvm-for-e2e-tests
-      - run: make -C test/e2e setup
+      - run: make -C test/e2e setup KUBERNETES_VERSION=${{ matrix.kubernetes-version }}
       - run: |
           make -C test/e2e test-multiple-k8s-clusters \
+            KUBERNETES_VERSION=${{ matrix.kubernetes-version }} \
             BACKUP_TRANSFER_PART_SIZE=${{ matrix.backup-transfer-part-size }} \
             GINKGO_FLAGS=--label-filter='${{ matrix.label-filter }}'
