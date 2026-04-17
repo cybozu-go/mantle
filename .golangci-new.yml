@@ -4,6 +4,14 @@ linters:
   disable:
     - depguard
     - wsl
+    - godox # Since we adopt the strangler-fig pattern, FIXME comments are inevitable.
+  settings:
+    exhaustruct:
+      exclude:
+        # The following packages are not designed to conform to this rule.
+        - k8s.io/.*
+        - sigs.k8s.io/controller-runtime/.*
+        - github.com/cybozu-go/mantle/api/.*
 formatters:
   enable:
     - gofmt

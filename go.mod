@@ -8,13 +8,13 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.41.5
 	github.com/aws/aws-sdk-go-v2/config v1.32.9
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.97.3
-	github.com/go-openapi/testify/v2 v2.3.0
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.3.3
 	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.39.1
 	github.com/prometheus/client_golang v1.22.0
 	github.com/pseudomuto/protoc-gen-doc v1.5.1
 	github.com/spf13/cobra v1.10.2
+	github.com/stretchr/testify v1.10.0
 	go.uber.org/mock v0.6.0
 	golang.org/x/time v0.14.0
 	google.golang.org/grpc v1.79.3
