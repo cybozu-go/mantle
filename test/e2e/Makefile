@@ -400,6 +400,12 @@ do-test-multik8s: $(GINKGO)
 		echo "Job logs for $(MINIKUBE_PROFILE_SECONDARY):"; \
 		$${KUBECTL_SECONDARY} get job -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle -o name | \
 			while read line; do echo $$line; $${KUBECTL_SECONDARY} logs -n $(CEPH_CLUSTER1_NAMESPACE) $$line; done; \
+		echo ""; \
+		echo "Primary Pods"; \
+		$${KUBECTL_PRIMARY} get pod -o yaml; \
+		echo ""; \
+		echo "Secondary Pods"; \
+		$${KUBECTL_SECONDARY} get pod -o yaml; \
 		# Explicitly fail the test to mark the CI job as failed. \
 		exit 1; \
 	fi
