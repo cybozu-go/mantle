@@ -32,6 +32,10 @@ type PrimarySettings struct {
 	ExportDataStorageClass string
 }
 
+type SecondarySettings struct {
+	MaxImportJobs int
+}
+
 type SecondaryServer struct {
 	client client.Client
 	proto.UnimplementedMantleServiceServer

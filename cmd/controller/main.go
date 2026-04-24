@@ -55,6 +55,7 @@ var (
 	role                         string
 	mantleServiceEndpoint        string
 	maxExportJobs                int
+	maxImportJobs                int
 	maxUploadJobs                int
 	exportDataStorageClass       string
 	envSecret                    string
@@ -99,6 +100,8 @@ func init() {
 			"this option is required and is interpreted as the address that the secondary mantle should listen to.")
 	flags.IntVar(&maxExportJobs, "max-export-jobs", 8,
 		"The maximum number of export jobs that can run simultaneously. If you set this to 0, there is no limit.")
+	flags.IntVar(&maxImportJobs, "max-import-jobs", 8,
+		"The maximum number of import jobs that can run simultaneously. If you set this to 0, there is no limit.")
 	flags.IntVar(&maxUploadJobs, "max-upload-jobs", 8,
 		"The maximum number of export jobs that can run simultaneously. If you set this to 0, there is no limit.")
 	flags.StringVar(&exportDataStorageClass, "export-data-storage-class", "",
@@ -233,7 +236,11 @@ func checkCommandlineArgs() error {
 	return nil
 }
 
-func setupReconcilers(mgr manager.Manager, primarySettings *controller.PrimarySettings) error {
+func setupReconcilers(
+	mgr manager.Manager,
+	primarySettings *controller.PrimarySettings,
+	secondarySettings *controller.SecondarySettings,
+) error {
 	managedCephClusterID := os.Getenv("POD_NAMESPACE")
 	if managedCephClusterID == "" {
 		setupLog.Error(errors.New("POD_NAMESPACE is empty"), "POD_NAMESPACE is empty")
@@ -279,6 +286,7 @@ func setupReconcilers(mgr manager.Manager, primarySettings *controller.PrimarySe
 		managedCephClusterID,
 		role,
 		primarySettings,
+		secondarySettings,
 		podImage,
 		envSecret,
 		&controller.ObjectStorageSettings{
@@ -348,7 +356,7 @@ func setupReconcilers(mgr manager.Manager, primarySettings *controller.PrimarySe
 }
 
 func setupStandalone(mgr manager.Manager) error {
-	return setupReconcilers(mgr, nil)
+	return setupReconcilers(mgr, nil, nil)
 }
 
 func setupPrimary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup) error {
@@ -418,7 +426,7 @@ func setupPrimary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup) 
 		ExportDataStorageClass: exportDataStorageClass,
 	}
 
-	return setupReconcilers(mgr, primarySettings)
+	return setupReconcilers(mgr, primarySettings, nil)
 }
 
 func setupSecondary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup, cancel context.CancelFunc) error {
@@ -476,7 +484,9 @@ func setupSecondary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup
 		serv.GracefulStop()
 	}()
 
-	return setupReconcilers(mgr, nil)
+	return setupReconcilers(mgr, nil, &controller.SecondarySettings{
+		MaxImportJobs: maxImportJobs,
+	})
 }
 
 func subMain() error {

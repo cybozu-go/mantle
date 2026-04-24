@@ -117,7 +117,8 @@ type MantleBackupReconciler struct {
 	ceph                   ceph.CephCmd
 	managedCephClusterID   string
 	role                   string
-	primarySettings        *PrimarySettings // This should be non-nil if and only if role equals 'primary'.
+	primarySettings        *PrimarySettings   // This should be non-nil if and only if role equals 'primary'.
+	secondarySettings      *SecondarySettings // This should be non-nil if and only if role equals 'secondary'.
 	expireQueueCh          chan event.GenericEvent
 	podImage               string
 	envSecret              string
@@ -134,6 +135,7 @@ func NewMantleBackupReconciler(
 	managedCephClusterID,
 	role string,
 	primarySettings *PrimarySettings,
+	secondarySettings *SecondarySettings,
 	podImage string,
 	envSecret string,
 	objectStorageSettings *ObjectStorageSettings,
@@ -147,6 +149,7 @@ func NewMantleBackupReconciler(
 		managedCephClusterID:   managedCephClusterID,
 		role:                   role,
 		primarySettings:        primarySettings,
+		secondarySettings:      secondarySettings,
 		expireQueueCh:          make(chan event.GenericEvent),
 		podImage:               podImage,
 		envSecret:              envSecret,
@@ -1345,8 +1348,8 @@ func (r *MantleBackupReconciler) handleCompletedExportJobs(ctx context.Context, 
 	return r.handleCompletedJobsOfComponent(ctx, backup, labelComponentExportJob, MantleExportJobPrefix, nil)
 }
 
-func (r *MantleBackupReconciler) canNewExportJobBeCreated(ctx context.Context) (bool, error) {
-	if r.primarySettings.MaxExportJobs == 0 {
+func (r *MantleBackupReconciler) canNewJobBeCreated(ctx context.Context, maxJobs int, component string) (bool, error) {
+	if maxJobs == 0 {
 		return true, nil
 	}
 
@@ -1355,10 +1358,10 @@ func (r *MantleBackupReconciler) canNewExportJobBeCreated(ctx context.Context) (
 		Namespace: r.managedCephClusterID,
 		LabelSelector: labels.SelectorFromSet(map[string]string{
 			"app.kubernetes.io/name":      labelAppNameValue,
-			"app.kubernetes.io/component": labelComponentExportJob,
+			"app.kubernetes.io/component": component,
 		}),
 	}); err != nil {
-		return false, fmt.Errorf("failed to list export Jobs: %w", err)
+		return false, fmt.Errorf("failed to list %s Jobs: %w", component, err)
 	}
 
 	// exclude completed jobs
@@ -1369,11 +1372,19 @@ func (r *MantleBackupReconciler) canNewExportJobBeCreated(ctx context.Context) (
 		}
 	}
 
-	if count >= r.primarySettings.MaxExportJobs {
-		return false, nil
+	return count < maxJobs, nil
+}
+
+func (r *MantleBackupReconciler) canNewExportJobBeCreated(ctx context.Context) (bool, error) {
+	return r.canNewJobBeCreated(ctx, r.primarySettings.MaxExportJobs, labelComponentExportJob)
+}
+
+func (r *MantleBackupReconciler) canNewImportJobBeCreated(ctx context.Context) (bool, error) {
+	if r.secondarySettings == nil {
+		return true, nil
 	}
 
-	return true, nil
+	return r.canNewJobBeCreated(ctx, r.secondarySettings.MaxImportJobs, labelComponentImportJob)
 }
 
 func (r *MantleBackupReconciler) getPartNumRangeOfExpectedRunningUploadJobs(
@@ -2651,6 +2662,15 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 	if !uploaded {
 		logger.Info("export data for the next part is not yet uploaded", "partNum", partNum)
 
+		return requeueReconciliation(), nil
+	}
+
+	// check if a new import Job can be created
+	ok, err := r.canNewImportJobBeCreated(ctx)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to check if a new import Job can be created: %w", err)
+	}
+	if !ok {
 		return requeueReconciliation(), nil
 	}
 

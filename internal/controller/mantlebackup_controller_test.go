@@ -200,6 +200,7 @@ var _ = Describe("MantleBackup controller", func() {
 				resMgr.ClusterID,
 				RoleStandalone,
 				nil,
+				nil,
 				"dummy image",
 				"",
 				nil,
@@ -455,6 +456,7 @@ var _ = Describe("MantleBackup controller", func() {
 					Client:                 grpcClient,
 					ExportDataStorageClass: resMgr.StorageClassName,
 				},
+				nil,
 				"dummy image",
 				"dummy-secret-env",
 				&ObjectStorageSettings{
@@ -979,7 +981,7 @@ var _ = Describe("prepareForDataSynchronization", func() {
 		}
 
 		mbr := NewMantleBackupReconciler(ctrlClient,
-			ctrlClient.Scheme(), "test", RolePrimary, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"))
+			ctrlClient.Scheme(), "test", RolePrimary, nil, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"))
 
 		ret, err := mbr.prepareForDataSynchronization(context.Background(),
 			backup, grpcClient)
@@ -1516,6 +1518,7 @@ var _ = Describe("export and upload", func() {
 				ExportDataStorageClass: resMgr.StorageClassName,
 				MaxExportJobs:          1,
 			},
+			nil,
 			"dummy image",
 			"dummy-secret",
 			&ObjectStorageSettings{},
@@ -1606,6 +1609,7 @@ var _ = Describe("export and upload", func() {
 					ExportDataStorageClass: resMgr.StorageClassName,
 					MaxExportJobs:          1,
 				},
+				nil,
 				"dummy image",
 				"",
 				nil,
@@ -1759,6 +1763,7 @@ var _ = Describe("import", func() {
 			nsController,
 			RoleSecondary,
 			nil,
+			nil,
 			"dummy-image",
 			"dummy-env-secret",
 			&ObjectStorageSettings{},
@@ -1776,6 +1781,32 @@ var _ = Describe("import", func() {
 			mockCtrl.Finish()
 		}
 	})
+
+	createAndReconcileImportJob := func(
+		ctx SpecContext,
+		mbr *MantleBackupReconciler,
+		name, ns string,
+	) {
+		GinkgoHelper()
+
+		target, err := createMantleBackupUsingDummyPVC(ctx, name, ns)
+		Expect(err).NotTo(HaveOccurred())
+
+		err = updateStatus(ctx, k8sClient, target, func() error {
+			target.Status.SnapSize = ptr.To(int64(testutil.FakeRBDSnapshotSize))
+			transferPartSize := resource.MustParse("1Gi")
+			target.Status.TransferPartSize = &transferPartSize
+
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		snapshotTarget, err := getSnapshotTargetByDummyMB(target)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = mbr.reconcileImportJob(ctx, target, snapshotTarget, -1)
+		Expect(err).NotTo(HaveOccurred())
+	}
 
 	DescribeTable("isExportDataAlreadyUploaded: inputs and outputs",
 		func(ctx SpecContext, gotExist, gotError, expectUploaded, expectError bool) {
@@ -1855,6 +1886,88 @@ var _ = Describe("import", func() {
 			res, err = mbr.reconcileImportJob(ctx, backup, snapshotTarget, largestCompletedPartNum)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.IsZero()).To(BeTrue())
+		})
+	})
+
+	Context("import job throttling", func() {
+		It("should throttle import jobs correctly", func(ctx SpecContext) {
+			nsController = resMgr.CreateNamespace()
+			mbr = NewMantleBackupReconciler(
+				k8sClient,
+				scheme.Scheme,
+				nsController,
+				RoleSecondary,
+				nil,
+				&SecondarySettings{
+					MaxImportJobs: 1,
+				},
+				"dummy-image",
+				"dummy-env-secret",
+				&ObjectStorageSettings{},
+				nil,
+				resource.MustParse("1Gi"),
+			)
+			mbr.objectStorageClient = mockObjectStorage
+			mbr.ceph = testutil.NewFakeRBD()
+
+			getNumOfImportJobs := func(ns string) (int, error) {
+				var jobs batchv1.JobList
+				err := k8sClient.List(ctx, &jobs, &client.ListOptions{
+					Namespace: ns,
+					LabelSelector: labels.SelectorFromSet(map[string]string{
+						"app.kubernetes.io/name":      labelAppNameValue,
+						"app.kubernetes.io/component": labelComponentImportJob,
+					}),
+				})
+
+				return len(jobs.Items), err
+			}
+
+			mockObjectStorage.EXPECT().Exists(gomock.Any(), gomock.Any()).
+				Return(true, nil).AnyTimes()
+
+			// create 5 different MantleBackup resources and call reconcileImportJob for each of them
+			for i := range 5 {
+				createAndReconcileImportJob(ctx, mbr, fmt.Sprintf("target1-%d", i), ns)
+			}
+
+			// make sure that only 1 Job is created
+			Consistently(ctx, func(g Gomega) error {
+				numJobs, err := getNumOfImportJobs(nsController)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(numJobs).To(Equal(1))
+
+				return nil
+			}, "1s").Should(Succeed())
+
+			// make sure that another mantle-controller existing in a different namespace can create an import Job
+			nsController2 := resMgr.CreateNamespace()
+			mbr2 := NewMantleBackupReconciler(
+				k8sClient,
+				scheme.Scheme,
+				nsController2,
+				RoleSecondary,
+				nil,
+				&SecondarySettings{
+					MaxImportJobs: 1,
+				},
+				"dummy-image",
+				"dummy-env-secret",
+				&ObjectStorageSettings{},
+				nil,
+				resource.MustParse("1Gi"),
+			)
+			mbr2.objectStorageClient = mockObjectStorage
+			mbr2.ceph = testutil.NewFakeRBD()
+			ns2 := resMgr.CreateNamespace()
+			createAndReconcileImportJob(ctx, mbr2, "target2", ns2)
+			Eventually(ctx, func(g Gomega) error {
+				numJobs, err := getNumOfImportJobs(nsController2)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(numJobs).To(Equal(1))
+
+				return nil
+			}).Should(Succeed())
 		})
 	})
 
@@ -2580,7 +2693,7 @@ var _ = Describe("MantleBackupReconciler", func() {
 		}
 
 		It("setup", func(ctx SpecContext) {
-			reconciler = NewMantleBackupReconciler(nil, nil, "", "", nil, "", "", nil, nil, resource.Quantity{})
+			reconciler = NewMantleBackupReconciler(nil, nil, "", "", nil, nil, "", "", nil, nil, resource.Quantity{})
 			cephCmd = testutil.NewFakeRBD()
 			reconciler.ceph = cephCmd
 		})
@@ -2617,7 +2730,7 @@ var _ = Describe("MantleBackupReconciler", func() {
 		var cephCmd *testutil.FakeRBD
 
 		It("setup", func(ctx SpecContext) {
-			reconciler = NewMantleBackupReconciler(nil, nil, "", "", nil, "", "", nil, nil, resource.Quantity{})
+			reconciler = NewMantleBackupReconciler(nil, nil, "", "", nil, nil, "", "", nil, nil, resource.Quantity{})
 			cephCmd = testutil.NewFakeRBD()
 			reconciler.ceph = cephCmd
 		})
@@ -2833,6 +2946,7 @@ set -eux -o pipefail
 				mgrUtil.GetManager().GetScheme(),
 				podNamespace,
 				"",  // unused
+				nil, // unused
 				nil, // unused
 				podImage,
 				"",                  // unused
