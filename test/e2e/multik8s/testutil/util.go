@@ -625,9 +625,9 @@ func EnsureCorrectRestoration(
 	Eventually(ctx, func(g Gomega) {
 		err := ApplyMountDeployTemplate(clusterNo, namespace, mountDeployName, restoreName)
 		g.Expect(err).NotTo(HaveOccurred())
-		stdout, _, err := Kubectl(clusterNo, nil, "exec", "-n", namespace, "deploy/"+mountDeployName, "--",
+		stdout, stderr, err := Kubectl(clusterNo, nil, "exec", "-n", namespace, "deploy/"+mountDeployName, "--",
 			"bash", "-c", "sha256sum /volume/data | awk '{print $1}'")
-		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred(), "stderr: %s", string(stderr))
 		g.Expect(string(stdout)).To(Equal(writtenDataHash))
 	}).Should(Succeed())
 }
