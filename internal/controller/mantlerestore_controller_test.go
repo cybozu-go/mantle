@@ -58,6 +58,7 @@ func (test *mantleRestoreControllerUnitTest) setupEnv() {
 			resMgr.ClusterID,
 			RoleStandalone,
 			nil,
+			nil,
 			"dummy image",
 			"",
 			nil,
