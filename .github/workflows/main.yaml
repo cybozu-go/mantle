@@ -15,6 +15,6 @@ jobs:
           go-version-file: "go.mod"
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
-      - run: make generate && make check-uncommitted
+      - run: go mod tidy && make generate && make check-uncommitted
       - run: make lint
       - run: make test
