@@ -15,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 const (
@@ -254,6 +255,26 @@ func (r *ResourceManager) ChangeJobCondition(ctx context.Context, job *batchv1.J
 	}
 
 	return r.client.Status().Update(ctx, job)
+}
+
+func (r *ResourceManager) DeletePVC(ctx context.Context, pvc *corev1.PersistentVolumeClaim) {
+	err := r.client.Delete(ctx, pvc)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return
+		}
+		Expect(err).NotTo(HaveOccurred())
+	}
+
+	currentPVC := &corev1.PersistentVolumeClaim{}
+	err = r.client.Get(ctx, types.NamespacedName{Name: pvc.Name, Namespace: pvc.Namespace}, currentPVC)
+	Expect(err).NotTo(HaveOccurred())
+
+	controllerutil.RemoveFinalizer(currentPVC, "kubernetes.io/pvc-protection")
+	err = r.client.Update(ctx, currentPVC)
+	Expect(err).NotTo(HaveOccurred())
+
+	CheckDeletedEventually[corev1.PersistentVolumeClaim](ctx, r.client, pvc.Name, pvc.Namespace)
 }
 
 // cf. https://go.googlesource.com/proposal/+/refs/heads/master/design/43651-type-parameters.md#pointer-method-example
