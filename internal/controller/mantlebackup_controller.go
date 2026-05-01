@@ -288,32 +288,41 @@ func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *
 	return &snapshotTarget{&pvc, &pv, imageName, poolName}, ctrl.Result{}, nil
 }
 
-// expire deletes the backup if it is already expired. Otherwise it schedules deletion.
-// Note that this function does not use requeue to scheduled deletion because the caller
-// will do other tasks after this function returns.
-func (r *MantleBackupReconciler) expire(ctx context.Context, backup *mantlev1.MantleBackup) error {
+// expire deletes the backup if expired, or schedules deletion via expireQueueCh if not yet.
+// Returns true when this call newly set DeletionTimestamp or already deleted, signaling the caller
+// to stop further processing.
+func (r *MantleBackupReconciler) expire(ctx context.Context, backup *mantlev1.MantleBackup) (bool, error) {
 	logger := log.FromContext(ctx)
 	if backup.Status.CreatedAt.IsZero() {
 		// the RBD snapshot has not be taken yet, do nothing.
-		return nil
+		return false, nil
+	}
+
+	if !backup.DeletionTimestamp.IsZero() {
+		// DeletionTimestamp is already set; let the caller handle finalization.
+		return false, nil
 	}
 
 	if v, ok := backup.Annotations[annotRetainIfExpired]; ok && v == "true" {
 		// retain this backup.
 		// If the annotation is deleted, reconciliation will run, so no need to schedule.
-		return nil
+		return false, nil
 	}
 
 	expire, err := strfmt.ParseDuration(backup.Spec.Expire)
 	if err != nil {
-		return err
+		return false, err
 	}
 	expireAt := backup.Status.CreatedAt.Add(expire)
 	if time.Now().UTC().After(expireAt) {
 		// already expired, delete it immediately.
 		logger.Info("delete expired backup", "createdAt", backup.Status.CreatedAt, "expire", expire)
 
-		return r.Delete(ctx, backup)
+		if err := r.Delete(ctx, backup); err != nil && !aerrors.IsNotFound(err) {
+			return false, err
+		}
+
+		return true, nil
 	}
 
 	// not expired yet. schedule deletion.
@@ -323,7 +332,7 @@ func (r *MantleBackupReconciler) expire(ctx context.Context, backup *mantlev1.Ma
 		Object: backup,
 	}
 
-	return nil
+	return false, nil
 }
 
 //+kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlebackups,verbs=get;list;watch;create;update;patch;delete
@@ -384,6 +393,10 @@ func (r *MantleBackupReconciler) reconcileLocalBackup(ctx context.Context, backu
 		return ctrl.Result{}, nil
 	}
 
+	if stopProcessing, err := r.expire(ctx, backup); stopProcessing || err != nil {
+		return requeueReconciliation(), err
+	}
+
 	target, result, err := r.getSnapshotTarget(ctx, backup)
 	notFound := aerrors.IsNotFound(err)
 	switch {
@@ -428,10 +441,6 @@ func (r *MantleBackupReconciler) reconcileLocalBackup(ctx context.Context, backu
 		return ctrl.Result{}, nil
 	}
 
-	if err := r.expire(ctx, backup); err != nil {
-		return ctrl.Result{}, err
-	}
-
 	if !backup.IsSnapshotCaptured() {
 		if err := r.provisionRBDSnapshot(ctx, backup, target); err != nil {
 			return ctrl.Result{}, err
@@ -445,6 +454,10 @@ func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, back
 	result, err := r.reconcileLocalBackup(ctx, backup)
 	if err != nil || !result.IsZero() {
 		return result, err
+	}
+
+	if !backup.DeletionTimestamp.IsZero() {
+		return ctrl.Result{}, nil
 	}
 
 	if !backup.IsVerifiedTrue() && !backup.IsVerifiedFalse() {
@@ -462,6 +475,10 @@ func (r *MantleBackupReconciler) reconcileAsPrimary(ctx context.Context, backup 
 	result, err := r.reconcileLocalBackup(ctx, backup)
 	if err != nil || !result.IsZero() {
 		return result, err
+	}
+
+	if !backup.DeletionTimestamp.IsZero() {
+		return ctrl.Result{}, nil
 	}
 
 	if !backup.IsVerifiedTrue() && !backup.IsVerifiedFalse() {
@@ -499,6 +516,10 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 		return ctrl.Result{}, nil
 	}
 
+	if stopProcessing, err := r.expire(ctx, backup); stopProcessing || err != nil {
+		return requeueReconciliation(), err
+	}
+
 	target, result, err := r.getSnapshotTarget(ctx, backup)
 	notFound := aerrors.IsNotFound(err)
 	switch {
@@ -515,10 +536,6 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 	}
 	// Only the NotFound error reaches this point, so return it as is.
 	if notFound {
-		return ctrl.Result{}, err
-	}
-
-	if err := r.expire(ctx, backup); err != nil {
 		return ctrl.Result{}, err
 	}
 
