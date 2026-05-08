@@ -10,6 +10,8 @@ import (
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/controller/domain"
 	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	aerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -28,9 +30,18 @@ func NewReconcileMBCPrimary(
 	managedCephClusterID string,
 	k8sClient KubernetesClient,
 	cronJobNamespace string,
+	overwriteMBCSchedule string,
+	serviceAccountName string,
+	image string,
 ) *ReconcileMBCPrimary {
 	return &ReconcileMBCPrimary{
-		reconciler:       domain.NewMBCPrimaryReconciler(managedCephClusterID),
+		reconciler: domain.NewMBCPrimaryReconciler(
+			managedCephClusterID,
+			overwriteMBCSchedule,
+			cronJobNamespace,
+			serviceAccountName,
+			image,
+		),
 		k8sClient:        k8sClient,
 		cronJobNamespace: cronJobNamespace,
 	}
@@ -53,44 +64,19 @@ func (r *ReconcileMBCPrimary) Run(ctx context.Context, mbcNamespacedName types.N
 		return err
 	}
 
-	cronJob, err := getResource[batchv1.CronJob](ctx, r.k8sClient, domain.GetMBCCronJobName(mbc), r.cronJobNamespace)
-	if err != nil && !aerrors.IsNotFound(err) {
+	origMBC := mbc.DeepCopy()
+	_ = r.reconciler.Operations.TakeAll()
+
+	if mbc.DeletionTimestamp.IsZero() {
+		err = r.runProvision(ctx, mbc)
+	} else {
+		err = r.runFinalize(ctx, mbc)
+	}
+
+	if err != nil {
 		return err
 	}
 
-	if mbc.DeletionTimestamp.IsZero() {
-		return r.runProvision()
-	}
-
-	return r.runFinalize(ctx, mbc, cronJob)
-}
-
-func (r *ReconcileMBCPrimary) runProvision() error {
-	err := r.reconciler.Provision()
-	if err != nil {
-		return fmt.Errorf("provision failed: %w", err)
-	}
-
-	return nil
-}
-
-func (r *ReconcileMBCPrimary) runFinalize(
-	ctx context.Context,
-	mbc *mantlev1.MantleBackupConfig,
-	cronJob *batchv1.CronJob,
-) error {
-	// Run finalize logic
-	origMBC := mbc.DeepCopy()
-	// Discard any leftover operations from a previous reconcile cycle that
-	// may have failed partway through, ensuring a clean slate.
-	_ = r.reconciler.Operations.TakeAll()
-
-	err := r.reconciler.Finalize(mbc, cronJob)
-	if err != nil {
-		return fmt.Errorf("finalize failed: %w", err)
-	}
-
-	// Persist changes
 	if !equality.Semantic.DeepEqual(origMBC, mbc) {
 		err := r.k8sClient.Update(ctx, mbc)
 		if err != nil {
@@ -101,6 +87,63 @@ func (r *ReconcileMBCPrimary) runFinalize(
 	err = r.k8sClient.ApplyReconcilerOperations(ctx, r.reconciler.Operations.TakeAll())
 	if err != nil {
 		return fmt.Errorf("failed to apply reconciler operations: %w", err)
+	}
+
+	return nil
+}
+
+func (r *ReconcileMBCPrimary) runProvision(ctx context.Context, mbc *mantlev1.MantleBackupConfig) error {
+	storageClass, err := r.getPVCStorageClass(ctx, mbc)
+	if err != nil {
+		return fmt.Errorf("failed to get PVC StorageClass: %w", err)
+	}
+
+	err = r.reconciler.Provision(mbc, storageClass)
+	if err != nil {
+		return fmt.Errorf("provision failed: %w", err)
+	}
+
+	return nil
+}
+
+func (r *ReconcileMBCPrimary) getPVCStorageClass(
+	ctx context.Context, mbc *mantlev1.MantleBackupConfig,
+) (*storagev1.StorageClass, error) {
+	pvc, err := getResource[corev1.PersistentVolumeClaim](
+		ctx, r.k8sClient, mbc.Spec.PVC, mbc.Namespace,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get PVC: %s: %s: %w", mbc.Namespace, mbc.Spec.PVC, err)
+	}
+
+	if pvc.Spec.StorageClassName == nil {
+		return nil, nil //nolint:nilnil // nil StorageClass signals "not responsible" to domain.Provision
+	}
+
+	storageClass, err := getResource[storagev1.StorageClass](
+		ctx, r.k8sClient, *pvc.Spec.StorageClassName, "",
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"failed to get StorageClass: %s: %w", *pvc.Spec.StorageClassName, err,
+		)
+	}
+
+	return storageClass, nil
+}
+
+func (r *ReconcileMBCPrimary) runFinalize(
+	ctx context.Context,
+	mbc *mantlev1.MantleBackupConfig,
+) error {
+	cronJob, err := getResource[batchv1.CronJob](ctx, r.k8sClient, domain.GetMBCCronJobName(mbc), r.cronJobNamespace)
+	if err != nil && !aerrors.IsNotFound(err) {
+		return fmt.Errorf("failed to get CronJob: %w", err)
+	}
+
+	err = r.reconciler.Finalize(mbc, cronJob)
+	if err != nil {
+		return fmt.Errorf("finalize failed: %w", err)
 	}
 
 	return nil
