@@ -3,16 +3,13 @@ package v1
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -20,7 +17,7 @@ const annotRemoteUID = "mantle.cybozu.io/remote-uid"
 
 // SetupVolumeAttachmentWebhookWithManager registers the webhook for VolumeAttachment in the manager.
 func SetupVolumeAttachmentWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr).For(&storagev1.VolumeAttachment{}).
+	return ctrl.NewWebhookManagedBy(mgr, &storagev1.VolumeAttachment{}).
 		WithValidator(&VolumeAttachmentCustomValidator{
 			client: mgr.GetClient(),
 		}).
@@ -40,18 +37,14 @@ type VolumeAttachmentCustomValidator struct {
 	client client.Client
 }
 
-var _ webhook.CustomValidator = &VolumeAttachmentCustomValidator{}
+var _ admission.Validator[*storagev1.VolumeAttachment] = &VolumeAttachmentCustomValidator{}
 
 //+kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch
 //+kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get;list;watch
 
-// ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type VolumeAttachment.
-func (v *VolumeAttachmentCustomValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
+// ValidateCreate implements admission.Validator so a webhook will be registered for the type VolumeAttachment.
+func (v *VolumeAttachmentCustomValidator) ValidateCreate(ctx context.Context, va *storagev1.VolumeAttachment) (admission.Warnings, error) {
 	logger := log.FromContext(ctx)
-	va, ok := obj.(*storagev1.VolumeAttachment)
-	if !ok {
-		return nil, fmt.Errorf("expected a VolumeAttachment object but got %T", obj)
-	}
 
 	pvName := va.Spec.Source.PersistentVolumeName
 	var pv corev1.PersistentVolume
@@ -75,12 +68,12 @@ func (v *VolumeAttachmentCustomValidator) ValidateCreate(ctx context.Context, ob
 	return nil, nil
 }
 
-// ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type VolumeAttachment.
-func (v *VolumeAttachmentCustomValidator) ValidateUpdate(_ context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
+// ValidateUpdate implements admission.Validator so a webhook will be registered for the type VolumeAttachment.
+func (v *VolumeAttachmentCustomValidator) ValidateUpdate(_ context.Context, oldObj, newObj *storagev1.VolumeAttachment) (admission.Warnings, error) {
 	return nil, nil
 }
 
-// ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type VolumeAttachment.
-func (v *VolumeAttachmentCustomValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
+// ValidateDelete implements admission.Validator so a webhook will be registered for the type VolumeAttachment.
+func (v *VolumeAttachmentCustomValidator) ValidateDelete(_ context.Context, obj *storagev1.VolumeAttachment) (admission.Warnings, error) {
 	return nil, nil
 }
