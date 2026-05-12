@@ -410,12 +410,10 @@ func setupPrimary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup) 
 		return err
 	}
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		<-ctx.Done()
 		_ = conn.Close()
-	}()
+	})
 
 	primarySettings := &controller.PrimarySettings{
 		ServiceEndpoint:        mantleServiceEndpoint,
@@ -467,22 +465,18 @@ func setupSecondary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup
 		return fmt.Errorf("failed to listen %s: %w", mantleServiceEndpoint, err)
 	}
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		err := serv.Serve(l)
 		if err != nil {
 			logger.Error(err, "gRPC server failed")
 		}
 		cancel()
-	}()
+	})
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		<-ctx.Done()
 		serv.GracefulStop()
-	}()
+	})
 
 	return setupReconcilers(mgr, nil, &controller.SecondarySettings{
 		MaxImportJobs: maxImportJobs,
