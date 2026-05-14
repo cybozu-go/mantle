@@ -2352,9 +2352,8 @@ func (r *MantleBackupReconciler) createStaticPVIfNotExists(
 
 			PersistentVolumeSource: corev1.PersistentVolumeSource{
 				CSI: &corev1.CSIPersistentVolumeSource{
-					Driver:                    basePV.Spec.CSI.Driver,
-					ControllerExpandSecretRef: basePV.Spec.CSI.ControllerExpandSecretRef,
-					NodeStageSecretRef:        basePV.Spec.CSI.NodeStageSecretRef,
+					Driver:             basePV.Spec.CSI.Driver,
+					NodeStageSecretRef: basePV.Spec.CSI.NodeStageSecretRef,
 					VolumeAttributes: map[string]string{
 						"clusterID":     basePV.Spec.CSI.VolumeAttributes["clusterID"],
 						"imageFeatures": feature,
