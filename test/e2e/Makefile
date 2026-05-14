@@ -216,7 +216,8 @@ install-rook-ceph-cluster2:
 wait-ceph-ready:
 	is_ok="false"; \
 	for ((i=0;i<$(TIMEOUT_SECS);i+=$(POLLING_INTERVAL))); do \
-		$(KUBECTL) -n $(NAMESPACE) exec deploy/rook-ceph-tools -- ceph -s && { \
+		$(KUBECTL) -n $(NAMESPACE) exec deploy/rook-ceph-tools -- ceph -s && \
+		$(KUBECTL) -n $(NAMESPACE) exec deploy/rook-ceph-tools -- ceph osd stat | grep -qE "[1-9][0-9]* up" && { \
 			echo "ceph -s succeeded in namespace $(NAMESPACE)"; \
 			is_ok="true"; \
 			break; \
