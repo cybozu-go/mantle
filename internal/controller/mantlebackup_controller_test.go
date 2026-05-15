@@ -2418,10 +2418,6 @@ var _ = Describe("import", func() {
 				corev1.ResourceStorage: resource.MustParse("1Gi"),
 			}
 			pvDriver := "test-pv-driver"
-			pvControllerExpandSecretRef := corev1.SecretReference{
-				Name:      "test-pv-cesr-name",
-				Namespace: "test-pv-cesr-ns",
-			}
 			pvNodeStageSecretRef := corev1.SecretReference{
 				Name:      "test-pv-nssr-name",
 				Namespace: "test-pv-nssr-ns",
@@ -2447,9 +2443,8 @@ var _ = Describe("import", func() {
 						Capacity: pvCapacity,
 						PersistentVolumeSource: corev1.PersistentVolumeSource{
 							CSI: &corev1.CSIPersistentVolumeSource{
-								Driver:                    pvDriver,
-								ControllerExpandSecretRef: &pvControllerExpandSecretRef,
-								NodeStageSecretRef:        &pvNodeStageSecretRef,
+								Driver:             pvDriver,
+								NodeStageSecretRef: &pvNodeStageSecretRef,
 								VolumeAttributes: map[string]string{
 									"clusterID":     pvClusterID,
 									"imageFeatures": pvImageFeatures,
@@ -2484,9 +2479,8 @@ var _ = Describe("import", func() {
 				},
 				PersistentVolumeSource: corev1.PersistentVolumeSource{
 					CSI: &corev1.CSIPersistentVolumeSource{
-						Driver:                    pvDriver,
-						ControllerExpandSecretRef: &pvControllerExpandSecretRef,
-						NodeStageSecretRef:        &pvNodeStageSecretRef,
+						Driver:             pvDriver,
+						NodeStageSecretRef: &pvNodeStageSecretRef,
 						VolumeAttributes: map[string]string{
 							"clusterID":     pvClusterID,
 							"imageFeatures": pvImageFeatures,
@@ -2808,9 +2802,8 @@ var _ = Describe("MantleBackupReconciler", func() {
 				},
 				PersistentVolumeSource: corev1.PersistentVolumeSource{
 					CSI: &corev1.CSIPersistentVolumeSource{
-						Driver:                    pvSrc.Spec.CSI.Driver,
-						ControllerExpandSecretRef: pvSrc.Spec.CSI.ControllerPublishSecretRef,
-						NodeStageSecretRef:        pvSrc.Spec.CSI.NodeStageSecretRef,
+						Driver:             pvSrc.Spec.CSI.Driver,
+						NodeStageSecretRef: pvSrc.Spec.CSI.NodeStageSecretRef,
 						VolumeAttributes: map[string]string{
 							"clusterID":     pvSrc.Spec.CSI.VolumeAttributes["clusterID"],
 							"imageFeatures": pvSrc.Spec.CSI.VolumeAttributes["imageFeatures"] + ",deep-flatten",
