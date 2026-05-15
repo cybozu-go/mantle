@@ -517,7 +517,9 @@ func getImageAndSnapNames(namespace, pool string) ([]string, error) {
 		}
 	}
 
-	return append(images, snaps...), nil
+	result := make([]string, 0, len(images)+len(snaps))
+
+	return append(append(result, images...), snaps...), nil
 }
 
 func checkJobExists(namespace, jobName string) (bool, error) {

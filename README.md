@@ -14,7 +14,7 @@ To use mantle on your real kubernetes cluster, read following sections.
 
 ### Conformed environments
 
-- Kubernetes cluster: v1.33, v1.34
+- Kubernetes cluster: v1.34, v1.35
 - Rook: v1.17.2+
 
 ### To Deploy on the cluster
@@ -95,7 +95,7 @@ make undeploy
 
 The following tools should be installed manually.
 
-- go: v1.24.0+
+- go: v1.25.0+
 - docker: 20.10+
 - kubebuilder: 3.14.0+
   - required if you want to add new CRs or webhooks.

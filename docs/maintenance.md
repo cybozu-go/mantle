@@ -21,11 +21,12 @@ To change the versions, edit the following files.
 - `README.md`
 - `versions.mk`
 
-We should also update go.mod by the following commands. Please note that Kubernetes v1 corresponds with v0 for the release tags. For example, v1.17.2 corresponds with the v0.17.2 tag.
+We should also update go.mod by the following commands. Note that `k8s.io/api`, `k8s.io/apimachinery`, and `k8s.io/client-go` use `v0.x.x` tags (e.g., v1.35.4 → v0.35.4), while `k8s.io/kubernetes` uses `v1.x.x` tags directly.
 
 ```bash
-$ VERSION=<upgrading Kubernetes release version>
-$ go get k8s.io/api@v${VERSION} k8s.io/apimachinery@v${VERSION} k8s.io/client-go@v${VERSION} k8s.io/kubernetes@v${VERSION}
+$ VERSION=0.<minor>.<patch>  # e.g. 0.35.4 for Kubernetes 1.35.4
+$ go get k8s.io/api@v${VERSION} k8s.io/apimachinery@v${VERSION} k8s.io/client-go@v${VERSION}
+$ go get k8s.io/kubernetes@v1.<minor>.<patch>  # e.g. v1.35.4
 ```
 
 Read the [`controller-runtime`'s release note](https://github.com/kubernetes-sigs/controller-runtime/releases), and update to the newest version that is compatible with all supported kubernetes versions. If there are breaking changes, we should decide how to manage these changes.

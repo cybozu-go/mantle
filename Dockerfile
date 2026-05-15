@@ -29,7 +29,7 @@ FROM golang:1.25 AS s5cmd-builder
 WORKDIR /workspace
 ## https://github.com/peak/s5cmd/releases
 ## use v2.3.0
-RUN go install github.com/peak/s5cmd/v2@48f7e59e2d02954e218d2ddb947566d57e495fd8
+RUN go install github.com/peak/s5cmd/v2@991c9fbc16709341b4bac04513232a1445941f63
 
 # Download and install custom RBD command
 # cf. https://github.com/cybozu/neco-containers/blob/a504569e337e41d3a9c7e0b6c0fc0482c2a31008/ceph/Dockerfile
