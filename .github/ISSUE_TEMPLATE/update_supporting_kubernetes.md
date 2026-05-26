@@ -27,6 +27,7 @@ Must update Kubernetes with each new version of Kubernetes.
   - https://github.com/kubernetes/minikube/releases
 - [ ] rook
   - https://github.com/rook/rook/releases
+  - Only need to confirm that upstream Rook has released a version that supports the target Kubernetes version.
 
 ### Release notes check
 
