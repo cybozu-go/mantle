@@ -30,6 +30,7 @@ Must update Kubernetes with each new version of Kubernetes.
 ### Additional Checks
 
 - [ ] Read the necessary release notes for Kubernetes.
+- [ ] Ready to support our product.
 
 ## Completion Checks
 
