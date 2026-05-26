@@ -11,11 +11,9 @@ assignees: ''
 
 - Read [this document](https://github.com/cybozu-go/mantle/blob/main/docs/maintenance.md).
 
-## Before Check List
+## Preconditions
 
-There is a checklist to confirm dependent libraries or tools are released. The release notes for Kubernetes should also be checked.
-
-### Must Update Dependencies
+### Update Dependencies
 
 Must update Kubernetes with each new version of Kubernetes.
 
@@ -29,11 +27,12 @@ Must update Kubernetes with each new version of Kubernetes.
   - https://github.com/rook/rook/releases
   - Only need to confirm that upstream Rook has released a version that supports the target Kubernetes version.
 
-### Release notes check
+### Additional Checks
 
 - [ ] Read the necessary release notes for Kubernetes.
+- [ ] Ready to support our product.
 
-## Checklist
+## Completion Checks
 
 - [ ] Finish implementation of the issue
 - [ ] Test all functions
