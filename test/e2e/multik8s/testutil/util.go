@@ -486,6 +486,16 @@ func SetupEnvironment(namespace string) {
 	}).Should(Succeed())
 }
 
+func CleanupMantleBackups(namespace string) {
+	GinkgoHelper()
+	_, _, err := Kubectl(PrimaryK8sCluster, nil,
+		"delete", "mantlebackup", "--all", "-n", namespace, "--timeout=5m", "--ignore-not-found")
+	Expect(err).NotTo(HaveOccurred())
+	_, _, err = Kubectl(SecondaryK8sCluster, nil,
+		"delete", "mantlebackup", "--all", "-n", namespace, "--timeout=5m", "--ignore-not-found")
+	Expect(err).NotTo(HaveOccurred())
+}
+
 func CreatePod(cluster int, namespace, podName, pvcName string) {
 	GinkgoHelper()
 	err := applyPodMountVolumeTemplate(cluster, namespace, podName, pvcName)
