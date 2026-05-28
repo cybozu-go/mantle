@@ -66,16 +66,18 @@ You store the up-to-date export-diff.patch as [`ceph/export-diff.patch`](https:/
   ```sh
   VERSION=16.2.4.0
   ``` 
-2. Go to the [rule setting page](https://github.com/cybozu-go/mantle/settings/rules/3334068) and change the value of "Enforcement status" to Active.
-3. Add a new tag and push it.
+2. Prevent pushing to main branch by changing the value of "Enforcement status" to **Active** on [the corresponding ruleset](https://github.com/cybozu-go/mantle/settings/rules/3334068).
+3. Allow creating tags for releasing ceph-export-diff by changing the value of "Enforcement status" to **Disabled** on [the corresponding ruleset](https://github.com/cybozu-go/mantle/settings/rules/3334059).
+4. Add a new tag and push it.
   ```sh
   git switch main
   git pull
   git tag ceph-export-diff-v$VERSION
   git push origin ceph-export-diff-v$VERSION
   ```
-4. Go to the [rule setting page](https://github.com/cybozu-go/mantle/settings/rules/3334068) and change the value of "Enforcement status" to Disabled.
-5. Once a new tag is pushed, [GitHub Actions](https://github.com/cybozu-go/mantle/actions) automatically creates a draft release note for the tagged version, builds a tar archive for the new release, and attaches it to the release note.
+5. Prevent creating tags for releasing ceph-export-diff by changing the value of "Enforcement status" to **Active** on [the corresponding ruleset](https://github.com/cybozu-go/mantle/settings/rules/3334059).
+6. Allow pushing to main branch by changing the value of "Enforcement status" to **Disabled** on [the corresponding ruleset](https://github.com/cybozu-go/mantle/settings/rules/3334068).
+7. Once a new tag is pushed, [GitHub Actions](https://github.com/cybozu-go/mantle/actions) automatically creates a draft release note for the tagged version, builds a tar archive for the new release, and attaches it to the release note.
   Visit [https://github.com/cybozu-go/mantle/releases] to check the result.
 
 ### Apply new export-diff for mantle
