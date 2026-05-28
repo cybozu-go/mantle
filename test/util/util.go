@@ -3,10 +3,11 @@ package util
 import (
 	"fmt"
 	"math/rand"
+	"sync"
 )
 
 var (
-	usedResourceNames = make(map[string]bool)
+	usedResourceNames = sync.Map{}
 )
 
 func GetUniqueName(prefix string) string {
@@ -16,10 +17,10 @@ func GetUniqueName(prefix string) string {
 		buf[i] = letters[rand.Intn(len(letters))]
 	}
 	name := fmt.Sprintf("%s%s", prefix, string(buf))
-	if usedResourceNames[name] {
+	_, loaded := usedResourceNames.LoadOrStore(name, true)
+	if loaded {
 		return GetUniqueName(prefix)
 	}
-	usedResourceNames[name] = true
 
 	return name
 }

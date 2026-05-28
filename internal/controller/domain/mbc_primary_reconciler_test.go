@@ -67,21 +67,189 @@ func newSC(opts ...optionSC) *storagev1.StorageClass {
 	return storageClass
 }
 
-func newReconciler(sc *storagev1.StorageClass) *domain.MBCPrimaryReconciler {
-	return domain.NewMBCPrimaryReconciler(sc.Parameters["clusterID"])
+func newReconciler(storageClass *storagev1.StorageClass, opts ...func(*reconcilerConfig)) *domain.MBCPrimaryReconciler {
+	cfg := &reconcilerConfig{
+		overwriteMBCSchedule: "",
+		cronJobNamespace:     "",
+		serviceAccountName:   "",
+		image:                "",
+	}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	return domain.NewMBCPrimaryReconciler(
+		storageClass.Parameters["clusterID"],
+		cfg.overwriteMBCSchedule,
+		cfg.cronJobNamespace,
+		cfg.serviceAccountName,
+		cfg.image,
+	)
 }
 
-func TestProvision_Error_NotImplemented(t *testing.T) {
+type reconcilerConfig struct {
+	overwriteMBCSchedule string
+	cronJobNamespace     string
+	serviceAccountName   string
+	image                string
+}
+
+func withOverwriteSchedule(schedule string) func(*reconcilerConfig) {
+	return func(cfg *reconcilerConfig) {
+		cfg.overwriteMBCSchedule = schedule
+	}
+}
+
+func withCronJobNamespace(ns string) func(*reconcilerConfig) {
+	return func(cfg *reconcilerConfig) {
+		cfg.cronJobNamespace = ns
+	}
+}
+
+func withServiceAccountName(sa string) func(*reconcilerConfig) {
+	return func(cfg *reconcilerConfig) {
+		cfg.serviceAccountName = sa
+	}
+}
+
+func withImage(image string) func(*reconcilerConfig) {
+	return func(cfg *reconcilerConfig) {
+		cfg.image = image
+	}
+}
+
+func TestMBCPrimaryReconciler_Provision_NotResponsibleCluster(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
-	r := newReconciler(newSC())
+	sc := newSC(scWithClusterID("ceph-cluster-id"))
+	reconciler := newReconciler(sc)
+	mbc := newMBC()
+	origMBC := mbc.DeepCopy()
+	differentSC := newSC(scWithClusterID("different-ceph-cluster-id"))
 
 	// Act
-	err := r.Provision()
+	err := reconciler.Provision(mbc, differentSC)
 
 	// Assert
-	require.ErrorIs(t, err, domain.ErrNotImplemented)
+	require.NoError(t, err)
+	require.Equal(t, origMBC, mbc)
+	require.Empty(t, reconciler.Operations.TakeAll())
+}
+
+func TestMBCPrimaryReconciler_Provision_NilStorageClass(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	sc := newSC()
+	reconciler := newReconciler(sc)
+	mbc := newMBC()
+	origMBC := mbc.DeepCopy()
+
+	// Act
+	err := reconciler.Provision(mbc, nil)
+
+	// Assert
+	require.NoError(t, err)
+	require.Equal(t, origMBC, mbc)
+	require.Empty(t, reconciler.Operations.TakeAll())
+}
+
+func TestMBCPrimaryReconciler_Provision_NonCephProvisioner(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	sc := newSC()
+	reconciler := newReconciler(sc)
+	mbc := newMBC()
+	origMBC := mbc.DeepCopy()
+	nonCephSC := newSC()
+	nonCephSC.Provisioner = "kubernetes.io/no-provisioner"
+
+	// Act
+	err := reconciler.Provision(mbc, nonCephSC)
+
+	// Assert
+	require.NoError(t, err)
+	require.Equal(t, origMBC, mbc)
+	require.Empty(t, reconciler.Operations.TakeAll())
+}
+
+func TestMBCPrimaryReconciler_Provision_AddFinalizerAndAnnotation(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	storageClass := newSC()
+	reconciler := newReconciler(storageClass)
+	mbc := newMBC()
+
+	// Act
+	err := reconciler.Provision(mbc, storageClass)
+
+	// Assert
+	require.NoError(t, err)
+	require.Contains(t, mbc.Finalizers, domain.MantleBackupConfigFinalizerName)
+	require.Equal(t,
+		storageClass.Parameters["clusterID"],
+		mbc.Annotations[domain.MantleBackupConfigAnnotationManagedClusterID],
+	)
+	require.Empty(t, reconciler.Operations.TakeAll())
+}
+
+func TestMBCPrimaryReconciler_Provision_CreateOrUpdateCronJob(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	storageClass := newSC()
+	reconciler := newReconciler(storageClass,
+		withCronJobNamespace("cronjob-ns"),
+		withServiceAccountName("sa-name"),
+		withImage("controller-image"),
+	)
+	mbc := newMBC(mbcWithAnnotAndFinalizer(storageClass))
+
+	// Act
+	err := reconciler.Provision(mbc, storageClass)
+
+	// Assert
+	require.NoError(t, err)
+
+	ops := reconciler.Operations.TakeAll()
+	require.Len(t, ops, 1)
+
+	operation, ok := ops[0].(*domain.CreateOrUpdateMBCCronJobOperation)
+	require.True(t, ok)
+	require.Equal(t, domain.GetMBCCronJobName(mbc), operation.CronJobName)
+	require.Equal(t, "cronjob-ns", operation.CronJobNamespace)
+	require.Equal(t, mbc.Spec.Schedule, operation.Schedule)
+	require.Equal(t, mbc.Spec.Suspend, operation.Suspend)
+	require.Equal(t, "sa-name", operation.ServiceAccountName)
+	require.Equal(t, "controller-image", operation.Image)
+	require.Equal(t, mbc.Name, operation.MBCName)
+	require.Equal(t, mbc.Namespace, operation.MBCNamespace)
+}
+
+func TestMBCPrimaryReconciler_Provision_OverwriteSchedule(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	storageClass := newSC()
+	overwrittenSchedule := "*/5 * * * *"
+	reconciler := newReconciler(storageClass, withOverwriteSchedule(overwrittenSchedule))
+	mbc := newMBC(mbcWithAnnotAndFinalizer(storageClass))
+
+	// Act
+	err := reconciler.Provision(mbc, storageClass)
+
+	// Assert
+	require.NoError(t, err)
+
+	ops := reconciler.Operations.TakeAll()
+	require.Len(t, ops, 1)
+
+	operation, ok := ops[0].(*domain.CreateOrUpdateMBCCronJobOperation)
+	require.True(t, ok)
+	require.Equal(t, overwrittenSchedule, operation.Schedule)
 }
 
 // TestMBCPrimaryReconciler_Finalize_NoProvision tests that Finalize does

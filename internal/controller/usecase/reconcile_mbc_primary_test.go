@@ -15,7 +15,9 @@ import (
 	"github.com/stretchr/testify/require"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	aerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -74,117 +76,254 @@ func TestMain(m *testing.M) {
 }
 
 func newUsecase(cephClusterID, cronJobNamespace string) *usecase.ReconcileMBCPrimary {
-	return usecase.NewReconcileMBCPrimary(cephClusterID, infra.NewKubernetesClient(k8sClient), cronJobNamespace)
+	return usecase.NewReconcileMBCPrimary(
+		cephClusterID,
+		infra.NewKubernetesClient(k8sClient),
+		cronJobNamespace,
+		"",
+		"sa-name",
+		"controller-image",
+	)
 }
 
-//nolint:funlen // After we implement the provision logic, the length will be reduced.
-func TestRun_FinalizePath_Success(t *testing.T) {
-	t.Parallel()
+type testEnvFixture struct {
+	mbcName          string
+	mbcNamespace     string
+	cronJobNamespace string
+	cephClusterID    string
+	pvcName          string
+}
 
-	mbcName := util.GetUniqueName("mbc-")
-	mbcNamespace := util.GetUniqueName("ns-")
-	cronJobNamespace := util.GetUniqueName("ns-")
-	cephClusterID := util.GetUniqueName("managed-ceph-cluster-id")
+func setupTestEnv(t *testing.T, cephClusterID string) *testEnvFixture {
+	t.Helper()
 
-	// Create namespaces
-	for _, ns := range []string{mbcNamespace, cronJobNamespace} {
+	fixture := &testEnvFixture{
+		mbcName:          util.GetUniqueName("mbc-"),
+		mbcNamespace:     util.GetUniqueName("ns-"),
+		cronJobNamespace: util.GetUniqueName("ns-"),
+		cephClusterID:    cephClusterID,
+		pvcName:          util.GetUniqueName("pvc-"),
+	}
+
+	scName := util.GetUniqueName("sc-")
+
+	for _, ns := range []string{fixture.mbcNamespace, fixture.cronJobNamespace} {
 		err := k8sClient.Create(t.Context(), &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{Name: ns},
 		})
 		require.NoError(t, err)
 	}
 
-	// Create MBC
-	mbc := &mantlev1.MantleBackupConfig{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      mbcName,
-			Namespace: mbcNamespace,
-			// FIXME: After we implement the provision logic, we should not set
-			// the finalizer and annotation manually in this test.
-			Finalizers: []string{
-				domain.MantleBackupConfigFinalizerName,
-			},
-			Annotations: map[string]string{
-				domain.MantleBackupConfigAnnotationManagedClusterID: cephClusterID,
-			},
-		},
-		Spec: mantlev1.MantleBackupConfigSpec{
-			PVC:      "pvc-name",
-			Schedule: "0 0 * * *",
-			Expire:   "2w",
-			Suspend:  false,
-		},
-	}
-	err := k8sClient.Create(t.Context(), mbc)
+	err := k8sClient.Create(t.Context(), &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: scName},
+		Provisioner: "test.rbd.csi.ceph.com",
+		Parameters:  map[string]string{"clusterID": cephClusterID},
+	})
 	require.NoError(t, err)
 
-	// Create CronJob
-	// FIXME: After we implement the provision logic, we should not create the CronJob manually in this test.
-	err = k8sClient.Create(t.Context(), &batchv1.CronJob{
+	err = k8sClient.Create(t.Context(), &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      domain.GetMBCCronJobName(mbc),
-			Namespace: cronJobNamespace,
+			Name:      fixture.pvcName,
+			Namespace: fixture.mbcNamespace,
 		},
-		Spec: batchv1.CronJobSpec{
-			Schedule: "0 0 * * *",
-			JobTemplate: batchv1.JobTemplateSpec{
-				Spec: batchv1.JobSpec{
-					Template: corev1.PodTemplateSpec{
-						Spec: corev1.PodSpec{
-							Containers: []corev1.Container{{
-								Name:  "backup",
-								Image: "backup-image",
-							}},
-							RestartPolicy: corev1.RestartPolicyOnFailure,
-						},
-					},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			StorageClassName: &scName,
+			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: resource.MustParse("1Gi"),
 				},
 			},
 		},
 	})
 	require.NoError(t, err)
 
-	// Delete MBC to trigger the finalization logic
+	return fixture
+}
+
+func (f *testEnvFixture) createMBC(
+	t *testing.T,
+) *mantlev1.MantleBackupConfig {
+	t.Helper()
+
+	mbc := &mantlev1.MantleBackupConfig{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      f.mbcName,
+			Namespace: f.mbcNamespace,
+		},
+		Spec: mantlev1.MantleBackupConfigSpec{
+			PVC:      f.pvcName,
+			Schedule: "0 0 * * *",
+			Expire:   "2w",
+			Suspend:  false,
+		},
+	}
+
+	err := k8sClient.Create(t.Context(), mbc)
+	require.NoError(t, err)
+
+	return mbc
+}
+
+func (f *testEnvFixture) mbcNN() types.NamespacedName {
+	return types.NamespacedName{Name: f.mbcName, Namespace: f.mbcNamespace}
+}
+
+func (f *testEnvFixture) provisionMBC(
+	t *testing.T, useCase *usecase.ReconcileMBCPrimary,
+) {
+	t.Helper()
+
+	err := useCase.Run(t.Context(), f.mbcNN())
+	require.NoError(t, err)
+
+	err = useCase.Run(t.Context(), f.mbcNN())
+	require.NoError(t, err)
+}
+
+func TestRun_FinalizePath_Success(t *testing.T) {
+	t.Parallel()
+
+	fixture := setupTestEnv(t, util.GetUniqueName("ceph-cluster-id"))
+	mbc := fixture.createMBC(t)
+	useCase := newUsecase(fixture.cephClusterID, fixture.cronJobNamespace)
+
+	fixture.provisionMBC(t, useCase)
+
+	cronJobNN := types.NamespacedName{
+		Name:      domain.GetMBCCronJobName(mbc),
+		Namespace: fixture.cronJobNamespace,
+	}
+
+	err := k8sClient.Get(t.Context(), cronJobNN, &batchv1.CronJob{})
+	require.NoError(t, err)
+
 	err = k8sClient.Delete(t.Context(), mbc)
 	require.NoError(t, err)
 
-	// Run the usecase
-	useCase := newUsecase(cephClusterID, cronJobNamespace)
-	err = useCase.Run(
-		t.Context(),
-		types.NamespacedName{Name: mbcName, Namespace: mbcNamespace},
-	)
+	err = useCase.Run(t.Context(), fixture.mbcNN())
 	require.NoError(t, err)
 
-	// Verify that the CronJob is deleted
 	require.EventuallyWithT(t, func(collect *assert.CollectT) {
-		err = k8sClient.Get(
-			t.Context(),
-			types.NamespacedName{Name: domain.GetMBCCronJobName(mbc), Namespace: cronJobNamespace},
-			&batchv1.CronJob{},
-		)
+		err = k8sClient.Get(t.Context(), cronJobNN, &batchv1.CronJob{})
 		assert.Error(collect, err)
 		assert.True(collect, aerrors.IsNotFound(err))
 	}, 5*time.Second, 1*time.Second)
 
-	// Run the usecase a second time to verify that the finalizer is removed.
-	// The first Run deletes the CronJob; the second Run should remove the finalizer.
-	err = useCase.Run(
-		t.Context(),
-		types.NamespacedName{Name: mbcName, Namespace: mbcNamespace},
-	)
+	err = useCase.Run(t.Context(), fixture.mbcNN())
 	require.NoError(t, err)
 
-	// Verify that the MBC has been garbage-collected by the API server.
-	// Once the finalizer is removed from a resource with DeletionTimestamp,
-	// Kubernetes deletes it automatically.
 	require.EventuallyWithT(t, func(collect *assert.CollectT) {
 		err = k8sClient.Get(
-			t.Context(),
-			types.NamespacedName{Name: mbcName, Namespace: mbcNamespace},
-			&mantlev1.MantleBackupConfig{},
+			t.Context(), fixture.mbcNN(), &mantlev1.MantleBackupConfig{},
 		)
 		assert.Error(collect, err)
 		assert.True(collect, aerrors.IsNotFound(err))
 	}, 5*time.Second, 1*time.Second)
+}
+
+func TestRun_ProvisionPath_FullLifecycle(t *testing.T) {
+	t.Parallel()
+
+	cephClusterID := util.GetUniqueName("ceph-cluster-id")
+	fixture := setupTestEnv(t, cephClusterID)
+	mbc := fixture.createMBC(t)
+	useCase := newUsecase(cephClusterID, fixture.cronJobNamespace)
+
+	err := useCase.Run(t.Context(), fixture.mbcNN())
+	require.NoError(t, err)
+
+	var updatedMBC mantlev1.MantleBackupConfig
+
+	err = k8sClient.Get(t.Context(), fixture.mbcNN(), &updatedMBC)
+	require.NoError(t, err)
+	require.Contains(t, updatedMBC.Finalizers, domain.MantleBackupConfigFinalizerName)
+	require.Equal(t, cephClusterID,
+		updatedMBC.Annotations[domain.MantleBackupConfigAnnotationManagedClusterID])
+
+	err = useCase.Run(t.Context(), fixture.mbcNN())
+	require.NoError(t, err)
+
+	cronJobNN := types.NamespacedName{
+		Name:      domain.GetMBCCronJobName(mbc),
+		Namespace: fixture.cronJobNamespace,
+	}
+
+	var cronJob batchv1.CronJob
+
+	err = k8sClient.Get(t.Context(), cronJobNN, &cronJob)
+	require.NoError(t, err)
+	require.Equal(t, "0 0 * * *", cronJob.Spec.Schedule)
+	require.False(t, *cronJob.Spec.Suspend)
+	require.Equal(t, batchv1.ForbidConcurrent, cronJob.Spec.ConcurrencyPolicy)
+	require.Equal(t, "sa-name",
+		cronJob.Spec.JobTemplate.Spec.Template.Spec.ServiceAccountName)
+	require.Equal(t, "controller-image",
+		cronJob.Spec.JobTemplate.Spec.Template.Spec.Containers[0].Image)
+}
+
+func TestRun_ProvisionPath_NotResponsibleCluster(t *testing.T) {
+	t.Parallel()
+
+	fixture := setupTestEnv(t, "other-cluster-id")
+	mbc := fixture.createMBC(t)
+	useCase := newUsecase("my-cluster-id", fixture.cronJobNamespace)
+
+	err := useCase.Run(t.Context(), fixture.mbcNN())
+	require.NoError(t, err)
+
+	var updatedMBC mantlev1.MantleBackupConfig
+
+	err = k8sClient.Get(t.Context(), fixture.mbcNN(), &updatedMBC)
+	require.NoError(t, err)
+	require.NotContains(t, updatedMBC.Finalizers, domain.MantleBackupConfigFinalizerName)
+
+	cronJobNN := types.NamespacedName{
+		Name:      domain.GetMBCCronJobName(mbc),
+		Namespace: fixture.cronJobNamespace,
+	}
+
+	err = k8sClient.Get(t.Context(), cronJobNN, &batchv1.CronJob{})
+	require.True(t, aerrors.IsNotFound(err))
+}
+
+func TestRun_ProvisionPath_CronJobUpdate(t *testing.T) {
+	t.Parallel()
+
+	cephClusterID := util.GetUniqueName("ceph-cluster-id")
+	fixture := setupTestEnv(t, cephClusterID)
+	mbc := fixture.createMBC(t)
+	useCase := newUsecase(cephClusterID, fixture.cronJobNamespace)
+
+	fixture.provisionMBC(t, useCase)
+
+	cronJobNN := types.NamespacedName{
+		Name:      domain.GetMBCCronJobName(mbc),
+		Namespace: fixture.cronJobNamespace,
+	}
+
+	var cronJob batchv1.CronJob
+
+	err := k8sClient.Get(t.Context(), cronJobNN, &cronJob)
+	require.NoError(t, err)
+	require.Equal(t, "0 0 * * *", cronJob.Spec.Schedule)
+	require.False(t, *cronJob.Spec.Suspend)
+
+	var updatedMBC mantlev1.MantleBackupConfig
+
+	err = k8sClient.Get(t.Context(), fixture.mbcNN(), &updatedMBC)
+	require.NoError(t, err)
+
+	updatedMBC.Spec.Schedule = "0 12 * * *"
+	updatedMBC.Spec.Suspend = true
+	err = k8sClient.Update(t.Context(), &updatedMBC)
+	require.NoError(t, err)
+
+	err = useCase.Run(t.Context(), fixture.mbcNN())
+	require.NoError(t, err)
+
+	err = k8sClient.Get(t.Context(), cronJobNN, &cronJob)
+	require.NoError(t, err)
+	require.Equal(t, "0 12 * * *", cronJob.Spec.Schedule)
+	require.True(t, *cronJob.Spec.Suspend)
 }
