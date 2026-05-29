@@ -2613,7 +2613,7 @@ blkdiscard -z /dev/zeroout-rbd
 				completeJob(ctx, job1.GetNamespace(), job1.GetName())
 
 				// Call handleCompletedImportJobs for MantleBackup1.
-				largestCompletedPartNum, err := mbr.handleCompletedImportJobs(ctx, backup1)
+				largestCompletedPartNum, err := mbr.handleCompletedImportJobs(ctx, backup1, dummyPoolName, dummyImageName)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(largestCompletedPartNum).To(Equal(0))
 
@@ -2629,7 +2629,7 @@ blkdiscard -z /dev/zeroout-rbd
 				completeJob(ctx, job2.GetNamespace(), job2.GetName())
 
 				// Call handleCompletedImportJobs for MantleBackup1.
-				largestCompletedPartNum, err = mbr.handleCompletedImportJobs(ctx, backup1)
+				largestCompletedPartNum, err = mbr.handleCompletedImportJobs(ctx, backup1, dummyPoolName, dummyImageName)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(largestCompletedPartNum).To(Equal(1))
 
@@ -2652,6 +2652,105 @@ blkdiscard -z /dev/zeroout-rbd
 			Entry("snap size = transfer part size", int64(testutil.FakeRBDSnapshotSize), 1),
 			Entry("snap size > transfer part size", int64(testutil.FakeRBDSnapshotSize-1), 2),
 		)
+
+		It("should delete middle snapshots when completed import jobs are cleaned up", func(ctx SpecContext) {
+			transferPartSize := resource.MustParse("1Gi")
+			transferPartSizeI64, ok := transferPartSize.AsInt64()
+			Expect(ok).To(BeTrue())
+
+			// Create a MantleBackup with TransferPartSize and annotRemoteUID set.
+			backup, err := createMantleBackupUsingDummyPVC(ctx, "target-mid-snap", ns)
+			Expect(err).NotTo(HaveOccurred())
+
+			backup.SetAnnotations(map[string]string{
+				annotRemoteUID: "test-remote-uid",
+			})
+			err = k8sClient.Update(ctx, backup)
+			Expect(err).NotTo(HaveOccurred())
+
+			err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, backup, transferPartSize)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Create middle snapshots on the RBD image (simulating what rbd import-diff would create).
+			midSnap1 := MakeMiddleSnapshotName(backup, 1*int(transferPartSizeI64))
+			midSnap2 := MakeMiddleSnapshotName(backup, 2*int(transferPartSizeI64))
+			err = mbr.ceph.RBDSnapCreate(dummyPoolName, dummyImageName, midSnap1)
+			Expect(err).NotTo(HaveOccurred())
+			err = mbr.ceph.RBDSnapCreate(dummyPoolName, dummyImageName, midSnap2)
+			Expect(err).NotTo(HaveOccurred())
+
+			createImportJob := func(b *mantlev1.MantleBackup, partNum int) *batchv1.Job {
+				job := batchv1.Job{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      MakeImportJobName(b, partNum),
+						Namespace: nsController,
+						Labels: map[string]string{
+							"app.kubernetes.io/name":      labelAppNameValue,
+							"app.kubernetes.io/component": labelComponentImportJob,
+						},
+					},
+					Spec: batchv1.JobSpec{
+						Template: corev1.PodTemplateSpec{
+							Spec: corev1.PodSpec{
+								RestartPolicy: corev1.RestartPolicyOnFailure,
+								Containers: []corev1.Container{
+									{Name: "dummy", Image: "dummy"},
+								},
+							},
+						},
+					},
+				}
+				err := k8sClient.Create(ctx, &job)
+				Expect(err).NotTo(HaveOccurred())
+
+				return &job
+			}
+
+			// Create import Job for part 0, complete it.
+			job0 := createImportJob(backup, 0)
+			completeJob(ctx, job0.GetNamespace(), job0.GetName())
+
+			// Create import Job for part 1, complete it.
+			job1 := createImportJob(backup, 1)
+			completeJob(ctx, job1.GetNamespace(), job1.GetName())
+
+			// Call handleCompletedImportJobs. Job 0 (not latest) should be deleted.
+			// The hook for part 0 deletes the middle snapshot at (0+1)*tps = midSnap1,
+			// which is the snapshot created by part 0's rbd import-diff.
+			largestCompletedPartNum, err := mbr.handleCompletedImportJobs(ctx, backup, dummyPoolName, dummyImageName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(largestCompletedPartNum).To(Equal(1))
+
+			// midSnap1 should be deleted (created by part 0), midSnap2 should still exist.
+			snaps, err := mbr.ceph.RBDSnapLs(dummyPoolName, dummyImageName)
+			Expect(err).NotTo(HaveOccurred())
+			snapNames := make([]string, 0, len(snaps))
+			for _, s := range snaps {
+				snapNames = append(snapNames, s.Name)
+			}
+			Expect(snapNames).NotTo(ContainElement(midSnap1))
+			Expect(snapNames).To(ContainElement(midSnap2))
+
+			// Create import Job for part 2, complete it.
+			job2 := createImportJob(backup, 2)
+			completeJob(ctx, job2.GetNamespace(), job2.GetName())
+
+			// Call handleCompletedImportJobs. Job 1 (not latest) should be deleted.
+			// The hook for part 1 deletes the middle snapshot at (1+1)*tps = midSnap2.
+			largestCompletedPartNum, err = mbr.handleCompletedImportJobs(ctx, backup, dummyPoolName, dummyImageName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(largestCompletedPartNum).To(Equal(2))
+
+			// midSnap2 should now also be deleted.
+			snaps, err = mbr.ceph.RBDSnapLs(dummyPoolName, dummyImageName)
+			Expect(err).NotTo(HaveOccurred())
+			snapNames = make([]string, 0, len(snaps))
+			for _, s := range snaps {
+				snapNames = append(snapNames, s.Name)
+			}
+			Expect(snapNames).NotTo(ContainElement(midSnap1))
+			Expect(snapNames).NotTo(ContainElement(midSnap2))
+		})
 	})
 })
 

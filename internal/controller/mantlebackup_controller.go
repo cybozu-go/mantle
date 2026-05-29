@@ -2021,7 +2021,7 @@ func (r *MantleBackupReconciler) startImport(
 		return requeueReconciliation(), nil
 	}
 
-	largestCompletedPartNum, err := r.handleCompletedImportJobs(ctx, backup)
+	largestCompletedPartNum, err := r.handleCompletedImportJobs(ctx, backup, target.poolName, target.imageName)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to handle completed import jobs: %w", err)
 	}
@@ -2144,8 +2144,26 @@ func (r *MantleBackupReconciler) isExportDataAlreadyUploaded(
 	return uploaded, nil
 }
 
-func (r *MantleBackupReconciler) handleCompletedImportJobs(ctx context.Context, backup *mantlev1.MantleBackup) (int, error) {
-	return r.handleCompletedJobsOfComponent(ctx, backup, labelComponentImportJob, MantleImportJobPrefix, nil)
+func (r *MantleBackupReconciler) handleCompletedImportJobs(
+	ctx context.Context, backup *mantlev1.MantleBackup, poolName, imageName string,
+) (int, error) {
+	var hookPtr *func(partNum int) error
+	if backup.Status.TransferPartSize != nil && backup.GetAnnotations()[annotRemoteUID] != "" {
+		transferPartSize, ok := backup.Status.TransferPartSize.AsInt64()
+		if ok && transferPartSize > 0 {
+			hook := func(partNum int) error {
+				snapName := MakeMiddleSnapshotName(backup, (partNum+1)*int(transferPartSize))
+				if err := r.removeRBDSnapshot(ctx, poolName, imageName, snapName); err != nil {
+					return fmt.Errorf("failed to remove middle snapshot: %s: %s: %s: %w", poolName, imageName, snapName, err)
+				}
+
+				return nil
+			}
+			hookPtr = &hook
+		}
+	}
+
+	return r.handleCompletedJobsOfComponent(ctx, backup, labelComponentImportJob, MantleImportJobPrefix, hookPtr)
 }
 
 func isPVSmallerThanPVC(
