@@ -372,6 +372,26 @@ var _ = Describe("MantleBackup controller", func() {
 			Entry("a near expiring backup should be deleted after expiration", 10*time.Second),
 		)
 
+		It("should delete the backup even if the PVC is deleted before expiry", func(ctx SpecContext) {
+			_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+
+			backup, err := resMgr.CreateUniqueBackupFor(ctx, pvc)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("waiting for the backup's snapshot to be captured")
+			resMgr.WaitForBackupSnapshotCaptured(ctx, backup)
+
+			By("deleting the PVC")
+			resMgr.DeletePVC(ctx, pvc)
+
+			By("simulate backup expiration")
+			simulateExpire(ctx, backup, -time.Hour)
+
+			By("wait for the backup to be deleted")
+			testutil.CheckDeletedEventually[mantlev1.MantleBackup](ctx, k8sClient, backup.Name, backup.Namespace)
+		})
+
 		It("should retain the backup if it has the retain-if-expired annotation", func(ctx SpecContext) {
 			_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 			Expect(err).NotTo(HaveOccurred())
