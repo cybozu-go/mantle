@@ -46,6 +46,7 @@ var _ = Describe("backup failure", Label("backup-failure"), func() {
 		WaitTemporaryJobsDeleted(ctx, primaryMB, secondaryMB)
 		WaitTemporaryPVCsDeleted(ctx, primaryMB, secondaryMB)
 		WaitTemporarySecondaryPVsDeleted(ctx, secondaryMB)
+		CleanupMantleBackups(namespace)
 	})
 
 	It("should handle removal of MantleBackup in secondary k8s cluster during a full backup", func(ctx SpecContext) {
@@ -95,6 +96,7 @@ var _ = Describe("backup failure", Label("backup-failure"), func() {
 		Expect(err).NotTo(HaveOccurred())
 		WaitTemporaryResourcesDeleted(ctx, primaryMB, secondaryMB0)
 		WaitTemporaryResourcesDeleted(ctx, primaryMB, secondaryMB1)
+		CleanupMantleBackups(namespace)
 	})
 
 	It("should handle removal of MantleBackup in primary k8s cluster during an incremental backup",
@@ -146,6 +148,7 @@ var _ = Describe("backup failure", Label("backup-failure"), func() {
 			WaitTemporaryJobsDeleted(ctx, primaryMB, secondaryMB)
 			WaitTemporaryPVCsDeleted(ctx, primaryMB, secondaryMB)
 			WaitTemporarySecondaryPVsDeleted(ctx, secondaryMB)
+			CleanupMantleBackups(namespace)
 		})
 
 	It("should handle removal of MantleBackup in secondary k8s cluster during an incremental backup",
@@ -206,5 +209,6 @@ var _ = Describe("backup failure", Label("backup-failure"), func() {
 			Expect(err).NotTo(HaveOccurred())
 			WaitTemporaryResourcesDeleted(ctx, primaryMB1, secondaryMB10)
 			WaitTemporaryResourcesDeleted(ctx, primaryMB1, secondaryMB11)
+			CleanupMantleBackups(namespace)
 		})
 })
