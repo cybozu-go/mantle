@@ -3,7 +3,7 @@ name: Check Do Not Merge Label
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
-
+permissions: {}
 jobs:
   check-label:
     runs-on: ubuntu-latest

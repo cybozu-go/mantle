@@ -4,6 +4,8 @@ on:
     paths:
       - "ceph/**"
       - "!ceph/README.md"
+permissions:
+  contents: read
 jobs:
   test:
     runs-on: mantle_large_runner_16core
