@@ -178,6 +178,21 @@ func (r *MantleBackupReconciler) removeRBDSnapshot(ctx context.Context, poolName
 	return nil
 }
 
+func (r *MantleBackupReconciler) removeRBDSnapshotFromBackup(
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
+) error {
+	if backup.Status.PVManifest == "" {
+		return nil
+	}
+	pool, image, err := r.getPoolAndImageFromStatusPVManifest(backup)
+	if err != nil {
+		return err
+	}
+
+	return r.removeRBDSnapshot(ctx, pool, image, backup.Name)
+}
+
 func (r *MantleBackupReconciler) createRBDSnapshot(ctx context.Context, poolName, imageName string, backup *mantlev1.MantleBackup) (*ceph.RBDSnapshot, error) {
 	logger := log.FromContext(ctx)
 	createErr := r.ceph.RBDSnapCreate(poolName, imageName, backup.Name)
@@ -409,7 +424,7 @@ func (r *MantleBackupReconciler) reconcileLocalBackup(ctx context.Context, backu
 		return result, nil
 	}
 	if !backup.DeletionTimestamp.IsZero() {
-		return r.finalizeStandalone(ctx, backup, target, notFound)
+		return r.finalizeStandalone(ctx, backup)
 	}
 	// Only the NotFound error reaches this point, so return it as is.
 	if notFound {
@@ -532,7 +547,7 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 		return result, nil
 	}
 	if !backup.DeletionTimestamp.IsZero() {
-		return r.finalizeSecondary(ctx, backup, target, notFound)
+		return r.finalizeSecondary(ctx, backup)
 	}
 	// Only the NotFound error reaches this point, so return it as is.
 	if notFound {
@@ -881,11 +896,10 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 		return err
 	}
 
-	snapshot, err := r.createRBDSnapshot(ctx, target.poolName, target.imageName, backup)
-	if err != nil {
-		return err
-	}
-
+	// Save PVManifest and PVCManifest before creating the RBD snapshot.
+	// This guarantees that removeRBDSnapshotFromBackup can locate and remove
+	// the snapshot even if the controller crashes after createRBDSnapshot but
+	// before the subsequent updateStatus that saves SnapID.
 	if err := updateStatus(ctx, r.Client, backup, func() error {
 		pvcJs, err := json.Marshal(target.pvc)
 		if err != nil {
@@ -903,6 +917,19 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 		}
 		backup.Status.PVManifest = string(pvJs)
 
+		return nil
+	}); err != nil {
+		logger.Error(err, "failed to update MantleBackup status", "status", backup.Status)
+
+		return err
+	}
+
+	snapshot, err := r.createRBDSnapshot(ctx, target.poolName, target.imageName, backup)
+	if err != nil {
+		return err
+	}
+
+	if err := updateStatus(ctx, r.Client, backup, func() error {
 		backup.Status.SnapID = &snapshot.Id
 		backup.Status.CreatedAt = metav1.NewTime(snapshot.Timestamp.Time)
 		backup.Status.SnapSize = &snapshot.Size
@@ -939,8 +966,6 @@ func isCreatedWhenMantleControllerWasSecondary(backup *mantlev1.MantleBackup) bo
 func (r *MantleBackupReconciler) finalizeStandalone(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
-	target *snapshotTarget,
-	targetPVCNotFound bool,
 ) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	if _, ok := backup.GetAnnotations()[annotDiffTo]; ok {
@@ -958,11 +983,8 @@ func (r *MantleBackupReconciler) finalizeStandalone(
 		return result, err
 	}
 
-	if !targetPVCNotFound {
-		err := r.removeRBDSnapshot(ctx, target.poolName, target.imageName, backup.Name)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
+	if err := r.removeRBDSnapshotFromBackup(ctx, backup); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	controllerutil.RemoveFinalizer(backup, MantleBackupFinalizerName)
@@ -979,8 +1001,6 @@ func (r *MantleBackupReconciler) finalizeStandalone(
 func (r *MantleBackupReconciler) finalizeSecondary(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
-	target *snapshotTarget,
-	targetPVCNotFound bool,
 ) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	if _, ok := backup.GetAnnotations()[annotDiffTo]; ok {
@@ -996,11 +1016,8 @@ func (r *MantleBackupReconciler) finalizeSecondary(
 		return result, err
 	}
 
-	if !targetPVCNotFound {
-		err := r.removeRBDSnapshot(ctx, target.poolName, target.imageName, backup.Name)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
+	if err := r.removeRBDSnapshotFromBackup(ctx, backup); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	controllerutil.RemoveFinalizer(backup, MantleBackupFinalizerName)

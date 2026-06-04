@@ -373,7 +373,7 @@ var _ = Describe("MantleBackup controller", func() {
 		)
 
 		It("should delete the backup even if the PVC is deleted before expiry", func(ctx SpecContext) {
-			_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
+			pv, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 			Expect(err).NotTo(HaveOccurred())
 
 			backup, err := resMgr.CreateUniqueBackupFor(ctx, pvc)
@@ -390,6 +390,11 @@ var _ = Describe("MantleBackup controller", func() {
 
 			By("wait for the backup to be deleted")
 			testutil.CheckDeletedEventually[mantlev1.MantleBackup](ctx, k8sClient, backup.Name, backup.Namespace)
+
+			By("check that the RBD snapshot is also removed")
+			snaps, err := reconciler.ceph.RBDSnapLs(resMgr.PoolName, pv.Spec.CSI.VolumeAttributes["imageName"])
+			Expect(err).NotTo(HaveOccurred())
+			Expect(snaps).To(BeEmpty())
 		})
 
 		It("should retain the backup if it has the retain-if-expired annotation", func(ctx SpecContext) {
@@ -2390,6 +2395,62 @@ var _ = Describe("import", func() {
 				return snap.Id == *backup2.Status.SnapID
 			})
 			Expect(index).NotTo(Equal(-1))
+		})
+	})
+
+	Context("finalizeSecondary", func() {
+		It("should delete the RBD snapshot even if the target PVC is not found", func(ctx SpecContext) {
+			backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("creating a snapshot with the backup's name")
+			err = mbr.ceph.RBDSnapCreate(dummyPoolName, dummyImageName, backup.Name)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("finalizing the backup with the target PVC not found")
+			_, err = mbr.finalizeSecondary(ctx, backup)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("checking that the RBD snapshot is removed")
+			snaps, err := mbr.ceph.RBDSnapLs(dummyPoolName, dummyImageName)
+			Expect(err).NotTo(HaveOccurred())
+			index := slices.IndexFunc(snaps, func(snap ceph.RBDSnapshot) bool {
+				return snap.Name == backup.Name
+			})
+			Expect(index).To(Equal(-1))
+		})
+	})
+
+	Context("finalizeStandalone", func() {
+		It("should delete the RBD snapshot when only PVManifest is persisted (SnapID not yet saved)", func(ctx SpecContext) {
+			// This test simulates a controller crash that occurs after createRBDSnapshot
+			// succeeds but before the second updateStatus (which saves SnapID) completes.
+			// In that state, PVManifest is already persisted (it is saved in the first
+			// updateStatus, before snapshot creation) but IsSnapshotCaptured() returns
+			// false because SnapID is absent.
+			//
+			// finalizeStandalone must be able to locate and remove the orphaned snapshot
+			// using PVManifest, ensuring no Ceph storage leak on MantleBackup deletion.
+			backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
+			Expect(err).NotTo(HaveOccurred())
+			// createMantleBackupUsingDummyPVC sets PVManifest but not SnapID,
+			// which exactly matches the crash state described above.
+
+			By("creating a snapshot with the backup's name as provisionRBDSnapshot would have done")
+			err = mbr.ceph.RBDSnapCreate(dummyPoolName, dummyImageName, backup.Name)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("finalizing the backup")
+			_, err = mbr.finalizeStandalone(ctx, backup)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("checking that the orphaned RBD snapshot is removed via PVManifest")
+			snaps, err := mbr.ceph.RBDSnapLs(dummyPoolName, dummyImageName)
+			Expect(err).NotTo(HaveOccurred())
+			index := slices.IndexFunc(snaps, func(snap ceph.RBDSnapshot) bool {
+				return snap.Name == backup.Name
+			})
+			Expect(index).To(Equal(-1))
 		})
 	})
 
