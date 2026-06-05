@@ -161,14 +161,47 @@ func NewMantleBackupReconciler(
 
 func (r *MantleBackupReconciler) removeRBDSnapshot(ctx context.Context, poolName, imageName, snapshotName string) error {
 	logger := log.FromContext(ctx)
-	rmErr := r.ceph.RBDSnapRm(poolName, imageName, snapshotName)
-	if rmErr != nil {
-		_, findErr := ceph.FindRBDSnapshot(r.ceph, poolName, imageName, snapshotName)
-		if findErr == nil || !errors.Is(findErr, ceph.ErrSnapshotNotFound) {
-			err := errors.Join(rmErr, findErr)
-			logger.Error(err, "failed to remove rbd snapshot", "poolName", poolName, "imageName", imageName, "snapshotName", snapshotName)
+	var imageID string
+	imageNames, err := r.ceph.RBDLs(poolName)
+	if err != nil {
+		return fmt.Errorf("failed to list RBD images: %w", err)
+	}
+	if slices.Contains(imageNames, imageName) {
+		info, err := r.ceph.RBDInfo(poolName, imageName)
+		if err != nil {
+			return fmt.Errorf("failed to get RBD info: %w", err)
+		}
+		imageID = info.ID
+	} else {
+		trashList, err := r.ceph.RBDTrashLs(poolName)
+		if err != nil {
+			return fmt.Errorf("failed to list RBD trash: %w", err)
+		}
+		for _, trash := range trashList {
+			if trash.Name == imageName {
+				imageID = trash.ID
 
-			return fmt.Errorf("failed to remove rbd snapshot: %w", err)
+				break
+			}
+		}
+		// If the image is not found in both active images and trash, it means the snapshot has already been removed, so it returns nil to allow finalization to proceed without error.
+		if len(imageID) == 0 {
+			logger.Info("rbd image not found, assuming snapshot has already been removed", "poolName", poolName, "imageName", imageName, "snapshotName", snapshotName)
+
+			return nil
+		}
+	}
+
+	rmErr := r.ceph.RBDSnapRm(poolName, imageID, snapshotName)
+	if rmErr != nil {
+		snapshots, lsErr := r.ceph.RBDSnapLsByID(poolName, imageID)
+		if lsErr != nil {
+			return fmt.Errorf("failed to list RBD snapshots by image ID: %w", lsErr)
+		}
+		for _, snap := range snapshots {
+			if snap.Name == snapshotName {
+				return fmt.Errorf("failed to remove rbd snapshot: %w", rmErr)
+			}
 		}
 		logger.Info("rbd snapshot has already been removed", "poolName", poolName, "imageName", imageName, "snapshotName", snapshotName)
 
@@ -3255,9 +3288,43 @@ func (r *MantleBackupReconciler) deleteMiddleSnapshots(backup *mantlev1.MantleBa
 		return fmt.Errorf("failed to get pool and image from status.PVManifest: %w", err)
 	}
 
-	snaps, err := r.ceph.RBDSnapLs(pool, image)
+	imageNames, err := r.ceph.RBDLs(pool)
 	if err != nil {
-		return fmt.Errorf("failed to list snapshots: %s: %s: %w", pool, image, err)
+		return fmt.Errorf("failed to list RBD images: %w", err)
+	}
+
+	var imageID string
+	var snaps []ceph.RBDSnapshot
+	if slices.Contains(imageNames, image) {
+		info, err := r.ceph.RBDInfo(pool, image)
+		if err != nil {
+			return fmt.Errorf("failed to get RBD image info: %s: %s: %w", pool, image, err)
+		}
+		imageID = info.ID
+		snaps, err = r.ceph.RBDSnapLs(pool, image)
+		if err != nil {
+			return fmt.Errorf("failed to list snapshots: %s: %s: %w", pool, image, err)
+		}
+	} else {
+		trashList, err := r.ceph.RBDTrashLs(pool)
+		if err != nil {
+			return fmt.Errorf("failed to list RBD trash: %w", err)
+		}
+		for _, trash := range trashList {
+			if trash.Name == image {
+				imageID = trash.ID
+
+				break
+			}
+		}
+		if imageID == "" {
+			// Image not found in active images or trash; snapshots are already gone.
+			return nil
+		}
+		snaps, err = r.ceph.RBDSnapLsByID(pool, imageID)
+		if err != nil {
+			return fmt.Errorf("failed to list snapshots by ID: %s: %s: %w", pool, imageID, err)
+		}
 	}
 
 	for i := range numParts {
@@ -3267,7 +3334,7 @@ func (r *MantleBackupReconciler) deleteMiddleSnapshots(backup *mantlev1.MantleBa
 		if snapIndex == -1 {
 			continue
 		}
-		if err := r.ceph.RBDSnapRm(pool, image, snaps[snapIndex].Name); err != nil {
+		if err := r.ceph.RBDSnapRm(pool, imageID, snaps[snapIndex].Name); err != nil {
 			return fmt.Errorf("failed to remove snapshot: %s: %s: %w", pool, image, err)
 		}
 	}

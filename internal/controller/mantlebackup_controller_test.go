@@ -2452,6 +2452,71 @@ var _ = Describe("import", func() {
 			})
 			Expect(index).To(Equal(-1))
 		})
+
+		It("should delete the RBD snapshot even if the image is moved to trash", func(ctx SpecContext) {
+			// Simulates the case where the CSI driver has trash-moved the image backing
+			// the PVC (rbd trash mv, which succeeds even with snapshots) after PVC deletion
+			// with Delete reclaim policy. The snapshot still exists inside the trashed image
+			// and must be removed so that no Ceph storage leaks.
+			backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("creating a snapshot and then moving the image to trash")
+			err = mbr.ceph.RBDSnapCreate(dummyPoolName, dummyImageName, backup.Name)
+			Expect(err).NotTo(HaveOccurred())
+			err = mbr.ceph.RBDTrashMv(dummyPoolName, dummyImageName)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("finalizing the backup")
+			_, err = mbr.finalizeStandalone(ctx, backup)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("checking that the RBD snapshot is removed from the trashed image")
+			trashItems, err := mbr.ceph.RBDTrashLs(dummyPoolName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(trashItems).To(HaveLen(1))
+			snaps, err := mbr.ceph.RBDSnapLsByID(dummyPoolName, trashItems[0].ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(slices.IndexFunc(snaps, func(snap ceph.RBDSnapshot) bool {
+				return snap.Name == backup.Name
+			})).To(Equal(-1))
+		})
+
+		It("should succeed when the image does not exist in either active images or trash", func(ctx SpecContext) {
+			// Simulates the case where the image has been fully purged from Ceph (e.g.,
+			// removed from trash after the snapshot was already deleted by a prior
+			// reconcile). finalizeStandalone must treat this as already cleaned up and
+			// not return an error.
+			backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
+			Expect(err).NotTo(HaveOccurred())
+			// No RBDSnapCreate: the image is not registered in Ceph at all.
+
+			By("finalizing the backup with no image or snapshot present in Ceph")
+			_, err = mbr.finalizeStandalone(ctx, backup)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should succeed when the snapshot has already been removed (idempotency)", func(ctx SpecContext) {
+			// Simulates an idempotent re-run: a previous reconcile already removed the
+			// snapshot but the finalizer was not yet removed (e.g., the controller crashed
+			// after snapshot deletion but before updating the MantleBackup status).
+			// finalizeStandalone must detect via RBDSnapLsByID that the snapshot is gone
+			// and not return an error.
+			backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("creating and then immediately removing the snapshot")
+			err = mbr.ceph.RBDSnapCreate(dummyPoolName, dummyImageName, backup.Name)
+			Expect(err).NotTo(HaveOccurred())
+			info, err := mbr.ceph.RBDInfo(dummyPoolName, dummyImageName)
+			Expect(err).NotTo(HaveOccurred())
+			err = mbr.ceph.RBDSnapRm(dummyPoolName, info.ID, backup.Name)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("finalizing the backup after the snapshot is already gone")
+			_, err = mbr.finalizeStandalone(ctx, backup)
+			Expect(err).NotTo(HaveOccurred())
+		})
 	})
 
 	Context("reconcileZeroOutJob", func() {

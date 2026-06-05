@@ -183,18 +183,48 @@ func (mr *MockCephCmdMockRecorder) RBDSnapLs(pool, image any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RBDSnapLs", reflect.TypeOf((*MockCephCmd)(nil).RBDSnapLs), pool, image)
 }
 
-// RBDSnapRm mocks base method.
-func (m *MockCephCmd) RBDSnapRm(pool, image, snap string) error {
+// RBDSnapLsByID mocks base method.
+func (m *MockCephCmd) RBDSnapLsByID(pool, imageID string) ([]RBDSnapshot, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "RBDSnapRm", pool, image, snap)
+	ret := m.ctrl.Call(m, "RBDSnapLsByID", pool, imageID)
+	ret0, _ := ret[0].([]RBDSnapshot)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RBDSnapLsByID indicates an expected call of RBDSnapLsByID.
+func (mr *MockCephCmdMockRecorder) RBDSnapLsByID(pool, imageID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RBDSnapLsByID", reflect.TypeOf((*MockCephCmd)(nil).RBDSnapLsByID), pool, imageID)
+}
+
+// RBDSnapRm mocks base method.
+func (m *MockCephCmd) RBDSnapRm(pool, imageID, snap string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RBDSnapRm", pool, imageID, snap)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // RBDSnapRm indicates an expected call of RBDSnapRm.
-func (mr *MockCephCmdMockRecorder) RBDSnapRm(pool, image, snap any) *gomock.Call {
+func (mr *MockCephCmdMockRecorder) RBDSnapRm(pool, imageID, snap any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RBDSnapRm", reflect.TypeOf((*MockCephCmd)(nil).RBDSnapRm), pool, image, snap)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RBDSnapRm", reflect.TypeOf((*MockCephCmd)(nil).RBDSnapRm), pool, imageID, snap)
+}
+
+// RBDTrashLs mocks base method.
+func (m *MockCephCmd) RBDTrashLs(pool string) ([]*RBDTrashInfo, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RBDTrashLs", pool)
+	ret0, _ := ret[0].([]*RBDTrashInfo)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RBDTrashLs indicates an expected call of RBDTrashLs.
+func (mr *MockCephCmdMockRecorder) RBDTrashLs(pool any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RBDTrashLs", reflect.TypeOf((*MockCephCmd)(nil).RBDTrashLs), pool)
 }
 
 // RBDTrashMv mocks base method.

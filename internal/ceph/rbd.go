@@ -109,6 +109,22 @@ func (c *cephCmdImpl) RBDTrashMv(pool, image string) error {
 	return nil
 }
 
+// RBDTrashLs lists RBD images in trash.
+func (c *cephCmdImpl) RBDTrashLs(pool string) ([]*RBDTrashInfo, error) {
+	stdout, stderr, err := c.command.execute("rbd", "trash", "ls", "-p", pool, "--format", "json")
+	if err != nil {
+		return nil, fmt.Errorf("failed to list RBD images in trash: %w, stderr: %s", err, string(stderr))
+	}
+
+	var trashInfos []*RBDTrashInfo
+	err = json.Unmarshal(stdout, &trashInfos)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal RBD trash info: %w, stdout: %s", err, stdout)
+	}
+
+	return trashInfos, nil
+}
+
 // CephRBDTaskTrashRemove adds a task to remove the image from trash.
 func (c *cephCmdImpl) CephRBDTaskAddTrashRemove(pool, imageID string) error {
 	_, stderr, err := c.command.execute("ceph", "rbd", "task", "add", "trash", "remove", fmt.Sprintf("%s/%s", pool, imageID))
@@ -145,9 +161,25 @@ func (c *cephCmdImpl) RBDSnapLs(pool, image string) ([]RBDSnapshot, error) {
 	return snapshots, nil
 }
 
+// RBDSnapLsByID lists RBD snapshots of an image by image ID.
+func (c *cephCmdImpl) RBDSnapLsByID(pool, imageID string) ([]RBDSnapshot, error) {
+	stdout, stderr, err := c.command.execute("rbd", "snap", "ls", "-p", pool, "--image-id", imageID, "--format", "json")
+	if err != nil {
+		return nil, fmt.Errorf("failed to list RBD snapshots: %w, stderr: %s", err, string(stderr))
+	}
+
+	var snapshots []RBDSnapshot
+	err = json.Unmarshal(stdout, &snapshots)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal RBD snapshots: %w, stdout: %s", err, stdout)
+	}
+
+	return snapshots, nil
+}
+
 // RBDSnapRm removes an RBD snapshot.
-func (c *cephCmdImpl) RBDSnapRm(pool, image, snap string) error {
-	_, stderr, err := c.command.execute("rbd", "snap", "rm", fmt.Sprintf("%s/%s@%s", pool, image, snap))
+func (c *cephCmdImpl) RBDSnapRm(pool, imageID, snap string) error {
+	_, stderr, err := c.command.execute("rbd", "snap", "rm", "-p", pool, "--image-id", imageID, "--snap", snap)
 	if err != nil {
 		return fmt.Errorf("failed to remove RBD snapshot: %w, stderr: %s", err, string(stderr))
 	}
