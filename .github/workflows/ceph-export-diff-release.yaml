@@ -3,6 +3,8 @@ on:
   push:
     tags:
       - "ceph-export-diff-v*.*.*.*"
+permissions:
+  contents: write
 jobs:
   release:
     runs-on: mantle_large_runner_16core

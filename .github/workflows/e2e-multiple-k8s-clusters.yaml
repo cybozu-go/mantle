@@ -10,6 +10,8 @@ on:
       - "CODEOWNERS"
     branches:
       - "main"
+permissions:
+  contents: read
 
 # Cancel any ongoing workflows on the same branch to avoid unnecessary fees.
 # cf. https://docs.github.com/en/actions/using-jobs/using-concurrency#example-using-concurrency-and-the-default-behavior
