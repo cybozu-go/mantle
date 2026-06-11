@@ -1515,6 +1515,9 @@ func calculateExportDataPVCSize(transferPartSize *resource.Quantity) (*resource.
 		return nil, fmt.Errorf("failed to convert status.transferPartSize to int64: %s", transferPartSize.String())
 	}
 
+	// The margin of the PVC size accounts for the filesystem metadata overhead required in addition
+	// to the backup data itself. The lower bound prevents the metadata from taking up a disproportionately
+	// large share of the PVC when the backup data size is small.
 	if pvcSizeI64 < 512*1024*1024 {
 		pvcSizeI64 = 512 * 1024 * 1024
 	}
