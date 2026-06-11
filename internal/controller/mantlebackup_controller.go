@@ -161,14 +161,47 @@ func NewMantleBackupReconciler(
 
 func (r *MantleBackupReconciler) removeRBDSnapshot(ctx context.Context, poolName, imageName, snapshotName string) error {
 	logger := log.FromContext(ctx)
-	rmErr := r.ceph.RBDSnapRm(poolName, imageName, snapshotName)
-	if rmErr != nil {
-		_, findErr := ceph.FindRBDSnapshot(r.ceph, poolName, imageName, snapshotName)
-		if findErr == nil || !errors.Is(findErr, ceph.ErrSnapshotNotFound) {
-			err := errors.Join(rmErr, findErr)
-			logger.Error(err, "failed to remove rbd snapshot", "poolName", poolName, "imageName", imageName, "snapshotName", snapshotName)
+	var imageID string
+	imageNames, err := r.ceph.RBDLs(poolName)
+	if err != nil {
+		return fmt.Errorf("failed to list RBD images: %w", err)
+	}
+	if slices.Contains(imageNames, imageName) {
+		info, err := r.ceph.RBDInfo(poolName, imageName)
+		if err != nil {
+			return fmt.Errorf("failed to get RBD info: %w", err)
+		}
+		imageID = info.ID
+	} else {
+		trashList, err := r.ceph.RBDTrashLs(poolName)
+		if err != nil {
+			return fmt.Errorf("failed to list RBD trash: %w", err)
+		}
+		for _, trash := range trashList {
+			if trash.Name == imageName {
+				imageID = trash.ID
 
-			return fmt.Errorf("failed to remove rbd snapshot: %w", err)
+				break
+			}
+		}
+		// If the image is not found in both active images and trash, it means the snapshot has already been removed, so it returns nil to allow finalization to proceed without error.
+		if len(imageID) == 0 {
+			logger.Info("rbd image not found, assuming snapshot has already been removed", "poolName", poolName, "imageName", imageName, "snapshotName", snapshotName)
+
+			return nil
+		}
+	}
+
+	rmErr := r.ceph.RBDSnapRm(poolName, imageID, snapshotName)
+	if rmErr != nil {
+		snapshots, lsErr := r.ceph.RBDSnapLsByID(poolName, imageID)
+		if lsErr != nil {
+			return fmt.Errorf("failed to ensure rbd snapshot is removed: %s/%s@%s: %w", poolName, imageID, snapshotName, errors.Join(rmErr, lsErr))
+		}
+		for _, snap := range snapshots {
+			if snap.Name == snapshotName {
+				return fmt.Errorf("failed to remove rbd snapshot: %w", rmErr)
+			}
 		}
 		logger.Info("rbd snapshot has already been removed", "poolName", poolName, "imageName", imageName, "snapshotName", snapshotName)
 
@@ -176,6 +209,21 @@ func (r *MantleBackupReconciler) removeRBDSnapshot(ctx context.Context, poolName
 	}
 
 	return nil
+}
+
+func (r *MantleBackupReconciler) removeRBDSnapshotFromBackup(
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
+) error {
+	if backup.Status.PVManifest == "" {
+		return nil
+	}
+	pool, image, err := r.getPoolAndImageFromStatusPVManifest(backup)
+	if err != nil {
+		return err
+	}
+
+	return r.removeRBDSnapshot(ctx, pool, image, backup.Name)
 }
 
 func (r *MantleBackupReconciler) createRBDSnapshot(ctx context.Context, poolName, imageName string, backup *mantlev1.MantleBackup) (*ceph.RBDSnapshot, error) {
@@ -288,32 +336,41 @@ func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *
 	return &snapshotTarget{&pvc, &pv, imageName, poolName}, ctrl.Result{}, nil
 }
 
-// expire deletes the backup if it is already expired. Otherwise it schedules deletion.
-// Note that this function does not use requeue to scheduled deletion because the caller
-// will do other tasks after this function returns.
-func (r *MantleBackupReconciler) expire(ctx context.Context, backup *mantlev1.MantleBackup) error {
+// expire deletes the backup if expired, or schedules deletion via expireQueueCh if not yet.
+// Returns true when this call newly set DeletionTimestamp or already deleted, signaling the caller
+// to stop further processing.
+func (r *MantleBackupReconciler) expire(ctx context.Context, backup *mantlev1.MantleBackup) (bool, error) {
 	logger := log.FromContext(ctx)
 	if backup.Status.CreatedAt.IsZero() {
 		// the RBD snapshot has not be taken yet, do nothing.
-		return nil
+		return false, nil
+	}
+
+	if !backup.DeletionTimestamp.IsZero() {
+		// DeletionTimestamp is already set; let the caller handle finalization.
+		return false, nil
 	}
 
 	if v, ok := backup.Annotations[annotRetainIfExpired]; ok && v == "true" {
 		// retain this backup.
 		// If the annotation is deleted, reconciliation will run, so no need to schedule.
-		return nil
+		return false, nil
 	}
 
 	expire, err := strfmt.ParseDuration(backup.Spec.Expire)
 	if err != nil {
-		return err
+		return false, err
 	}
 	expireAt := backup.Status.CreatedAt.Add(expire)
 	if time.Now().UTC().After(expireAt) {
 		// already expired, delete it immediately.
 		logger.Info("delete expired backup", "createdAt", backup.Status.CreatedAt, "expire", expire)
 
-		return r.Delete(ctx, backup)
+		if err := r.Delete(ctx, backup); err != nil && !aerrors.IsNotFound(err) {
+			return false, err
+		}
+
+		return true, nil
 	}
 
 	// not expired yet. schedule deletion.
@@ -323,7 +380,7 @@ func (r *MantleBackupReconciler) expire(ctx context.Context, backup *mantlev1.Ma
 		Object: backup,
 	}
 
-	return nil
+	return false, nil
 }
 
 //+kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlebackups,verbs=get;list;watch;create;update;patch;delete
@@ -384,6 +441,10 @@ func (r *MantleBackupReconciler) reconcileLocalBackup(ctx context.Context, backu
 		return ctrl.Result{}, nil
 	}
 
+	if stopProcessing, err := r.expire(ctx, backup); stopProcessing || err != nil {
+		return requeueReconciliation(), err
+	}
+
 	target, result, err := r.getSnapshotTarget(ctx, backup)
 	notFound := aerrors.IsNotFound(err)
 	switch {
@@ -396,7 +457,7 @@ func (r *MantleBackupReconciler) reconcileLocalBackup(ctx context.Context, backu
 		return result, nil
 	}
 	if !backup.DeletionTimestamp.IsZero() {
-		return r.finalizeStandalone(ctx, backup, target, notFound)
+		return r.finalizeStandalone(ctx, backup)
 	}
 	// Only the NotFound error reaches this point, so return it as is.
 	if notFound {
@@ -428,10 +489,6 @@ func (r *MantleBackupReconciler) reconcileLocalBackup(ctx context.Context, backu
 		return ctrl.Result{}, nil
 	}
 
-	if err := r.expire(ctx, backup); err != nil {
-		return ctrl.Result{}, err
-	}
-
 	if !backup.IsSnapshotCaptured() {
 		if err := r.provisionRBDSnapshot(ctx, backup, target); err != nil {
 			return ctrl.Result{}, err
@@ -445,6 +502,10 @@ func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, back
 	result, err := r.reconcileLocalBackup(ctx, backup)
 	if err != nil || !result.IsZero() {
 		return result, err
+	}
+
+	if !backup.DeletionTimestamp.IsZero() {
+		return ctrl.Result{}, nil
 	}
 
 	if !backup.IsVerifiedTrue() && !backup.IsVerifiedFalse() {
@@ -462,6 +523,10 @@ func (r *MantleBackupReconciler) reconcileAsPrimary(ctx context.Context, backup 
 	result, err := r.reconcileLocalBackup(ctx, backup)
 	if err != nil || !result.IsZero() {
 		return result, err
+	}
+
+	if !backup.DeletionTimestamp.IsZero() {
+		return ctrl.Result{}, nil
 	}
 
 	if !backup.IsVerifiedTrue() && !backup.IsVerifiedFalse() {
@@ -499,6 +564,10 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 		return ctrl.Result{}, nil
 	}
 
+	if stopProcessing, err := r.expire(ctx, backup); stopProcessing || err != nil {
+		return requeueReconciliation(), err
+	}
+
 	target, result, err := r.getSnapshotTarget(ctx, backup)
 	notFound := aerrors.IsNotFound(err)
 	switch {
@@ -511,14 +580,10 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 		return result, nil
 	}
 	if !backup.DeletionTimestamp.IsZero() {
-		return r.finalizeSecondary(ctx, backup, target, notFound)
+		return r.finalizeSecondary(ctx, backup)
 	}
 	// Only the NotFound error reaches this point, so return it as is.
 	if notFound {
-		return ctrl.Result{}, err
-	}
-
-	if err := r.expire(ctx, backup); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -864,11 +929,10 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 		return err
 	}
 
-	snapshot, err := r.createRBDSnapshot(ctx, target.poolName, target.imageName, backup)
-	if err != nil {
-		return err
-	}
-
+	// Save PVManifest and PVCManifest before creating the RBD snapshot.
+	// This guarantees that removeRBDSnapshotFromBackup can locate and remove
+	// the snapshot even if the controller crashes after createRBDSnapshot but
+	// before the subsequent updateStatus that saves SnapID.
 	if err := updateStatus(ctx, r.Client, backup, func() error {
 		pvcJs, err := json.Marshal(target.pvc)
 		if err != nil {
@@ -886,6 +950,19 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 		}
 		backup.Status.PVManifest = string(pvJs)
 
+		return nil
+	}); err != nil {
+		logger.Error(err, "failed to update MantleBackup status", "status", backup.Status)
+
+		return err
+	}
+
+	snapshot, err := r.createRBDSnapshot(ctx, target.poolName, target.imageName, backup)
+	if err != nil {
+		return err
+	}
+
+	if err := updateStatus(ctx, r.Client, backup, func() error {
 		backup.Status.SnapID = &snapshot.Id
 		backup.Status.CreatedAt = metav1.NewTime(snapshot.Timestamp.Time)
 		backup.Status.SnapSize = &snapshot.Size
@@ -922,8 +999,6 @@ func isCreatedWhenMantleControllerWasSecondary(backup *mantlev1.MantleBackup) bo
 func (r *MantleBackupReconciler) finalizeStandalone(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
-	target *snapshotTarget,
-	targetPVCNotFound bool,
 ) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	if _, ok := backup.GetAnnotations()[annotDiffTo]; ok {
@@ -941,11 +1016,8 @@ func (r *MantleBackupReconciler) finalizeStandalone(
 		return result, err
 	}
 
-	if !targetPVCNotFound {
-		err := r.removeRBDSnapshot(ctx, target.poolName, target.imageName, backup.Name)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
+	if err := r.removeRBDSnapshotFromBackup(ctx, backup); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	controllerutil.RemoveFinalizer(backup, MantleBackupFinalizerName)
@@ -962,8 +1034,6 @@ func (r *MantleBackupReconciler) finalizeStandalone(
 func (r *MantleBackupReconciler) finalizeSecondary(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
-	target *snapshotTarget,
-	targetPVCNotFound bool,
 ) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	if _, ok := backup.GetAnnotations()[annotDiffTo]; ok {
@@ -979,11 +1049,8 @@ func (r *MantleBackupReconciler) finalizeSecondary(
 		return result, err
 	}
 
-	if !targetPVCNotFound {
-		err := r.removeRBDSnapshot(ctx, target.poolName, target.imageName, backup.Name)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
+	if err := r.removeRBDSnapshotFromBackup(ctx, backup); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	controllerutil.RemoveFinalizer(backup, MantleBackupFinalizerName)
@@ -3221,9 +3288,43 @@ func (r *MantleBackupReconciler) deleteMiddleSnapshots(backup *mantlev1.MantleBa
 		return fmt.Errorf("failed to get pool and image from status.PVManifest: %w", err)
 	}
 
-	snaps, err := r.ceph.RBDSnapLs(pool, image)
+	imageNames, err := r.ceph.RBDLs(pool)
 	if err != nil {
-		return fmt.Errorf("failed to list snapshots: %s: %s: %w", pool, image, err)
+		return fmt.Errorf("failed to list RBD images: %w", err)
+	}
+
+	var imageID string
+	var snaps []ceph.RBDSnapshot
+	if slices.Contains(imageNames, image) {
+		info, err := r.ceph.RBDInfo(pool, image)
+		if err != nil {
+			return fmt.Errorf("failed to get RBD image info: %s: %s: %w", pool, image, err)
+		}
+		imageID = info.ID
+		snaps, err = r.ceph.RBDSnapLs(pool, image)
+		if err != nil {
+			return fmt.Errorf("failed to list snapshots: %s: %s: %w", pool, image, err)
+		}
+	} else {
+		trashList, err := r.ceph.RBDTrashLs(pool)
+		if err != nil {
+			return fmt.Errorf("failed to list RBD trash: %w", err)
+		}
+		for _, trash := range trashList {
+			if trash.Name == image {
+				imageID = trash.ID
+
+				break
+			}
+		}
+		if imageID == "" {
+			// Image not found in active images or trash; snapshots are already gone.
+			return nil
+		}
+		snaps, err = r.ceph.RBDSnapLsByID(pool, imageID)
+		if err != nil {
+			return fmt.Errorf("failed to list snapshots by ID: %s: %s: %w", pool, imageID, err)
+		}
 	}
 
 	for i := range numParts {
@@ -3233,7 +3334,7 @@ func (r *MantleBackupReconciler) deleteMiddleSnapshots(backup *mantlev1.MantleBa
 		if snapIndex == -1 {
 			continue
 		}
-		if err := r.ceph.RBDSnapRm(pool, image, snaps[snapIndex].Name); err != nil {
+		if err := r.ceph.RBDSnapRm(pool, imageID, snaps[snapIndex].Name); err != nil {
 			return fmt.Errorf("failed to remove snapshot: %s: %s: %w", pool, image, err)
 		}
 	}

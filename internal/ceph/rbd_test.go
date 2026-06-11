@@ -309,6 +309,59 @@ var _ = Describe("CephCmd.RBDRm", func() {
 	})
 })
 
+var _ = Describe("CephCmd.RBDTrashLs", func() {
+	var t reporter
+
+	It("should return the correct list of trashed images", func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		m := NewMockcommand(ctrl)
+		m.EXPECT().
+			execute("rbd", "trash", "ls", "-p", "pool", "--format", "json").
+			Return([]byte(`[
+				{"id": "abc123", "name": "csi-vol-d2556cc0-5ba6-4e70-b966-56522225bdc5"},
+				{"id": "def456", "name": "csi-vol-f2a83492-3cf2-48e7-8500-804754c42ce6"}
+			]`), []byte{}, nil)
+
+		cmd := mockedCephCmd(m)
+		infos, err := cmd.RBDTrashLs("pool")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(infos).To(HaveLen(2))
+		Expect(infos[0].ID).To(Equal("abc123"))
+		Expect(infos[0].Name).To(Equal("csi-vol-d2556cc0-5ba6-4e70-b966-56522225bdc5"))
+		Expect(infos[1].ID).To(Equal("def456"))
+		Expect(infos[1].Name).To(Equal("csi-vol-f2a83492-3cf2-48e7-8500-804754c42ce6"))
+	})
+
+	It("should return empty list, if trash is empty", func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		m := NewMockcommand(ctrl)
+		m.EXPECT().
+			execute("rbd", "trash", "ls", "-p", "pool", "--format", "json").
+			Return([]byte(`[]`), []byte{}, nil)
+
+		cmd := mockedCephCmd(m)
+		infos, err := cmd.RBDTrashLs("pool")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(infos).To(BeEmpty())
+	})
+
+	It("should return an error, if the command failed", func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		m := NewMockcommand(ctrl)
+		m.EXPECT().execute(gomock.Any()).Return([]byte{}, []byte("error!"), errors.New("error"))
+
+		cmd := mockedCephCmd(m)
+		_, err := cmd.RBDTrashLs("pool")
+		Expect(err).To(HaveOccurred())
+	})
+})
+
 var _ = Describe("CephCmd.RBDSnapCreate", func() {
 	var t reporter
 
@@ -378,6 +431,45 @@ var _ = Describe("CephCmd.RBDSnapLs", func() {
 	})
 })
 
+var _ = Describe("CephCmd.RBDSnapLsByID", func() {
+	var t reporter
+
+	It("should return the correct RBDSnapshot", func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		m := NewMockcommand(ctrl)
+		m.EXPECT().
+			execute("rbd", "snap", "ls", "-p", "pool", "--image-id", "image-id", "--format", "json").
+			Return([]byte(`
+		[{"id":4,"name":"test","size":10737418240,"protected":"false","timestamp":"Tue Oct  1 10:11:31 2024"}]
+		`), []byte{}, nil)
+
+		cmd := mockedCephCmd(m)
+		snaps, err := cmd.RBDSnapLsByID("pool", "image-id")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(snaps).To(HaveLen(1))
+		snap := snaps[0]
+		Expect(snap.Id).To(Equal(int(4)))
+		Expect(snap.Name).To(Equal("test"))
+		Expect(snap.Size).To(Equal(int64(10737418240)))
+		Expect(snap.Protected).To(BeFalse())
+		Expect(snap.Timestamp).To(Equal(NewRBDTimeStamp(time.Date(2024, 10, 1, 10, 11, 31, 0, time.UTC))))
+	})
+
+	It("should return an error, if the command failed", func() {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		m := NewMockcommand(ctrl)
+		m.EXPECT().execute(gomock.Any()).Return([]byte{}, []byte("error!"), errors.New("error"))
+
+		cmd := mockedCephCmd(m)
+		_, err := cmd.RBDSnapLsByID("pool", "image-id")
+		Expect(err).To(HaveOccurred())
+	})
+})
+
 var _ = Describe("CephCmd.RBDSnapRm", func() {
 	var t reporter
 
@@ -387,11 +479,11 @@ var _ = Describe("CephCmd.RBDSnapRm", func() {
 
 		m := NewMockcommand(ctrl)
 		m.EXPECT().
-			execute("rbd", "snap", "rm", "pool/image@snap").
+			execute("rbd", "snap", "rm", "-p", "pool", "--image-id", "image-id", "--snap", "snap").
 			Return([]byte{}, []byte{}, nil)
 
 		cmd := mockedCephCmd(m)
-		err := cmd.RBDSnapRm("pool", "image", "snap")
+		err := cmd.RBDSnapRm("pool", "image-id", "snap")
 		Expect(err).ToNot(HaveOccurred())
 	})
 
@@ -403,7 +495,7 @@ var _ = Describe("CephCmd.RBDSnapRm", func() {
 		m.EXPECT().execute(gomock.Any()).Return([]byte{}, []byte("error!"), errors.New("error"))
 
 		cmd := mockedCephCmd(m)
-		err := cmd.RBDSnapRm("pool", "image", "snap")
+		err := cmd.RBDSnapRm("pool", "image-id", "snap")
 		Expect(err).To(HaveOccurred())
 	})
 })

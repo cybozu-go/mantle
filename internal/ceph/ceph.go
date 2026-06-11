@@ -45,6 +45,11 @@ type RBDSnapshot struct {
 	Timestamp RBDTimeStamp `json:"timestamp,omitzero"`
 }
 
+type RBDTrashInfo struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 type CephCmd interface {
 	RBDClone(pool, srcImage, srcSnap, dstImage, features string) error
 	RBDInfo(pool, image string) (*RBDImageInfo, error)
@@ -54,10 +59,12 @@ type CephCmd interface {
 	RBDLockRm(pool, image string, lock *RBDLock) error
 	RBDRm(pool, image string) error
 	RBDTrashMv(pool, image string) error
+	RBDTrashLs(pool string) ([]*RBDTrashInfo, error)
 	CephRBDTaskAddTrashRemove(pool, image string) error
 	RBDSnapCreate(pool, image, snap string) error
 	RBDSnapLs(pool, image string) ([]RBDSnapshot, error)
-	RBDSnapRm(pool, image, snap string) error
+	RBDSnapLsByID(pool, imageID string) ([]RBDSnapshot, error)
+	RBDSnapRm(pool, imageID, snap string) error
 }
 
 type cephCmdImpl struct {
