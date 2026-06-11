@@ -142,8 +142,11 @@ spec:
                 - type: integer
                 - type: string
                 description: |-
-                  'transferPartSize' indicates the size of each part of the data
-                  transferred from the primary to the secondary.
+                  'transferPartSize' indicates the size of each part of the data transferred
+                  from the primary to the secondary.
+                  Some jobs read the part size from this field rather than directly from the
+                  mantle-controller command-line argument. This ensures that the part size
+                  does not change while these jobs for a given MantleBackup are running.
                 pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                 x-kubernetes-int-or-string: true
             type: object

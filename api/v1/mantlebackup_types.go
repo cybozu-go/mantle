@@ -51,8 +51,11 @@ type MantleBackupStatus struct {
 	// 'snapSize' indicates SIZE of `rbd snap ls`
 	SnapSize *int64 `json:"snapSize,omitempty"`
 
-	// 'transferPartSize' indicates the size of each part of the data
-	// transferred from the primary to the secondary.
+	// 'transferPartSize' indicates the size of each part of the data transferred
+	// from the primary to the secondary.
+	// Some jobs read the part size from this field rather than directly from the
+	// mantle-controller command-line argument. This ensures that the part size
+	// does not change while these jobs for a given MantleBackup are running.
 	TransferPartSize *resource.Quantity `json:"transferPartSize,omitempty"`
 }
 

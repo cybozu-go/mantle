@@ -60,6 +60,9 @@ write_endpoints
 if [ -e "/mantle/export-${PART_NUM}.bin" ]; then
     exit
 fi
+# The export-diff output is first saved to a temporary file and then renamed to the final file used for
+# uploading. This makes it easy to detect whether the job was interrupted during export-diff when the
+# export job is restarted after an interruption.
 rm -f /mantle/tmp.bin
 if [ -z "${FROM_SNAP_NAME}" ]; then
     rbd export-diff \
