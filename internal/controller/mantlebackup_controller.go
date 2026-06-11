@@ -196,7 +196,7 @@ func (r *MantleBackupReconciler) removeRBDSnapshot(ctx context.Context, poolName
 	if rmErr != nil {
 		snapshots, lsErr := r.ceph.RBDSnapLsByID(poolName, imageID)
 		if lsErr != nil {
-			return fmt.Errorf("failed to list RBD snapshots by image ID: %w", lsErr)
+			return fmt.Errorf("failed to ensure rbd snapshot is removed: %s/%s@%s: %w", poolName, imageID, snapshotName, errors.Join(rmErr, lsErr))
 		}
 		for _, snap := range snapshots {
 			if snap.Name == snapshotName {

@@ -6,6 +6,7 @@ import (
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/test/util"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -54,6 +55,8 @@ func NewResourceManager(client client.Client) (*ResourceManager, error) {
 
 // EnvTest cannot delete namespace. So, we have to use another new namespace.
 func (r *ResourceManager) CreateNamespace() string {
+	GinkgoHelper()
+
 	name := util.GetUniqueName("test-")
 	ns := corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
@@ -217,6 +220,8 @@ func (r *ResourceManager) CreateUniqueBackupFor(ctx context.Context, pvc *corev1
 }
 
 func (r *ResourceManager) WaitForBackupSnapshotCaptured(ctx context.Context, backup *mantlev1.MantleBackup) {
+	GinkgoHelper()
+
 	EventuallyWithOffset(1, func(g Gomega, ctx context.Context) {
 		err := r.client.Get(ctx, types.NamespacedName{Name: backup.Name, Namespace: backup.Namespace}, backup)
 		g.Expect(err).NotTo(HaveOccurred())
@@ -226,6 +231,8 @@ func (r *ResourceManager) WaitForBackupSnapshotCaptured(ctx context.Context, bac
 }
 
 func (r *ResourceManager) WaitForBackupSyncedToRemote(ctx context.Context, backup *mantlev1.MantleBackup) {
+	GinkgoHelper()
+
 	EventuallyWithOffset(1, func(g Gomega, ctx context.Context) {
 		err := r.client.Get(ctx, types.NamespacedName{Name: backup.Name, Namespace: backup.Namespace}, backup)
 		g.Expect(err).NotTo(HaveOccurred())
@@ -258,6 +265,8 @@ func (r *ResourceManager) ChangeJobCondition(ctx context.Context, job *batchv1.J
 }
 
 func (r *ResourceManager) DeletePVC(ctx context.Context, pvc *corev1.PersistentVolumeClaim) {
+	GinkgoHelper()
+
 	err := r.client.Delete(ctx, pvc)
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -286,6 +295,8 @@ type ObjectConstraint[T any] interface {
 // These functions cannot belong to ResourceManager because they use generics.
 
 func CheckCreatedEventually[T any, OC ObjectConstraint[T]](ctx context.Context, client client.Client, name, namespace string) {
+	GinkgoHelper()
+
 	var obj T
 	EventuallyWithOffset(1, func(g Gomega, ctx context.Context) {
 		err := client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, OC(&obj))
@@ -294,6 +305,8 @@ func CheckCreatedEventually[T any, OC ObjectConstraint[T]](ctx context.Context, 
 }
 
 func CheckDeletedEventually[T any, OC ObjectConstraint[T]](ctx context.Context, client client.Client, name, namespace string) {
+	GinkgoHelper()
+
 	var obj T
 	EventuallyWithOffset(1, func(g Gomega, ctx context.Context) {
 		err := client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, OC(&obj))
