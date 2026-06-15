@@ -50,6 +50,12 @@ func GetMBCCronJobName(mbc *mantlev1.MantleBackupConfig) string {
 	return MantleBackupConfigCronJobNamePrefix + string(mbc.UID)
 }
 
+// GetMBCUIDFromCronJobName extracts the MantleBackupConfig UID from a CronJob name.
+// It returns the UID and true if the name has the expected prefix, or ("", false) otherwise.
+func GetMBCUIDFromCronJobName(cronJobName string) (string, bool) {
+	return strings.CutPrefix(cronJobName, MantleBackupConfigCronJobNamePrefix)
+}
+
 // MBCPrimaryReconciler is a reconciler for MantleBackupConfig resources
 // running on the primary cluster.
 type MBCPrimaryReconciler struct {
