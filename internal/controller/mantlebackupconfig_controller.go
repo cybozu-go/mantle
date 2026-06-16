@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 	"sync"
 
 	"k8s.io/apimachinery/pkg/fields"
@@ -137,8 +136,7 @@ func (r *MantleBackupConfigReconciler) SetupWithManager(mgr ctrl.Manager) error 
 			&batchv1.CronJob{},
 			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, cronJob client.Object) []reconcile.Request {
 				// Extract the MantleBackupConfig's UID, look it up, and enqueue its reconciliation.
-				name := cronJob.GetName()
-				uid, found := strings.CutPrefix(name, domain.MantleBackupConfigCronJobNamePrefix)
+				uid, found := domain.GetMBCUIDFromCronJobName(cronJob.GetName())
 				if !found {
 					return []reconcile.Request{}
 				}

@@ -344,3 +344,28 @@ func TestMBCPrimaryReconciler_Finalize_NotResponsibleStorageClass(t *testing.T) 
 	require.Equal(t, origMBC, mbc)
 	require.Empty(t, reconciler.Operations.TakeAll())
 }
+
+func TestGetMBCUIDFromCronJobName_ValidName(t *testing.T) {
+	t.Parallel()
+
+	uid, found := domain.GetMBCUIDFromCronJobName(domain.MantleBackupConfigCronJobNamePrefix + "some-uid-value")
+	require.True(t, found)
+	require.Equal(t, "some-uid-value", uid)
+}
+
+func TestGetMBCUIDFromCronJobName_InvalidName(t *testing.T) {
+	t.Parallel()
+
+	_, found := domain.GetMBCUIDFromCronJobName("other-prefix-some-uid")
+	require.False(t, found)
+}
+
+func TestGetMBCUIDFromCronJobName_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	mbc := newMBC()
+	cronJobName := domain.GetMBCCronJobName(mbc)
+	uid, found := domain.GetMBCUIDFromCronJobName(cronJobName)
+	require.True(t, found)
+	require.Equal(t, string(mbc.UID), uid)
+}
