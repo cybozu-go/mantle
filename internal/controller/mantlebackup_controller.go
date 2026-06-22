@@ -2326,6 +2326,12 @@ func (r *MantleBackupReconciler) reconcileZeroOutJob(
 		return ctrl.Result{}, nil
 	}
 
+	// To run the zeroout job, the backup target volume must be accessed as a block device.
+	// In most cases, the backup target volume is accessed via filesystem type PV, and it
+	// cannot be accesses as a block device. Therefore, we use ceph-csi static PVC/PV
+	// to create a separate PVC/PV that accesses the same underlying RBD image as
+	// a block device.
+	// ref. https://github.com/ceph/ceph-csi/blob/8a82b6e76f2c620fceec2d49659d00c97c6ddbbe/docs/static-pvc.md
 	if err := r.createStaticPVIfNotExists(
 		ctx,
 		snapshotTarget.pv,
@@ -2499,6 +2505,17 @@ func (r *MantleBackupReconciler) createStaticPVCIfNotExists(
 	return nil
 }
 
+// createOrUpdateZeroOutJob creates or updates a Job that runs `blkdiscard -z`
+// on the backup target volume before a full backup. This achieves the following:
+//   - Zero-fills the volume to erase any stale data that existed before the backup.
+//   - Releases the storage space that was allocated for that stale data.
+//   - Eliminates the risk of stale data causing issues in subsequent processing.
+//
+// The reason `blkdiscard -z` is used instead of plain `blkdiscard`:
+//   - `blkdiscard` does not guarantee that existing data is actually erased.
+//   - `blkdiscard -z`, like `blkdiscard`, releases all regions, but also zero-fills them.
+//
+// ref. https://www.spinics.net/lists/ceph-devel/msg61800.html
 func (r *MantleBackupReconciler) createOrUpdateZeroOutJob(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
