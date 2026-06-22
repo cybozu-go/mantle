@@ -2,8 +2,9 @@
 CONTROLLER_TOOLS_VERSION := v0.20.1
 # https://github.com/helm/helm/releases
 HELM_VERSION := 4.2.0
-# It is set by CI using the environment variable, use conditional assignment.
-KUBERNETES_VERSION := 1.35.4
+# Use a Kubernetes version supported by the minikube version below.
+# The patch version may differ from the k8s patch version in go.mod.
+KUBERNETES_VERSION := 1.35.1
 # https://github.com/kubernetes-sigs/kustomize/releases
 KUSTOMIZE_VERSION := v5.8.1
 # https://github.com/kubernetes/minikube/releases

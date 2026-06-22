@@ -25,7 +25,7 @@ jobs:
       fail-fast: false
       matrix:
         kubernetes-version:
-          - 1.35.4
+          - 1.35.1
         backup-transfer-part-size:
           - 3Mi # smaller than the PVC size
         label-filter:
@@ -39,10 +39,10 @@ jobs:
           - "!//" # select unlabelled tests
         include:
           # testing various backup-transfer-part-size
-          - kubernetes-version: 1.35.4
+          - kubernetes-version: 1.35.1
             backup-transfer-part-size: 10Mi # equal to the PVC size
             label-filter: various-transfer-part-size
-          - kubernetes-version: 1.35.4
+          - kubernetes-version: 1.35.1
             backup-transfer-part-size: 200Gi # greater than the PVC size
             label-filter: various-transfer-part-size
 
