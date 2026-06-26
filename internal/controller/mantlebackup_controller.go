@@ -47,6 +47,7 @@ import (
 const (
 	MantleBackupFinalizerName = "mantlebackup.mantle.cybozu.io/finalizer"
 
+	labelClusterID                = "mantle.cybozu.io/cluster-id"
 	labelLocalBackupTargetPVCUID  = "mantle.cybozu.io/local-backup-target-pvc-uid"
 	labelRemoteBackupTargetPVCUID = "mantle.cybozu.io/remote-backup-target-pvc-uid"
 	labelAppNameValue             = "mantle"
@@ -241,24 +242,6 @@ func (r *MantleBackupReconciler) createRBDSnapshot(
 	return snap, nil
 }
 
-func (r *MantleBackupReconciler) checkPVCInManagedCluster(ctx context.Context, pvc *corev1.PersistentVolumeClaim) *reconcileResult {
-	logger := log.FromContext(ctx)
-	clusterID, err := getCephClusterIDFromPVC(ctx, r.Client, pvc)
-	if err != nil {
-		logger.Error(err, "failed to get clusterID from PVC", "namespace", pvc.Namespace, "name", pvc.Name)
-
-		return reconcileFailed("failed to get clusterID from PVC: %w", err)
-	}
-	if clusterID != r.managedCephClusterID {
-		logger.Info("clusterID not matched", "pvc", pvc.Name, "clusterID", clusterID, "managedCephClusterID", r.managedCephClusterID)
-		// If the clusterID of the PVC does not match the managedCephClusterID,
-		// it returns succeedReconcile to skip further processing of this PVC, as it is not managed by this controller.
-		return reconcileSucceeded()
-	}
-
-	return nil
-}
-
 func (r *MantleBackupReconciler) checkPVCBound(ctx context.Context, pvc *corev1.PersistentVolumeClaim) *reconcileResult {
 	logger := log.FromContext(ctx)
 	if pvc.Status.Phase != corev1.ClaimBound {
@@ -291,10 +274,7 @@ func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *
 	var pvc corev1.PersistentVolumeClaim
 	if err := r.Get(ctx, types.NamespacedName{Namespace: pvcNamespace, Name: pvcName}, &pvc); err != nil {
 		if aerrors.IsNotFound(err) {
-			// TODO: When we eventually stop calling `checkPVCInManagedCluster` within `getSnapshotTarget`,
-			// the “PVC not found” error will be replaced with “requeue.”
-			// -> return nil, reconcileRequeue()
-			return nil, nil
+			return nil, reconcileRequeue()
 		}
 
 		logger.Error(err, "failed to get PVC", "namespace", pvcNamespace, "name", pvcName)
@@ -305,10 +285,6 @@ func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *
 	// Return an error if the PVC has been re-created after the first call.
 	if uid, ok := backup.GetLabels()[labelLocalBackupTargetPVCUID]; ok && uid != string(pvc.GetUID()) {
 		return nil, reconcileFailed("PVC UID does not match the backup target")
-	}
-
-	if result := r.checkPVCInManagedCluster(ctx, &pvc); result.shouldReturn() {
-		return nil, result.wrapIfError("failed to check the PVC is in managed cluster")
 	}
 
 	if result := r.checkPVCBound(ctx, &pvc); result.shouldReturn() {
@@ -414,6 +390,11 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
+	if result := r.checkManagedBackup(ctx, &backup); result.shouldReturn() {
+		return result.toCtrlResult()
+	}
+	logger.Info("starting reconciliation", "namespace", backup.Namespace, "name", backup.Name, "backupUID", string(backup.GetUID()))
+
 	switch r.role {
 	case RoleStandalone:
 		return r.reconcileAsStandalone(ctx, &backup).toCtrlResult()
@@ -424,6 +405,42 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	panic("unreachable")
+}
+
+// checkManagedBackup checks if the MantleBackup resource is managed by this controller.
+func (r *MantleBackupReconciler) checkManagedBackup(ctx context.Context, backup *mantlev1.MantleBackup) *reconcileResult {
+	// If the MantleBackup resource has a label indicating that it is managed by this controller.
+	if backup.Labels != nil {
+		if clusterID, ok := backup.Labels[labelClusterID]; ok {
+			if clusterID == r.managedCephClusterID {
+				return nil
+			}
+			// The MantleBackup resource is managed by a different controller, so we return a successful reconcile result to stop further processing.
+			return reconcileSucceeded()
+		}
+	}
+
+	var pvc corev1.PersistentVolumeClaim
+	if err := r.Get(ctx, types.NamespacedName{Namespace: backup.Namespace, Name: backup.Spec.PVC}, &pvc); err != nil {
+		if aerrors.IsNotFound(err) {
+			return reconcileRequeue()
+		}
+
+		return reconcileFailed("failed to get the PVC specified in the MantleBackup resource: %w", err)
+	}
+
+	clusterID, err := getCephClusterIDFromPVC(ctx, r.Client, &pvc)
+	if err != nil {
+		return reconcileFailed("failed to get the Ceph cluster ID from the PVC: %w", err)
+	}
+
+	// If the cluster ID of the PVC does not match the managed Ceph cluster ID, it means that the PVC is not managed by this controller.
+	// In this case, we return a successful reconcile result to stop further processing.
+	if clusterID != r.managedCephClusterID {
+		return reconcileSucceeded()
+	}
+
+	return nil
 }
 
 func (r *MantleBackupReconciler) reconcileLocalBackup(ctx context.Context, backup *mantlev1.MantleBackup) *reconcileResult {
@@ -441,46 +458,41 @@ func (r *MantleBackupReconciler) reconcileLocalBackup(ctx context.Context, backu
 		return result.wrapIfError("failed to expire backup")
 	}
 
+	if !backup.DeletionTimestamp.IsZero() {
+		return r.finalizeStandalone(ctx, backup)
+	}
+
 	target, result := r.getSnapshotTarget(ctx, backup)
 	if result.shouldReturn() {
 		return result.wrapIfError("failed to get snapshot target")
 	}
 
-	if !backup.DeletionTimestamp.IsZero() {
-		return r.finalizeStandalone(ctx, backup)
-	}
-
-	// TODO: When we eventually stop calling `checkPVCInManagedCluster` within `getSnapshotTarget`,
-	// there will be no need to requeue here.
-	// -> remove this block.
-	if target == nil {
-		return reconcileRequeue()
-	}
-
+	updated := false
 	if backup.Labels == nil {
 		backup.Labels = make(map[string]string)
 	}
-
+	if _, ok := backup.Labels[labelClusterID]; !ok {
+		backup.Labels[labelClusterID] = r.managedCephClusterID
+		updated = true
+	}
+	// Attach local-backup-target-pvc-uid label before trying to create a RBD
+	// snapshot corresponding to the given MantleBackup, so that we can make
+	// sure that every MantleBackup that has a RBD snapshot is labelled with
+	// local-backup-target-pvc-uid.
 	if _, ok := backup.Labels[labelLocalBackupTargetPVCUID]; !ok {
 		backup.Labels[labelLocalBackupTargetPVCUID] = string(target.pvc.GetUID())
-
-		if err := r.Update(ctx, backup); err != nil {
-			logger.Error(err, "failed to add label", "label", labelLocalBackupTargetPVCUID)
-
-			return reconcileFailed("failed to add label: %w", err)
-		}
+		updated = true
+	}
+	if controllerutil.AddFinalizer(backup, MantleBackupFinalizerName) {
+		updated = true
 	}
 
-	if !controllerutil.ContainsFinalizer(backup, MantleBackupFinalizerName) {
-		controllerutil.AddFinalizer(backup, MantleBackupFinalizerName)
-
+	if updated {
 		if err := r.Update(ctx, backup); err != nil {
-			logger.Error(err, "failed to add finalizer", "finalizer", MantleBackupFinalizerName)
+			logger.Error(err, "failed to update MantleBackup")
 
-			return reconcileFailed("failed to add finalizer: %w", err)
+			return reconcileFailed("failed to update MantleBackup: %w", err)
 		}
-
-		return nil
 	}
 
 	if !backup.IsSnapshotCaptured() {
@@ -559,20 +571,13 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 		return result.wrapIfError("failed to expire backup")
 	}
 
-	target, result := r.getSnapshotTarget(ctx, backup)
-	if result.shouldReturn() {
-		return result.wrapIfError("failed to get snapshot target")
-	}
-
 	if !backup.DeletionTimestamp.IsZero() {
 		return r.finalizeSecondary(ctx, backup)
 	}
 
-	// TODO: When we eventually stop calling `checkPVCInManagedCluster` within `getSnapshotTarget`,
-	// there will be no need to requeue here.
-	// -> remove this block.
-	if target == nil {
-		return reconcileRequeue()
+	target, result := r.getSnapshotTarget(ctx, backup)
+	if result.shouldReturn() {
+		return result.wrapIfError("failed to get snapshot target")
 	}
 
 	if !backup.IsSnapshotCaptured() {
