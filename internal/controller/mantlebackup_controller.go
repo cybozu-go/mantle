@@ -751,6 +751,7 @@ func (r *MantleBackupReconciler) replicateManifests(
 		annotRemoteUID: string(backup.GetUID()),
 	})
 	backupSent.SetLabels(map[string]string{
+		labelClusterID:                r.managedCephClusterID,
 		labelLocalBackupTargetPVCUID:  resp.GetUid(),
 		labelRemoteBackupTargetPVCUID: string(pvc.GetUID()),
 	})

@@ -43,7 +43,7 @@ var _ = Describe("Replication unit tests", func() {
 			test.ns = resMgr.CreateNamespace()
 
 			test.server = grpc.NewServer()
-			proto.RegisterMantleServiceServer(test.server, NewSecondaryServer(k8sClient))
+			proto.RegisterMantleServiceServer(test.server, NewSecondaryServer(k8sClient, resMgr.ClusterID))
 			l, err := net.Listen("tcp", replicationTestEndpoint)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -105,7 +105,7 @@ func (test *replicationUnitTest) testCreateUpdatePVCAfterResizing() {
 						corev1.ResourceStorage: resource.MustParse("1Gi"),
 					},
 				},
-				StorageClassName: ptr.To("test-sc"),
+				StorageClassName: ptr.To(resMgr.StorageClassName),
 			},
 		}
 
@@ -161,6 +161,7 @@ func (test *replicationUnitTest) newMantleBackup() *mantlev1.MantleBackup {
 			Name:      util.GetUniqueName("test-mb-"),
 			Namespace: test.ns,
 			Labels: map[string]string{
+				labelClusterID:                resMgr.ClusterID,
 				labelRemoteBackupTargetPVCUID: util.GetUniqueName("test-remote-pvc-uid-"),
 				labelLocalBackupTargetPVCUID:  util.GetUniqueName("test-local-pvc-uid-"),
 			},
