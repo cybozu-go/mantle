@@ -236,16 +236,25 @@ func checkCommandlineArgs() error {
 	return nil
 }
 
+func getManagedCephClusterID() (string, error) {
+	managedCephClusterID := os.Getenv("POD_NAMESPACE")
+	if managedCephClusterID == "" {
+		setupLog.Error(errors.New("POD_NAMESPACE is empty"), "POD_NAMESPACE is empty")
+
+		return "", errors.New("POD_NAMESPACE is empty")
+	}
+
+	return managedCephClusterID, nil
+}
+
 func setupReconcilers(
 	mgr manager.Manager,
 	primarySettings *controller.PrimarySettings,
 	secondarySettings *controller.SecondarySettings,
 ) error {
-	managedCephClusterID := os.Getenv("POD_NAMESPACE")
-	if managedCephClusterID == "" {
-		setupLog.Error(errors.New("POD_NAMESPACE is empty"), "POD_NAMESPACE is empty")
-
-		return errors.New("POD_NAMESPACE is empty")
+	managedCephClusterID, err := getManagedCephClusterID()
+	if err != nil {
+		return fmt.Errorf("failed to get managed Ceph cluster ID: %w", err)
 	}
 
 	podImage := os.Getenv("POD_IMAGE")
@@ -458,7 +467,11 @@ func setupSecondary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup
 	}
 	serv := grpc.NewServer(grpcArgs...)
 
-	proto.RegisterMantleServiceServer(serv, controller.NewSecondaryServer(mgr.GetClient()))
+	managedCephClusterID, err := getManagedCephClusterID()
+	if err != nil {
+		return fmt.Errorf("failed to get managed Ceph cluster ID: %w", err)
+	}
+	proto.RegisterMantleServiceServer(serv, controller.NewSecondaryServer(mgr.GetClient(), managedCephClusterID))
 
 	l, err := net.Listen("tcp", mantleServiceEndpoint)
 	if err != nil {
