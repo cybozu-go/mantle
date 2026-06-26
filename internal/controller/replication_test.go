@@ -43,7 +43,7 @@ var _ = Describe("Replication unit tests", func() {
 			test.ns = resMgr.CreateNamespace()
 
 			test.server = grpc.NewServer()
-			proto.RegisterMantleServiceServer(test.server, NewSecondaryServer(k8sClient))
+			proto.RegisterMantleServiceServer(test.server, NewSecondaryServer(k8sClient, "TODO"))
 			l, err := net.Listen("tcp", replicationTestEndpoint)
 			Expect(err).NotTo(HaveOccurred())
 
