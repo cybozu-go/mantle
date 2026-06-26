@@ -904,22 +904,6 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 ) *reconcileResult {
 	logger := log.FromContext(ctx)
 
-	// Attach local-backup-target-pvc-uid label before trying to create a RBD
-	// snapshot corresponding to the given MantleBackup, so that we can make
-	// sure that every MantleBackup that has a RBD snapshot is labelled with
-	// local-backup-target-pvc-uid.
-	key := client.ObjectKeyFromObject(backup)
-	if err := r.Get(ctx, key, backup); err != nil {
-		return reconcileFailed("failed to get MantleBackup: %w", err)
-	}
-	if backup.Labels == nil {
-		backup.Labels = map[string]string{}
-	}
-	backup.Labels[labelLocalBackupTargetPVCUID] = string(target.pvc.GetUID())
-	if err := r.Update(ctx, backup); err != nil {
-		return reconcileFailed("failed to update MantleBackup: %w", err)
-	}
-
 	// Save PVManifest and PVCManifest before creating the RBD snapshot.
 	// This guarantees that removeRBDSnapshotFromBackup can locate and remove
 	// the snapshot even if the controller crashes after createRBDSnapshot but
