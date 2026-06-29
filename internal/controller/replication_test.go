@@ -80,34 +80,38 @@ var _ = Describe("Replication unit tests", func() {
 		})
 	})
 
-	Context("CreateUpdatePVC", test.testCreateUpdatePVCAfterResizing)
+	Context("CreateUpdatePVC", test.testCreateUpdatePVC)
 	Context("CreateMantleBackup", test.testCreateMantleBackup)
 })
 
-func (test *replicationUnitTest) testCreateUpdatePVCAfterResizing() {
+func (test *replicationUnitTest) newRequestPVC() *corev1.PersistentVolumeClaim {
+	return &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      util.GetUniqueName("test-pvc-"),
+			Namespace: test.ns,
+			Annotations: map[string]string{
+				annotRemoteUID: util.GetUniqueName("test-remote-uid-"),
+			},
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: resource.MustParse("1Gi"),
+				},
+			},
+			StorageClassName: ptr.To(resMgr.StorageClassName),
+		},
+	}
+}
+
+func (test *replicationUnitTest) testCreateUpdatePVC() {
 	// CSATEST-1492
 	It("calls CreateOrUpdatePVC twice with the different PVC sizes and should not update the PVC size", func() {
 		ctx := context.Background()
 
-		srcPVC := &corev1.PersistentVolumeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-pvc",
-				Namespace: test.ns,
-				Annotations: map[string]string{
-					annotRemoteUID: "test-uid",
-					"dummy":        "test-1",
-				},
-			},
-			Spec: corev1.PersistentVolumeClaimSpec{
-				AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
-				Resources: corev1.VolumeResourceRequirements{
-					Requests: corev1.ResourceList{
-						corev1.ResourceStorage: resource.MustParse("1Gi"),
-					},
-				},
-				StorageClassName: ptr.To(resMgr.StorageClassName),
-			},
-		}
+		srcPVC := test.newRequestPVC()
+		srcPVC.Annotations["dummy"] = "test-1"
 
 		By("creating a PVC")
 		pvcRaw, err := json.Marshal(srcPVC)
@@ -144,6 +148,42 @@ func (test *replicationUnitTest) testCreateUpdatePVCAfterResizing() {
 		Expect(pvc.Annotations["dummy"]).To(Equal("test-2"))
 		// the storage size should not be updated
 		Expect(pvc.Spec.Resources.Requests.Storage().String()).To(Equal("1Gi"))
+	})
+
+	DescribeTable("should reject an invalid request",
+		func(ctx SpecContext, mutate func(*corev1.PersistentVolumeClaim)) {
+			pvc := test.newRequestPVC()
+			mutate(pvc)
+
+			pvcRaw, err := json.Marshal(pvc)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = test.client.CreateOrUpdatePVC(ctx, &proto.CreateOrUpdatePVCRequest{Pvc: pvcRaw})
+			Expect(err).To(HaveOccurred())
+		},
+		Entry("when the remote-uid annotation is missing", func(pvc *corev1.PersistentVolumeClaim) {
+			delete(pvc.Annotations, annotRemoteUID)
+		}),
+		Entry("when the cluster-id derived from the StorageClass does not set", func(pvc *corev1.PersistentVolumeClaim) {
+			pvc.Spec.StorageClassName = nil
+		}),
+		Entry("when the cluster-id(StorageClass) is different from the managed one", func(pvc *corev1.PersistentVolumeClaim) {
+			pvc.Spec.StorageClassName = ptr.To(resMgr.StorageClassNameAnother)
+		}),
+	)
+
+	It("should reject a remote-uid annotation different from the existing one", func(ctx SpecContext) {
+		pvc := test.newRequestPVC()
+		pvcRaw, err := json.Marshal(pvc)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = test.client.CreateOrUpdatePVC(ctx, &proto.CreateOrUpdatePVCRequest{Pvc: pvcRaw})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Update the same PVC with a different remote-uid.
+		pvc.Annotations[annotRemoteUID] = util.GetUniqueName("test-different-uid-")
+		pvcRaw, err = json.Marshal(pvc)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = test.client.CreateOrUpdatePVC(ctx, &proto.CreateOrUpdatePVCRequest{Pvc: pvcRaw})
+		Expect(err).To(HaveOccurred())
 	})
 }
 
@@ -299,7 +339,7 @@ func (test *replicationUnitTest) testCreateMantleBackup() {
 		Expect(err).NotTo(HaveOccurred())
 
 		// Modify the PVC UID label
-		mb.Labels[labelLocalBackupTargetPVCUID] = "different-uid"
+		mb.Labels[labelLocalBackupTargetPVCUID] = util.GetUniqueName("test-different-uid-")
 		mbJson, err = json.Marshal(mb)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -324,7 +364,7 @@ func (test *replicationUnitTest) testCreateMantleBackup() {
 		Expect(err).NotTo(HaveOccurred())
 
 		// Modify the remote UID annotation
-		mb.Annotations[annotRemoteUID] = "different-uid"
+		mb.Annotations[annotRemoteUID] = util.GetUniqueName("test-different-uid-")
 		mbJson, err = json.Marshal(mb)
 		Expect(err).NotTo(HaveOccurred())
 
