@@ -77,8 +77,7 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 	Expect(err).NotTo(HaveOccurred())
 
 	By("Setup common resources")
-	resMgr, err = testutil.NewResourceManager(k8sClient)
-	Expect(err).NotTo(HaveOccurred())
+	resMgr = testutil.NewResourceManager(ctx, k8sClient)
 
 	validator = &VolumeAttachmentCustomValidator{
 		client: k8sClient,
