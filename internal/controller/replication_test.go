@@ -327,53 +327,72 @@ func (test *replicationUnitTest) testCreateMantleBackup() {
 		test.expectPersistedMantleBackup(ctx, mb)
 	})
 
-	It("should reject PVC UID label different from existing one", func(ctx SpecContext) {
-		// Arrange
-		mb := test.newMantleBackup()
-		mbJson, err := json.Marshal(mb)
-		Expect(err).NotTo(HaveOccurred())
+	// Each Entry mutates a valid MantleBackup so that it is malformed, then expects
+	// the create request to be rejected.
+	DescribeTable("rejects a malformed MantleBackup",
+		func(ctx SpecContext, mutate func(*mantlev1.MantleBackup)) {
+			mb := test.newMantleBackup()
+			mutate(mb)
 
-		_, err = test.client.CreateMantleBackup(ctx, &proto.CreateMantleBackupRequest{
-			MantleBackup: mbJson,
-		})
-		Expect(err).NotTo(HaveOccurred())
+			mbJson, err := json.Marshal(mb)
+			Expect(err).NotTo(HaveOccurred())
 
-		// Modify the PVC UID label
-		mb.Labels[labelLocalBackupTargetPVCUID] = util.GetUniqueName("test-different-uid-")
-		mbJson, err = json.Marshal(mb)
-		Expect(err).NotTo(HaveOccurred())
+			_, err = test.client.CreateMantleBackup(ctx, &proto.CreateMantleBackupRequest{
+				MantleBackup: mbJson,
+			})
+			Expect(err).To(HaveOccurred())
+		},
+		Entry("without the cluster ID label",
+			func(mb *mantlev1.MantleBackup) { delete(mb.Labels, labelClusterID) }),
+		Entry("with a different cluster ID label",
+			func(mb *mantlev1.MantleBackup) {
+				mb.Labels[labelClusterID] = util.GetUniqueName("test-different-cluster-id-")
+			}),
+		Entry("without the remote PVC UID label",
+			func(mb *mantlev1.MantleBackup) { delete(mb.Labels, labelRemoteBackupTargetPVCUID) }),
+		Entry("without the local PVC UID label",
+			func(mb *mantlev1.MantleBackup) { delete(mb.Labels, labelLocalBackupTargetPVCUID) }),
+		Entry("without any labels",
+			func(mb *mantlev1.MantleBackup) { mb.Labels = map[string]string{} }),
+		Entry("without any annotations",
+			func(mb *mantlev1.MantleBackup) { mb.Annotations = map[string]string{} }),
+		Entry("without the remote UID annotation",
+			func(mb *mantlev1.MantleBackup) {
+				// Keep the annotations map non-nil (a nil map would be rejected by the
+				// nil check instead of the dedicated annotation check) by replacing it
+				// with one that lacks annotRemoteUID.
+				mb.Annotations = map[string]string{"mantle.cybozu.io/dummy": "x"}
+			}),
+	)
 
-		// Act
-		_, err = test.client.CreateMantleBackup(ctx, &proto.CreateMantleBackupRequest{
-			MantleBackup: mbJson,
-		})
+	// Each Entry first creates a valid MantleBackup, then mutates it so that it
+	// conflicts with the persisted one, and expects the second create to be rejected.
+	DescribeTable("rejects a MantleBackup conflicting with the existing one",
+		func(ctx SpecContext, mutate func(*mantlev1.MantleBackup)) {
+			mb := test.newMantleBackup()
+			mbJson, err := json.Marshal(mb)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = test.client.CreateMantleBackup(ctx, &proto.CreateMantleBackupRequest{
+				MantleBackup: mbJson,
+			})
+			Expect(err).NotTo(HaveOccurred())
 
-		// Assert
-		Expect(err).To(HaveOccurred())
-	})
+			mutate(mb)
 
-	It("should reject remote UID annotation different from existing one", func(ctx SpecContext) {
-		// Arrange
-		mb := test.newMantleBackup()
-		mbJson, err := json.Marshal(mb)
-		Expect(err).NotTo(HaveOccurred())
-
-		_, err = test.client.CreateMantleBackup(ctx, &proto.CreateMantleBackupRequest{
-			MantleBackup: mbJson,
-		})
-		Expect(err).NotTo(HaveOccurred())
-
-		// Modify the remote UID annotation
-		mb.Annotations[annotRemoteUID] = util.GetUniqueName("test-different-uid-")
-		mbJson, err = json.Marshal(mb)
-		Expect(err).NotTo(HaveOccurred())
-
-		// Act
-		_, err = test.client.CreateMantleBackup(ctx, &proto.CreateMantleBackupRequest{
-			MantleBackup: mbJson,
-		})
-
-		// Assert
-		Expect(err).To(HaveOccurred())
-	})
+			mbJson, err = json.Marshal(mb)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = test.client.CreateMantleBackup(ctx, &proto.CreateMantleBackupRequest{
+				MantleBackup: mbJson,
+			})
+			Expect(err).To(HaveOccurred())
+		},
+		Entry("with a different local PVC UID label",
+			func(mb *mantlev1.MantleBackup) {
+				mb.Labels[labelLocalBackupTargetPVCUID] = util.GetUniqueName("test-different-uid-")
+			}),
+		Entry("with a different remote UID annotation",
+			func(mb *mantlev1.MantleBackup) {
+				mb.Annotations[annotRemoteUID] = util.GetUniqueName("test-different-uid-")
+			}),
+	)
 }
