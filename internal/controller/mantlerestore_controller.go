@@ -284,8 +284,6 @@ func (r *MantleRestoreReconciler) createRestoringPVIfNotExists(ctx context.Conte
 		Namespace: pvcNamespace,
 		Name:      pvcName,
 	}
-	newPV.Spec.CSI.ControllerPublishSecretRef = nil
-	newPV.Spec.CSI.ControllerExpandSecretRef = nil
 	newPV.Spec.CSI.VolumeAttributes = map[string]string{
 		"clusterID":     srcPV.Spec.CSI.VolumeAttributes["clusterID"],
 		"pool":          srcPV.Spec.CSI.VolumeAttributes["pool"],

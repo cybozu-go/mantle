@@ -102,8 +102,9 @@ func zeroOutVolume(namespace, pvcName string) error {
 		},
 	}
 	zeroOutPV.Spec.CSI = &corev1.CSIPersistentVolumeSource{
-		Driver:             origPV.Spec.CSI.Driver,
-		NodeStageSecretRef: origPV.Spec.CSI.NodeStageSecretRef,
+		Driver:                    origPV.Spec.CSI.Driver,
+		ControllerExpandSecretRef: origPV.Spec.CSI.ControllerExpandSecretRef,
+		NodeStageSecretRef:        origPV.Spec.CSI.NodeStageSecretRef,
 		VolumeAttributes: map[string]string{
 			"clusterID":     origPV.Spec.CSI.VolumeAttributes["clusterID"],
 			"imageFeatures": origPV.Spec.CSI.VolumeAttributes["imageFeatures"],
