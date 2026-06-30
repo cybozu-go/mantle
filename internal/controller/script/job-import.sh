@@ -73,11 +73,14 @@ if [ -z "${FROM_SNAP_NAME}" ]; then
     if [ "$count" -eq 0 ]; then
         rbd snap create ${POOL_NAME}/${DST_IMAGE_NAME}@initialsnap
     else
+        # Roll back here to guarantee that the import target is exactly
+        # the expected state, so that the subsequent import-diff applies correctly.
         rbd snap rollback ${POOL_NAME}/${DST_IMAGE_NAME}@initialsnap
     fi
     rbd_import
     rbd snap rm ${POOL_NAME}/${DST_IMAGE_NAME}@initialsnap
 else
+    # See the comment above for why we roll back here.
     rbd snap rollback ${POOL_NAME}/${DST_IMAGE_NAME}@${FROM_SNAP_NAME}
     rbd_import
 fi

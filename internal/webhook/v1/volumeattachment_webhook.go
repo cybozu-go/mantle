@@ -43,6 +43,9 @@ var _ admission.Validator[*storagev1.VolumeAttachment] = &VolumeAttachmentCustom
 //+kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get;list;watch
 
 // ValidateCreate implements admission.Validator so a webhook will be registered for the type VolumeAttachment.
+// We validate at VolumeAttachment creation rather than Pod creation because validating
+// at Pod creation could not handle the case where the PVC does not yet exist at the time
+// the Pod is created.
 func (v *VolumeAttachmentCustomValidator) ValidateCreate(ctx context.Context, va *storagev1.VolumeAttachment) (admission.Warnings, error) {
 	logger := log.FromContext(ctx)
 
