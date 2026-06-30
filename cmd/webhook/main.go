@@ -128,6 +128,9 @@ func subMain() error {
 		return err
 	}
 
+	// We validate at VolumeAttachment creation rather than Pod creation because validating
+	// at Pod creation could not handle the case where the PVC does not yet exist at the time
+	// the Pod is created.
 	if err := webhookv1.SetupVolumeAttachmentWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "failed to setup VolumeAttachment webhook")
 
