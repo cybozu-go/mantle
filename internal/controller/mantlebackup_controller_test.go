@@ -232,7 +232,8 @@ var _ = Describe("MantleBackup controller", func() {
 
 			// simulate the PVC UID mismatch
 			backup.SetLabels(map[string]string{labelLocalBackupTargetPVCUID: string(uuid.NewUUID())})
-			_, _, err = reconciler.getSnapshotTarget(ctx, backup)
+			_, rr := reconciler.getSnapshotTarget(ctx, backup)
+			_, err = rr.toCtrlResult()
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -1008,8 +1009,9 @@ var _ = Describe("prepareForDataSynchronization", func() {
 		mbr := NewMantleBackupReconciler(ctrlClient,
 			ctrlClient.Scheme(), "test", RolePrimary, nil, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"))
 
-		ret, err := mbr.prepareForDataSynchronization(context.Background(),
+		ret, rr := mbr.prepareForDataSynchronization(context.Background(),
 			backup, grpcClient)
+		_, err = rr.toCtrlResult()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ret.isIncremental).To(Equal(isIncremental))
 		Expect(ret.isSecondaryMantleBackupSnapshotCaptured).To(Equal(isSecondaryMantleBackupSnapshotCaptured))
@@ -1484,7 +1486,7 @@ var _ = Describe("export and upload", func() {
 			isIncremental:                           isIncremental,
 			isSecondaryMantleBackupSnapshotCaptured: isSecondaryMantleBackupSnapshotCaptured,
 			diffFrom:                                diffFrom,
-		})
+		}).toCtrlResult()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ret.RequeueAfter).NotTo(BeZero())
 
@@ -1498,7 +1500,7 @@ var _ = Describe("export and upload", func() {
 			isIncremental:                           false,
 			isSecondaryMantleBackupSnapshotCaptured: false,
 			diffFrom:                                nil,
-		})
+		}).toCtrlResult()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ret.RequeueAfter).NotTo(BeZero())
 	}
@@ -1703,7 +1705,7 @@ var _ = Describe("export and upload", func() {
 
 			// We use reconcileLocalBackup to focus on the part size update logic.
 			Eventually(func(g Gomega) {
-				result, err := mbr.reconcileLocalBackup(ctx, backup)
+				result, err := mbr.reconcileLocalBackup(ctx, backup).toCtrlResult()
 				g.Expect(result.IsZero()).To(BeTrue())
 				g.Expect(err).NotTo(HaveOccurred())
 
@@ -1717,7 +1719,7 @@ var _ = Describe("export and upload", func() {
 			mbr.backupTransferPartSize = newSize
 
 			Eventually(func(g Gomega) {
-				result, err := mbr.reconcileLocalBackup(ctx, backup)
+				result, err := mbr.reconcileLocalBackup(ctx, backup).toCtrlResult()
 				g.Expect(result.IsZero()).To(BeTrue())
 				g.Expect(err).NotTo(HaveOccurred())
 			}, "10s").Should(Succeed())
@@ -1829,7 +1831,7 @@ var _ = Describe("import", func() {
 		snapshotTarget, err := getSnapshotTargetByDummyMB(target)
 		Expect(err).NotTo(HaveOccurred())
 
-		_, err = mbr.reconcileImportJob(ctx, target, snapshotTarget, -1)
+		_, err = mbr.reconcileImportJob(ctx, target, snapshotTarget, -1).toCtrlResult()
 		Expect(err).NotTo(HaveOccurred())
 	}
 
@@ -1843,7 +1845,7 @@ var _ = Describe("import", func() {
 
 					return gotExist, nil
 				})
-			uploaded, err := mbr.isExportDataAlreadyUploaded(ctx, &mantlev1.MantleBackup{
+			uploaded, rr := mbr.isExportDataAlreadyUploaded(ctx, &mantlev1.MantleBackup{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "name",
 					Annotations: map[string]string{
@@ -1851,6 +1853,7 @@ var _ = Describe("import", func() {
 					},
 				},
 			}, 0)
+			_, err := rr.toCtrlResult()
 			if expectError {
 				Expect(err).To(HaveOccurred())
 			} else {
@@ -1887,7 +1890,7 @@ var _ = Describe("import", func() {
 				}).Times(2)
 
 			// The first call to reconcileImportJob should create an import Job
-			res, err := mbr.reconcileImportJob(ctx, backup, snapshotTarget, -1)
+			res, err := mbr.reconcileImportJob(ctx, backup, snapshotTarget, -1).toCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.RequeueAfter).NotTo(BeZero())
 
@@ -1899,7 +1902,7 @@ var _ = Describe("import", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// The successive calls should return ctrl.Result{Requeue: true} until the import Job is completed.
-			res, err = mbr.reconcileImportJob(ctx, backup, snapshotTarget, -1)
+			res, err = mbr.reconcileImportJob(ctx, backup, snapshotTarget, -1).toCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.RequeueAfter).NotTo(BeZero())
 
@@ -1908,7 +1911,7 @@ var _ = Describe("import", func() {
 
 			// Finally, the call should return (ctrl.Result{}, nil)
 			largestCompletedPartNum := int(testutil.FakeRBDSnapshotSize/backup.Status.TransferPartSize.Value() - 1)
-			res, err = mbr.reconcileImportJob(ctx, backup, snapshotTarget, largestCompletedPartNum)
+			res, err = mbr.reconcileImportJob(ctx, backup, snapshotTarget, largestCompletedPartNum).toCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.IsZero()).To(BeTrue())
 		})
@@ -2010,7 +2013,7 @@ var _ = Describe("import", func() {
 			dummySnapshot, err := ceph.FindRBDSnapshot(mbr.ceph, snapshotTarget.poolName, snapshotTarget.imageName, backup.GetName())
 			Expect(err).NotTo(HaveOccurred())
 
-			err = mbr.markSecondarySnapshotCaptured(ctx, backup, snapshotTarget)
+			_, err = mbr.markSecondarySnapshotCaptured(ctx, backup, snapshotTarget).toCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
 
 			err = k8sClient.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup)
@@ -2145,7 +2148,7 @@ var _ = Describe("import", func() {
 			createExportDataPVC(ctx, backup)
 
 			// Perform primaryCleanup
-			res, err := mbr.primaryCleanup(ctx, backup)
+			res, err := mbr.primaryCleanup(ctx, backup).toCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.IsZero()).To(BeTrue())
 
@@ -2183,7 +2186,7 @@ var _ = Describe("import", func() {
 			err = k8sClient.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup)
 			Expect(err).NotTo(HaveOccurred())
 
-			res, err := mbr.primaryCleanup(ctx, backup)
+			res, err := mbr.primaryCleanup(ctx, backup).toCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.IsZero()).To(BeTrue())
 
@@ -2201,7 +2204,7 @@ var _ = Describe("import", func() {
 			createExportDataPVC(ctx, backup2)
 
 			// Act
-			res, err := mbr.primaryCleanup(ctx, backup1)
+			res, err := mbr.primaryCleanup(ctx, backup1).toCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.IsZero()).To(BeTrue())
 
@@ -2297,7 +2300,7 @@ var _ = Describe("import", func() {
 			expectAccessToObjectStorage(backup)
 
 			// Perform secondaryCleanup
-			res, err := mbr.secondaryCleanup(ctx, backup, true)
+			res, err := mbr.secondaryCleanup(ctx, backup, true).toCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.IsZero()).To(BeTrue())
 
@@ -2343,7 +2346,7 @@ var _ = Describe("import", func() {
 			err = k8sClient.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup)
 			Expect(err).NotTo(HaveOccurred())
 
-			res, err := mbr.secondaryCleanup(ctx, backup, false)
+			res, err := mbr.secondaryCleanup(ctx, backup, false).toCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.IsZero()).To(BeTrue())
 		})
@@ -2363,7 +2366,7 @@ var _ = Describe("import", func() {
 			// let's NOT call mockObjectStorage.EXPECT() here.
 
 			// Act
-			res, err := mbr.secondaryCleanup(ctx, backup1, true)
+			res, err := mbr.secondaryCleanup(ctx, backup1, true).toCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.IsZero()).To(BeTrue())
 
@@ -2408,7 +2411,7 @@ var _ = Describe("import", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("finalizing the backup with the target PVC not found")
-			_, err = mbr.finalizeSecondary(ctx, backup)
+			_, err = mbr.finalizeSecondary(ctx, backup).toCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
 
 			By("checking that the RBD snapshot is removed")
@@ -2441,7 +2444,7 @@ var _ = Describe("import", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("finalizing the backup")
-			_, err = mbr.finalizeStandalone(ctx, backup)
+			_, err = mbr.finalizeStandalone(ctx, backup).toCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
 
 			By("checking that the orphaned RBD snapshot is removed via PVManifest")
@@ -2468,7 +2471,7 @@ var _ = Describe("import", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("finalizing the backup")
-			_, err = mbr.finalizeStandalone(ctx, backup)
+			_, err = mbr.finalizeStandalone(ctx, backup).toCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
 
 			By("checking that the RBD snapshot is removed from the trashed image")
@@ -2492,7 +2495,7 @@ var _ = Describe("import", func() {
 			// No RBDSnapCreate: the image is not registered in Ceph at all.
 
 			By("finalizing the backup with no image or snapshot present in Ceph")
-			_, err = mbr.finalizeStandalone(ctx, backup)
+			_, err = mbr.finalizeStandalone(ctx, backup).toCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -2514,7 +2517,7 @@ var _ = Describe("import", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("finalizing the backup after the snapshot is already gone")
-			_, err = mbr.finalizeStandalone(ctx, backup)
+			_, err = mbr.finalizeStandalone(ctx, backup).toCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
@@ -2531,7 +2534,7 @@ var _ = Describe("import", func() {
 			err = k8sClient.Update(ctx, backup)
 			Expect(err).NotTo(HaveOccurred())
 
-			result, err := mbr.reconcileZeroOutJob(ctx, backup, &snapshotTarget{})
+			result, err := mbr.reconcileZeroOutJob(ctx, backup, &snapshotTarget{}).toCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.RequeueAfter).To(BeZero())
 
@@ -2607,7 +2610,7 @@ var _ = Describe("import", func() {
 			}
 
 			// The first call to reconcileZeroOutJob should create a PV, PVC, and Job, and requeue.
-			result, err := mbr.reconcileZeroOutJob(ctx, backup, snapshotTarget)
+			result, err := mbr.reconcileZeroOutJob(ctx, backup, snapshotTarget).toCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.RequeueAfter).NotTo(BeZero())
 
@@ -2705,7 +2708,7 @@ blkdiscard -z /dev/zeroout-rbd
 			completeJob(ctx, job.GetNamespace(), job.GetName())
 
 			// A call to reconcileZeroOutJob should NOT requeue after the Job completed
-			result, err = mbr.reconcileZeroOutJob(ctx, backup, snapshotTarget)
+			result, err = mbr.reconcileZeroOutJob(ctx, backup, snapshotTarget).toCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.RequeueAfter).To(BeZero())
 		})
@@ -2759,7 +2762,8 @@ blkdiscard -z /dev/zeroout-rbd
 				completeJob(ctx, job1.GetNamespace(), job1.GetName())
 
 				// Call handleCompletedImportJobs for MantleBackup1.
-				largestCompletedPartNum, err := mbr.handleCompletedImportJobs(ctx, backup1)
+				largestCompletedPartNum, rr := mbr.handleCompletedImportJobs(ctx, backup1)
+				_, err = rr.toCtrlResult()
 				Expect(err).NotTo(HaveOccurred())
 				Expect(largestCompletedPartNum).To(Equal(0))
 
@@ -2775,7 +2779,8 @@ blkdiscard -z /dev/zeroout-rbd
 				completeJob(ctx, job2.GetNamespace(), job2.GetName())
 
 				// Call handleCompletedImportJobs for MantleBackup1.
-				largestCompletedPartNum, err = mbr.handleCompletedImportJobs(ctx, backup1)
+				largestCompletedPartNum, rr = mbr.handleCompletedImportJobs(ctx, backup1)
+				_, err = rr.toCtrlResult()
 				Expect(err).NotTo(HaveOccurred())
 				Expect(largestCompletedPartNum).To(Equal(1))
 
@@ -2810,7 +2815,8 @@ var _ = Describe("MantleBackupReconciler", func() {
 			cephCmd.SetError(rbdErr)
 			defer cephCmd.SetError(nil)
 
-			locked, err := reconciler.lockVolume(poolName, imageName, lockID)
+			locked, rr := reconciler.lockVolume(poolName, imageName, lockID)
+			_, err := rr.toCtrlResult()
 			if err != nil {
 				return locked, err
 			}
@@ -2876,7 +2882,8 @@ var _ = Describe("MantleBackupReconciler", func() {
 		})
 
 		It("locks a volume", func(ctx SpecContext) {
-			locked, err := reconciler.lockVolume("pool", "image", "lock1")
+			locked, rr := reconciler.lockVolume("pool", "image", "lock1")
+			_, err := rr.toCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(locked).To(BeTrue())
 		})
@@ -2889,7 +2896,7 @@ var _ = Describe("MantleBackupReconciler", func() {
 			cephCmd.SetError(rbdErr)
 			defer cephCmd.SetError(nil)
 
-			err := reconciler.unlockVolume(poolName, imageName, lockID)
+			_, err := reconciler.unlockVolume(poolName, imageName, lockID).toCtrlResult()
 			if expectErr {
 				Expect(err).To(HaveOccurred())
 			} else {
@@ -3134,7 +3141,7 @@ set -eux -o pipefail
 		})
 
 		It("should create PV, PVC, and Job by the first verify process", func(ctx SpecContext) {
-			err := reconciler.verify(ctx, backupSuccess)
+			_, err := reconciler.verify(ctx, backupSuccess).toCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
 
 			// check resources created by verify method
@@ -3181,7 +3188,7 @@ set -eux -o pipefail
 			err = k8sClient.Status().Patch(ctx, updatedJob, client.MergeFrom(&currentJob))
 			Expect(err).NotTo(HaveOccurred())
 
-			err = reconciler.verify(ctx, backupSuccess)
+			_, err = reconciler.verify(ctx, backupSuccess).toCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
 			checkPV(ctx, backupSuccess, pv)
 			checkPVC(ctx, backupSuccess, pvc)
@@ -3193,7 +3200,7 @@ set -eux -o pipefail
 		})
 
 		It("should mark not verified when Job fails", func(ctx SpecContext) {
-			err := reconciler.verify(ctx, backupFail)
+			_, err := reconciler.verify(ctx, backupFail).toCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
 
 			// Update the Job to Failed
@@ -3228,7 +3235,7 @@ set -eux -o pipefail
 			err = k8sClient.Status().Patch(ctx, updatedJob, client.MergeFrom(&currentJob))
 			Expect(err).NotTo(HaveOccurred())
 
-			err = reconciler.verify(ctx, backupFail)
+			_, err = reconciler.verify(ctx, backupFail).toCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
 			checkPV(ctx, backupFail, pv)
 			checkPVC(ctx, backupFail, pvc)
