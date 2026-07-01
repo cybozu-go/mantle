@@ -1360,45 +1360,14 @@ func (r *MantleBackupReconciler) handleCompletedJobsOfComponent(
 	componentPrefix string,
 	hookPostJobDeletion *func(partNum int) error,
 ) (int, error) {
-	// List all the Jobs
-	var jobList batchv1.JobList
-	if err := r.List(ctx, &jobList, &client.ListOptions{
-		Namespace: r.managedCephClusterID,
-		LabelSelector: labels.SelectorFromSet(map[string]string{
-			"app.kubernetes.io/name":      labelAppNameValue,
-			"app.kubernetes.io/component": componentLabel,
-		}),
-	}); err != nil {
-		return -1, fmt.Errorf("failed to list Jobs: %w", err)
-	}
-
-	// Collect the completed Jobs having the correct prefix.
-	type CompletedJob struct {
-		job     batchv1.Job
-		partNum int
-	}
-	completedJobs := []*CompletedJob{}
-	largestPartNum := -1
-	for _, job := range jobList.Items {
-		if !IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete) {
-			continue
-		}
-
-		partNum, ok := ExtractPartNumFromComponentJobName(componentPrefix, job.GetName(), backup)
-		if !ok {
-			continue
-		}
-
-		completedJobs = append(completedJobs, &CompletedJob{
-			job:     job,
-			partNum: partNum,
-		})
-
-		largestPartNum = max(largestPartNum, partNum)
+	completedJobs, largestPartNum, err := r.listCompletedJobsOfComponent(ctx, backup, componentLabel, componentPrefix)
+	if err != nil {
+		return -1, err
 	}
 
 	// Delete the completed Jobs other than the latest one
-	for _, job := range completedJobs {
+	for i := range completedJobs {
+		job := &completedJobs[i]
 		if job.partNum == largestPartNum {
 			continue
 		}
@@ -1421,6 +1390,50 @@ func (r *MantleBackupReconciler) handleCompletedJobsOfComponent(
 	}
 
 	return largestPartNum, nil
+}
+
+type completedComponentJob struct {
+	job     batchv1.Job
+	partNum int
+}
+
+// listCompletedJobsOfComponent lists the completed Jobs of the given component that
+// belong to the backup, and returns them together with the largest part number among
+// them (-1 if there is none).
+func (r *MantleBackupReconciler) listCompletedJobsOfComponent(
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
+	componentLabel string,
+	componentPrefix string,
+) ([]completedComponentJob, int, error) {
+	var jobList batchv1.JobList
+	if err := r.List(ctx, &jobList, &client.ListOptions{
+		Namespace: r.managedCephClusterID,
+		LabelSelector: labels.SelectorFromSet(map[string]string{
+			"app.kubernetes.io/name":      labelAppNameValue,
+			"app.kubernetes.io/component": componentLabel,
+		}),
+	}); err != nil {
+		return nil, -1, fmt.Errorf("failed to list Jobs: %w", err)
+	}
+
+	var completedJobs []completedComponentJob
+	largestPartNum := -1
+	for _, job := range jobList.Items {
+		if !IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete) {
+			continue
+		}
+
+		partNum, ok := ExtractPartNumFromComponentJobName(componentPrefix, job.GetName(), backup)
+		if !ok {
+			continue
+		}
+
+		completedJobs = append(completedJobs, completedComponentJob{job: job, partNum: partNum})
+		largestPartNum = max(largestPartNum, partNum)
+	}
+
+	return completedJobs, largestPartNum, nil
 }
 
 func IsPartNextToLargestCompletedPart(largestCompletedPartNum *int, partNum int) bool {
@@ -1611,27 +1624,9 @@ func (r *MantleBackupReconciler) getLargestCompletedUploadPartNum(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
 ) (int, error) {
-	var jobList batchv1.JobList
-	if err := r.List(ctx, &jobList, &client.ListOptions{
-		Namespace: r.managedCephClusterID,
-		LabelSelector: labels.SelectorFromSet(map[string]string{
-			"app.kubernetes.io/name":      labelAppNameValue,
-			"app.kubernetes.io/component": labelComponentUploadJob,
-		}),
-	}); err != nil {
-		return -1, fmt.Errorf("failed to list upload Jobs: %w", err)
-	}
-
-	largestPartNum := -1
-	for _, job := range jobList.Items {
-		if !IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete) {
-			continue
-		}
-		partNum, ok := ExtractPartNumFromUploadJobName(job.GetName(), backup)
-		if !ok {
-			continue
-		}
-		largestPartNum = max(largestPartNum, partNum)
+	_, largestPartNum, err := r.listCompletedJobsOfComponent(ctx, backup, labelComponentUploadJob, MantleUploadJobPrefix)
+	if err != nil {
+		return -1, err
 	}
 
 	return largestPartNum, nil
