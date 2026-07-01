@@ -25,32 +25,32 @@ const (
 )
 
 type ResourceManager struct {
-	client           client.Client
-	ClusterID        string
-	StorageClassName string
-	PoolName         string
+	client                  client.Client
+	ClusterID               string
+	ClusterIDAnother        string
+	StorageClassName        string
+	StorageClassNameAnother string
+	PoolName                string
 }
 
-func NewResourceManager(client client.Client) (*ResourceManager, error) {
-	clusterID := util.GetUniqueName("ceph-")
+func NewResourceManager(ctx context.Context, client client.Client) *ResourceManager {
+	GinkgoHelper()
 
-	// Create a namespace of the same name as cluster ID
-	ns := corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: clusterID,
-		},
-	}
-	err := client.Create(context.Background(), &ns)
-	if err != nil {
-		return nil, err
+	res := &ResourceManager{
+		client:                  client,
+		ClusterID:               util.GetUniqueName("ceph-"),
+		ClusterIDAnother:        util.GetUniqueName("ceph-"),
+		StorageClassName:        util.GetUniqueName("sc-"),
+		StorageClassNameAnother: util.GetUniqueName("sc-"),
+		PoolName:                util.GetUniqueName("pool-"),
 	}
 
-	return &ResourceManager{
-		client:           client,
-		StorageClassName: util.GetUniqueName("sc-"),
-		ClusterID:        clusterID,
-		PoolName:         util.GetUniqueName("pool-"),
-	}, nil
+	res.createNamespace(ctx, res.ClusterID)
+	res.createNamespace(ctx, res.ClusterIDAnother)
+	res.createStorageClass(ctx, res.StorageClassName, res.ClusterID)
+	res.createStorageClass(ctx, res.StorageClassNameAnother, res.ClusterIDAnother)
+
+	return res
 }
 
 // EnvTest cannot delete namespace. So, we have to use another new namespace.
@@ -58,29 +58,39 @@ func (r *ResourceManager) CreateNamespace() string {
 	GinkgoHelper()
 
 	name := util.GetUniqueName("test-")
+	r.createNamespace(context.Background(), name)
+
+	return name
+}
+
+func (r *ResourceManager) createNamespace(ctx context.Context, name string) {
+	GinkgoHelper()
+
 	ns := corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 		},
 	}
-	err := r.client.Create(context.Background(), &ns)
-	Expect(err).NotTo(HaveOccurred())
 
-	return name
+	err := r.client.Create(ctx, &ns)
+	Expect(err).NotTo(HaveOccurred())
 }
 
-func (r *ResourceManager) CreateStorageClass(ctx context.Context) error {
+func (r *ResourceManager) createStorageClass(ctx context.Context, name, clusterID string) {
+	GinkgoHelper()
+
 	sc := storagev1.StorageClass{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: r.StorageClassName,
+			Name: name,
 		},
 		Provisioner: provisioner,
 		Parameters: map[string]string{
-			"clusterID": r.ClusterID,
+			"clusterID": clusterID,
 		},
 	}
 
-	return r.client.Create(ctx, &sc)
+	err := r.client.Create(ctx, &sc)
+	Expect(err).NotTo(HaveOccurred())
 }
 
 // CreateUniquePVAndPVC creates a unique named PV and PVC. The PV is bound to the PVC.

@@ -37,14 +37,21 @@ type SecondarySettings struct {
 }
 
 type SecondaryServer struct {
-	client client.Client
+	client               client.Client
+	managedCephClusterID string
 	proto.UnimplementedMantleServiceServer
 }
 
 var _ proto.MantleServiceServer = &SecondaryServer{}
 
-func NewSecondaryServer(client client.Client) *SecondaryServer {
-	return &SecondaryServer{client: client}
+func NewSecondaryServer(
+	client client.Client,
+	managedCephClusterID string,
+) *SecondaryServer {
+	return &SecondaryServer{
+		client:               client,
+		managedCephClusterID: managedCephClusterID,
+	}
 }
 
 func (s *SecondaryServer) CreateOrUpdatePVC(
@@ -62,6 +69,16 @@ func (s *SecondaryServer) CreateOrUpdatePVC(
 	if !ok {
 		return nil, fmt.Errorf("annotation not found in the received PVC: %s: %s: %s",
 			annotRemoteUID, pvcReceived.GetName(), pvcReceived.GetNamespace())
+	}
+
+	// Check cluster-id of the PVC in the request.
+	pvcClusterID, err := getCephClusterIDFromPVC(ctx, s.client, &pvcReceived)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get ceph cluster ID from the received PVC: %w", err)
+	}
+	if pvcClusterID != s.managedCephClusterID {
+		return nil, fmt.Errorf("cluster-id not matched or not found: %s: %s: %s",
+			pvcClusterID, pvcReceived.GetName(), pvcReceived.GetNamespace())
 	}
 
 	// Create or update the requested PVC.
@@ -128,7 +145,17 @@ func (s *SecondaryServer) CreateMantleBackup(
 			backupReceived.GetName(), backupReceived.GetNamespace())
 	}
 
-	_, ok := backupReceived.Labels[labelRemoteBackupTargetPVCUID]
+	primaryClusterID, ok := backupReceived.Labels[labelClusterID]
+	if !ok {
+		return nil, fmt.Errorf("label not found in the received MantleBackup: %s: %s: %s",
+			labelClusterID, backupReceived.GetName(), backupReceived.GetNamespace())
+	}
+	if primaryClusterID != s.managedCephClusterID {
+		return nil, fmt.Errorf("cluster-id not matched: %s: %s: %s",
+			primaryClusterID, backupReceived.GetName(), backupReceived.GetNamespace())
+	}
+
+	_, ok = backupReceived.Labels[labelRemoteBackupTargetPVCUID]
 	if !ok {
 		return nil, fmt.Errorf("label not found in the received MantleBackup: %s: %s: %s",
 			labelRemoteBackupTargetPVCUID, backupReceived.GetName(), backupReceived.GetNamespace())

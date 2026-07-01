@@ -538,3 +538,18 @@ func checkJobExists(namespace, jobName string) (bool, error) {
 
 	return found, nil
 }
+
+func checkPVCExists(namespace, pvcName string) (bool, error) {
+	stdout, _, err := kubectl("get", "pvc", "-n", namespace, "-o", "json")
+	if err != nil {
+		return false, err
+	}
+	var pvcList corev1.PersistentVolumeClaimList
+	if err := json.Unmarshal(stdout, &pvcList); err != nil {
+		return false, err
+	}
+
+	return slices.ContainsFunc(pvcList.Items, func(pvc corev1.PersistentVolumeClaim) bool {
+		return pvc.Name == pvcName
+	}), nil
+}

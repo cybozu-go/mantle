@@ -52,6 +52,11 @@ setup:
 
 .PHONY: test
 test:
+	$(MAKE) launch-single-k8s-cluster
+	$(MAKE) do_test
+
+.PHONEY: launch-single-k8s-cluster
+launch-single-k8s-cluster:
 	$(MAKE) launch-minikube MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_PRIMARY)
 	$(MAKE) install-rook-ceph-operator
 	$(MAKE) install-rook-ceph-cluster1
@@ -65,10 +70,14 @@ test:
 		NAMESPACE=$(CEPH_CLUSTER2_NAMESPACE) \
 		HELM_RELEASE=mantle2 \
 		VALUES_YAML=testdata/values-mantle2.yaml
-	$(MAKE) do_test
 
 .PHONY: test-multiple-k8s-clusters
 test-multiple-k8s-clusters:
+	$(MAKE) launch-multiple-k8s-clusters
+	$(MAKE) do-test-multik8s
+
+.PHONY: launch-multiple-k8s-clusters
+launch-multiple-k8s-clusters:
 # set up a k8s cluster for secondary mantle
 	$(MAKE) launch-minikube MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_SECONDARY)
 	$(MAKE) install-rook-ceph-operator
@@ -112,8 +121,6 @@ test-multiple-k8s-clusters:
 		NAMESPACE=$(CEPH_CLUSTER1_NAMESPACE) \
 		HELM_RELEASE=mantle \
 		VALUES_YAML=testdata/values-mantle-primary.yaml
-# start testing
-	$(MAKE) do-test-multik8s
 
 .PHONY: clean
 clean:
