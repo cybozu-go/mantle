@@ -27,8 +27,8 @@ jobs:
     runs-on: "ubuntu-22.04"
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v6.0.2
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v7.0.0
+      - uses: actions/setup-go@v6.4.0
         with:
           go-version-file: "go.mod"
       - run: sudo apt-get update

@@ -11,8 +11,8 @@ jobs:
     runs-on: mantle_large_runner_16core
     steps:
       - run: sudo apt-get update
-      - uses: actions/checkout@v6.0.2
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v7.0.0
+      - uses: actions/setup-go@v6.4.0
         with:
           go-version-file: "go.mod"
       - uses: ./.github/actions/set-up-kvm-for-e2e-tests
