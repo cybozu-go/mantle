@@ -4,12 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/cybozu-go/mantle/internal/ceph"
+	"github.com/cybozu-go/mantle/internal/controller/internal/reconcile"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -155,16 +154,7 @@ func IsJobConditionTrue(conditions []batchv1.JobCondition, conditionType batchv1
 }
 
 func requeueReconciliation() ctrl.Result {
-	requeueAfter := os.Getenv("REQUEUE_RECONCILIATION_AFTER")
-	if len(requeueAfter) == 0 {
-		panic("You should set REQUEUE_RECONCILIATION_AFTER env var.")
-	}
-	duration, err := time.ParseDuration(requeueAfter)
-	if err != nil {
-		panic(fmt.Sprintf("Set REQUEUE_RECONCILIATION_AFTER properly: %v", err))
-	}
-
-	return ctrl.Result{RequeueAfter: duration}
+	return reconcile.RequeueAfter()
 }
 
 func deleteRBDImageAsynchronously(ceph ceph.CephCmd, pool, image string) error {
