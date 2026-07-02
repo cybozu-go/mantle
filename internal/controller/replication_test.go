@@ -43,7 +43,7 @@ var _ = Describe("Replication unit tests", func() {
 			test.ns = resMgr.CreateNamespace()
 
 			test.server = grpc.NewServer()
-			proto.RegisterMantleServiceServer(test.server, NewSecondaryServer(k8sClient))
+			proto.RegisterMantleServiceServer(test.server, NewSecondaryServer(k8sClient, resMgr.ClusterID))
 			l, err := net.Listen("tcp", replicationTestEndpoint)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -80,34 +80,38 @@ var _ = Describe("Replication unit tests", func() {
 		})
 	})
 
-	Context("CreateUpdatePVC", test.testCreateUpdatePVCAfterResizing)
+	Context("CreateUpdatePVC", test.testCreateUpdatePVC)
 	Context("CreateMantleBackup", test.testCreateMantleBackup)
 })
 
-func (test *replicationUnitTest) testCreateUpdatePVCAfterResizing() {
+func (test *replicationUnitTest) newRequestPVC() *corev1.PersistentVolumeClaim {
+	return &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      util.GetUniqueName("test-pvc-"),
+			Namespace: test.ns,
+			Annotations: map[string]string{
+				annotRemoteUID: util.GetUniqueName("test-remote-uid-"),
+			},
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: resource.MustParse("1Gi"),
+				},
+			},
+			StorageClassName: ptr.To(resMgr.StorageClassName),
+		},
+	}
+}
+
+func (test *replicationUnitTest) testCreateUpdatePVC() {
 	// CSATEST-1492
 	It("calls CreateOrUpdatePVC twice with the different PVC sizes and should not update the PVC size", func() {
 		ctx := context.Background()
 
-		srcPVC := &corev1.PersistentVolumeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-pvc",
-				Namespace: test.ns,
-				Annotations: map[string]string{
-					annotRemoteUID: "test-uid",
-					"dummy":        "test-1",
-				},
-			},
-			Spec: corev1.PersistentVolumeClaimSpec{
-				AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
-				Resources: corev1.VolumeResourceRequirements{
-					Requests: corev1.ResourceList{
-						corev1.ResourceStorage: resource.MustParse("1Gi"),
-					},
-				},
-				StorageClassName: ptr.To("test-sc"),
-			},
-		}
+		srcPVC := test.newRequestPVC()
+		srcPVC.Annotations["dummy"] = "test-1"
 
 		By("creating a PVC")
 		pvcRaw, err := json.Marshal(srcPVC)
@@ -145,6 +149,42 @@ func (test *replicationUnitTest) testCreateUpdatePVCAfterResizing() {
 		// the storage size should not be updated
 		Expect(pvc.Spec.Resources.Requests.Storage().String()).To(Equal("1Gi"))
 	})
+
+	DescribeTable("should reject an invalid request",
+		func(ctx SpecContext, mutate func(*corev1.PersistentVolumeClaim)) {
+			pvc := test.newRequestPVC()
+			mutate(pvc)
+
+			pvcRaw, err := json.Marshal(pvc)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = test.client.CreateOrUpdatePVC(ctx, &proto.CreateOrUpdatePVCRequest{Pvc: pvcRaw})
+			Expect(err).To(HaveOccurred())
+		},
+		Entry("when the remote-uid annotation is missing", func(pvc *corev1.PersistentVolumeClaim) {
+			delete(pvc.Annotations, annotRemoteUID)
+		}),
+		Entry("when the cluster-id derived from the StorageClass is not set", func(pvc *corev1.PersistentVolumeClaim) {
+			pvc.Spec.StorageClassName = nil
+		}),
+		Entry("when the cluster-id(StorageClass) is different from the managed one", func(pvc *corev1.PersistentVolumeClaim) {
+			pvc.Spec.StorageClassName = ptr.To(resMgr.StorageClassNameAnother)
+		}),
+	)
+
+	It("should reject a remote-uid annotation different from the existing one", func(ctx SpecContext) {
+		pvc := test.newRequestPVC()
+		pvcRaw, err := json.Marshal(pvc)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = test.client.CreateOrUpdatePVC(ctx, &proto.CreateOrUpdatePVCRequest{Pvc: pvcRaw})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Update the same PVC with a different remote-uid.
+		pvc.Annotations[annotRemoteUID] = util.GetUniqueName("test-different-uid-")
+		pvcRaw, err = json.Marshal(pvc)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = test.client.CreateOrUpdatePVC(ctx, &proto.CreateOrUpdatePVCRequest{Pvc: pvcRaw})
+		Expect(err).To(HaveOccurred())
+	})
 }
 
 func (test *replicationUnitTest) newMantleBackup() *mantlev1.MantleBackup {
@@ -161,6 +201,7 @@ func (test *replicationUnitTest) newMantleBackup() *mantlev1.MantleBackup {
 			Name:      util.GetUniqueName("test-mb-"),
 			Namespace: test.ns,
 			Labels: map[string]string{
+				labelClusterID:                resMgr.ClusterID,
 				labelRemoteBackupTargetPVCUID: util.GetUniqueName("test-remote-pvc-uid-"),
 				labelLocalBackupTargetPVCUID:  util.GetUniqueName("test-local-pvc-uid-"),
 			},
@@ -286,53 +327,76 @@ func (test *replicationUnitTest) testCreateMantleBackup() {
 		test.expectPersistedMantleBackup(ctx, mb)
 	})
 
-	It("should reject PVC UID label different from existing one", func(ctx SpecContext) {
-		// Arrange
-		mb := test.newMantleBackup()
-		mbJson, err := json.Marshal(mb)
-		Expect(err).NotTo(HaveOccurred())
+	// Each Entry mutates a valid MantleBackup so that it is malformed, then expects
+	// the create request to be rejected.
+	DescribeTable("rejects a malformed MantleBackup",
+		func(ctx SpecContext, mutate func(*mantlev1.MantleBackup)) {
+			mb := test.newMantleBackup()
+			mutate(mb)
 
-		_, err = test.client.CreateMantleBackup(ctx, &proto.CreateMantleBackupRequest{
-			MantleBackup: mbJson,
-		})
-		Expect(err).NotTo(HaveOccurred())
+			mbJson, err := json.Marshal(mb)
+			Expect(err).NotTo(HaveOccurred())
 
-		// Modify the PVC UID label
-		mb.Labels[labelLocalBackupTargetPVCUID] = "different-uid"
-		mbJson, err = json.Marshal(mb)
-		Expect(err).NotTo(HaveOccurred())
+			_, err = test.client.CreateMantleBackup(ctx, &proto.CreateMantleBackupRequest{
+				MantleBackup: mbJson,
+			})
+			Expect(err).To(HaveOccurred())
+		},
+		Entry("without the cluster ID label",
+			func(mb *mantlev1.MantleBackup) { delete(mb.Labels, labelClusterID) }),
+		Entry("with a different cluster ID label",
+			func(mb *mantlev1.MantleBackup) {
+				mb.Labels[labelClusterID] = util.GetUniqueName("test-different-cluster-id-")
+			}),
+		Entry("without the remote PVC UID label",
+			func(mb *mantlev1.MantleBackup) { delete(mb.Labels, labelRemoteBackupTargetPVCUID) }),
+		Entry("without the local PVC UID label",
+			func(mb *mantlev1.MantleBackup) { delete(mb.Labels, labelLocalBackupTargetPVCUID) }),
+		Entry("without any labels (empty map)",
+			func(mb *mantlev1.MantleBackup) { mb.Labels = map[string]string{} }),
+		Entry("without any labels (nil map)",
+			func(mb *mantlev1.MantleBackup) { mb.Labels = nil }),
+		Entry("without any annotations (empty map)",
+			func(mb *mantlev1.MantleBackup) { mb.Annotations = map[string]string{} }),
+		Entry("without any annotations (nil map)",
+			func(mb *mantlev1.MantleBackup) { mb.Annotations = nil }),
+		Entry("without the remote UID annotation",
+			func(mb *mantlev1.MantleBackup) {
+				// Keep the annotations map non-nil (a nil map would be rejected by the
+				// nil check instead of the dedicated annotation check) by replacing it
+				// with one that lacks annotRemoteUID.
+				mb.Annotations = map[string]string{"mantle.cybozu.io/dummy": "x"}
+			}),
+	)
 
-		// Act
-		_, err = test.client.CreateMantleBackup(ctx, &proto.CreateMantleBackupRequest{
-			MantleBackup: mbJson,
-		})
+	// Each Entry first creates a valid MantleBackup, then mutates it so that it
+	// conflicts with the persisted one, and expects the second create to be rejected.
+	DescribeTable("rejects a MantleBackup conflicting with the existing one",
+		func(ctx SpecContext, mutate func(*mantlev1.MantleBackup)) {
+			mb := test.newMantleBackup()
+			mbJson, err := json.Marshal(mb)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = test.client.CreateMantleBackup(ctx, &proto.CreateMantleBackupRequest{
+				MantleBackup: mbJson,
+			})
+			Expect(err).NotTo(HaveOccurred())
 
-		// Assert
-		Expect(err).To(HaveOccurred())
-	})
+			mutate(mb)
 
-	It("should reject remote UID annotation different from existing one", func(ctx SpecContext) {
-		// Arrange
-		mb := test.newMantleBackup()
-		mbJson, err := json.Marshal(mb)
-		Expect(err).NotTo(HaveOccurred())
-
-		_, err = test.client.CreateMantleBackup(ctx, &proto.CreateMantleBackupRequest{
-			MantleBackup: mbJson,
-		})
-		Expect(err).NotTo(HaveOccurred())
-
-		// Modify the remote UID annotation
-		mb.Annotations[annotRemoteUID] = "different-uid"
-		mbJson, err = json.Marshal(mb)
-		Expect(err).NotTo(HaveOccurred())
-
-		// Act
-		_, err = test.client.CreateMantleBackup(ctx, &proto.CreateMantleBackupRequest{
-			MantleBackup: mbJson,
-		})
-
-		// Assert
-		Expect(err).To(HaveOccurred())
-	})
+			mbJson, err = json.Marshal(mb)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = test.client.CreateMantleBackup(ctx, &proto.CreateMantleBackupRequest{
+				MantleBackup: mbJson,
+			})
+			Expect(err).To(HaveOccurred())
+		},
+		Entry("with a different local PVC UID label",
+			func(mb *mantlev1.MantleBackup) {
+				mb.Labels[labelLocalBackupTargetPVCUID] = util.GetUniqueName("test-different-uid-")
+			}),
+		Entry("with a different remote UID annotation",
+			func(mb *mantlev1.MantleBackup) {
+				mb.Annotations[annotRemoteUID] = util.GetUniqueName("test-different-uid-")
+			}),
+	)
 }
