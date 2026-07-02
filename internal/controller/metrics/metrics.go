@@ -8,6 +8,15 @@ import (
 const namespace = "mantle"
 
 var (
+	BackupExportedDiffSizeBytes = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Name:      "backup_exported_diff_size_bytes",
+			Help:      "Total bytes of the uploaded diff parts.",
+		},
+		[]string{"persistentvolumeclaim", "resource_namespace", "mantlebackup"},
+	)
+
 	BackupConfigInfo = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: namespace,
@@ -29,6 +38,7 @@ var (
 )
 
 func init() {
+	runtimemetrics.Registry.MustRegister(BackupExportedDiffSizeBytes)
 	runtimemetrics.Registry.MustRegister(BackupConfigInfo)
 	runtimemetrics.Registry.MustRegister(BackupDurationSeconds)
 }

@@ -78,6 +78,21 @@ func (b *S3Bucket) Exists(ctx context.Context, key string) (bool, error) {
 	return true, nil
 }
 
+func (b *S3Bucket) GetSize(ctx context.Context, key string) (int64, error) {
+	output, err := b.s3Client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: &b.bucketName,
+		Key:    &key,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("HeadObject failed: %s: %s: %s: %w", b.endpoint, b.bucketName, key, err)
+	}
+	if output.ContentLength == nil {
+		return 0, fmt.Errorf("HeadObject returned nil ContentLength: %s: %s: %s", b.endpoint, b.bucketName, key)
+	}
+
+	return *output.ContentLength, nil
+}
+
 func (b *S3Bucket) Delete(ctx context.Context, key string) error {
 	if _, err := b.s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: &b.bucketName,

@@ -522,6 +522,17 @@ func (r *MantleBackupReconciler) reconcileAsPrimary(ctx context.Context, backup 
 		return reconcile.Succeeded()
 	}
 
+	// Restore the metric after a controller restart. startUpload also calls Set(), but
+	// the replicate path below may return early before reaching startUpload, so we also
+	// set it here, which is always reached. Failures are only logged, not returned, so
+	// that a transient object storage error while collecting this observability metric
+	// does not block verification, replication, or cleanup.
+	if largestCompletedUploadPartNum, err := r.getLargestCompletedUploadPartNum(ctx, backup); err != nil {
+		log.FromContext(ctx).Error(err, "failed to get largest completed upload part number")
+	} else if err := r.setExportedDiffSizeMetric(ctx, backup, largestCompletedUploadPartNum); err != nil {
+		log.FromContext(ctx).Error(err, "failed to set exported diff size metric")
+	}
+
 	if !backup.IsVerifiedTrue() && !backup.IsVerifiedFalse() {
 		if result := r.verify(ctx, backup); result.ShouldReturn() {
 			return result.WrapIfError("failed to verify backup")
@@ -1006,6 +1017,12 @@ func (r *MantleBackupReconciler) finalizeStandalone(
 		return result.WrapIfError("failed to remove RBD snapshot from backup")
 	}
 
+	_ = metrics.BackupExportedDiffSizeBytes.Delete(prometheus.Labels{
+		"persistentvolumeclaim": backup.Spec.PVC,
+		"resource_namespace":    backup.GetNamespace(),
+		"mantlebackup":          backup.GetName(),
+	})
+
 	controllerutil.RemoveFinalizer(backup, MantleBackupFinalizerName)
 	if err := r.Update(ctx, backup); err != nil {
 		logger.Error(err, "failed to remove finalizer", "finalizer", MantleBackupFinalizerName)
@@ -1334,45 +1351,14 @@ func (r *MantleBackupReconciler) handleCompletedJobsOfComponent(
 	componentPrefix string,
 	hookPostJobDeletion *func(partNum int) error,
 ) (int, *reconcile.Result) {
-	// List all the Jobs
-	var jobList batchv1.JobList
-	if err := r.List(ctx, &jobList, &client.ListOptions{
-		Namespace: r.managedCephClusterID,
-		LabelSelector: labels.SelectorFromSet(map[string]string{
-			"app.kubernetes.io/name":      labelAppNameValue,
-			"app.kubernetes.io/component": componentLabel,
-		}),
-	}); err != nil {
-		return -1, reconcile.Failed("failed to list Jobs: %w", err)
-	}
-
-	// Collect the completed Jobs having the correct prefix.
-	type CompletedJob struct {
-		job     batchv1.Job
-		partNum int
-	}
-	completedJobs := []*CompletedJob{}
-	largestPartNum := -1
-	for _, job := range jobList.Items {
-		if !IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete) {
-			continue
-		}
-
-		partNum, ok := ExtractPartNumFromComponentJobName(componentPrefix, job.GetName(), backup)
-		if !ok {
-			continue
-		}
-
-		completedJobs = append(completedJobs, &CompletedJob{
-			job:     job,
-			partNum: partNum,
-		})
-
-		largestPartNum = max(largestPartNum, partNum)
+	completedJobs, largestPartNum, result := r.listCompletedJobsOfComponent(ctx, backup, componentLabel, componentPrefix)
+	if result.ShouldReturn() {
+		return -1, result
 	}
 
 	// Delete the completed Jobs other than the latest one
-	for _, job := range completedJobs {
+	for i := range completedJobs {
+		job := &completedJobs[i]
 		if job.partNum == largestPartNum {
 			continue
 		}
@@ -1395,6 +1381,50 @@ func (r *MantleBackupReconciler) handleCompletedJobsOfComponent(
 	}
 
 	return largestPartNum, nil
+}
+
+type completedComponentJob struct {
+	job     batchv1.Job
+	partNum int
+}
+
+// listCompletedJobsOfComponent lists the completed Jobs of the given component that
+// belong to the backup, and returns them together with the largest part number among
+// them (-1 if there is none).
+func (r *MantleBackupReconciler) listCompletedJobsOfComponent(
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
+	componentLabel string,
+	componentPrefix string,
+) ([]completedComponentJob, int, *reconcile.Result) {
+	var jobList batchv1.JobList
+	if err := r.List(ctx, &jobList, &client.ListOptions{
+		Namespace: r.managedCephClusterID,
+		LabelSelector: labels.SelectorFromSet(map[string]string{
+			"app.kubernetes.io/name":      labelAppNameValue,
+			"app.kubernetes.io/component": componentLabel,
+		}),
+	}); err != nil {
+		return nil, -1, reconcile.Failed("failed to list Jobs: %w", err)
+	}
+
+	var completedJobs []completedComponentJob
+	largestPartNum := -1
+	for _, job := range jobList.Items {
+		if !IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete) {
+			continue
+		}
+
+		partNum, ok := ExtractPartNumFromComponentJobName(componentPrefix, job.GetName(), backup)
+		if !ok {
+			continue
+		}
+
+		completedJobs = append(completedJobs, completedComponentJob{job: job, partNum: partNum})
+		largestPartNum = max(largestPartNum, partNum)
+	}
+
+	return completedJobs, largestPartNum, nil
 }
 
 func IsPartNextToLargestCompletedPart(largestCompletedPartNum *int, partNum int) bool {
@@ -1530,6 +1560,10 @@ func (r *MantleBackupReconciler) startUpload(ctx context.Context, targetBackup *
 		return result.WrapIfError("failed to handle completed upload jobs")
 	}
 
+	if err := r.setExportedDiffSizeMetric(ctx, targetBackup, largestCompletedUploadPartNum); err != nil {
+		log.FromContext(ctx).Error(err, "failed to set exported diff size metric")
+	}
+
 	if result := r.createOrUpdateUploadJobs(
 		ctx,
 		targetBackup,
@@ -1540,6 +1574,57 @@ func (r *MantleBackupReconciler) startUpload(ctx context.Context, targetBackup *
 	}
 
 	return nil
+}
+
+// setExportedDiffSizeMetric HeadObjects each uploaded diff part from part 0 through
+// largestCompletedUploadPartNum, sums their sizes, and overwrites (Set) the
+// backup_exported_diff_size_bytes gauge with that total.
+func (r *MantleBackupReconciler) setExportedDiffSizeMetric(
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
+	largestCompletedUploadPartNum int,
+) error {
+	if largestCompletedUploadPartNum < 0 {
+		return nil
+	}
+
+	if result := r.prepareObjectStorageClient(ctx); result.ShouldReturn() {
+		_, err := result.ToCtrlResult()
+
+		return fmt.Errorf("failed to prepare object storage client: %w", err)
+	}
+
+	var totalSize int64
+	for partNum := 0; partNum <= largestCompletedUploadPartNum; partNum++ {
+		key := MakeObjectNameOfExportedData(backup.GetName(), string(backup.GetUID()), partNum)
+		size, err := r.objectStorageClient.GetSize(ctx, key)
+		if err != nil {
+			return fmt.Errorf("failed to get size of exported data part %d: %w", partNum, err)
+		}
+		totalSize += size
+	}
+
+	metrics.BackupExportedDiffSizeBytes.With(prometheus.Labels{
+		"persistentvolumeclaim": backup.Spec.PVC,
+		"resource_namespace":    backup.GetNamespace(),
+		"mantlebackup":          backup.GetName(),
+	}).Set(float64(totalSize))
+
+	return nil
+}
+
+func (r *MantleBackupReconciler) getLargestCompletedUploadPartNum(
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
+) (int, error) {
+	_, largestPartNum, result := r.listCompletedJobsOfComponent(ctx, backup, labelComponentUploadJob, MantleUploadJobPrefix)
+	if result.ShouldReturn() {
+		_, err := result.ToCtrlResult()
+
+		return -1, err
+	}
+
+	return largestPartNum, nil
 }
 
 func (r *MantleBackupReconciler) handleCompletedUploadJobs(ctx context.Context, backup *mantlev1.MantleBackup) (int, *reconcile.Result) {

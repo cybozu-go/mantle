@@ -12,6 +12,7 @@ import (
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/ceph"
 	"github.com/cybozu-go/mantle/internal/controller/internal/objectstorage"
+	"github.com/cybozu-go/mantle/internal/controller/metrics"
 	"github.com/cybozu-go/mantle/internal/testutil"
 	"github.com/cybozu-go/mantle/pkg/controller/proto"
 	"github.com/cybozu-go/mantle/test/util"
@@ -115,6 +116,39 @@ func completeJob(ctx SpecContext, jobNamespace, jobName string) {
 	}
 	err := k8sClient.Status().Update(ctx, &job)
 	Expect(err).NotTo(HaveOccurred())
+}
+
+// gatherGaugeValue returns the value of the gauge series matching name and labels,
+// and whether it exists.
+func gatherGaugeValue(name string, labels map[string]string) (float64, bool) {
+	GinkgoHelper()
+
+	mfs, err := runtimemetrics.Registry.Gather()
+	Expect(err).NotTo(HaveOccurred())
+	for _, mf := range mfs {
+		if mf.GetName() != name {
+			continue
+		}
+		for _, m := range mf.GetMetric() {
+			got := map[string]string{}
+			for _, l := range m.GetLabel() {
+				got[l.GetName()] = l.GetValue()
+			}
+			match := true
+			for k, v := range labels {
+				if got[k] != v {
+					match = false
+
+					break
+				}
+			}
+			if match {
+				return m.GetGauge().GetValue(), true
+			}
+		}
+	}
+
+	return 0, false
 }
 
 var _ = Describe("MantleBackup controller", func() {
@@ -1558,6 +1592,11 @@ var _ = Describe("export and upload", func() {
 		)
 		mbr.ceph = testutil.NewFakeRBD()
 
+		mockObjectStorage := objectstorage.NewMockBucket(mockCtrl)
+		mockObjectStorage.EXPECT().GetSize(gomock.Any(), gomock.Any()).
+			Return(int64(0), nil).AnyTimes()
+		mbr.objectStorageClient = mockObjectStorage
+
 		ns = resMgr.CreateNamespace()
 	})
 
@@ -1768,6 +1807,40 @@ var _ = Describe("export and upload", func() {
 			Entry("snap size = transfer part size", int64(testutil.FakeRBDSnapshotSize), 1),
 			Entry("snap size > transfer part size", int64(testutil.FakeRBDSnapshotSize-1), 2),
 		)
+
+		It("should set backup_exported_diff_size_bytes to the total size of the uploaded parts", func(ctx SpecContext) {
+			const numOfParts = 2
+			const partSize = int64(100)
+			// A transfer part size smaller than the snapshot size splits the backup into 2 parts.
+			mbr.backupTransferPartSize = *resource.NewQuantity(int64(testutil.FakeRBDSnapshotSize-1), resource.BinarySI)
+
+			// Stub GetSize to return a fixed size for every part.
+			mockObjectStorage := objectstorage.NewMockBucket(mockCtrl)
+			mockObjectStorage.EXPECT().GetSize(gomock.Any(), gomock.Any()).
+				Return(partSize, nil).AnyTimes()
+			mbr.objectStorageClient = mockObjectStorage
+
+			target := createAndExportMantleBackup(ctx, mbr, "target", ns, false, false, nil)
+
+			// Complete all export Jobs.
+			for partNum := range numOfParts {
+				completeJob(ctx, MakeExportJobName(target, partNum))
+				runStartExportAndUpload(ctx, target)
+			}
+			// Complete all upload Jobs.
+			for partNum := range numOfParts {
+				completeJob(ctx, MakeUploadJobName(target, partNum))
+				runStartExportAndUpload(ctx, target)
+			}
+
+			value, found := gatherGaugeValue("mantle_backup_exported_diff_size_bytes", map[string]string{
+				"persistentvolumeclaim": target.Spec.PVC,
+				"resource_namespace":    target.GetNamespace(),
+				"mantlebackup":          target.GetName(),
+			})
+			Expect(found).To(BeTrue())
+			Expect(value).To(Equal(float64(numOfParts * partSize)))
+		})
 	})
 })
 
@@ -2519,6 +2592,30 @@ var _ = Describe("import", func() {
 			By("finalizing the backup after the snapshot is already gone")
 			_, err = mbr.finalizeStandalone(ctx, backup).ToCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should delete the backup_exported_diff_size_bytes metric", func(ctx SpecContext) {
+			backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
+			Expect(err).NotTo(HaveOccurred())
+
+			labels := map[string]string{
+				"persistentvolumeclaim": backup.Spec.PVC,
+				"resource_namespace":    backup.GetNamespace(),
+				"mantlebackup":          backup.GetName(),
+			}
+
+			By("setting the metric for the backup")
+			metrics.BackupExportedDiffSizeBytes.With(labels).Set(1)
+			_, found := gatherGaugeValue("mantle_backup_exported_diff_size_bytes", labels)
+			Expect(found).To(BeTrue())
+
+			By("finalizing the backup")
+			_, err = mbr.finalizeStandalone(ctx, backup).ToCtrlResult()
+			Expect(err).NotTo(HaveOccurred())
+
+			By("checking the metric series is removed")
+			_, found = gatherGaugeValue("mantle_backup_exported_diff_size_bytes", labels)
+			Expect(found).To(BeFalse())
 		})
 	})
 
