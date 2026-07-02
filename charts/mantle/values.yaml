@@ -45,8 +45,12 @@ replicationService:
   # targetPort:
 
 webhook:
-  # webhook.enabled -- If true, deploy a webhook to prevent Pods from mounting PVCs created by Mantle.
-  # When deploying multiple Mantle instances, Set the value to `true` on only a single instance.
+  # webhook.enabled -- If true, deploy a webhook to prevent Pods from mounting PVCs that were
+  #   created as backup target PVCs by a secondary Mantle. We intend this webhook to be enabled
+  #   on a secondary Mantle because those PVCs should only be used for receiving backup data.
+  #
+  #   When deploying multiple Mantle instances on a K8s cluster, at most one instance
+  #   can have this webhook enabled.
   enabled: false
   # webhook.replicaCount -- Number of replicas for the webhook deployment.
   replicaCount: 1
