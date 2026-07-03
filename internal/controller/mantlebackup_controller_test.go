@@ -12,6 +12,7 @@ import (
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/ceph"
 	"github.com/cybozu-go/mantle/internal/controller/internal/objectstorage"
+	"github.com/cybozu-go/mantle/internal/controller/internal/reconcile"
 	"github.com/cybozu-go/mantle/internal/testutil"
 	"github.com/cybozu-go/mantle/pkg/controller/proto"
 	"github.com/cybozu-go/mantle/test/util"
@@ -235,6 +236,17 @@ var _ = Describe("MantleBackup controller", func() {
 			_, rr := reconciler.getSnapshotTarget(ctx, backup)
 			_, err = rr.ToCtrlResult()
 			Expect(err).To(HaveOccurred())
+		})
+
+		It("should attach the managed Ceph cluster ID label", func(ctx SpecContext) {
+			_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+
+			backup, err := resMgr.CreateUniqueBackupFor(ctx, pvc)
+			Expect(err).NotTo(HaveOccurred())
+
+			resMgr.WaitForBackupSnapshotCaptured(ctx, backup)
+			Expect(backup.GetLabels()[labelClusterID]).To(Equal(resMgr.ClusterID))
 		})
 
 		It("should capture snapshot", func(ctx SpecContext) {
@@ -833,6 +845,98 @@ var _ = Describe("MantleBackup controller", func() {
 	})
 })
 
+var _ = Describe("checkManagedBackup", func() {
+	var ns string
+
+	BeforeEach(func() {
+		ns = resMgr.CreateNamespace()
+	})
+
+	// The PVC created by resMgr belongs to resMgr.ClusterID, which is treated as the
+	// managed Ceph cluster. Each Entry passes, in order:
+	//   - labeled: when true, the MantleBackup gets the cluster-id label set to the
+	//     managed Ceph cluster ID (resMgr.ClusterID).
+	//   - createPVC: when true, a PVC managed by resMgr is created and referenced;
+	//     otherwise the referenced PVC does not exist.
+	//   - managed: when true, the reconciler manages the same cluster as the PVC
+	//     (resMgr.ClusterID); when false, it manages a different cluster.
+	//   - assert: assertion against the *reconcileResult returned by checkManagedBackup.
+	DescribeTable("decides whether the MantleBackup should be processed",
+		func(ctx SpecContext, labeled, createPVC, managed bool, assert func(*reconcile.Result)) {
+			managedID := resMgr.ClusterID
+			if !managed {
+				managedID = util.GetUniqueName("ceph-")
+			}
+
+			pvcName := "non-existent-pvc"
+			if createPVC {
+				_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
+				Expect(err).NotTo(HaveOccurred())
+				pvcName = pvc.Name
+			}
+
+			backup := &mantlev1.MantleBackup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      util.GetUniqueName("backup-"),
+					Namespace: ns,
+				},
+				Spec: mantlev1.MantleBackupSpec{PVC: pvcName},
+			}
+			if labeled {
+				backup.SetLabels(map[string]string{labelClusterID: resMgr.ClusterID})
+			}
+
+			r := NewMantleBackupReconciler(
+				k8sClient, scheme.Scheme, managedID, RoleStandalone,
+				nil, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"),
+			)
+
+			assert(r.checkManagedBackup(ctx, backup))
+		},
+		Entry("continues via the label fast path even when the PVC exists",
+			true, true, true, // labeled, PVC exists (must not be consulted), managed
+			func(r *reconcile.Result) { Expect(r).To(BeNil()) }),
+		Entry("continues via the label fast path without looking up the PVC",
+			true, false, true, // labeled, no PVC (must not be consulted), managed
+			func(r *reconcile.Result) { Expect(r).To(BeNil()) }),
+		Entry("skips via the label fast path when the label points to another cluster",
+			true, false, false, // labeled for resMgr.ClusterID, no PVC, reconciler manages a different cluster
+			func(r *reconcile.Result) {
+				Expect(r.ShouldReturn()).To(BeTrue())
+				res, err := r.ToCtrlResult()
+				Expect(err).NotTo(HaveOccurred())
+				Expect(res.IsZero()).To(BeTrue())
+			}),
+		Entry("continues when the PVC belongs to the managed cluster",
+			false, true, true, // unlabeled, PVC exists, managed
+			func(r *reconcile.Result) { Expect(r).To(BeNil()) }),
+		Entry("skips when the PVC belongs to another cluster",
+			false, true, false, // unlabeled, PVC exists, reconciler manages a different cluster
+			func(r *reconcile.Result) {
+				Expect(r.ShouldReturn()).To(BeTrue())
+				res, err := r.ToCtrlResult()
+				Expect(err).NotTo(HaveOccurred())
+				Expect(res.IsZero()).To(BeTrue())
+			}),
+		Entry("requeues when the referenced PVC is not found",
+			false, false, true, // unlabeled, no PVC, managed
+			func(r *reconcile.Result) {
+				Expect(r.ShouldReturn()).To(BeTrue())
+				res, err := r.ToCtrlResult()
+				Expect(err).NotTo(HaveOccurred())
+				Expect(res.RequeueAfter).NotTo(BeZero())
+			}),
+		Entry("requeues when the referenced PVC is not found regardless of the managed cluster",
+			false, false, false, // unlabeled, no PVC, reconciler manages a different cluster
+			func(r *reconcile.Result) {
+				Expect(r.ShouldReturn()).To(BeTrue())
+				res, err := r.ToCtrlResult()
+				Expect(err).NotTo(HaveOccurred())
+				Expect(res.RequeueAfter).NotTo(BeZero())
+			}),
+	)
+})
+
 var _ = Describe("searchDiffOriginMantleBackup", func() {
 	testMantleBackup := newMantleBackup("test0", "test-ns", nil, nil, false,
 		5, metav1.ConditionTrue, metav1.ConditionFalse)
@@ -1194,7 +1298,7 @@ var _ = Describe("SetSynchronizing", func() {
 			diffFrom = &sourceName
 		}
 
-		secondaryServer := NewSecondaryServer(ctrlClient)
+		secondaryServer := NewSecondaryServer(ctrlClient, "unused")
 		_, err = secondaryServer.SetSynchronizing(context.Background(), &proto.SetSynchronizingRequest{
 			Name:      targetName,
 			Namespace: backupNamespace,
@@ -1301,7 +1405,7 @@ var _ = Describe("SetSynchronizing", func() {
 			Expect(err).NotTo(HaveOccurred())
 		}
 
-		secondaryServer := NewSecondaryServer(ctrlClient)
+		secondaryServer := NewSecondaryServer(ctrlClient, "unused")
 		_, err = secondaryServer.SetSynchronizing(context.Background(), &proto.SetSynchronizingRequest{
 			Name:      name1,
 			Namespace: "",
