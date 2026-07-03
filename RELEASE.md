@@ -85,11 +85,14 @@ If you want to release both charts, please follow the instructions for each of t
    git switch -c bump-mantle-cluster-wide-chart-${CHARTVERSION}
    ```
 
-3. Update versions in the `Chart.yaml` file.
+3. Update versions in the `Chart.yaml` and `values.yaml` files.
    ```sh
    # For charts/mantle
    sed -r -i "s/appVersion: \"[[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+\"/appVersion: \"${APPVERSION}\"/g" charts/mantle/Chart.yaml
    sed -r -i "s/^version: [[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+/version: ${CHARTVERSION}/g" charts/mantle/Chart.yaml
+   DIGEST=$(gh api --paginate "/orgs/cybozu-go/packages/container/mantle/versions" \
+     --jq "[.[] | select(.metadata.container.tags[]? == \"${APPVERSION}\") | .name] | first")
+   sed -r -i "s|^(  reference:).*|\1 ${APPVERSION}@${DIGEST}|" charts/mantle/values.yaml
 
    # For charts/mantle-cluster-wide
    sed -r -i "s/appVersion: \"[[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+\"/appVersion: \"${APPVERSION}\"/g" charts/mantle-cluster-wide/Chart.yaml

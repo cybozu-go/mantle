@@ -3,7 +3,8 @@ replicaCount: 1
 image:
   repository: ghcr.io/cybozu-go/mantle
   pullPolicy:
-  tag: # {{ .Chart.AppVersion }}
+  # The image reference: a tag and/or a digest (e.g. "1.2.3@sha256:...").
+  reference: 0.11.3@sha256:64a4080f28b15ff854fe0d54337d0eaadbd70133d5a6129ded37b34e1c1d2f64
 
 imagePullSecrets: []
 nameOverride: ""
