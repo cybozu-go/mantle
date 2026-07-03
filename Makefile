@@ -104,9 +104,16 @@ golangci-lint:
 	}
 
 .PHONY: lint
-lint: golangci-lint ## Run golangci-lint linter & yamllint
+lint: golangci-lint check-yaml-template ## Run golangci-lint linter & yamllint
 	$(GOLANGCI_LINT) run --timeout 3m
 	$(GOLANGCI_LINT) run -c .golangci-new.yml --timeout 3m internal/controller/domain internal/controller/usecase
+
+.PHONY: check-yaml-template
+check-yaml-template: ## Ensure go-template placeholders in YAML are quoted (use "%s" instead of bare %s).
+	@if grep -rnP '(?<!")%s|%s(?!")' --include='*.yaml' --include='*.yml' .; then \
+		echo 'ERROR: found bare "%s" in the YAML files above; quote them as "%s" so YAML validators accept them.'; \
+		exit 1; \
+	fi
 
 .PHONY: lint-fix
 lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes

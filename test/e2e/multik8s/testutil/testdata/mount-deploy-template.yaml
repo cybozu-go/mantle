@@ -1,17 +1,17 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: %s
-  namespace: %s
+  name: "%s"
+  namespace: "%s"
 spec:
   selector:
     matchLabels:
-      app: %s
+      app: "%s"
   replicas: 1
   template:
     metadata:
       labels:
-        app: %s
+        app: "%s"
     spec:
       securityContext:
         runAsUser: 10000
@@ -30,4 +30,4 @@ spec:
       volumes:
         - name: volume
           persistentVolumeClaim:
-            claimName: %s
+            claimName: "%s"
