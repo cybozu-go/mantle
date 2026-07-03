@@ -1,8 +1,8 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: %s
-  namespace: %s
+  name: "%s"
+  namespace: "%s"
 spec:
   template:
     spec:
@@ -22,4 +22,4 @@ spec:
       volumes:
       - name: volume
         persistentVolumeClaim:
-          claimName: %s
+          claimName: "%s"

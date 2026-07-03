@@ -3,12 +3,12 @@ kind: MantleBackup
 metadata:
   labels:
     app.kubernetes.io/name: mantlebackup
-    app.kubernetes.io/instance: %s
+    app.kubernetes.io/instance: "%s"
     app.kubernetes.io/part-of: mantle
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/created-by: mantle
-  name: %s
-  namespace: %s
+  name: "%s"
+  namespace: "%s"
 spec:
-  pvc: %s
+  pvc: "%s"
   expire: "1d"
