@@ -26,6 +26,8 @@ Must update Kubernetes with each new version of Kubernetes.
 - [ ] rook
   - https://github.com/rook/rook/releases
   - Only need to confirm that upstream Rook has released a version that supports the target Kubernetes version.
+- [ ] kubebuilder
+  - https://github.com/kubernetes-sigs/kubebuilder/releases
 
 ### Additional Checks
 
