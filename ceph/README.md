@@ -18,7 +18,7 @@ make test
 **In the `cybozu/ceph` repository,** sync with the contents from upstream git (`ceph/ceph`),  including tags.
 
 ```sh
-git swtich main
+git switch main
 git remote
 # If there is no `upstream` in remotes, use the following command to add it.
 git remote add upstream https://github.com/ceph/ceph.git
