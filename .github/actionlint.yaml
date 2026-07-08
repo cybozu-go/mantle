@@ -1,0 +1,5 @@
+# You can see the self-hosted runners available for mantle.
+# https://github.com/cybozu-go/mantle/settings/actions/runners
+self-hosted-runner:
+  labels:
+    - mantle_large_runner_16core
