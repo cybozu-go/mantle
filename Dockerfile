@@ -35,7 +35,7 @@ RUN go install github.com/peak/s5cmd/v2@991c9fbc16709341b4bac04513232a1445941f63
 # cf. https://github.com/cybozu/neco-containers/blob/a504569e337e41d3a9c7e0b6c0fc0482c2a31008/ceph/Dockerfile
 FROM ubuntu:22.04 AS custom-ceph
 
-ARG EXPORT_DIFF_VERSION=19.2.1.0
+ARG EXPORT_DIFF_VERSION=20.2.1.0
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
