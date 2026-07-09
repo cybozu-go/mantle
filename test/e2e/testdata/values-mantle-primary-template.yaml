@@ -1,7 +1,7 @@
 image:
   repository: controller
   pullPolicy: IfNotPresent
-  tag: latest
+  reference: latest
 
 controller:
   role: primary

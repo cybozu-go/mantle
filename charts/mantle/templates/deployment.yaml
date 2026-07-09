@@ -43,7 +43,7 @@ spec:
             capabilities:
               drop:
               - "ALL"
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.reference }}"
           {{- with .Values.image.pullPolicy }}
           imagePullPolicy: {{ . }}
           {{- end }}
@@ -128,7 +128,7 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
             - name: POD_IMAGE
-              value: {{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
+              value: {{ .Values.image.repository }}:{{ .Values.image.reference }}
             {{- range .Values.controller.env }}
             - {{ toYaml . | nindent 14 }}
             {{- end }}
@@ -215,7 +215,7 @@ spec:
               secretKeyRef:
                 key: ceph-username
                 name: rook-ceph-mon
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.reference }}"
           imagePullPolicy: IfNotPresent
           name: toolbox
           securityContext:
@@ -327,7 +327,7 @@ spec:
             capabilities:
               drop:
               - "ALL"
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.reference }}"
           {{- with .Values.image.pullPolicy }}
           imagePullPolicy: {{ . }}
           {{- end }}
