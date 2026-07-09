@@ -2,7 +2,7 @@ FROM ghcr.io/cybozu/ubuntu:22.04 AS build-ceph
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
-ENV CEPH_TAG=v19.2.1
+ENV CEPH_TAG=v20.2.1
 ENV WORKSPACE=/workspace
 
 RUN apt-get update && \
@@ -24,10 +24,6 @@ WORKDIR ${WORKSPACE}/ceph
 
 RUN ./install-deps.sh && \
     apt install --no-install-recommends -y python3-routes
-
-# Addition of debian pkg in ceph exporter was omitted in squid.
-# https://github.com/ceph/ceph/pull/56541
-RUN patch -p1 < ${WORKSPACE}/exporter.patch
 
 # This patch customizes the ceph rbd export-diff command. 
 RUN patch -p1 < ${WORKSPACE}/export-diff.patch
