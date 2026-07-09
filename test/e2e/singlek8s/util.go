@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -523,18 +522,19 @@ func getImageAndSnapNames(namespace, pool string) ([]string, error) {
 }
 
 func checkJobExists(namespace, jobName string) (bool, error) {
-	stdout, _, err := kubectl("get", "job", "-n", namespace, "-o", "json")
-	if err != nil {
-		return false, err
-	}
-	jobList := batchv1.JobList{}
-	err = json.Unmarshal(stdout, &jobList)
-	if err != nil {
-		return false, err
-	}
-	found := slices.ContainsFunc(jobList.Items, func(j batchv1.Job) bool {
-		return j.Name == jobName
-	})
+	return checkResourceExists("job", namespace, jobName)
+}
 
-	return found, nil
+func checkPVCExists(namespace, pvcName string) (bool, error) {
+	return checkResourceExists("pvc", namespace, pvcName)
+}
+
+// checkResourceExists reports whether a single named resource exists in the namespace.
+func checkResourceExists(kind, namespace, name string) (bool, error) {
+	stdout, _, err := kubectl("get", kind, name, "-n", namespace, "--ignore-not-found=true", "-o", "name")
+	if err != nil {
+		return false, err
+	}
+
+	return len(bytes.TrimSpace(stdout)) > 0, nil
 }
