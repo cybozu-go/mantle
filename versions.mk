@@ -13,6 +13,10 @@ MINIKUBE_VERSION := v1.38.1
 PROTOC_VERSION := 34.1
 # https://github.com/rook/rook/releases
 ROOK_CHART_VERSION := v1.19.5
+# https://github.com/zizmorcore/zizmor/releases
+ZIZMOR_VERSION := v1.26.1
+# SHA256 checksum of the zizmor's release tarball for verification
+ZIZMOR_SHA256 := 8556289a64e7aaf2400cd516f61a471aa91c5902cc56ad96a82fd12f90c2ef73
 # https://github.com/rhysd/actionlint/releases
 ACTIONLINT_VERSION := v1.7.12
 # https://github.com/suzuki-shunsuke/ghalint/releases
