@@ -190,15 +190,24 @@ MBC PoC と同様、`MantleBackupReconciler.Reconcile` 内で `sync.Once` によ
 
 == 段階的移行計画
 
+[#migration-strategy-note]
 === 移行戦略
 
 ストラングラーフィグパターンに基づき、次の方針で進める：
 
-1. **既存のオーケストレーション（`reconcileAsStandalone` などの旧メソッド群）をファサードとして残したまま**、サブフローを 1 つずつドメイン層の関数（＋ユニットテスト）に置き換える。旧メソッドは「入力の取得 → ドメイン関数の呼び出し → Operations の即時適用」をするだけの形に痩せていく。
-2. あるロールの全サブフローがドメイン化された時点で、そのロールの `Provision`/`Finalize`（逐次 `if` の形）とユースケース層の `Run` を組み立て、`Reconcile` の該当ロール分岐を切り替え、不要になった旧コードを削除する。
-3. ロールは standalone → primary → secondary の順に完成させる。standalone のフローは primary の部分集合（ローカルバックアップ＋verify＋cleanup）なので、共有部分のドメイン化がそのまま primary の下準備になる。
+1. **最初に最終形と同じ呼び出し経路（`Reconcile` → `usecase.Run` → `domain.Provision`/`Finalize`）を骨組みとして導入する**（PR 2）。ドメイン層の関数を旧コードから直接呼ぶ中間状態は作らず、ドメイン化された処理は常にユースケース層経由で実行される。
+2. 移行が完了していない状況に対しては、`Provision`/`Finalize` が「旧コードに委譲する」ことを表す一時的な戻り値（以下 **legacy 委譲シグナル**）を返す。`Run` は、そこまでにドメイン層が行ったリコンサイル対象の変更の永続化と Operations の適用を済ませた上でシグナルを呼び出し元へ伝え、`Reconcile` が旧コード経路を実行する。
+3. サブフローを 1 つずつドメイン化し、`Provision`/`Finalize` の逐次 `if` に追記していく。ドメイン化したサブフローの旧コードは同じ PR で削除する。あるロールの全サブフローが揃ったら、そのロールの legacy 委譲シグナルと旧コード経路を削除する。従来方式のような「一括切り替え PR」は不要になり、ロール完成時の PR は削除が主体の低リスクなものになる。
+4. Operation 型・インフラ層の Operation 実行器・ドメイン interface のインフラ実装は、先行 PR でまとめて導入せず、**それらを初めて使用する PR で一緒に追加する**。レビュー時に発行側（ドメイン層）と実行側（インフラ層）を突き合わせて確認できるようにするためでもある。
+5. ロールは standalone → primary → secondary の順に完成させる。standalone のフローは primary の部分集合（ローカルバックアップ＋verify＋cleanup）なので、共有部分のドメイン化がそのまま primary の下準備になる。
 
-この戦略により、切り替え PR 以外のどの時点でも旧経路が現役で動き続け、各 PR のレビュー範囲が「1 サブフローのドメイン化とそのテスト」に限定される。
+「最初からユースケース層経由」での移行が可能な理由と、そのために必要な一時的な仕組みは次の通り：
+
+* `Provision`/`Finalize` は「`if 条件 { return 処理 }` の逐次実行」であり、1 回のリコンサイルは最初に成立した条件の処理だけを実行して終わる。そのため「移行済みの条件の `if`」と「未移行の状況で legacy 委譲シグナルを返す `if`」が同じ関数内に矛盾なく共存でき、サブフローをフロー順に縛られることなく 1 つずつ移行できる。
+* legacy 委譲シグナルはドメイン層に定義する一時的な戻り値であり、全ロールの移行完了時（PR 13）に仕組みごと削除する。
+* 例外として、primary の冒頭で毎回実行されるメトリクス復元処理（`setExportedDiffSizeMetric` 系）は「条件で終端する処理」ではないため逐次 `if` に馴染まず、移行（PR 9）までは `Reconcile` 側に残す。
+
+この戦略により、どの時点でも未移行の経路は旧コードが現役で動き続け、各 PR のレビュー範囲が「1 サブフローのドメイン化とそのテスト」に限定される。
 
 === PR 一覧
 
@@ -211,80 +220,81 @@ MBC PoC と同様、`MantleBackupReconciler.Reconcile` 内で `sync.Once` によ
 * **テスト**: 移動した純粋関数のうちテストが薄いものに AAA ユニットテストを追加する（特に `searchForDiffOriginMantleBackup`、`ExtractPartNumFrom*`）。既存の関連テストが `internal/controller` 側にあればテスト関数ごと domain 側へ移す。
 * **規模**: 大きめだが、ほぼ機械的な移動 diff。
 
-==== PR 2: MantleBackup 用 Operation 基盤
+==== PR 2: ユースケース層の骨組みと Reconcile の配線
 
-* **内容**: MantleBackup のリコンサイルで使う Operation 型の骨格（第 1 弾として PR 3〜6 が使う分：`DeleteMantleBackupOperation`、`ScheduleExpireOperation`、`CreateOrUpdateVerifyJobOperation`、静的 PV/PVC 作成、verify リソース削除系）と、`infra.ApplyReconcilerOperations` への実行器の追加を行う。実行器がチャネル（`expireQueueCh`）や `ceph.CephCmd` を必要とするため、`infra.KubernetesClient` の依存注入を拡張する。
-* **nop**: この PR の時点では Operation を発行するコードが存在しないため、追加分は全て nop。
-* **テスト**: Operation 型は構造体のみのためユニットテスト対象外（実行器はインテグレーション・E2E の守備範囲）。
-* **規模**: 小。
-* **備考**: 以降の PR で新しい Operation 型が必要になった場合は、その Operation を初めて発行する PR で型と実行器を一緒に追加する（巨大な nop PR を避ける）。
+* **内容**: 3 ロール分のドメインリコンサイラ（`MBStandaloneReconciler`・`MBPrimaryReconciler`・`MBSecondaryReconciler`）の `Provision`/`Finalize` と、ユースケース層の `ReconcileMB{Standalone,Primary,Secondary}.Run` を骨組みとして導入し、`Reconcile` の各ロール分岐を `usecase.Run` 経由に配線する。legacy 委譲シグナル（ドメイン層に定義する一時的な戻り値）もこの PR で導入する。この時点の `Provision`/`Finalize` は legacy 委譲シグナルを返すだけであり、`Run` はそれを受けて旧コード経路に委譲するため、外部挙動は変わらない。
+* **nop**: `Provision`/`Finalize` は何も処理しないため、配線以外は実質 nop。
+* **テスト**: `Run` の骨組み（`DeletionTimestamp` による呼び分け・変更の永続化・Operations の適用・legacy 委譲シグナルの伝播）に対する AAA ユニットテスト。
+* **規模**: 小〜中。
+* **備考**: Operation 型・`infra.ApplyReconcilerOperations` の実行器・ドメイン interface のインフラ実装は、この PR ではまとめて導入せず、それらを初めて使用する後続 PR で一緒に追加する（<<migration-strategy-note,移行戦略>> の方針 4）。
 
 ==== PR 3: expire と checkManagedBackup のドメイン化
 
-* **内容**: `expire` の判定ロジック（CreatedAt 未設定・deletionTimestamp・retain-if-expired アノテーション・期限計算）をドメイン層の関数に移し、削除は `DeleteMantleBackupOperation`、遅延 requeue は `ScheduleExpireOperation` として発行する。`checkManagedBackup` の判定部分（ラベル一致・cluster ID 照合）もドメイン化し、PVC と cluster ID の取得は呼び出し側に残す。旧 `expire`・`checkManagedBackup` はドメイン関数を呼んで Operations を即時適用する形に書き換える。
+* **内容**: `expire` の判定ロジック（CreatedAt 未設定・deletionTimestamp・retain-if-expired アノテーション・期限計算）をドメイン化し、削除は `DeleteMantleBackupOperation`、遅延 requeue は `ScheduleExpireOperation` として発行する。`checkManagedBackup` の判定部分（ラベル一致・cluster ID 照合）もドメイン化し、PVC と cluster ID の取得はユースケース層（`Run`）が行いドメイン層へ渡す。これらを全ロールの `Provision`/`Finalize` の冒頭の `if` として追記し、旧 `expire`・`checkManagedBackup` は削除する。両 Operation の型とインフラ層の実行器（`expireQueueCh` の注入を含む）はこの PR で追加する。
 * **テスト**: 「期限切れなら削除 Operation を発行する」「retain-if-expired なら何もしない」「未期限なら schedule Operation を発行する」等の AAA ユニットテスト。
 * **規模**: 小〜中。最初のサブフロー移行としてパターンを確立する PR。
 
 ==== PR 4: ローカルバックアップ準備とスナップショット作成のドメイン化
 
 * **内容**:
-** `reconcileLocalBackup` のうち、ラベル（cluster-id / local-backup-target-pvc-uid）と finalizer の付与、`getSnapshotTarget` の判定部分（PVC UID 照合、`checkPVCBound`、PV からの image/pool 抽出）をドメイン化する。PVC・PV の取得は呼び出し側に残す。
-** `provisionRBDSnapshot` を「2 周のリコンサイル」に分解してドメイン化する（<<risk-persist-order>> 参照）：第 1 周は PVC/PV マニフェストを status にセットして requeue（永続化はユースケース層／旧呼び出し側）、第 2 周はマニフェスト永続化済みを確認してから `CreateAndFindRBDSnapshot` interface（この PR でドメイン層に定義、インフラ層で `ceph.CephCmd` により実装）でスナップショットを作成し、SnapID・CreatedAt・SnapSize・conditions をメモリ上で更新する。
+** `reconcileLocalBackup` のうち、ラベル（cluster-id / local-backup-target-pvc-uid）と finalizer の付与、`getSnapshotTarget` の判定部分（PVC UID 照合、`checkPVCBound`、PV からの image/pool 抽出）をドメイン化する。PVC・PV の取得はユースケース層が行いドメイン層へ渡す。
+** `provisionRBDSnapshot` を「2 周のリコンサイル」に分解してドメイン化する（<<risk-persist-order>> 参照）：第 1 周は PVC/PV マニフェストを status にセットして requeue（永続化はユースケース層）、第 2 周はマニフェスト永続化済みを確認してから `CreateAndFindRBDSnapshot` interface（この PR でドメイン層に定義、インフラ層で `ceph.CephCmd` により実装）でスナップショットを作成し、SnapID・CreatedAt・SnapSize・conditions をメモリ上で更新する。
+** 以上を standalone・primary の `Provision` の `if` として追記し、旧コードの該当部分を削除する。
 * **テスト**: ラベル・finalizer 付与、マニフェスト未保存時の requeue、スナップショット作成後の status 更新、fake interface を使った作成失敗時の挙動。
 * **規模**: 中。ドメイン interface を使う最初の PR。
 
 ==== PR 5: verify のドメイン化
 
-* **内容**: `verify` を「clone 作成（interface）→ 静的 PV/PVC 作成（Operation）→ verify Job 作成（Operation）→ Job 完了状態（入力データ）に応じた Verified condition の更新（メモリ上）」の逐次 `if` に書き換える。verify Job の完了状態は呼び出し側が `checkJobStatus` 相当で取得してデータとして渡す。`createOrUpdateVerifyJob` の Job spec 構築と `createStaticPV(C)IfNotExists` の本体はインフラ層の Operation 実行器へ移す。
+* **内容**: `verify` を「clone 作成（interface）→ 静的 PV/PVC 作成（Operation）→ verify Job 作成（Operation）→ Job 完了状態（入力データ）に応じた Verified condition の更新（メモリ上）」の逐次 `if` に書き換える。verify Job の完了状態はユースケース層が `checkJobStatus` 相当で取得してデータとして渡す。clone 作成 interface のインフラ実装と各 Operation の型・実行器（`createOrUpdateVerifyJob` の Job spec 構築、`createStaticPV(C)IfNotExists` の本体を含む）はこの PR で追加する。全ロールの `Provision` の該当 `if` として追記し、旧 `verify` 系コードを削除する。
 * **テスト**: Job 未完了なら何もしない、成功／失敗に応じた condition 設定、各 Operation の発行内容。
 * **規模**: 中。
 
 ==== PR 6: primaryCleanup と finalizeStandalone のドメイン化
 
-* **内容**: `primaryCleanup`（export/upload Job・export-data PVC・verify リソースの削除、verify 用 RBD イメージの削除）と `finalizeStandalone`（diff-to アノテーション確認、cleanup、RBD スナップショット削除、メトリクス削除、finalizer 除去）をドメイン化する。リソース削除は Operation、RBD スナップショット削除（`removeRBDSnapshot`：存在確認 → 削除 → 確認）と verify イメージ削除はドメイン interface とする。
+* **内容**: `primaryCleanup`（export/upload Job・export-data PVC・verify リソースの削除、verify 用 RBD イメージの削除）と `finalizeStandalone`（diff-to アノテーション確認、cleanup、RBD スナップショット削除、メトリクス削除、finalizer 除去）をドメイン化する。リソース削除は Operation、RBD スナップショット削除（`removeRBDSnapshot`：存在確認 → 削除 → 確認）と verify イメージ削除はドメイン interface とする。Operation の型・実行器と interface のインフラ実装はこの PR で追加する。standalone・primary の `Provision`（cleanup の `if`）と `Finalize` に追記し、旧コードを削除する。
 * **テスト**: diff-to があればスキップ、finalizer がなければスキップ、削除 Operation の発行内容、スナップショット既削除時に成功扱いになること。
 * **規模**: 中。
 
-==== PR 7: standalone ロールの組み立てと切り替え
+==== PR 7: standalone ロールの完成（legacy 委譲の撤去）
 
-* **内容**: PR 3〜6 のドメイン関数を組み合わせて `domain.MBStandaloneReconciler` の `Provision`/`Finalize` を逐次 `if` スタイルで実装し、`usecase.ReconcileMBStandalone.Run`（リソース事前取得 → 呼び分け → 永続化 → Operations 適用）を実装する。`Reconcile` の `RoleStandalone` 分岐をユースケース層呼び出しに切り替え、standalone 専用の旧コード経路を削除する。
-* **テスト**: `Provision`/`Finalize` の分岐網羅（スナップショット未作成→作成、verify 未完→verify、全完了→cleanup、finalize の各段階）を AAA ユニットテストで担保する。
-* **規模**: 中。**最初のロール切り替え PR** であり、挙動確認を特に慎重に行う。
+* **内容**: PR 3〜6 により `MBStandaloneReconciler` の `Provision`/`Finalize` が standalone の全サブフローをカバーしたので、standalone 経路の legacy 委譲シグナルの返却箇所と standalone 専用の旧コードを削除する。ロジックの変更は含めない。
+* **テスト**: `Provision`/`Finalize` の分岐網羅（スナップショット未作成→作成、verify 未完→verify、全完了→cleanup、finalize の各段階）が AAA ユニットテストで揃っていることを確認し、不足分を補う。
+* **規模**: 小〜中（削除が主体）。standalone が新アーキテクチャで完結する最初のマイルストーン。
 
 ==== PR 8: レプリケーションのマニフェスト同期と同期準備のドメイン化
 
-* **内容**: `replicateManifests`（先行 backup の同期確認 → 送信用 PVC/MantleBackup マニフェスト構築 → gRPC 送信）をドメイン化し、gRPC 2 呼び出しを複合 Operation `ReplicateManifestsOperation` にする。`prepareForDataSynchronization` は、セカンダリの backup 一覧（gRPC `ListMantleBackup`）と primary の backup 一覧を呼び出し側で事前取得し、full/incremental/diff-from の判定をドメイン層の純粋関数にする。`SetSynchronizing` は Operation 化する。
+* **内容**: `replicateManifests`（先行 backup の同期確認 → 送信用 PVC/MantleBackup マニフェスト構築 → gRPC 送信）をドメイン化し、gRPC 2 呼び出しを複合 Operation `ReplicateManifestsOperation` にする。`prepareForDataSynchronization` は、セカンダリの backup 一覧（gRPC `ListMantleBackup`）と primary の backup 一覧をユースケース層で事前取得し、full/incremental/diff-from の判定をドメイン層の純粋関数にする。`SetSynchronizing` は Operation 化する。primary の `Provision` に追記し、旧コードの該当部分を削除する。
 * **テスト**: 先行 backup 未同期時の requeue、送信マニフェストの内容（アノテーション・ラベル・容量）、sync-mode アノテーションと diff-from 探索の分岐網羅。
-* **規模**: 中〜大。gRPC 系 Operation をここで導入する。
+* **規模**: 中〜大。gRPC 系 Operation の型と実行器をここで導入する。
 
 ==== PR 9: export / upload のドメイン化
 
-* **内容**: `startExport`・`startUpload` 系（export-data PVC・export Job・upload Job の作成判定、完了 Job の処理、`canNew{Export,Import}JobBeCreated` の同時実行数制限、part 番号管理、diff-from/diff-to アノテーションの付与、メトリクス設定）をドメイン化する。Job/PVC 一覧・完了状態・オブジェクトストレージの `Exists`/`GetSize` は呼び出し側で事前取得しデータとして渡す。Job spec 構築（`createOrUpdateExportJob`・`createOrUpdateUploadJobs`・`createOrUpdateExportDataPVC`）はインフラ層の Operation 実行器へ移す。
+* **内容**: `startExport`・`startUpload` 系（export-data PVC・export Job・upload Job の作成判定、完了 Job の処理、`canNew{Export,Import}JobBeCreated` の同時実行数制限、part 番号管理、diff-from/diff-to アノテーションの付与、メトリクス設定）をドメイン化する。Job/PVC 一覧・完了状態・オブジェクトストレージの `Exists`/`GetSize` はユースケース層で事前取得しデータとして渡す。Job spec 構築（`createOrUpdateExportJob`・`createOrUpdateUploadJobs`・`createOrUpdateExportDataPVC`）はインフラ層の Operation 実行器としてこの PR で追加する。primary 冒頭のメトリクス復元処理と `exportedDiffSizeCache` もこの PR でユースケース層に移す。primary の `Provision` に追記し、旧コードの該当部分を削除する。
 * **テスト**: part 進行の判定（`IsPartNextToLargestCompletedPart` 連携）、同時実行数制限、full/incremental による Job パラメータの違い、全 part 完了の判定。
 * **規模**: 大。レビュー負荷が高くなる場合は「export」「upload」の 2 PR に分割してよい（分割時は export 側 Operation が一時的に nop でも構わない）。
 
-==== PR 10: primary ロールの組み立てと切り替え
+==== PR 10: primary ロールの完成（legacy 委譲の撤去）
 
-* **内容**: PR 7 と同様に `domain.MBPrimaryReconciler`・`usecase.ReconcileMBPrimary` を実装し、`Reconcile` の `RolePrimary` 分岐を切り替える。`exportedDiffSizeCache` をユースケース層に移す。primary 専用の旧コード（`replicate` 系のオーケストレーション）を削除する。
-* **テスト**: `Provision` の分岐網羅（未 verify → verify、未同期 → replicate、同期済み → condition 更新と requeue、全完了 → cleanup）。
-* **規模**: 中。
+* **内容**: primary 経路の legacy 委譲シグナルの返却箇所と、primary 専用の旧コード（`replicate` 系のオーケストレーションなど）を削除する。ロジックの変更は含めない。
+* **テスト**: `Provision` の分岐網羅（未 verify → verify、未同期 → replicate、同期済み → condition 更新と requeue、全完了 → cleanup）が揃っていることを確認し、不足分を補う。
+* **規模**: 小〜中（削除が主体）。
 
 ==== PR 11: インポート（secondary の provision）のドメイン化
 
-* **内容**: `startImport` 系をドメイン化する。sync-mode アノテーション確認・part 0 アップロード確認（`Exists` は事前取得）・PV/PVC サイズ比較・status マニフェスト更新（メモリ上）・zero-out Job / import Job / 静的 PV/PVC の作成（Operation）・`markSecondarySnapshotCaptured` を逐次 `if` に整理する。`lockVolume`/`unlockVolume` はドメイン interface とし、ロック保持中の判定と Job Operation の発行順序をドメイン層で明示する。Job spec 構築はインフラ層へ。`prepareObjectStorageClient` はインフラ層のコンポーネントに移す。
+* **内容**: `startImport` 系をドメイン化する。sync-mode アノテーション確認・part 0 アップロード確認（`Exists` はユースケース層で事前取得）・PV/PVC サイズ比較・status マニフェスト更新（メモリ上）・zero-out Job / import Job / 静的 PV/PVC の作成（Operation）・`markSecondarySnapshotCaptured` を逐次 `if` に整理する。`lockVolume`/`unlockVolume` はドメイン interface とし、ロック保持中の判定と Job Operation の発行順序をドメイン層で明示する。Operation の型・実行器（Job spec 構築を含む）と lock interface のインフラ実装はこの PR で追加する。`prepareObjectStorageClient` はインフラ層のコンポーネントに移す。secondary の `Provision` に追記し、旧コードの該当部分を削除する。
 * **テスト**: sync-mode 未設定時の requeue、part 0 未アップロード時の requeue、ロック取得失敗時の requeue、zero-out → import の順序、snapshot captured 化の条件。
 * **規模**: 大。必要なら「zero-out・静的 PV/PVC」「import Job・ロック」の 2 PR に分割してよい。
 
 ==== PR 12: secondaryCleanup と finalizeSecondary のドメイン化
 
-* **内容**: `secondaryCleanup`（import Job 削除・オブジェクトストレージ上のエクスポートデータ削除・中間スナップショット削除・verify リソース削除）と `finalizeSecondary` をドメイン化する。オブジェクトストレージ削除は Operation、中間スナップショット削除（一覧 → 判定 → 削除）はドメイン interface とする。
+* **内容**: `secondaryCleanup`（import Job 削除・オブジェクトストレージ上のエクスポートデータ削除・中間スナップショット削除・verify リソース削除）と `finalizeSecondary` をドメイン化する。オブジェクトストレージ削除は Operation、中間スナップショット削除（一覧 → 判定 → 削除）はドメイン interface とする。Operation の型・実行器と interface のインフラ実装はこの PR で追加する。secondary の `Provision`（cleanup の `if`）と `Finalize` に追記し、旧コードを削除する。
 * **テスト**: PR 6 と同様の観点＋中間スナップショットの削除対象判定。
 * **規模**: 中。
 
-==== PR 13: secondary ロールの組み立てと切り替え・最終整理
+==== PR 13: secondary ロールの完成（legacy 委譲の撤去）・最終整理
 
-* **内容**: `domain.MBSecondaryReconciler`・`usecase.ReconcileMBSecondary` を実装し、`Reconcile` の `RoleSecondary` 分岐を切り替える。全ロールの切り替え完了に伴い、MB-C に残った旧コードを削除し、`mantlebackup_controller.go` を「struct 定義・`SetupWithManager`・薄い `Reconcile`・ユースケース層の初期化」のみに縮小する。
-* **テスト**: `Provision`/`Finalize` の分岐網羅（remote 作成でない backup のスキップ、import → verify → cleanup の進行）。
+* **内容**: secondary 経路の legacy 委譲シグナルの返却箇所と旧コードを削除する。全ロールの完成に伴い、legacy 委譲シグナルの仕組み自体をドメイン層・ユースケース層から削除し、`mantlebackup_controller.go` を「struct 定義・`SetupWithManager`・薄い `Reconcile`・ユースケース層の初期化」のみに縮小する。
+* **テスト**: `Provision`/`Finalize` の分岐網羅（remote 作成でない backup のスキップ、import → verify → cleanup の進行）が揃っていることを確認し、不足分を補う。
 * **規模**: 中（削除 diff が大きいが機械的）。
 
 === 各 PR 共通の完了条件（Definition of Done）
@@ -310,9 +320,9 @@ MBC PoC と同様、`MantleBackupReconciler.Reconcile` 内で `sync.Once` によ
 
 読み取りをユースケース層の事前取得に変えると、従来は条件付きだった K8s/gRPC/S3 アクセスが毎回発生しうる。K8s の読み取りはキャッシュ経由のため増加は許容するが、**gRPC・S3・`rbd` コマンドの呼び出し回数は増やさない**こと。ユースケース層で従来と同じ条件（例：`IsSynced()`、conditions の状態）を確認してから取得する。
 
-=== 切り替え PR（PR 7・10・13）のリスク
+=== legacy 委譲境界のリスク
 
-ロール切り替えは経路の一括変更であり、サブフロー移行 PR よりリスクが高い。切り替え PR ではロジックの変更を一切含めず「組み立て・配線・削除」に限定し、既存のインテグレーション・E2E テストの通過をもって等価性を確認する。デグレを検知しやすくするため、切り替え PR の前にそのロールのドメイン層ユニットテストが分岐を網羅していることを確認する。
+移行期間中は「どの状況をドメイン層が処理し、どの状況を旧コードに委譲するか」の境界が PR ごとに動く。委譲を判定する `if` 条件が削除した旧コードの分岐条件と一致していないと、特定の状況がどちらの経路でも処理されない（または二重に処理される）恐れがある。サブフロー移行 PR のレビューでは、追記した `if` 条件・legacy 委譲条件・削除した旧コードの分岐条件の対応を必ず突き合わせる。ロール完成 PR（PR 7・10・13）はロジック変更を含まない削除主体の PR とし、既存のインテグレーション・E2E テストの通過をもって等価性を確認する。
 
 === requeue タイミングの等価性
 
