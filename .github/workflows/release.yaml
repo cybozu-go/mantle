@@ -10,6 +10,7 @@ jobs:
   release:
     name: "release"
     runs-on: "ubuntu-22.04"
+    timeout-minutes: 10
     steps:
       - name: "Validate Release Version"
         id: check_version
@@ -23,30 +24,38 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v7.0.0
-      - uses: actions/setup-go@v6.4.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
           go-version-file: "go.mod"
 
-      - run: echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      - run: echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: make docker-build IMG=ghcr.io/cybozu-go/mantle:${{ steps.check_version.outputs.version }}
       - run: docker push ghcr.io/cybozu-go/mantle:${{ steps.check_version.outputs.version }}
 
       - name: "Push branch tag"
         if: ${{ steps.check_version.outputs.prerelease == 'false' }}
+        env:
+          VERSION: ${{ steps.check_version.outputs.version }}
         run: |
-          BRANCH=$(echo ${{ steps.check_version.outputs.version }} | cut -d "." -f 1-2)
-          docker tag ghcr.io/cybozu-go/mantle:${{ steps.check_version.outputs.version }} "ghcr.io/cybozu-go/mantle:${BRANCH}"
+          BRANCH=$(echo "${VERSION}" | cut -d "." -f 1-2)
+          docker tag "ghcr.io/cybozu-go/mantle:${VERSION}" "ghcr.io/cybozu-go/mantle:${BRANCH}"
           docker push "ghcr.io/cybozu-go/mantle:${BRANCH}"
 
       - name: "Get previous tag"
         id: get_previous_tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # see https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#list-matching-references
           RESP=$(gh api \
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            /repos/${{ github.repository }}/git/matching-refs/tags/v)
+            "/repos/${GITHUB_REPOSITORY}/git/matching-refs/tags/v")
           PREV_TAG=$(echo "${RESP}" | jq -r '.[].ref' | awk -F "/" '{print $3}' | \
             grep -E "^v[0-9]+\.[0-9]+\.[0-9]+" | sort -V -r | tail -n +2 | head -n 1)
           if [ -z "${PREV_TAG}" ]; then
@@ -54,12 +63,12 @@ jobs:
             exit 1
           fi
           echo "previous_tag=${PREV_TAG}" >> "${GITHUB_OUTPUT}"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: "Create Release"
         id: create_release
-        run: |
-          gh release create -t "Release ${GITHUB_REF_NAME}" -d --prerelease=${{ steps.check_version.outputs.prerelease }} \
-            --generate-notes --notes-start-tag "${{ steps.get_previous_tag.outputs.previous_tag }}" "${GITHUB_REF_NAME}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PRERELEASE: ${{ steps.check_version.outputs.prerelease }}
+          PREVIOUS_TAG: ${{ steps.get_previous_tag.outputs.previous_tag }}
+        run: |
+          gh release create -t "Release ${GITHUB_REF_NAME}" -d --prerelease="${PRERELEASE}" \
+            --generate-notes --notes-start-tag "${PREVIOUS_TAG}" "${GITHUB_REF_NAME}"
