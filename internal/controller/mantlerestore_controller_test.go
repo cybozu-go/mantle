@@ -332,10 +332,8 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPVC() {
 		err := test.reconciler.createRestoringPVCIfNotExists(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
-		Eventually(ctx, func(g Gomega) {
-			err = k8sClient.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &pvc)
-			g.Expect(err).NotTo(HaveOccurred())
-		}).Should(Succeed())
+		waitForObjectToBeCached(ctx, test.reconciler.client,
+			client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &pvc)
 
 		err = test.reconciler.deleteRestoringPVC(ctx, restore)
 		Expect(err).NotTo(HaveOccurred())
@@ -367,6 +365,9 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPVC() {
 		err := test.reconciler.createRestoringPVCIfNotExists(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
+		waitForObjectToBeCached(ctx, test.reconciler.client,
+			client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &pvc)
+
 		err = test.reconciler.deleteRestoringPVC(ctx, restoreDifferent)
 		Expect(err).To(HaveOccurred())
 
@@ -396,10 +397,8 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPV() {
 		err := test.reconciler.createRestoringPVIfNotExists(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
-		Eventually(ctx, func(g Gomega) {
-			err = k8sClient.Get(ctx, client.ObjectKey{Name: test.reconciler.restoringPVName(restore)}, &pv)
-			g.Expect(err).NotTo(HaveOccurred())
-		}).Should(Succeed())
+		waitForObjectToBeCached(ctx, test.reconciler.client,
+			client.ObjectKey{Name: test.reconciler.restoringPVName(restore)}, &pv)
 
 		err = test.reconciler.deleteRestoringPV(ctx, restore)
 		Expect(err).NotTo(HaveOccurred())
@@ -431,11 +430,8 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPV() {
 		err := test.reconciler.createRestoringPVIfNotExists(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
-		// Make sure the client cache stores the restoring PV.
-		Eventually(func(g Gomega) {
-			err = k8sClient.Get(ctx, client.ObjectKey{Name: test.reconciler.restoringPVName(restore)}, &pv)
-			g.Expect(err).NotTo(HaveOccurred())
-		}).Should(Succeed())
+		waitForObjectToBeCached(ctx, test.reconciler.client,
+			client.ObjectKey{Name: test.reconciler.restoringPVName(restore)}, &pv)
 
 		err = test.reconciler.deleteRestoringPV(ctx, restoreDifferent)
 		Expect(err).To(HaveOccurred())
@@ -451,6 +447,17 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPV() {
 		err = test.reconciler.deleteRestoringPV(ctx, restore)
 		Expect(err).NotTo(HaveOccurred())
 	})
+}
+
+// waitForObjectToBeCached waits until the given (cached) client observes the
+// object. deleteRestoringPVC and deleteRestoringPV read objects through the
+// reconciler's cached client and return nil on NotFound, so tests must wait
+// for the cache to catch up before calling them.
+func waitForObjectToBeCached(ctx context.Context, c client.Client, key client.ObjectKey, obj client.Object) {
+	GinkgoHelper()
+	Eventually(ctx, func(g Gomega) {
+		g.Expect(c.Get(ctx, key, obj)).NotTo(HaveOccurred())
+	}).Should(Succeed())
 }
 
 // helper function to get MantleRestore object.
