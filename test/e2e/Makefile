@@ -247,6 +247,17 @@ wait-ceph-ready:
 		echo ; \
 		echo "=== Service ===" ; \
 		$(KUBECTL) get -A svc ; \
+		echo ; \
+		echo "=== Logs of unhealthy pods (last 200 lines) ===" ; \
+		$(KUBECTL) get pod -A --no-headers \
+		  | awk '{split($$3,a,"/"); if ($$4!="Running" && $$4!="Completed" || a[1]!=a[2]) print $$1, $$2}' \
+		  | while read ns pod; do \
+			echo ; \
+			echo "----- $$ns/$$pod (current) -----" ; \
+			$(KUBECTL) logs --tail 200 --all-containers -n $$ns $$pod || true ; \
+			echo "----- $$ns/$$pod (previous) -----" ; \
+			$(KUBECTL) logs --tail 200 --all-containers --previous -n $$ns $$pod || true ; \
+		  done ; \
 		exit 1; \
 	fi
 
