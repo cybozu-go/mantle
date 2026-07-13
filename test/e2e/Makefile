@@ -201,7 +201,7 @@ install-rook-ceph-operator:
 install-rook-ceph-cluster1:
 	$(call retry,$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
 		--namespace $(CEPH_CLUSTER1_NAMESPACE) -f testdata/values-cluster.yaml \
-		--wait rook-ceph-cluster rook-ceph-cluster)
+		--wait --force-conflicts rook-ceph-cluster rook-ceph-cluster)
 	$(MAKE) wait-ceph-ready NAMESPACE=$(CEPH_CLUSTER1_NAMESPACE)
 
 .PHONY: install-rook-ceph-cluster2
@@ -209,7 +209,7 @@ install-rook-ceph-cluster2:
 	$(call retry,$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
 		--create-namespace --namespace $(CEPH_CLUSTER2_NAMESPACE) -f testdata/values-cluster.yaml \
 		--set cephClusterSpec.dataDirHostPath=/var/lib/rook2 \
-		--wait rook-ceph-cluster2 rook-ceph-cluster)
+		--wait --force-conflicts rook-ceph-cluster2 rook-ceph-cluster)
 	$(MAKE) wait-ceph-ready NAMESPACE=$(CEPH_CLUSTER2_NAMESPACE)
 
 .PHONY: wait-ceph-ready
