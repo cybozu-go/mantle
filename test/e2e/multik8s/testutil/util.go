@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1044,30 +1045,86 @@ func GetNumberOfBackupParts(snapshotSize *resource.Quantity) (int, error) {
 	return int(expectedNumOfParts), nil
 }
 
-func ChangeBackupTransferPartSize(size string) {
+// changeMantleControllerArg sets the CLI argument named flag (e.g.,
+// "--max-export-data-pvcs") of the mantle-controller in the primary cluster to
+// value. If value is nil, the argument is removed so that the controller falls
+// back to its default value. It waits until the rollout completes, so the new
+// controller Pod is guaranteed to run with the updated arguments when this
+// function returns.
+func changeMantleControllerArg(flag string, value *string) {
 	GinkgoHelper()
 
 	deployMC, err := GetDeploy(PrimaryK8sCluster, CephClusterNamespace, MantleControllerDeployName)
 	Expect(err).NotTo(HaveOccurred())
 
 	args := deployMC.Spec.Template.Spec.Containers[0].Args
-	backupTransferPartSizeIndex := slices.IndexFunc(
+	argIndex := slices.IndexFunc(
 		args,
-		func(arg string) bool { return strings.HasPrefix(arg, "--backup-transfer-part-size=") },
+		func(arg string) bool { return strings.HasPrefix(arg, flag+"=") },
 	)
-	Expect(backupTransferPartSizeIndex).NotTo(Equal(-1))
+
+	var patch string
+	switch {
+	case value == nil && argIndex == -1:
+		return
+	case value == nil:
+		patch = fmt.Sprintf(
+			`[{"op": "remove", "path": "/spec/template/spec/containers/0/args/%d"}]`,
+			argIndex,
+		)
+	case argIndex == -1:
+		patch = fmt.Sprintf(
+			`[{"op": "add", "path": "/spec/template/spec/containers/0/args/-", `+
+				`"value":"%s=%s"}]`,
+			flag,
+			*value,
+		)
+	default:
+		patch = fmt.Sprintf(
+			`[{"op": "replace", "path": "/spec/template/spec/containers/0/args/%d", `+
+				`"value":"%s=%s"}]`,
+			argIndex,
+			flag,
+			*value,
+		)
+	}
 
 	_, _, err = Kubectl(
 		PrimaryK8sCluster, nil,
-		"patch", "deploy", "-n", CephClusterNamespace, MantleControllerDeployName, "--type=json",
-		fmt.Sprintf(
-			`-p=[{"op": "replace", "path": "/spec/template/spec/containers/0/args/%d", `+
-				`"value":"--backup-transfer-part-size=%s"}]`,
-			backupTransferPartSizeIndex,
-			size,
-		),
+		"patch", "deploy", "-n", CephClusterNamespace, MantleControllerDeployName, "--type=json", "-p="+patch,
 	)
 	Expect(err).NotTo(HaveOccurred())
+
+	_, _, err = Kubectl(
+		PrimaryK8sCluster, nil,
+		"rollout", "status", "-n", CephClusterNamespace,
+		"deploy/"+MantleControllerDeployName, "--timeout=3m",
+	)
+	Expect(err).NotTo(HaveOccurred())
+}
+
+// ChangeBackupTransferPartSize sets --backup-transfer-part-size of the
+// mantle-controller in the primary cluster to size, and waits until the
+// rollout completes.
+func ChangeBackupTransferPartSize(size string) {
+	GinkgoHelper()
+
+	changeMantleControllerArg("--backup-transfer-part-size", &size)
+}
+
+// ChangeMaxExportDataPVCs sets --max-export-data-pvcs of the mantle-controller
+// in the primary cluster to count. If count is nil, the argument is removed so
+// that the controller falls back to its default value. It waits until the
+// rollout completes.
+func ChangeMaxExportDataPVCs(count *int) {
+	GinkgoHelper()
+
+	var value *string
+	if count != nil {
+		v := strconv.Itoa(*count)
+		value = &v
+	}
+	changeMantleControllerArg("--max-export-data-pvcs", value)
 }
 
 func ChangeComponentJobScript(

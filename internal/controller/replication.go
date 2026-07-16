@@ -29,6 +29,7 @@ type PrimarySettings struct {
 	Client                 proto.MantleServiceClient
 	MaxExportJobs          int
 	MaxUploadJobs          int
+	MaxExportDataPVCs      int
 	ExportDataStorageClass string
 }
 

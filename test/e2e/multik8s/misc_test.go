@@ -147,6 +147,37 @@ var _ = Describe("miscellaneous tests", func() {
 		EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName2, restoreName2, writtenDataHash2)
 	})
 
+	It("should complete a multi-part backup even when max-export-data-pvcs is 1", func(ctx SpecContext) {
+		namespace := util.GetUniqueName("ns-")
+		pvcName := util.GetUniqueName("pvc-")
+		backupName := util.GetUniqueName("mb-")
+
+		SetupEnvironment(namespace)
+
+		maxExportDataPVCs := 1
+		ChangeMaxExportDataPVCs(&maxExportDataPVCs)
+		defer ChangeMaxExportDataPVCs(nil)
+
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+		_ = WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
+
+		// Make sure the backup will be split into multiple parts.
+		pvc, err := GetPVC(PrimaryK8sCluster, namespace, pvcName)
+		Expect(err).NotTo(HaveOccurred())
+		numParts, err := GetNumberOfBackupParts(pvc.Spec.Resources.Requests.Storage())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(numParts).To(BeNumerically(">", 1))
+
+		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
+		WaitMantleBackupSynced(namespace, backupName)
+
+		primaryMB, err := GetMB(PrimaryK8sCluster, namespace, backupName)
+		Expect(err).NotTo(HaveOccurred())
+		secondaryMB, err := GetMB(SecondaryK8sCluster, namespace, backupName)
+		Expect(err).NotTo(HaveOccurred())
+		WaitTemporaryResourcesDeleted(ctx, primaryMB, secondaryMB)
+	})
+
 	It("should succeed in backup even if part=0 upload Job completes after part=1 upload Job does",
 		func(ctx SpecContext) {
 			namespace := util.GetUniqueName("ns-")

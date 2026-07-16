@@ -8,7 +8,6 @@ rules:
   - ""
   resources:
   - configmaps
-  - pods
   - secrets
   verbs:
   - get
@@ -41,6 +40,15 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - deletecollection
+  - get
+  - list
+  - watch
 - apiGroups:
   - batch
   resources:
