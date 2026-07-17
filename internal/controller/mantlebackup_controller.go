@@ -376,6 +376,7 @@ func (r *MantleBackupReconciler) expire(ctx context.Context, backup *mantlev1.Ma
 //+kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlebackups/finalizers,verbs=update
 //+kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch
 //+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
+//+kubebuilder:rbac:groups=core,resources=pods,verbs=deletecollection
 //+kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch
 //+kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get;list;watch
 //+kubebuilder:rbac:groups=storage.k8s.io,resources=storageclasses,verbs=get;list;watch
@@ -1326,7 +1327,7 @@ func (r *MantleBackupReconciler) startExport(
 	if ok, result := r.canNewExportJobBeCreated(ctx); result.ShouldReturn() {
 		return -1, result.WrapIfError("failed to check if a new export Job can be created")
 	} else if !ok {
-		// skip to create an export Job
+		// skip creating an export Job
 		return largestCompletedPartNum, nil
 	}
 
@@ -1336,7 +1337,15 @@ func (r *MantleBackupReconciler) startExport(
 		return largestCompletedPartNum, nil
 	}
 
-	if result := r.createOrUpdateExportDataPVC(ctx, targetBackup, largestCompletedPartNum); result.ShouldReturn() {
+	nextPartNum := largestCompletedPartNum + 1
+	if ok, result := r.canNewExportDataPVCBeCreated(ctx, targetBackup, nextPartNum); result.ShouldReturn() {
+		return -1, result.WrapIfError("failed to check if a new export data PVC can be created")
+	} else if !ok {
+		// skip creating an export data PVC and an export Job
+		return largestCompletedPartNum, nil
+	}
+
+	if result := r.createOrUpdateExportDataPVC(ctx, targetBackup, nextPartNum); result.ShouldReturn() {
 		return -1, result.WrapIfError("failed to create or update export data PVC")
 	}
 
@@ -1348,40 +1357,42 @@ func (r *MantleBackupReconciler) startExport(
 }
 
 // handleCompletedJobsOfComponent checks completed {export,upload,import} Jobs and
-// returns the latest completed part number. It also deletes the completed Jobs
-// other than the latest one.
+// returns the latest completed part number. It calls hookPerCompletedPart before
+// deleting each non-latest Job and also for the latest Job, which is kept.
 func (r *MantleBackupReconciler) handleCompletedJobsOfComponent(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
 	componentLabel string,
 	componentPrefix string,
-	hookPostJobDeletion *func(partNum int) error,
+	hookPerCompletedPart *func(partNum int, isLatest bool) error,
 ) (int, *reconcile.Result) {
 	completedJobs, largestPartNum, result := r.listCompletedJobsOfComponent(ctx, backup, componentLabel, componentPrefix)
 	if result.ShouldReturn() {
 		return -1, result
 	}
 
-	// Delete the completed Jobs other than the latest one
 	for i := range completedJobs {
 		job := &completedJobs[i]
-		if job.partNum == largestPartNum {
-			continue
+		isLatest := job.partNum == largestPartNum
+
+		if hookPerCompletedPart != nil {
+			if err := (*hookPerCompletedPart)(job.partNum, isLatest); err != nil {
+				return -1, reconcile.Failed("hookPerCompletedPart failed: %w", err)
+			}
 		}
 
-		if err := r.Delete(ctx, &job.job, &client.DeleteOptions{
-			Preconditions: &metav1.Preconditions{
-				UID:             &job.job.UID,
-				ResourceVersion: &job.job.ResourceVersion,
-			},
-			PropagationPolicy: ptr.To(metav1.DeletePropagationBackground),
-		}); err != nil {
-			return -1, reconcile.Failed("failed to delete Job: %s: %w", job.job.GetName(), err)
-		}
-
-		if hookPostJobDeletion != nil {
-			if err := (*hookPostJobDeletion)(job.partNum); err != nil {
-				return -1, reconcile.Failed("hookPostJobDeletion failed: %w", err)
+		// Delete the completed Jobs other than the latest one. The latest
+		// completed Job must NOT be deleted because it's used to track the
+		// progress of the component.
+		if !isLatest {
+			if err := r.Delete(ctx, &job.job, &client.DeleteOptions{
+				Preconditions: &metav1.Preconditions{
+					UID:             &job.job.UID,
+					ResourceVersion: &job.job.ResourceVersion,
+				},
+				PropagationPolicy: ptr.To(metav1.DeletePropagationBackground),
+			}); err != nil {
+				return -1, reconcile.Failed("failed to delete Job: %s: %w", job.job.GetName(), err)
 			}
 		}
 	}
@@ -1471,6 +1482,47 @@ func (r *MantleBackupReconciler) canNewJobBeCreated(ctx context.Context, maxJobs
 
 func (r *MantleBackupReconciler) canNewExportJobBeCreated(ctx context.Context) (bool, *reconcile.Result) {
 	return r.canNewJobBeCreated(ctx, r.primarySettings.MaxExportJobs, labelComponentExportJob)
+}
+
+func (r *MantleBackupReconciler) canNewExportDataPVCBeCreated(
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
+	partNum int,
+) (bool, *reconcile.Result) {
+	if r.primarySettings.MaxExportDataPVCs == 0 {
+		return true, nil
+	}
+
+	// If the PVC for this part already exists, allow reconciliation to continue
+	// even when the PVC limit is reached so that the corresponding Job can be
+	// created or updated.
+	pvcName := MakeExportDataPVCName(backup, partNum)
+	var pvc corev1.PersistentVolumeClaim
+	if err := r.Get(ctx, types.NamespacedName{
+		Name:      pvcName,
+		Namespace: r.managedCephClusterID,
+	}, &pvc); err != nil {
+		if !aerrors.IsNotFound(err) {
+			return false, reconcile.Failed("failed to get export data PVC: %s/%s: %w",
+				r.managedCephClusterID, pvcName, err)
+		}
+	} else {
+		return true, nil
+	}
+
+	var pvcs corev1.PersistentVolumeClaimList
+	if err := r.List(ctx, &pvcs, &client.ListOptions{
+		Namespace: r.managedCephClusterID,
+		LabelSelector: labels.SelectorFromSet(map[string]string{
+			"app.kubernetes.io/name":      labelAppNameValue,
+			"app.kubernetes.io/component": labelComponentExportData,
+		}),
+	}); err != nil {
+		return false, reconcile.Failed("failed to list export data PVCs: %w", err)
+	}
+
+	// Count terminating PVCs because their backing PVs can still consume disk space.
+	return len(pvcs.Items) < r.primarySettings.MaxExportDataPVCs, nil
 }
 
 func (r *MantleBackupReconciler) canNewImportJobBeCreated(ctx context.Context) (bool, *reconcile.Result) {
@@ -1651,12 +1703,61 @@ func (r *MantleBackupReconciler) getLargestCompletedUploadPartNum(
 }
 
 func (r *MantleBackupReconciler) handleCompletedUploadJobs(ctx context.Context, backup *mantlev1.MantleBackup) (int, *reconcile.Result) {
-	hook := func(partNum int) error {
-		pvc := corev1.PersistentVolumeClaim{}
-		pvc.SetName(MakeExportDataPVCName(backup, partNum))
-		pvc.SetNamespace(r.managedCephClusterID)
-		if err := r.Delete(ctx, &pvc); err != nil && !aerrors.IsNotFound(err) {
-			return fmt.Errorf("failed to delete export data PVC: %s/%s: %w", pvc.GetNamespace(), pvc.GetName(), err)
+	cleanUpPartResources := func(partNum int, isLatest bool) error {
+		// Delete the export data PVC of every completed part, including the
+		// latest one. Its data has already been uploaded, so it's no longer
+		// needed. If we kept the PVC of the latest completed part until its
+		// upload Job is deleted, the backup could deadlock when the number of
+		// the export data PVCs reaches MaxExportDataPVCs: the PVC couldn't be
+		// deleted until the upload Job of the next part completes, and the
+		// next part couldn't make progress without a free PVC slot.
+		//
+		// For example, suppose that MaxExportDataPVCs is 2, two multi-part
+		// backups A and B are in progress, and we kept the PVC of the latest
+		// completed part of each backup:
+		//
+		//              | part 0                   | part 1
+		//     ---------+--------------------------+----------------------
+		//     backup A | uploaded (PVC A-0 kept)  | can't create PVC A-1
+		//     backup B | uploaded (PVC B-0 kept)  | can't create PVC B-1
+		//
+		//     existing PVCs: A-0, B-0 (= MaxExportDataPVCs, no free slot)
+		//
+		// In this situation, A would be stuck by the following circular wait,
+		// where "X <- Y" means X waits for Y (the same applies to B):
+		//
+		//     PVC A-0 is deleted
+		//       <- upload Job A-0 is deleted (it's kept while it's the
+		//          latest completed upload Job of A)
+		//       <- upload Job A-1 completes
+		//       <- export Job A-1 completes
+		//       <- PVC A-1 is created
+		//       <- a PVC slot gets free
+		//       <- PVC A-0 or PVC B-0 is deleted (back to the beginning)
+		if err := r.deleteExportDataPVC(ctx, backup, partNum); err != nil {
+			return err
+		}
+
+		// Delete the Pods of the export and upload Jobs of the part. The
+		// pvc-protection controller does not remove the export data PVC deleted
+		// above until all Pods referring to it are deleted, not just terminated.
+		// Keeping those Pods would leave the PVC terminating and occupying a PVC
+		// slot, which could deadlock the backup when the number of export data
+		// PVCs reaches MaxExportDataPVCs. Deleting a non-latest upload Job also
+		// deletes its Pods, but the latest upload Job is kept for progress
+		// tracking, so explicitly delete the Pods of both Jobs for the latest
+		// part.
+		if !isLatest {
+			return nil
+		}
+
+		for _, jobName := range []string{
+			MakeExportJobName(backup, partNum),
+			MakeUploadJobName(backup, partNum),
+		} {
+			if err := r.deletePodsOfJob(ctx, jobName); err != nil {
+				return fmt.Errorf("failed to delete the Pods of the Job of the completed part: %s: %w", jobName, err)
+			}
 		}
 
 		return nil
@@ -1667,8 +1768,68 @@ func (r *MantleBackupReconciler) handleCompletedUploadJobs(ctx context.Context, 
 		backup,
 		labelComponentUploadJob,
 		MantleUploadJobPrefix,
-		&hook,
+		&cleanUpPartResources,
 	)
+}
+
+func (r *MantleBackupReconciler) deleteExportDataPVC(
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
+	partNum int,
+) error {
+	key := types.NamespacedName{
+		Name:      MakeExportDataPVCName(backup, partNum),
+		Namespace: r.managedCephClusterID,
+	}
+	var pvc corev1.PersistentVolumeClaim
+	if err := r.Get(ctx, key, &pvc); err != nil {
+		if aerrors.IsNotFound(err) {
+			return nil
+		}
+
+		return fmt.Errorf("failed to get export data PVC: %s: %w", key, err)
+	}
+	if !pvc.GetDeletionTimestamp().IsZero() {
+		return nil
+	}
+
+	if err := r.Delete(ctx, &pvc, &client.DeleteOptions{
+		Preconditions: &metav1.Preconditions{
+			UID:             &pvc.UID,
+			ResourceVersion: &pvc.ResourceVersion,
+		},
+	}); err != nil && !aerrors.IsNotFound(err) {
+		return fmt.Errorf("failed to delete export data PVC: %s: %w", key, err)
+	}
+
+	return nil
+}
+
+func (r *MantleBackupReconciler) deletePodsOfJob(ctx context.Context, jobName string) error {
+	// List the Pods first to avoid sending an unnecessary DeleteAllOf write
+	// request to kube-apiserver when there are no Pods to delete.
+	listOptions := []client.ListOption{
+		client.InNamespace(r.managedCephClusterID),
+		client.MatchingLabels{batchv1.JobNameLabel: jobName},
+	}
+	var pods corev1.PodList
+	if err := r.List(ctx, &pods, listOptions...); err != nil {
+		return fmt.Errorf("failed to list Pods of Job: %s: %w", jobName, err)
+	}
+	if len(pods.Items) == 0 {
+		return nil
+	}
+
+	if err := r.DeleteAllOf(
+		ctx,
+		&corev1.Pod{},
+		client.InNamespace(r.managedCephClusterID),
+		client.MatchingLabels{batchv1.JobNameLabel: jobName},
+	); err != nil {
+		return fmt.Errorf("failed to delete Pods of Job: %s: %w", jobName, err)
+	}
+
+	return nil
 }
 
 func calculateExportDataPVCSize(transferPartSize *resource.Quantity) (*resource.Quantity, error) {
@@ -1700,7 +1861,7 @@ func calculateExportDataPVCSize(transferPartSize *resource.Quantity) (*resource.
 func (r *MantleBackupReconciler) createOrUpdateExportDataPVC(
 	ctx context.Context,
 	target *mantlev1.MantleBackup,
-	largestCompletedPartNum int,
+	partNum int,
 ) *reconcile.Result {
 	var targetPVC corev1.PersistentVolumeClaim
 	if err := json.Unmarshal([]byte(target.Status.PVCManifest), &targetPVC); err != nil {
@@ -1714,7 +1875,7 @@ func (r *MantleBackupReconciler) createOrUpdateExportDataPVC(
 	}
 
 	var pvc corev1.PersistentVolumeClaim
-	pvc.SetName(MakeExportDataPVCName(target, largestCompletedPartNum+1))
+	pvc.SetName(MakeExportDataPVCName(target, partNum))
 	pvc.SetNamespace(r.managedCephClusterID)
 	if _, err = ctrl.CreateOrUpdate(ctx, r.Client, &pvc, func() error {
 		labels := pvc.GetLabels()

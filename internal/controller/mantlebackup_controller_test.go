@@ -1666,6 +1666,81 @@ var _ = Describe("export and upload", func() {
 		}, "3s", "1s").Should(Succeed())
 	}
 
+	getExportDataPVC := func(
+		ctx SpecContext,
+		ns string,
+		backup *mantlev1.MantleBackup,
+		partNum int,
+	) (corev1.PersistentVolumeClaim, error) {
+		var pvc corev1.PersistentVolumeClaim
+		err := k8sClient.Get(ctx, types.NamespacedName{
+			Name:      MakeExportDataPVCName(backup, partNum),
+			Namespace: ns,
+		}, &pvc)
+
+		return pvc, err
+	}
+
+	getNumOfExportDataPVCs := func(ctx SpecContext, ns string) (int, error) {
+		var pvcs corev1.PersistentVolumeClaimList
+		err := k8sClient.List(ctx, &pvcs, &client.ListOptions{
+			Namespace: ns,
+			LabelSelector: labels.SelectorFromSet(map[string]string{
+				"app.kubernetes.io/name":      labelAppNameValue,
+				"app.kubernetes.io/component": labelComponentExportData,
+			}),
+		})
+
+		return len(pvcs.Items), err
+	}
+
+	// waitExportDataPVCTerminating waits until the export data PVC is deleted,
+	// i.e., it has a deletion timestamp.
+	waitExportDataPVCTerminating := func(ctx SpecContext, ns string, backup *mantlev1.MantleBackup, partNum int) {
+		GinkgoHelper()
+
+		Eventually(ctx, func(g Gomega) error {
+			pvc, err := getExportDataPVC(ctx, ns, backup, partNum)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(pvc.GetDeletionTimestamp().IsZero()).To(BeFalse())
+
+			return nil
+		}).Should(Succeed())
+	}
+
+	// completeExportDataPVCDeletion removes the PVC protection finalizer of the
+	// export data PVC so envtest completes its deletion, and waits until the PVC
+	// is completely removed.
+	completeExportDataPVCDeletion := func(ctx SpecContext, ns string, backup *mantlev1.MantleBackup, partNum int) {
+		GinkgoHelper()
+
+		Eventually(ctx, func(g Gomega) error {
+			pvc, err := getExportDataPVC(ctx, ns, backup, partNum)
+			if aerrors.IsNotFound(err) {
+				return nil
+			}
+			g.Expect(err).NotTo(HaveOccurred())
+			pvc.SetFinalizers(nil)
+
+			return k8sClient.Update(ctx, &pvc)
+		}).Should(Succeed())
+
+		Eventually(ctx, func(g Gomega) error {
+			_, err := getExportDataPVC(ctx, ns, backup, partNum)
+			g.Expect(err).To(HaveOccurred())
+			g.Expect(aerrors.IsNotFound(err)).To(BeTrue())
+
+			return nil
+		}).Should(Succeed())
+	}
+
+	waitPVCDeletedAndRemoveFinalizers := func(ctx SpecContext, ns string, backup *mantlev1.MantleBackup, partNum int) {
+		GinkgoHelper()
+
+		waitExportDataPVCTerminating(ctx, ns, backup, partNum)
+		completeExportDataPVCDeletion(ctx, ns, backup, partNum)
+	}
+
 	BeforeEach(func() {
 		var t reporter
 		mockCtrl = gomock.NewController(t)
@@ -1796,6 +1871,191 @@ var _ = Describe("export and upload", func() {
 
 				return nil
 			}).Should(Succeed())
+		})
+
+		It("should throttle export data PVCs correctly", func(ctx SpecContext) {
+			// Allow unlimited export Jobs so that only the export data PVC
+			// limit throttles the backups.
+			mbr.primarySettings.MaxExportJobs = 0
+			mbr.primarySettings.MaxExportDataPVCs = 1
+
+			// Create 3 different MantleBackups and start exporting each of them.
+			backups := make([]*mantlev1.MantleBackup, 0, 3)
+			for i := range 3 {
+				backup := createAndExportMantleBackup(ctx, mbr, fmt.Sprintf("target1-%d", i), ns, false, false, nil)
+				backups = append(backups, backup)
+			}
+
+			// Only 1 export data PVC (of backups[0], the first exported one)
+			// should be created due to MaxExportDataPVCs=1.
+			Consistently(ctx, func(g Gomega) error {
+				numPVCs, err := getNumOfExportDataPVCs(ctx, nsController)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(numPVCs).To(Equal(1))
+
+				return nil
+			}, "1s").Should(Succeed())
+
+			// Delete the sole export data PVC. It remains terminating because
+			// of the pvc-protection finalizer, which nothing removes in envtest.
+			pvc, err := getExportDataPVC(ctx, nsController, backups[0], 0)
+			Expect(err).NotTo(HaveOccurred())
+			err = k8sClient.Delete(ctx, &pvc)
+			Expect(err).NotTo(HaveOccurred())
+			waitExportDataPVCTerminating(ctx, nsController, backups[0], 0)
+
+			// Reconcile backups[1]. The terminating PVC still occupies the
+			// only PVC slot, so no new PVC should be created.
+			runStartExportAndUpload(ctx, backups[1])
+			Consistently(ctx, func(g Gomega) error {
+				numPVCs, err := getNumOfExportDataPVCs(ctx, nsController)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(numPVCs).To(Equal(1))
+
+				return nil
+			}, "1s").Should(Succeed())
+
+			// Remove the finalizer of the terminating PVC and wait until it's
+			// completely removed to free the PVC slot.
+			completeExportDataPVCDeletion(ctx, nsController, backups[0], 0)
+
+			// Reconcile backups[1] again. Now it should be able to create its
+			// export data PVC, and the total number of the PVCs should get
+			// back to 1.
+			runStartExportAndUpload(ctx, backups[1])
+			Eventually(ctx, func(g Gomega) error {
+				pvc, err := getExportDataPVC(ctx, nsController, backups[1], 0)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(pvc.GetDeletionTimestamp().IsZero()).To(BeTrue())
+
+				numPVCs, err := getNumOfExportDataPVCs(ctx, nsController)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(numPVCs).To(Equal(1))
+
+				return nil
+			}).Should(Succeed())
+
+			// Make sure that another mantle-controller existing in a different
+			// namespace can create an export data PVC, i.e., the PVCs are
+			// counted per namespace.
+			nsController2 := resMgr.CreateNamespace()
+			mbr2 := NewMantleBackupReconciler(
+				k8sClient,
+				scheme.Scheme,
+				nsController2,
+				RolePrimary,
+				&PrimarySettings{
+					Client:                 grpcClient,
+					ExportDataStorageClass: resMgr.StorageClassName,
+					MaxExportJobs:          0,
+					MaxExportDataPVCs:      1,
+				},
+				nil,
+				"dummy image",
+				"",
+				nil,
+				nil,
+				resource.MustParse("1Gi"),
+			)
+			mbr2.ceph = testutil.NewFakeRBD()
+			ns2 := resMgr.CreateNamespace()
+			createAndExportMantleBackup(ctx, mbr2, "target2", ns2, false, false, nil)
+			Eventually(ctx, func(g Gomega) error {
+				numPVCs, err := getNumOfExportDataPVCs(ctx, nsController2)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(numPVCs).To(Equal(1))
+
+				return nil
+			}).Should(Succeed())
+		})
+
+		It("should not throttle export data PVCs when the limit is zero", func(ctx SpecContext) {
+			mbr.primarySettings.MaxExportJobs = 0
+			mbr.primarySettings.MaxExportDataPVCs = 0
+
+			for i := range 3 {
+				createAndExportMantleBackup(ctx, mbr, fmt.Sprintf("target-%d", i), ns, false, false, nil)
+			}
+
+			Eventually(ctx, func(g Gomega) error {
+				numPVCs, err := getNumOfExportDataPVCs(ctx, nsController)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(numPVCs).To(Equal(3))
+
+				return nil
+			}).Should(Succeed())
+		})
+
+		It("should complete a multi-part backup even when MaxExportDataPVCs is 1", func(ctx SpecContext) {
+			mbr.primarySettings.MaxExportJobs = 0
+			mbr.primarySettings.MaxExportDataPVCs = 1
+			mbr.backupTransferPartSize = *resource.NewQuantity(int64(testutil.FakeRBDSnapshotSize)-1, resource.BinarySI)
+
+			createDummyPodOfJob := func(jobName string) {
+				GinkgoHelper()
+
+				pod := corev1.Pod{}
+				pod.SetName(jobName)
+				pod.SetNamespace(nsController)
+				pod.SetLabels(map[string]string{batchv1.JobNameLabel: jobName})
+				pod.Spec.Containers = []corev1.Container{{Name: "dummy", Image: "dummy"}}
+				err := k8sClient.Create(ctx, &pod)
+				Expect(err).NotTo(HaveOccurred())
+			}
+
+			waitPodsOfJobDeleted := func(jobName string) {
+				GinkgoHelper()
+
+				Eventually(ctx, func(g Gomega) error {
+					var pods corev1.PodList
+					err := k8sClient.List(ctx, &pods, &client.ListOptions{
+						Namespace: nsController,
+						LabelSelector: labels.SelectorFromSet(map[string]string{
+							batchv1.JobNameLabel: jobName,
+						}),
+					})
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(pods.Items).To(BeEmpty())
+
+					return nil
+				}).Should(Succeed())
+			}
+
+			// The backup is split into 2 parts because the transfer part size is
+			// slightly smaller than the snapshot size.
+			target := createAndExportMantleBackup(ctx, mbr, "target-multi-part", ns, false, false, nil)
+
+			// Create dummy Pods that pretend to belong to the export and upload
+			// Jobs of part 0, because envtest doesn't run the Job controller and
+			// thus no Pods are created for the Jobs.
+			createDummyPodOfJob(MakeExportJobName(target, 0))
+			createDummyPodOfJob(MakeUploadJobName(target, 0))
+
+			// Complete the export and upload Jobs of part 0.
+			completeJob(ctx, MakeExportJobName(target, 0))
+			runStartExportAndUpload(ctx, target)
+			completeJob(ctx, MakeUploadJobName(target, 0))
+			runStartExportAndUpload(ctx, target)
+
+			// The Pods of the export and upload Jobs of part 0 should be deleted
+			// so that the pvc-protection controller can remove the PVC of part 0.
+			waitPodsOfJobDeleted(MakeExportJobName(target, 0))
+			waitPodsOfJobDeleted(MakeUploadJobName(target, 0))
+
+			// The PVC of part 0 should be deleted as soon as the upload Job of
+			// part 0 completes. Otherwise, the backup would deadlock: the PVC of
+			// part 1 could not be created due to MaxExportDataPVCs=1, so the
+			// upload Job of part 1 would never complete, which in turn would keep
+			// the PVC of part 0 undeleted.
+			waitPVCDeletedAndRemoveFinalizers(ctx, nsController, target, 0)
+
+			// Make sure part 1 can proceed and complete.
+			runStartExportAndUpload(ctx, target)
+			completeJob(ctx, MakeExportJobName(target, 1))
+			runStartExportAndUpload(ctx, target)
+			completeJob(ctx, MakeUploadJobName(target, 1))
+			runStartExportAndUpload(ctx, target)
+			waitPVCDeletedAndRemoveFinalizers(ctx, nsController, target, 1)
 		})
 
 		DescribeTable(

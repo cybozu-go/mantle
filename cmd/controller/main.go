@@ -57,6 +57,7 @@ var (
 	maxExportJobs                int
 	maxImportJobs                int
 	maxUploadJobs                int
+	maxExportDataPVCs            int
 	exportDataStorageClass       string
 	envSecret                    string
 	objectStorageBucketName      string
@@ -103,7 +104,9 @@ func init() {
 	flags.IntVar(&maxImportJobs, "max-import-jobs", 8,
 		"The maximum number of import jobs that can run simultaneously. If you set this to 0, there is no limit.")
 	flags.IntVar(&maxUploadJobs, "max-upload-jobs", 8,
-		"The maximum number of export jobs that can run simultaneously. If you set this to 0, there is no limit.")
+		"The maximum number of upload jobs that can run simultaneously. If you set this to 0, there is no limit.")
+	flags.IntVar(&maxExportDataPVCs, "max-export-data-pvcs", 16,
+		"The maximum number of export data PVCs that can be created. If you set this to 0, there is no limit.")
 	flags.StringVar(&exportDataStorageClass, "export-data-storage-class", "",
 		"The storage class of PVCs used to store exported data temporarily.")
 	flags.StringVar(&envSecret, "env-secret", "",
@@ -430,6 +433,7 @@ func setupPrimary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup) 
 		Client:                 proto.NewMantleServiceClient(conn),
 		MaxExportJobs:          maxExportJobs,
 		MaxUploadJobs:          maxUploadJobs,
+		MaxExportDataPVCs:      maxExportDataPVCs,
 		ExportDataStorageClass: exportDataStorageClass,
 	}
 
