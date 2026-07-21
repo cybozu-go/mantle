@@ -367,8 +367,13 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPVC() {
 		err := test.reconciler.createRestoringPVCIfNotExists(ctx, restore, test.backup)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = test.reconciler.deleteRestoringPVC(ctx, restoreDifferent)
-		Expect(err).To(HaveOccurred())
+		// test.reconciler uses the manager's cached client, so the PVC created
+		// just above may not be visible to it yet. Retry until the cache catches
+		// up; otherwise deleteRestoringPVC would get a NotFound and return nil
+		// instead of the expected RestoredBy mismatch error.
+		Eventually(ctx, func(g Gomega) {
+			g.Expect(test.reconciler.deleteRestoringPVC(ctx, restoreDifferent)).To(HaveOccurred())
+		}).Should(Succeed())
 
 		// remove finalizers from PVC to allow deletion
 		err = k8sClient.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: test.tenantNamespace}, &pvc)
