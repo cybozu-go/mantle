@@ -25,6 +25,8 @@ cephClusterSpec:
   crashCollector:
     disable: true
   storage:
+    useAllNodes: false
+    useAllDevices: false
     storageClassDeviceSets:
       - name: set1
         count: 1
