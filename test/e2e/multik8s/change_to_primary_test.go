@@ -21,7 +21,7 @@ var _ = Describe("change role from primary to standalone during full backup", La
 		defer ResumeObjectStorage(ctx)
 
 		By("should create a MantleBackup resource")
-		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
 		writtenDataHash := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
 		WaitMantleBackupSnapshotCaptured(PrimaryK8sCluster, namespace, backupName)
@@ -74,7 +74,7 @@ var _ = Describe("change to primary", Label("change-to-primary"), func() {
 		backupName00 = util.GetUniqueName("mb-")
 
 		SetupNamespaces(namespace)
-		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName0)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName0, SCName1)
 		writtenDataHash00 = WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName0)
 		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName0, backupName00)
 		WaitMantleBackupSynced(namespace, backupName00)
@@ -101,7 +101,7 @@ var _ = Describe("change to primary", Label("change-to-primary"), func() {
 		pvcName1 = util.GetUniqueName("pvc-")
 		backupName10 = util.GetUniqueName("mb-")
 
-		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName1)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName1, SCName1)
 		writtenDataHash10 = WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName1)
 		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName1, backupName10)
 	})

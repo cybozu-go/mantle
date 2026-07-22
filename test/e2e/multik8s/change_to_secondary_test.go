@@ -49,7 +49,7 @@ var _ = Describe("change to secondary", Label("change-to-secondary"), func() {
 	})
 
 	It("should create and restore a MantleBackup resource", func(ctx SpecContext) {
-		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName0)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName0, SCName1)
 
 		writtenDataHash00 = WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName0)
 		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName0, backupName00)
@@ -73,7 +73,7 @@ var _ = Describe("change to secondary", Label("change-to-secondary"), func() {
 	})
 
 	It("should create a MantleBackup resource in the secondary k8s cluster", func(ctx SpecContext) {
-		CreatePVC(ctx, SecondaryK8sCluster, namespace, pvcName1)
+		CreatePVC(ctx, SecondaryK8sCluster, namespace, pvcName1, SCName1)
 		writtenDataHash10 = WriteRandomDataToPV(ctx, SecondaryK8sCluster, namespace, pvcName1)
 		CreateMantleBackup(SecondaryK8sCluster, namespace, pvcName1, backupName10)
 		WaitMantleBackupSnapshotCaptured(SecondaryK8sCluster, namespace, backupName10)
@@ -92,7 +92,7 @@ var _ = Describe("change to secondary", Label("change-to-secondary"), func() {
 	})
 
 	It("should create and synchronize new MantleBackup resources", func(ctx SpecContext) {
-		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName2)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName2, SCName1)
 
 		writtenDataHash20 = WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName2)
 		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName2, backupName20)

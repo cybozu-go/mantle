@@ -21,7 +21,7 @@ var _ = Describe("metrics tests", func() {
 
 	It("should setup", func(ctx SpecContext) {
 		SetupNamespaces(namespace)
-		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
 		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
 		WaitMantleBackupSynced(namespace, backupName)
 		CreateMantleBackupConfig(PrimaryK8sCluster, namespace, pvcName, backupConfigName)
@@ -60,7 +60,7 @@ var _ = Describe("miscellaneous tests", func() {
 		defer ResumeObjectStorage(ctx)
 
 		// Create MantleBackup M0.
-		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
 		writtenDataHash := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
 
@@ -105,8 +105,8 @@ var _ = Describe("miscellaneous tests", func() {
 
 		SetupNamespaces(namespace)
 
-		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName1)
-		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName2)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName1, SCName1)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName2, SCName1)
 		writtenDataHash1 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName1)
 		writtenDataHash2 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName2)
 		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName1, backupName1)
@@ -158,7 +158,7 @@ var _ = Describe("miscellaneous tests", func() {
 		ChangeMaxExportDataPVCs(&maxExportDataPVCs)
 		defer ChangeMaxExportDataPVCs(nil)
 
-		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
 		_ = WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 
 		// Make sure the backup will be split into multiple parts.
@@ -208,7 +208,7 @@ s5cmd(){
 				&script,
 			)
 
-			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
 			writtenDataHash := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
 
@@ -287,7 +287,7 @@ s5cmd(){
 			ChangeComponentJobScript(ctx, clusterOfJob, envName, namespace, backupName, partNumFailed, &script)
 			defer ChangeComponentJobScript(ctx, clusterOfJob, envName, namespace, backupName, partNumFailed, nil)
 
-			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
 			writtenDataHash := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
 

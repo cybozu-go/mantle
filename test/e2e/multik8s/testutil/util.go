@@ -543,10 +543,10 @@ func CreatePod(cluster int, namespace, podName, pvcName string) {
 	Expect(err).NotTo(HaveOccurred())
 }
 
-func CreatePVC(ctx SpecContext, cluster int, namespace, name string) {
+func CreatePVC(ctx SpecContext, cluster int, namespace, name, scName string) {
 	GinkgoHelper()
 	Eventually(ctx, func() error {
-		return applyPVCTemplate(cluster, namespace, name, SCName1)
+		return applyPVCTemplate(cluster, namespace, name, scName)
 	}).Should(Succeed())
 }
 
@@ -923,7 +923,9 @@ func WaitUploadJobCreated(ctx SpecContext, cluster int, namespace, backupName st
 	Eventually(ctx, func(g Gomega) {
 		mb, err := GetMB(cluster, namespace, backupName)
 		g.Expect(err).NotTo(HaveOccurred())
-		jobs, err := GetJobList(cluster, CephCluster1Namespace)
+		cephNS, err := cephNamespaceOf(mb)
+		g.Expect(err).NotTo(HaveOccurred())
+		jobs, err := GetJobList(cluster, cephNS)
 		g.Expect(err).NotTo(HaveOccurred())
 		exist := slices.ContainsFunc(jobs.Items, func(job batchv1.Job) bool {
 			return job.GetName() == controller.MakeUploadJobName(mb, partNum)
@@ -991,20 +993,24 @@ func WaitJobDeleted(ctx SpecContext, cluster int, namespace, jobName string) {
 
 func WaitTemporaryPrimaryJobsDeleted(ctx SpecContext, primaryMB *mantlev1.MantleBackup) {
 	GinkgoHelper()
-	WaitComponentJobsDeleted(ctx, PrimaryK8sCluster, CephCluster1Namespace,
+	cephNS, err := cephNamespaceOf(primaryMB)
+	Expect(err).NotTo(HaveOccurred())
+	WaitComponentJobsDeleted(ctx, PrimaryK8sCluster, cephNS,
 		controller.MantleExportJobPrefix, primaryMB)
-	WaitComponentJobsDeleted(ctx, PrimaryK8sCluster, CephCluster1Namespace,
+	WaitComponentJobsDeleted(ctx, PrimaryK8sCluster, cephNS,
 		controller.MantleUploadJobPrefix, primaryMB)
-	WaitJobDeleted(ctx, PrimaryK8sCluster, CephCluster1Namespace, controller.MakeVerifyJobName(primaryMB))
+	WaitJobDeleted(ctx, PrimaryK8sCluster, cephNS, controller.MakeVerifyJobName(primaryMB))
 }
 
 func WaitTemporarySecondaryJobsDeleted(ctx SpecContext, secondaryMB *mantlev1.MantleBackup) {
 	GinkgoHelper()
-	WaitComponentJobsDeleted(ctx, SecondaryK8sCluster, CephCluster1Namespace,
+	cephNS, err := cephNamespaceOf(secondaryMB)
+	Expect(err).NotTo(HaveOccurred())
+	WaitComponentJobsDeleted(ctx, SecondaryK8sCluster, cephNS,
 		controller.MantleImportJobPrefix, secondaryMB)
-	WaitComponentJobsDeleted(ctx, SecondaryK8sCluster, CephCluster1Namespace,
+	WaitComponentJobsDeleted(ctx, SecondaryK8sCluster, cephNS,
 		controller.MantleZeroOutJobPrefix, secondaryMB)
-	WaitJobDeleted(ctx, SecondaryK8sCluster, CephCluster1Namespace, controller.MakeVerifyJobName(secondaryMB))
+	WaitJobDeleted(ctx, SecondaryK8sCluster, cephNS, controller.MakeVerifyJobName(secondaryMB))
 }
 
 func WaitTemporaryJobsDeleted(ctx SpecContext, primaryMB, secondaryMB *mantlev1.MantleBackup) {
@@ -1041,15 +1047,19 @@ func WaitPVCsDeleted(ctx SpecContext, cluster int, namespace, pvcNamePrefix stri
 
 func WaitTemporaryPrimaryPVCsDeleted(ctx SpecContext, primaryMB *mantlev1.MantleBackup) {
 	GinkgoHelper()
-	WaitPVCsDeleted(ctx, PrimaryK8sCluster, CephCluster1Namespace,
+	cephNS, err := cephNamespaceOf(primaryMB)
+	Expect(err).NotTo(HaveOccurred())
+	WaitPVCsDeleted(ctx, PrimaryK8sCluster, cephNS,
 		fmt.Sprintf("%s%s-", controller.MantleExportDataPVCPrefix, string(primaryMB.GetUID())))
-	WaitPVCDeleted(ctx, PrimaryK8sCluster, CephCluster1Namespace, controller.MakeVerifyPVCName(primaryMB))
+	WaitPVCDeleted(ctx, PrimaryK8sCluster, cephNS, controller.MakeVerifyPVCName(primaryMB))
 }
 
 func WaitTemporarySecondaryPVCsDeleted(ctx SpecContext, secondaryMB *mantlev1.MantleBackup) {
 	GinkgoHelper()
-	WaitPVCDeleted(ctx, SecondaryK8sCluster, CephCluster1Namespace, controller.MakeZeroOutPVCName(secondaryMB))
-	WaitPVCDeleted(ctx, SecondaryK8sCluster, CephCluster1Namespace, controller.MakeVerifyPVCName(secondaryMB))
+	cephNS, err := cephNamespaceOf(secondaryMB)
+	Expect(err).NotTo(HaveOccurred())
+	WaitPVCDeleted(ctx, SecondaryK8sCluster, cephNS, controller.MakeZeroOutPVCName(secondaryMB))
+	WaitPVCDeleted(ctx, SecondaryK8sCluster, cephNS, controller.MakeVerifyPVCName(secondaryMB))
 }
 
 func WaitTemporaryPVCsDeleted(ctx SpecContext, primaryMB, secondaryMB *mantlev1.MantleBackup) {

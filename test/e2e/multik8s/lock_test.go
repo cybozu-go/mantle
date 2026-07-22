@@ -26,7 +26,7 @@ var _ = Describe("Locking", Label("lock"), func() {
 	It("should setup environment", func(ctx SpecContext) {
 		SetupNamespaces(namespace)
 		// Create PVC and MantleBackup in the primary cluster
-		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
 		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName0)
 		WaitMantleBackupSynced(namespace, backupName0)
 		var err error

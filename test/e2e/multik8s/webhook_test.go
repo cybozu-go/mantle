@@ -22,7 +22,7 @@ var _ = Describe("webhook independence test", func() {
 
 		By("setting up the namespace and creating PVC on primary cluster")
 		SetupNamespaces(namespace)
-		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
 
 		By("creating MantleBackup on primary cluster")
 		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
@@ -80,7 +80,7 @@ var _ = Describe("webhook independence test", func() {
 		By("checking that it is allowed to create a Pod that mounts a PVC without remote-uid annotation", func() {
 			podName := util.GetUniqueName("pod-")
 			pvcName := util.GetUniqueName("pvc-")
-			CreatePVC(ctx, SecondaryK8sCluster, namespace, pvcName)
+			CreatePVC(ctx, SecondaryK8sCluster, namespace, pvcName, SCName1)
 			CreatePod(SecondaryK8sCluster, namespace, podName, pvcName)
 			Eventually(ctx, func(g Gomega) {
 				pods, err := GetPodList(SecondaryK8sCluster, namespace)
