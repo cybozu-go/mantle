@@ -15,7 +15,7 @@ var _ = Describe("change role from primary to standalone during full backup", La
 		backupName := util.GetUniqueName("mb-")
 		restoreName := util.GetUniqueName("mr-")
 
-		SetupEnvironment(namespace)
+		SetupNamespaces(namespace)
 
 		PauseObjectStorage(ctx)
 		defer ResumeObjectStorage(ctx)
@@ -73,7 +73,7 @@ var _ = Describe("change to primary", Label("change-to-primary"), func() {
 		pvcName0 = util.GetUniqueName("pvc-")
 		backupName00 = util.GetUniqueName("mb-")
 
-		SetupEnvironment(namespace)
+		SetupNamespaces(namespace)
 		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName0)
 		writtenDataHash00 = WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName0)
 		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName0, backupName00)

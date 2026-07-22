@@ -20,8 +20,8 @@ var _ = Describe("webhook independence test", func() {
 		backupName := util.GetUniqueName("mb-")
 		podName := util.GetUniqueName("pod-")
 
-		By("setting up the environment and creating PVC on primary cluster")
-		SetupEnvironment(namespace)
+		By("setting up the namespace and creating PVC on primary cluster")
+		SetupNamespaces(namespace)
 		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
 
 		By("creating MantleBackup on primary cluster")
@@ -42,7 +42,7 @@ var _ = Describe("webhook independence test", func() {
 		By("scaling down the controller deployment to 0 on secondary cluster")
 		Expect(CountMantleControllerPods(SecondaryK8sCluster)).To(Equal(1))
 		_, stderr, err := Kubectl(SecondaryK8sCluster, nil,
-			"scale", "deploy", "-n", CephClusterNamespace, "mantle-controller", "--replicas=0")
+			"scale", "deploy", "-n", CephCluster1Namespace, "mantle-controller", "--replicas=0")
 		Expect(err).NotTo(HaveOccurred(), string(stderr))
 
 		By("waiting for the controller pods to be terminated")
@@ -53,7 +53,7 @@ var _ = Describe("webhook independence test", func() {
 
 		By("checking the webhook deployment is still available on secondary cluster")
 		Eventually(ctx, func(g Gomega) {
-			err := CheckDeploymentReady(SecondaryK8sCluster, CephClusterNamespace, "mantle-webhook")
+			err := CheckDeploymentReady(SecondaryK8sCluster, CephCluster1Namespace, "mantle-webhook")
 			g.Expect(err).NotTo(HaveOccurred())
 		}).Should(Succeed())
 
@@ -95,12 +95,12 @@ var _ = Describe("webhook independence test", func() {
 
 		By("scaling the controller deployment back to 1 replica on secondary cluster")
 		_, stderr, err = Kubectl(SecondaryK8sCluster, nil,
-			"scale", "deploy", "-n", CephClusterNamespace, "mantle-controller", "--replicas=1")
+			"scale", "deploy", "-n", CephCluster1Namespace, "mantle-controller", "--replicas=1")
 		Expect(err).NotTo(HaveOccurred(), string(stderr))
 
 		By("waiting for the controller deployment to be ready")
 		Eventually(ctx, func(g Gomega) {
-			err := CheckDeploymentReady(SecondaryK8sCluster, CephClusterNamespace, "mantle-controller")
+			err := CheckDeploymentReady(SecondaryK8sCluster, CephCluster1Namespace, "mantle-controller")
 			g.Expect(err).NotTo(HaveOccurred())
 		}).Should(Succeed())
 	})

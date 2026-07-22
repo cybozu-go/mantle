@@ -45,7 +45,7 @@ var _ = Describe("change to secondary", Label("change-to-secondary"), func() {
 		backupName20 = util.GetUniqueName("mb-")
 		backupName21 = util.GetUniqueName("mb-")
 
-		SetupEnvironment(namespace)
+		SetupNamespaces(namespace)
 	})
 
 	It("should create and restore a MantleBackup resource", func(ctx SpecContext) {

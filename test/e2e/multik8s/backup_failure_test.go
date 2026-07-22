@@ -13,7 +13,7 @@ var _ = Describe("backup failure", Label("backup-failure"), func() {
 		pvcName := util.GetUniqueName("pvc-")
 		backupName := util.GetUniqueName("mb-")
 
-		SetupEnvironment(namespace)
+		SetupNamespaces(namespace)
 
 		// Pause the object storage to make backups fail.
 		PauseObjectStorage(ctx)
@@ -55,7 +55,7 @@ var _ = Describe("backup failure", Label("backup-failure"), func() {
 		backupName := util.GetUniqueName("mb-")
 		restoreName := util.GetUniqueName("mr-")
 
-		SetupEnvironment(namespace)
+		SetupNamespaces(namespace)
 
 		// Pause the object storage to make backups fail.
 		PauseObjectStorage(ctx)
@@ -107,7 +107,7 @@ var _ = Describe("backup failure", Label("backup-failure"), func() {
 			backupName1 := util.GetUniqueName("mb-")
 			restoreName0 := util.GetUniqueName("mr-")
 
-			SetupEnvironment(namespace)
+			SetupNamespaces(namespace)
 
 			// Create MantleBackup M0.
 			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
@@ -160,7 +160,7 @@ var _ = Describe("backup failure", Label("backup-failure"), func() {
 			restoreName0 := util.GetUniqueName("mr-")
 			restoreName1 := util.GetUniqueName("mr-")
 
-			SetupEnvironment(namespace)
+			SetupNamespaces(namespace)
 
 			// Create MantleBackup M0.
 			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)

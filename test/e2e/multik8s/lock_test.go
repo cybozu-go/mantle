@@ -24,7 +24,7 @@ var _ = Describe("Locking", Label("lock"), func() {
 	var poolName, imageName string
 
 	It("should setup environment", func(ctx SpecContext) {
-		SetupEnvironment(namespace)
+		SetupNamespaces(namespace)
 		// Create PVC and MantleBackup in the primary cluster
 		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
 		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName0)
@@ -45,7 +45,7 @@ var _ = Describe("Locking", Label("lock"), func() {
 		imageName = pvStored.Spec.CSI.VolumeAttributes["imageName"]
 
 		// locked
-		_, _, err = Kubectl(SecondaryK8sCluster, nil, "exec", "-n", CephClusterNamespace, controllerPod, "--",
+		_, _, err = Kubectl(SecondaryK8sCluster, nil, "exec", "-n", CephCluster1Namespace, controllerPod, "--",
 			"rbd", "-p", poolName, "lock", "add", imageName, dummyLockID)
 		Expect(err).NotTo(HaveOccurred())
 	})
@@ -70,15 +70,15 @@ var _ = Describe("Locking", Label("lock"), func() {
 		mb1, err := GetMB(SecondaryK8sCluster, namespace, backupName1)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(
-			CheckJobExist(SecondaryK8sCluster, CephClusterNamespace, controller.MantleZeroOutJobPrefix+string(mb1.GetUID())),
+			CheckJobExist(SecondaryK8sCluster, CephCluster1Namespace, controller.MantleZeroOutJobPrefix+string(mb1.GetUID())),
 		).To(BeFalse())
 		Expect(
-			CheckJobExist(SecondaryK8sCluster, CephClusterNamespace, controller.MantleImportJobPrefix+string(mb1.GetUID())),
+			CheckJobExist(SecondaryK8sCluster, CephCluster1Namespace, controller.MantleImportJobPrefix+string(mb1.GetUID())),
 		).To(BeFalse())
 	})
 
 	It("should unlock the volume in the secondary cluster", func() {
-		stdout, _, err := Kubectl(SecondaryK8sCluster, nil, "exec", "-n", CephClusterNamespace, controllerPod, "--",
+		stdout, _, err := Kubectl(SecondaryK8sCluster, nil, "exec", "-n", CephCluster1Namespace, controllerPod, "--",
 			"rbd", "-p", poolName, "--format", "json", "lock", "ls", imageName)
 		Expect(err).NotTo(HaveOccurred())
 		var locks []*ceph.RBDLock
@@ -87,7 +87,7 @@ var _ = Describe("Locking", Label("lock"), func() {
 		Expect(locks).To(HaveLen(1))
 
 		// unlock
-		_, _, err = Kubectl(SecondaryK8sCluster, nil, "exec", "-n", CephClusterNamespace, controllerPod, "--",
+		_, _, err = Kubectl(SecondaryK8sCluster, nil, "exec", "-n", CephCluster1Namespace, controllerPod, "--",
 			"rbd", "-p", poolName, "lock", "rm", imageName, dummyLockID, locks[0].Locker)
 		Expect(err).NotTo(HaveOccurred())
 	})
@@ -98,7 +98,7 @@ var _ = Describe("Locking", Label("lock"), func() {
 
 	It("should not exist locks after backup completion", func() {
 		Eventually(func(g Gomega) {
-			stdout, _, err := Kubectl(SecondaryK8sCluster, nil, "exec", "-n", CephClusterNamespace, controllerPod, "--",
+			stdout, _, err := Kubectl(SecondaryK8sCluster, nil, "exec", "-n", CephCluster1Namespace, controllerPod, "--",
 				"rbd", "-p", poolName, "--format", "json", "lock", "ls", imageName)
 			g.Expect(err).NotTo(HaveOccurred())
 			var locks []*ceph.RBDLock

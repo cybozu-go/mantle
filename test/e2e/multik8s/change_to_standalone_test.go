@@ -19,7 +19,7 @@ var _ = Describe("change to standalone", Label("change-to-standalone"), func() {
 		pvcName = util.GetUniqueName("pvc-")
 		backupName = util.GetUniqueName("mb-")
 
-		SetupEnvironment(namespace)
+		SetupNamespaces(namespace)
 		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
 		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
 		WaitMantleBackupSynced(namespace, backupName)

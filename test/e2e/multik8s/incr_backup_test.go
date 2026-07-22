@@ -19,7 +19,7 @@ var _ = Describe("incremental backup", Label("incr-backup"), func() {
 		restoreName0 := util.GetUniqueName("mr-")
 		restoreName1 := util.GetUniqueName("mr-")
 
-		SetupEnvironment(namespace)
+		SetupNamespaces(namespace)
 		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
 
 		// create M0.
@@ -69,7 +69,7 @@ var _ = Describe("incremental backup", Label("incr-backup"), func() {
 		restoreName1 := util.GetUniqueName("mr-")
 		restoreName2 := util.GetUniqueName("mr-")
 
-		SetupEnvironment(namespace)
+		SetupNamespaces(namespace)
 		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
 
 		// create M0.
@@ -133,7 +133,7 @@ var _ = Describe("incremental backup", Label("incr-backup"), func() {
 		restoreName1 := util.GetUniqueName("mr-")
 		restoreName2 := util.GetUniqueName("mr-")
 
-		SetupEnvironment(namespace)
+		SetupNamespaces(namespace)
 		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
 
 		// create M0.
