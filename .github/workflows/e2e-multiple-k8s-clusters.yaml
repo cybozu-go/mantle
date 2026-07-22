@@ -36,6 +36,7 @@ jobs:
           - change-to-secondary
           - change-to-standalone
           - lock
+          - multi-controller
           - "!//" # select unlabelled tests
         include:
           # testing various backup-transfer-part-size

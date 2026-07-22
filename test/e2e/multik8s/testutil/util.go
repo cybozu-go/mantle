@@ -908,6 +908,22 @@ func EnsurePVCHasNoSnapshots(cluster int, namespace, pvcName string) {
 	Expect(snaps).To(BeEmpty())
 }
 
+// EnsurePVCHasNoSnapshot waits until the RBD snapshot named snapName no longer
+// exists on the given PVC's image. It is the counterpart of EnsurePVCHasSnapshot
+// and is used to confirm that deleting a MantleBackup also removes its snapshot.
+func EnsurePVCHasNoSnapshot(cluster int, namespace, pvcName, snapName string) {
+	GinkgoHelper()
+	By("checking the PVC no longer has the snapshot")
+	Eventually(func(g Gomega) {
+		snaps, err := ListRBDSnapshotsInPVC(cluster, namespace, pvcName)
+		g.Expect(err).NotTo(HaveOccurred())
+		exists := slices.ContainsFunc(snaps, func(snap ceph.RBDSnapshot) bool {
+			return snap.Name == snapName
+		})
+		g.Expect(exists).To(BeFalse())
+	}).Should(Succeed())
+}
+
 func createCephCmd(cluster int) ceph.CephCmd {
 	kubectl, err := getKubectlInvocation(cluster)
 	if err != nil {
@@ -941,6 +957,16 @@ func CheckJobExist(clusterNo int, namespace, jobName string) bool {
 
 	return slices.ContainsFunc(jobs.Items, func(job batchv1.Job) bool {
 		return job.GetName() == jobName
+	})
+}
+
+func CheckPVCExist(clusterNo int, namespace, pvcName string) bool {
+	GinkgoHelper()
+	pvcs, err := GetPVCList(clusterNo, namespace)
+	Expect(err).NotTo(HaveOccurred())
+
+	return slices.ContainsFunc(pvcs.Items, func(pvc corev1.PersistentVolumeClaim) bool {
+		return pvc.GetName() == pvcName
 	})
 }
 
