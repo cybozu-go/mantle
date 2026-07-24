@@ -1,0 +1,10 @@
+apiVersion: ceph.rook.io/v1
+kind: CephBlockPool
+metadata:
+  name: rook-ceph-block
+  namespace: "%s"
+spec:
+  failureDomain: osd
+  replicated:
+    size: 1
+    requireSafeReplicaSize: false

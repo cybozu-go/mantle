@@ -28,15 +28,6 @@ provisioner: rook-ceph.ceph.rook.io/bucket
 reclaimPolicy: Delete
 volumeBindingMode: Immediate
 ---
-apiVersion: objectbucket.io/v1alpha1
-kind: ObjectBucketClaim
-metadata:
-  name: export-data
-  namespace: rook-ceph
-spec:
-  generateBucketName: export-data
-  storageClassName: ceph-bucket
----
 apiVersion: v1
 kind: Service
 metadata:
@@ -56,3 +47,21 @@ spec:
     rook_cluster: rook-ceph
     rook_object_store: ceph-object-store
   type: NodePort
+---
+apiVersion: objectbucket.io/v1alpha1
+kind: ObjectBucketClaim
+metadata:
+  name: export-data-1
+  namespace: rook-ceph
+spec:
+  generateBucketName: export-data-1
+  storageClassName: ceph-bucket
+---
+apiVersion: objectbucket.io/v1alpha1
+kind: ObjectBucketClaim
+metadata:
+  name: export-data-2
+  namespace: rook-ceph
+spec:
+  generateBucketName: export-data-2
+  storageClassName: ceph-bucket

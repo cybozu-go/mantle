@@ -28,8 +28,8 @@ var _ = Describe("full backup", Label("full-backup"), func() {
 			backupName := util.GetUniqueName("mb-")
 			restoreName := util.GetUniqueName("mr-")
 
-			SetupEnvironment(namespace)
-			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+			SetupNamespaces(namespace)
+			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
 			writtenDataHash := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
 			WaitMantleBackupSynced(namespace, backupName)
@@ -194,8 +194,8 @@ var _ = Describe("full backup", Label("full-backup"), func() {
 		restoreName0 := util.GetUniqueName("mr-")
 		restoreName1 := util.GetUniqueName("mr-")
 
-		SetupEnvironment(namespace)
-		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+		SetupNamespaces(namespace)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
 		writtenDataHash0 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 
 		// create M0.
@@ -239,8 +239,8 @@ var _ = Describe("full backup", Label("full-backup"), func() {
 		restoreName0 := util.GetUniqueName("mr-")
 		restoreName1 := util.GetUniqueName("mr-")
 
-		SetupEnvironment(namespace)
-		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+		SetupNamespaces(namespace)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
 		writtenDataHash0 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 
 		// create M0.
@@ -280,12 +280,12 @@ var _ = Describe("full backup", Label("full-backup"), func() {
 		pvcName := util.GetUniqueName("pvc-")
 		backupName := util.GetUniqueName("mb-")
 
-		SetupEnvironment(namespace)
+		SetupNamespaces(namespace)
 
 		// Create a PVC, a MantleBackup for it, and wait for the MantleBackup to
 		// be synced.  We intentionally write no data to the PVC to make
 		// verification fail.
-		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
 		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
 		WaitMantleBackupSynced(namespace, backupName)
 

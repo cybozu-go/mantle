@@ -5,9 +5,9 @@ image:
 
 controller:
   role: secondary
-  mantleServiceEndpoint: ":58080"
+  mantleServiceEndpoint: ":8082"
   ports:
-    - containerPort: 58080
+    - containerPort: 8082
   objectStorageBucketName: {OBJECT_STORAGE_BUCKET_NAME}
   objectStorageEndpoint: {OBJECT_STORAGE_ENDPOINT}
   envSecret: export-data
@@ -21,11 +21,6 @@ controller:
 
 replicationService:
   type: NodePort
-  port: 58080
-  targetPort: 58080
-  nodePort: 30007
-
-webhook:
-  enabled: true
-  certificate:
-    managedBy: helm 
+  port: 8082
+  targetPort: 8082
+  nodePort: 30082
