@@ -4,7 +4,7 @@
 
 == 目的
 
-link:new-architecture.adoc[Mantle（再）設計案]に従い、`internal/controller/mantlebackup_controller.go`（約 3,500 行、以下 MB-C）を三層アーキテクチャ（ドメイン層・ユースケース層・インフラ層）にリファクタリングする。このリファクタリングにより以下を達成する：
+link:new-architecture.adoc[Mantle（再）設計案]に従い、`internal/controller/mantlebackup_controller.go`（約 3,600 行、以下 MB-C）を三層アーキテクチャ（ドメイン層・ユースケース層・インフラ層）にリファクタリングする。このリファクタリングにより以下を達成する：
 
 * 本体コードの関心を分離し、Kubernetes クラスタや Ceph クラスタといった外部リソースにアクセスする部分（インフラ層）と、コントローラが次に何を行うべきかを判定する部分（ドメイン層）を分けることで、コードの見通しをよくする。ドメイン層では、どのような状況でリコンサイラがどのように振る舞うのかを明示的に書く。
 * ドメイン層に対して Arrange-Act-Assert を明示した（envtest を用いない）ユニットテストを書き、リコンサイラの振る舞いを担保する。
@@ -14,14 +14,14 @@ MantleBackupConfig コントローラで実施済みの PoC（ https://github.co
 
 == 基準コミット
 
-本計画は、コミット https://github.com/cybozu-go/mantle/commit/b532c087edaea8aec22a3884b6b7f0f5233e75df[`b532c087`] 時点のコードに基づいて作成した。本書中の関数名・行数・挙動に関する記述はすべてこのコミット時点のものである。**各 PR の作成時には、その時点の最新の `main` と基準コミットの差分を確認し、対象コードに変更があれば本計画をその時点の `main` に基づいて適宜修正した上で着手すること。**
+本計画は、コミット https://github.com/cybozu-go/mantle/commit/007511aaf8de2bd7db016241258b0aec8cb0ecb2[`007511a`] 時点のコードに基づいて作成した。本書中の関数名・行数・挙動に関する記述はすべてこのコミット時点のものである。**各 PR の作成時には、その時点の最新の `main` と基準コミットの差分を確認し、対象コードに変更があれば本計画をその時点の `main` に基づいて適宜修正した上で着手すること。**
 
 == スコープ外
 
 * インテグレーションテスト（envtest を用いるテスト）の追加・修正・削除。ただしシンボル移動に伴う機械的な参照先修正（import・シンボル名の変更）は許容する。
 * E2E テストの追加・修正・削除。ただしシンボル移動に伴う機械的な参照先修正（import・シンボル名の変更）は許容する（`test/e2e/multik8s/testutil` が `Make*Name` 系などを参照しているため）。
 * gRPC によって呼び出される処理（`replication.go` のサーバ側実装）の改善。ただし定数・共有ヘルパの移動（<<d6>> 参照）に伴う機械的な import 修正は許容する。
-* 外部から見た振る舞いが変わるような実装。リソース名（Job/PVC/PV のプレフィックス）、ラベル・アノテーション、`.status` の遷移、メトリクスなど外部から観測可能な挙動を変えない。ただし <<risk-requeue>> に列挙した requeue 回数・エラー経路・gRPC 再送信の変化は許容例外とする。
+* 外部から見た振る舞いが変わるような実装。リソース名（Job/PVC/PV のプレフィックス）、ラベル・アノテーション、`.status` の遷移、メトリクス、`--max-export-data-pvcs` によるスロットリングなど外部から観測可能な挙動を変えない。ただし <<risk-requeue>> に列挙した requeue 回数・エラー経路・gRPC 再送信の変化は許容例外とする。
 * `mantlerestore_controller.go`・`garbage_collector_runner.go` など他コントローラのリファクタリング。ただし共有ヘルパのインフラ層への移動（<<d6>> 参照）に伴う機械的な参照先修正（import・シンボル名の変更）は許容する。
 
 == 現状の構造
@@ -49,8 +49,8 @@ MantleBackupConfig コントローラで実施済みの PoC（ https://github.co
 | K8s（Job/PV/PVC 作成・状態確認）、Ceph（clone 作成）
 
 | レプリケーション（primary）
-| `replicate`, `replicateManifests`, `prepareForDataSynchronization`, `startExportAndUpload`, `startExport`, `startUpload`, `createOrUpdateExportJob`, `createOrUpdateUploadJobs`, `handleCompleted{Export,Upload}Jobs`
-| gRPC（`CreateOrUpdatePVC`, `CreateMantleBackup`, `ListMantleBackup`, `SetSynchronizing`）、K8s（Job/PVC 作成）、オブジェクトストレージ（`GetSize`）
+| `replicate`, `replicateManifests`, `prepareForDataSynchronization`, `startExportAndUpload`, `startExport`, `startUpload`, `createOrUpdateExportJob`, `createOrUpdateUploadJobs`, `handleCompleted{Export,Upload}Jobs`, `canNewExportDataPVCBeCreated`, `deleteExportDataPVC`, `deletePodsOfJob`
+| gRPC（`CreateOrUpdatePVC`, `CreateMantleBackup`, `ListMantleBackup`, `SetSynchronizing`）、K8s（Job/PVC の作成・一覧・削除、Pod の一覧・削除）、オブジェクトストレージ（`GetSize`）
 
 | インポート（secondary）
 | `startImport`, `reconcileZeroOutJob`, `reconcileImportJob`, `createStaticPV(C)IfNotExists`, `lockVolume`/`unlockVolume`, `markSecondarySnapshotCaptured`
@@ -122,7 +122,7 @@ new-architecture.adoc の方針通り、**書き込み系はドメインイベ�
 | メモリ上で変更し、ユースケース層が永続化
 | PoC と同じ方式。ただし永続化はメタデータの `Update` と status の `Status().Update` の両方を行う（PoC は `Update` のみ）。<<risk-persist-order>> の例外あり
 
-| Job・PVC・PV の作成／削除、他の `MantleBackup` の更新（diff-from アノテーションなど）、期限切れ backup の削除
+| Job・Pod・PVC・PV の作成／削除、他の `MantleBackup` の更新（diff-from アノテーションなど）、期限切れ backup の削除
 | Operation
 | Job マニフェスト構築はインフラ層に置く（<<d4>>）
 
@@ -138,9 +138,9 @@ new-architecture.adoc の方針通り、**書き込み系はドメインイベ�
 | ユースケース層で事前取得
 | 無条件取得にすると同期済み backup のリコンサイルごとに gRPC 呼び出しが増えるため、取得の要否はドメイン層の判定関数で決める（後述）
 
-| Job の完了状態・ラベル付き Job/PVC の一覧
+| Job の完了状態・ラベル付き Job/PVC の一覧・対象 PVC の存在
 | ユースケース層で事前取得
-| `checkJobStatus`・`handleCompletedJobsOfComponent`・`canNewJobBeCreated` 相当の判定はドメイン層で行い、入力（Job のリスト・状態）はデータとして渡す
+| `checkJobStatus`・`handleCompletedJobsOfComponent`・`canNewJobBeCreated`・`canNewExportDataPVCBeCreated` 相当の判定はドメイン層で行い、入力（Job/PVC のリスト・状態）はデータとして渡す。`deletePodsOfJob` 内の一覧取得は、不要な DeleteCollection を避けるための Operation 実行時の詳細としてインフラ層に置く
 
 | オブジェクトストレージ `Exists`（secondary でのアップロード済み確認）・`GetSize`（primary のメトリクス）
 | ユースケース層で事前取得
@@ -237,6 +237,17 @@ verify Job の存在・完了状態はユースケース層が事前取得した
 * verify リソース作成の `if` は return するため、現行（作成と同一パスでレプリケーションも進む）に比べ検証開始パスでリコンサイルが 1 周増える（<<risk-requeue>> の許容例外）。
 * 現行は未 verify の間、毎パスで clone・静的 PV/PVC・Job を再確認・再作成していた（`rbd ls` も毎パス発行される）が、新実装では verify Job が存在しない場合のみ作成する。Ceph への呼び出しが減る方向の変化であり許容する。
 * 完了パスでは condition をメモリ上で更新して継続するため、verify 完了後の余分な 1 周が消える（<<risk-requeue>> 参照）。
+
+[#d8]
+=== D8: export-data PVC 上限と完了 part のリソース解放
+
+primary の `--max-export-data-pvcs` は、managed Ceph cluster の namespace に同時に存在できる export-data PVC 数を制限する。リファクタリング後も次の挙動を維持する：
+
+* `MaxExportDataPVCs == 0` は無制限とする。上限が有効な場合、新しい part の PVC が既に存在すれば、全体の PVC 数が上限以上でも対応する export Job の作成・更新を続行する。PVC が存在しない場合だけ、同 namespace の `app.kubernetes.io/name=mantle` かつ `app.kubernetes.io/component=export-data` の PVC を数え、上限未満なら作成する。削除中の PVC も backing PV が領域を消費しうるため数に含める。
+* upload Job が完了した part は、最新の完了 part を含めて export-data PVC を直ちに削除する。最新の完了 upload Job は進捗管理のため残す一方、その part の export Job・upload Job の Pod は削除し、pvc-protection によって PVC が Terminating のままスロットを占有し続けることを防ぐ。最新でない完了 Job は従来どおり Job 自体の削除により Pod も削除される。
+* `MaxExportDataPVCs` は primary の設定としてユースケース層・ドメイン層へ渡す。対象 part の PVC、ラベル付き PVC 一覧、完了 Job の状態はユースケース層が事前取得し、作成可否と解放対象はドメイン層が判定する。PVC・Pod の削除は Operation とし、現行どおり PVC の削除要求後に最新完了 part の Pod を削除する順序で発行する。Pod の一覧取得と DeleteCollection は Operation 実行器が一続きで行う。
+
+この挙動を崩すと、特に `MaxExportDataPVCs == 1` の multi-part backup で、前 part の PVC がスロットを占有して次 part の PVC を作れないデッドロックが発生する。PR 12・13 では既存の envtest・E2E テストに加え、ドメイン層のユニットテストでこの不変条件を担保する。
 
 == 段階的移行計画
 
@@ -341,15 +352,15 @@ verify Job の存在・完了状態はユースケース層が事前取得した
 
 ==== PR 12: export のドメイン化（nop）
 
-* **内容**: `startExport` 系（export-data PVC・export Job の作成判定、完了 export Job の処理、`canNewExportJobBeCreated` の同時実行数制限、part 番号管理、diff-from/diff-to アノテーションの付与）をドメイン化する。Job/PVC 一覧・完了状態はユースケース層で事前取得しデータとして渡す。Job spec 構築（`createOrUpdateExportJob`・`createOrUpdateExportDataPVC`）はインフラ層の Operation 実行器としてこの PR で追加する。
+* **内容**: `startExport` 系（export-data PVC・export Job の作成判定、完了 export Job の処理、`canNewExportJobBeCreated` の Job 同時実行数制限、`canNewExportDataPVCBeCreated` の PVC 数制限、part 番号管理、diff-from/diff-to アノテーションの付与）をドメイン化する。`MaxExportDataPVCs` は primary の設定からユースケース層・ドメイン層へ渡す。Job/PVC 一覧・完了状態と次 part の PVC の存在はユースケース層で事前取得しデータとして渡す。PVC 上限判定は <<d8>> のとおり、対象 PVC が既存なら上限到達時も続行し、新規作成時は削除中を含むラベル付き PVC を数える。Job spec 構築（`createOrUpdateExportJob`・`createOrUpdateExportDataPVC`）はインフラ層の Operation 実行器としてこの PR で追加する。
 * **nop**: PR 11 と同じ理由で `Provision` への配線は行わず、PR 13 まで未使用（nop）。
-* **テスト**: part 進行の判定（最大完了 part 番号 + 1 を次 part とする選定）、同時実行数制限、full/incremental による Job パラメータの違い、全 part 完了の判定。
+* **テスト**: part 進行の判定（最大完了 part 番号 + 1 を次 part とする選定）、Job 同時実行数制限、export-data PVC 数制限（0 なら無制限、上限到達時の新規作成抑止、対象 PVC が既存なら続行、削除中 PVC も数える）、full/incremental による Job パラメータの違い、全 part 完了の判定。
 * **規模**: 中〜大。
 
 ==== PR 13: upload のドメイン化と replicate 経路の配線
 
-* **内容**: `startUpload` 系（upload Job の作成判定、完了 upload Job の処理によるアップロード完了確認、メトリクス設定）をドメイン化する。アップロード完了確認は K8s 上の完了 upload Job の状態で行う（オブジェクトストレージの `Exists` は primary 経路では使われない）。オブジェクトストレージの `GetSize`（メトリクス用）はユースケース層で事前取得しデータとして渡す（取得の要否はドメイン層の判定関数で決める。<<d3>> 参照）。この事前取得には S3 クライアントの初期化（`prepareObjectStorageClient` 相当）が必要なため、PR 15 で移設済みでなければ、インフラ層のコンポーネントへの移設をこの PR で行う（<<d5>> 参照）。Job spec 構築（`createOrUpdateUploadJobs`）はインフラ層の Operation 実行器としてこの PR で追加する。移行期間中 `Reconcile` 側に巻き上げていたメトリクス復元処理と `exportedDiffSizeCache` もこの PR でユースケース層に移す（finalize 時のキャッシュエントリ削除は `Run` の Finalize 経路に置く。PR 9 参照）。PR 11・12 のドメイン関数と合わせて primary の `Provision` の「同期されていない」`if` 分岐を構成・配線し、旧 `replicate` 系コードを削除する。
-* **テスト**: upload Job の作成判定・アップロード済みスキップ・メトリクス設定に加え、配線した `if` 分岐全体（マニフェスト同期 → export → upload → 同期完了）の進行を担保する。
+* **内容**: `startUpload` 系（upload Job の作成判定、完了 upload Job の処理によるアップロード完了確認と part リソースの解放、メトリクス設定）をドメイン化する。アップロード完了確認は K8s 上の完了 upload Job の状態で行う（オブジェクトストレージの `Exists` は primary 経路では使われない）。完了した全 part（最新を含む）の export-data PVC を削除し、最新完了 part では進捗管理用の export/upload Job を残したまま両 Job の Pod を削除する処理を、<<d8>> の順序を維持する Operation として追加する。Pod の DeleteCollection に必要な既存 RBAC 権限も維持する。オブジェクトストレージの `GetSize`（メトリクス用）はユースケース層で事前取得しデータとして渡す（取得の要否はドメイン層の判定関数で決める。<<d3>> 参照）。この事前取得には S3 クライアントの初期化（`prepareObjectStorageClient` 相当）が必要なため、PR 15 で移設済みでなければ、インフラ層のコンポーネントへの移設をこの PR で行う（<<d5>> 参照）。Job spec 構築（`createOrUpdateUploadJobs`）はインフラ層の Operation 実行器としてこの PR で追加する。移行期間中 `Reconcile` 側に巻き上げていたメトリクス復元処理と `exportedDiffSizeCache` もこの PR でユースケース層に移す（finalize 時のキャッシュエントリ削除は `Run` の Finalize 経路に置く。PR 9 参照）。PR 11・12 のドメイン関数と合わせて primary の `Provision` の「同期されていない」`if` 分岐を構成・配線し、旧 `replicate` 系コードを削除する。
+* **テスト**: upload Job の作成判定・アップロード済みスキップ・メトリクス設定、完了 part の PVC 削除、最新完了 part の Job を残した Pod 削除、`MaxExportDataPVCs == 1` でも multi-part backup が次 part へ進めることに加え、配線した `if` 分岐全体（マニフェスト同期 → export → upload → 同期完了）の進行を担保する。
 * **規模**: 中〜大。
 * **備考**: この PR で primary の未同期分岐が新旧いっぺんに切り替わる。PR 11・12 のユニットテストが分岐を網羅していることを配線前に確認する。
 
