@@ -1,0 +1,31 @@
+image:
+  repository: controller
+  pullPolicy: IfNotPresent
+  reference: latest
+
+controller:
+  role: secondary
+  mantleServiceEndpoint: ":8082"
+  ports:
+    - containerPort: 8082
+  objectStorageBucketName: {OBJECT_STORAGE_BUCKET_NAME}
+  objectStorageEndpoint: {OBJECT_STORAGE_ENDPOINT}
+  envSecret: export-data
+  gcInterval: 1s
+  env:
+    - name: REQUEUE_RECONCILIATION_AFTER
+      value: "10s"
+  mtls:
+    clientCACertConfigMap: mantle-primary-ca-crt
+    serverTLSSecret: cert-mantle-replication
+
+replicationService:
+  type: NodePort
+  port: 8081
+  targetPort: 8082
+  nodePort: 30081
+
+webhook:
+  enabled: true
+  certificate:
+    managedBy: helm 

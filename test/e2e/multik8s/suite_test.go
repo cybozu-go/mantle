@@ -27,10 +27,19 @@ func TestMtest(t *testing.T) {
 var _ = BeforeSuite(func() {
 	By("waiting for mantle-controller to be ready", func() {
 		Eventually(func() error {
-			return CheckDeploymentReady(PrimaryK8sCluster, CephClusterNamespace, "mantle-controller")
+			return CheckDeploymentReady(PrimaryK8sCluster, CephCluster1Namespace, "mantle-controller")
 		}).Should(Succeed())
 		Eventually(func() error {
-			return CheckDeploymentReady(SecondaryK8sCluster, CephClusterNamespace, "mantle-controller")
+			return CheckDeploymentReady(SecondaryK8sCluster, CephCluster1Namespace, "mantle-controller")
 		}).Should(Succeed())
+	})
+
+	By("setting up storage pools", func() {
+		for _, clusterNo := range []int{PrimaryK8sCluster, SecondaryK8sCluster} {
+			err := ApplyRBDPoolTemplate(clusterNo, CephCluster1Namespace)
+			Expect(err).NotTo(HaveOccurred())
+			err = ApplySCTemplate(clusterNo, SCName1, CephCluster1Namespace, CephCluster1Namespace)
+			Expect(err).NotTo(HaveOccurred())
+		}
 	})
 })

@@ -38,13 +38,11 @@ var _ = Describe("Mantle", Ordered, func() {
 
 	BeforeAll(func() {
 		By("wait for mantle-controller to be ready", func() {
-			Eventually(func() error {
-				return checkDeploymentReady(cephCluster1Namespace, "mantle-controller")
-			}).Should(Succeed())
-
-			Eventually(func() error {
-				return checkDeploymentReady(cephCluster2Namespace, "mantle2-controller")
-			}).Should(Succeed())
+			for _, ns := range []string{cephCluster1Namespace, cephCluster2Namespace} {
+				Eventually(func() error {
+					return checkDeploymentReady(ns, "mantle-controller")
+				}).Should(Succeed())
+			}
 		})
 	})
 })

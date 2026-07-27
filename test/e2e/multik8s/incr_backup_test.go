@@ -19,8 +19,8 @@ var _ = Describe("incremental backup", Label("incr-backup"), func() {
 		restoreName0 := util.GetUniqueName("mr-")
 		restoreName1 := util.GetUniqueName("mr-")
 
-		SetupEnvironment(namespace)
-		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+		SetupNamespaces(namespace)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
 
 		// create M0.
 		writtenDataHash0 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
@@ -69,8 +69,8 @@ var _ = Describe("incremental backup", Label("incr-backup"), func() {
 		restoreName1 := util.GetUniqueName("mr-")
 		restoreName2 := util.GetUniqueName("mr-")
 
-		SetupEnvironment(namespace)
-		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+		SetupNamespaces(namespace)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
 
 		// create M0.
 		writtenDataHash0 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
@@ -133,8 +133,8 @@ var _ = Describe("incremental backup", Label("incr-backup"), func() {
 		restoreName1 := util.GetUniqueName("mr-")
 		restoreName2 := util.GetUniqueName("mr-")
 
-		SetupEnvironment(namespace)
-		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+		SetupNamespaces(namespace)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
 
 		// create M0.
 		writtenDataHash0 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)

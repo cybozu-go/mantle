@@ -20,8 +20,8 @@ var _ = Describe("metrics tests", func() {
 	backupConfigName := util.GetUniqueName("mbc-")
 
 	It("should setup", func(ctx SpecContext) {
-		SetupEnvironment(namespace)
-		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+		SetupNamespaces(namespace)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
 		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
 		WaitMantleBackupSynced(namespace, backupName)
 		CreateMantleBackupConfig(PrimaryK8sCluster, namespace, pvcName, backupConfigName)
@@ -32,7 +32,7 @@ var _ = Describe("metrics tests", func() {
 			Eventually(ctx, func(g Gomega) {
 				controllerPod, err := GetControllerPodName(PrimaryK8sCluster)
 				g.Expect(err).NotTo(HaveOccurred())
-				stdout, _, err := Kubectl(PrimaryK8sCluster, nil, "exec", "-n", CephClusterNamespace, controllerPod, "--",
+				stdout, _, err := Kubectl(PrimaryK8sCluster, nil, "exec", "-n", CephCluster1Namespace, controllerPod, "--",
 					"curl", "-s", "http://localhost:8080/metrics")
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(strings.Contains(string(stdout), metricName)).To(BeTrue())
@@ -53,14 +53,14 @@ var _ = Describe("miscellaneous tests", func() {
 		backupName := util.GetUniqueName("mb-")
 		restoreName := util.GetUniqueName("mr-")
 
-		SetupEnvironment(namespace)
+		SetupNamespaces(namespace)
 
 		// Pause the object storage to make upload Jobs fail.
 		PauseObjectStorage(ctx)
 		defer ResumeObjectStorage(ctx)
 
 		// Create MantleBackup M0.
-		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
 		writtenDataHash := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
 
@@ -103,10 +103,10 @@ var _ = Describe("miscellaneous tests", func() {
 		restoreName1 := util.GetUniqueName("mr-")
 		restoreName2 := util.GetUniqueName("mr-")
 
-		SetupEnvironment(namespace)
+		SetupNamespaces(namespace)
 
-		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName1)
-		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName2)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName1, SCName1)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName2, SCName1)
 		writtenDataHash1 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName1)
 		writtenDataHash2 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName2)
 		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName1, backupName1)
@@ -152,13 +152,13 @@ var _ = Describe("miscellaneous tests", func() {
 		pvcName := util.GetUniqueName("pvc-")
 		backupName := util.GetUniqueName("mb-")
 
-		SetupEnvironment(namespace)
+		SetupNamespaces(namespace)
 
 		maxExportDataPVCs := 1
 		ChangeMaxExportDataPVCs(&maxExportDataPVCs)
 		defer ChangeMaxExportDataPVCs(nil)
 
-		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
 		_ = WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 
 		// Make sure the backup will be split into multiple parts.
@@ -187,7 +187,7 @@ var _ = Describe("miscellaneous tests", func() {
 			partNumSlow := 0
 			partNumFast := 1
 
-			SetupEnvironment(namespace)
+			SetupNamespaces(namespace)
 
 			script := fmt.Sprintf(`#!/bin/bash
 s5cmd_path=$(which s5cmd)
@@ -208,7 +208,7 @@ s5cmd(){
 				&script,
 			)
 
-			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
 			writtenDataHash := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
 
@@ -219,12 +219,12 @@ s5cmd(){
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(primaryMB.IsSynced()).To(BeFalse())
 
-				jobSlow, err := GetJob(PrimaryK8sCluster, CephClusterNamespace,
+				jobSlow, err := GetJob(PrimaryK8sCluster, CephCluster1Namespace,
 					controller.MakeUploadJobName(primaryMB, partNumSlow))
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(IsJobConditionTrue(jobSlow.Status.Conditions, batchv1.JobComplete)).To(BeFalse())
 
-				jobFast, err := GetJob(PrimaryK8sCluster, CephClusterNamespace,
+				jobFast, err := GetJob(PrimaryK8sCluster, CephCluster1Namespace,
 					controller.MakeUploadJobName(primaryMB, partNumFast))
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(IsJobConditionTrue(jobFast.Status.Conditions, batchv1.JobComplete)).To(BeTrue())
@@ -262,7 +262,7 @@ s5cmd(){
 			restoreName := util.GetUniqueName("mr-")
 			partNumFailed := 1
 
-			SetupEnvironment(namespace)
+			SetupNamespaces(namespace)
 
 			// Make part=1 Job fail
 			script := fmt.Sprintf(`#!/bin/bash
@@ -287,7 +287,7 @@ s5cmd(){
 			ChangeComponentJobScript(ctx, clusterOfJob, envName, namespace, backupName, partNumFailed, &script)
 			defer ChangeComponentJobScript(ctx, clusterOfJob, envName, namespace, backupName, partNumFailed, nil)
 
-			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
 			writtenDataHash := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
 
@@ -302,7 +302,7 @@ s5cmd(){
 				g.Expect(err).NotTo(HaveOccurred())
 				jobName := makeJobName(backup, partNumFailed)
 
-				job, err := GetJob(clusterOfJob, CephClusterNamespace, jobName)
+				job, err := GetJob(clusterOfJob, CephCluster1Namespace, jobName)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete)).To(BeFalse())
 			}).Should(Succeed())
@@ -310,7 +310,7 @@ s5cmd(){
 			By("ensuring the part=1 Job continues to fail")
 			Consistently(ctx, func(g Gomega) {
 				jobName := makeJobName(backup, partNumFailed)
-				job, err := GetJob(clusterOfJob, CephClusterNamespace, jobName)
+				job, err := GetJob(clusterOfJob, CephCluster1Namespace, jobName)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete)).To(BeFalse())
 			}, "10s", "1s").Should(Succeed())
@@ -319,7 +319,7 @@ s5cmd(){
 			switch howJobRevived {
 			case 0: // reset the Job script to the original one.
 				ChangeComponentJobScript(ctx, clusterOfJob, envName, namespace, backupName, partNumFailed, nil)
-				_, _, err := Kubectl(clusterOfJob, nil, "delete", "-n", CephClusterNamespace,
+				_, _, err := Kubectl(clusterOfJob, nil, "delete", "-n", CephCluster1Namespace,
 					"job", makeJobName(backup, partNumFailed))
 				Expect(err).NotTo(HaveOccurred())
 
@@ -351,19 +351,19 @@ spec:
       - name: mantle
         persistentVolumeClaim:
           claimName: %s
-`, jobName, CephClusterNamespace, controller.MakeExportDataPVCName(backup, partNumFailed))
+`, jobName, CephCluster1Namespace, controller.MakeExportDataPVCName(backup, partNumFailed))
 				_, _, err := Kubectl(clusterOfJob, []byte(manifest), "apply", "-f", "-")
 				Expect(err).NotTo(HaveOccurred())
 
 				By("waiting for the Job to be completed")
 				Eventually(ctx, func(g Gomega) {
-					job, err := GetJob(clusterOfJob, CephClusterNamespace, jobName)
+					job, err := GetJob(clusterOfJob, CephCluster1Namespace, jobName)
 					g.Expect(err).NotTo(HaveOccurred())
 					g.Expect(IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete)).To(BeTrue())
 				}).Should(Succeed())
 
 				By("deleting the Job")
-				_, _, err = Kubectl(clusterOfJob, nil, "delete", "-n", CephClusterNamespace, "job", jobName)
+				_, _, err = Kubectl(clusterOfJob, nil, "delete", "-n", CephCluster1Namespace, "job", jobName)
 				Expect(err).NotTo(HaveOccurred())
 			}
 

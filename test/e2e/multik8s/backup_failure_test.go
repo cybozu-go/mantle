@@ -13,14 +13,14 @@ var _ = Describe("backup failure", Label("backup-failure"), func() {
 		pvcName := util.GetUniqueName("pvc-")
 		backupName := util.GetUniqueName("mb-")
 
-		SetupEnvironment(namespace)
+		SetupNamespaces(namespace)
 
 		// Pause the object storage to make backups fail.
 		PauseObjectStorage(ctx)
 		defer ResumeObjectStorage(ctx)
 
 		// Create MantleBackup M0.
-		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
 		_ = WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
 
@@ -55,14 +55,14 @@ var _ = Describe("backup failure", Label("backup-failure"), func() {
 		backupName := util.GetUniqueName("mb-")
 		restoreName := util.GetUniqueName("mr-")
 
-		SetupEnvironment(namespace)
+		SetupNamespaces(namespace)
 
 		// Pause the object storage to make backups fail.
 		PauseObjectStorage(ctx)
 		defer ResumeObjectStorage(ctx)
 
 		// Create MantleBackup M0.
-		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
 		writtenDataHash := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
 
@@ -107,10 +107,10 @@ var _ = Describe("backup failure", Label("backup-failure"), func() {
 			backupName1 := util.GetUniqueName("mb-")
 			restoreName0 := util.GetUniqueName("mr-")
 
-			SetupEnvironment(namespace)
+			SetupNamespaces(namespace)
 
 			// Create MantleBackup M0.
-			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
 			writtenDataHash0 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName0)
 			WaitMantleBackupSynced(namespace, backupName0)
@@ -120,7 +120,7 @@ var _ = Describe("backup failure", Label("backup-failure"), func() {
 			defer ResumeObjectStorage(ctx)
 
 			// Create MantleBackup M1.
-			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
 			_ = WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName1)
 
@@ -160,10 +160,10 @@ var _ = Describe("backup failure", Label("backup-failure"), func() {
 			restoreName0 := util.GetUniqueName("mr-")
 			restoreName1 := util.GetUniqueName("mr-")
 
-			SetupEnvironment(namespace)
+			SetupNamespaces(namespace)
 
 			// Create MantleBackup M0.
-			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
 			writtenDataHash0 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName0)
 			WaitMantleBackupSynced(namespace, backupName0)
@@ -173,7 +173,7 @@ var _ = Describe("backup failure", Label("backup-failure"), func() {
 			defer ResumeObjectStorage(ctx)
 
 			// Create MantleBackup M1.
-			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName)
+			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
 			writtenDataHash1 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName1)
 

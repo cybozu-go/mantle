@@ -30,6 +30,8 @@ ceph/go.mod
 ceph/go.sum
 ceph/packages/
 test/e2e/testdata/persistentvolumes.yaml
-test/e2e/testdata/values-mantle-primary.yaml
-test/e2e/testdata/values-mantle-secondary.yaml
+test/e2e/testdata/values-mantle-primary-1.yaml
+test/e2e/testdata/values-mantle-primary-2.yaml
+test/e2e/testdata/values-mantle-secondary-1.yaml
+test/e2e/testdata/values-mantle-secondary-2.yaml
 include/
