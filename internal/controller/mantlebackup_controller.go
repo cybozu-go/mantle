@@ -1444,11 +1444,6 @@ func (r *MantleBackupReconciler) listCompletedJobsOfComponent(
 	return completedJobs, largestPartNum, nil
 }
 
-func IsPartNextToLargestCompletedPart(largestCompletedPartNum *int, partNum int) bool {
-	return (largestCompletedPartNum == nil && partNum != 0) ||
-		(largestCompletedPartNum != nil && partNum != *largestCompletedPartNum+1)
-}
-
 func (r *MantleBackupReconciler) handleCompletedExportJobs(ctx context.Context, backup *mantlev1.MantleBackup) (int, *reconcile.Result) {
 	return r.handleCompletedJobsOfComponent(ctx, backup, labelComponentExportJob, MantleExportJobPrefix, nil)
 }
