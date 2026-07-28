@@ -16,9 +16,11 @@ import (
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/ceph"
+	"github.com/cybozu-go/mantle/internal/controller/infra"
 	"github.com/cybozu-go/mantle/internal/controller/internal/objectstorage"
 	"github.com/cybozu-go/mantle/internal/controller/internal/reconcile"
 	"github.com/cybozu-go/mantle/internal/controller/metrics"
+	"github.com/cybozu-go/mantle/internal/controller/usecase"
 	"github.com/cybozu-go/mantle/pkg/controller/proto"
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/time/rate"
@@ -139,6 +141,10 @@ type MantleBackupReconciler struct {
 	backupTransferPartSize resource.Quantity
 
 	exportedDiffSizeCache map[types.UID]exportedDiffSizeCacheEntry
+
+	reconcileMBStandalone *usecase.ReconcileMBStandalone
+	reconcileMBPrimary    *usecase.ReconcileMBPrimary
+	reconcileMBSecondary  *usecase.ReconcileMBSecondary
 }
 
 type exportedDiffSizeCacheEntry struct {
@@ -164,6 +170,8 @@ func NewMantleBackupReconciler(
 	proxySettings *ProxySettings,
 	backupTransferPartSize resource.Quantity,
 ) *MantleBackupReconciler {
+	k8sClient := infra.NewKubernetesClient(client)
+
 	return &MantleBackupReconciler{
 		Client:                 client,
 		Scheme:                 scheme,
@@ -179,6 +187,9 @@ func NewMantleBackupReconciler(
 		proxySettings:          proxySettings,
 		backupTransferPartSize: backupTransferPartSize,
 		exportedDiffSizeCache:  map[types.UID]exportedDiffSizeCacheEntry{},
+		reconcileMBStandalone:  usecase.NewReconcileMBStandalone(k8sClient),
+		reconcileMBPrimary:     usecase.NewReconcileMBPrimary(k8sClient),
+		reconcileMBSecondary:   usecase.NewReconcileMBSecondary(k8sClient),
 	}
 }
 
@@ -418,6 +429,23 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return result.ToCtrlResult()
 	}
 	logger.Info("starting reconciliation", "namespace", backup.Namespace, "name", backup.Name, "backupUID", string(backup.GetUID()))
+
+	var result *reconcile.Result
+
+	switch r.role {
+	case RoleStandalone:
+		result = r.reconcileMBStandalone.Run(ctx, req.NamespacedName)
+	case RolePrimary:
+		result = r.reconcileMBPrimary.Run(ctx, req.NamespacedName)
+	case RoleSecondary:
+		result = r.reconcileMBSecondary.Run(ctx, req.NamespacedName)
+	default:
+		panic("unreachable")
+	}
+
+	if !result.ShouldContinueWithLegacyReconcile() {
+		return result.ToCtrlResult()
+	}
 
 	switch r.role {
 	case RoleStandalone:
