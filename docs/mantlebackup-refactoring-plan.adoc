@@ -20,7 +20,7 @@ MantleBackupConfig コントローラで実施済みの PoC（ https://github.co
 
 * インテグレーションテスト（envtest を用いるテスト）の追加・修正・削除。ただしシンボル移動に伴う機械的な参照先修正（import・シンボル名の変更）は許容する。
 * E2E テストの追加・修正・削除。ただしシンボル移動に伴う機械的な参照先修正（import・シンボル名の変更）は許容する（`test/e2e/multik8s/testutil` が `Make*Name` 系などを参照しているため）。
-* gRPC によって呼び出される処理（`replication.go` のサーバ側実装）の改善。ただし定数・共有ヘルパの移動（<<d6>> 参照）に伴う機械的な import 修正は許容する。
+* gRPC によって呼び出される処理（`replication.go` のサーバ側実装）の改善。ただし定数・共有ヘルパの移動（<<d2>>・<<d6>> 参照）に伴う機械的な import 修正は許容する。
 * 外部から見た振る舞いが変わるような実装。リソース名（Job/PVC/PV のプレフィックス）、ラベル・アノテーション、`.status` の遷移、メトリクス、`--max-export-data-pvcs` によるスロットリングなど外部から観測可能な挙動を変えない。ただし <<risk-requeue>> に列挙した requeue 回数・エラー経路・gRPC 再送信の変化は許容例外とする。
 * `mantlerestore_controller.go`・`garbage_collector_runner.go` など他コントローラのリファクタリング。ただし共有ヘルパのインフラ層への移動（<<d6>> 参照）に伴う機械的な参照先修正（import・シンボル名の変更）は許容する。
 
@@ -103,10 +103,11 @@ MantleBackupConfig コントローラで実施済みの PoC（ https://github.co
 [#d2]
 === D2: 共有定数・純粋ヘルパの移動
 
-MB-C 先頭のラベル・アノテーション・sync-mode・名前プレフィックス定数、および `Make*Name`・`ExtractPartNumFrom*` などの純粋ヘルパ関数は、ドメイン層（`internal/controller/domain`）に移動する。
+MB-C 先頭のラベル・アノテーション・sync-mode・名前プレフィックス定数、および `Make*Name`・`ExtractPartNumFrom*` などの純粋ヘルパ関数は、それらを使用するコンポーネントをドメイン層へ移す PR で、コンポーネントと一緒にドメイン層（`internal/controller/domain`）へ移動する。定数・純粋ヘルパだけを先行して一括移動する PR は設けない。
 
 * これらは「Mantle がどのように振る舞うか」の定義そのものであり、ドメイン層の管轄。
-* `replication.go`・既存 envtest テストからの参照は import 変更のみの機械的修正で追従する（PR 2 で実施）。
+* 移動する定数・純粋ヘルパを `replication.go`・既存 envtest テストなど移動前のコンポーネントも参照している場合、その PR で import 変更のみの機械的修正を行う。
+* 複数のコンポーネントから参照される定数・純粋ヘルパは、それを最初に必要とするコンポーネントの移動 PR で移し、後続のコンポーネントは移動済みの定義を利用する。
 * `getCephClusterIDFromPVC`（`util.go`）は外部アクセス（StorageClass の読み取り）を持つためドメイン層へは移動せず、インフラ層へ移動する（`mantlerestore_controller.go`・`replication.go` と共有しているため機械的な参照先修正を伴う。<<d6>> 参照）。
 
 [#d3]
@@ -128,7 +129,7 @@ new-architecture.adoc の方針通り、**書き込み系はドメインイベ�
 
 | gRPC `CreateOrUpdatePVC` → `CreateMantleBackup`（レプリケーション）
 | 複合 Operation
-| 前者のレスポンス（PVC UID）を後者のリクエストが使うが、レスポンスをドメイン層の判定には使わないため、2 呼び出しをまとめた 1 つの Operation としてインフラ層で実行する。なお現行実装は送信直後の同一パス内で `ListMantleBackup` が送信結果を読むため、セカンダリに対象 backup がまだ存在しない初回だけは Operation 化に伴い 2 周のリコンサイルに分解する。対象 backup が存在してから `SnapshotCaptured` になるまでは、現行どおり各リコンサイルで Operation を再発行する（PR 11・<<risk-requeue>> 参照）
+| 前者のレスポンス（PVC UID）を後者のリクエストが使うが、レスポンスをドメイン層の判定には使わないため、2 呼び出しをまとめた 1 つの Operation としてインフラ層で実行する。なお現行実装は送信直後の同一パス内で `ListMantleBackup` が送信結果を読むため、セカンダリに対象 backup がまだ存在しない初回だけは Operation 化に伴い 2 周のリコンサイルに分解する。対象 backup が存在してから `SnapshotCaptured` になるまでは、現行どおり各リコンサイルで Operation を再発行する（PR 10・<<risk-requeue>> 参照）
 
 | gRPC `SetSynchronizing`
 | Operation
@@ -198,7 +199,7 @@ interface は new-architecture.adoc の指示通り「その処理に必要な�
 workqueue への遅延投入はインフラ層の関心。ドメイン層は「まだ期限切れでない」ことを判定して `ScheduleExpireOperation` を発行し、インフラ層の実行器がチャネルへ送出する。`SetupWithManager` の `WatchesRawSource` 配線は現状のまま `mantlebackup_controller.go` に残す。
 
 `prepareObjectStorageClient`（S3 クライアントの遅延初期化）::
-インフラ層に移す。ConfigMap/Secret から認証情報を読んで `objectstorage.Bucket` を返す処理をインフラ層のコンポーネントとし、ユースケース層はそれを介して `Exists`/`GetSize` の事前取得を行う。ユースケース層からの利用は、PoC の `usecase.KubernetesClient` と同様にユースケース層で定義したインターフェースをインフラ層が実装する形（依存性逆転）とし、new-architecture.adoc の「ユースケース層はインフラ層に依存しない」制約を守る。このコンポーネントは primary のメトリクス復元をユースケース層へ移す PR 8 で導入し、PR 13 の upload メトリクスと PR 15 の secondary `Exists` はそれを利用する。現行の secondary は、`Reconcile` 共通の `checkManagedBackup` を通過した後、ロール固有の所有権スキップ判定より前に、`Exists` の要否にかかわらずクライアントを初期化し、失敗した場合はそのリコンサイル全体を中断する。このエラー経路を変えないため、新実装でも secondary の `Run` は、<<managed-backup-preflight,管理対象の事前判定>>を通過した直後かつ `Provision`/`Finalize` の呼び出しより前にクライアントを初期化する。primary ではクライアント初期化と `GetSize` はメトリクス算出専用であり、失敗時は <<d3>> のとおりリコンサイルを中断しない。
+インフラ層に移す。ConfigMap/Secret から認証情報を読んで `objectstorage.Bucket` を返す処理をインフラ層のコンポーネントとし、ユースケース層はそれを介して `Exists`/`GetSize` の事前取得を行う。ユースケース層からの利用は、PoC の `usecase.KubernetesClient` と同様にユースケース層で定義したインターフェースをインフラ層が実装する形（依存性逆転）とし、new-architecture.adoc の「ユースケース層はインフラ層に依存しない」制約を守る。このコンポーネントは primary のメトリクス復元をユースケース層へ移す PR 7 で導入し、PR 12 の upload メトリクスと PR 14 の secondary `Exists` はそれを利用する。現行の secondary は、`Reconcile` 共通の `checkManagedBackup` を通過した後、ロール固有の所有権スキップ判定より前に、`Exists` の要否にかかわらずクライアントを初期化し、失敗した場合はそのリコンサイル全体を中断する。このエラー経路を変えないため、新実装でも secondary の `Run` は、<<managed-backup-preflight,管理対象の事前判定>>を通過した直後かつ `Provision`/`Finalize` の呼び出しより前にクライアントを初期化する。primary ではクライアント初期化と `GetSize` はメトリクス算出専用であり、失敗時は <<d3>> のとおりリコンサイルを中断しない。
 
 メトリクス出力::
 PoC（`MBCPrimaryReconciler.Provision`）と同様、ドメイン層から `metrics` パッケージを直接呼んでよい。`metrics` パッケージは外部システムへのアクセスを持たないため、new-architecture.adoc の層依存の制約には抵触しない。
@@ -218,7 +219,7 @@ MBC PoC と同様、`MantleBackupReconciler.Reconcile` 内で `sync.Once` によ
 
 `util.go` の `createCloneByPV`・`deleteRBDImageAsynchronously`・`getCephClusterIDFromPVC`（と下請けの `getCephClusterIDFromSCName`）は外部アクセスを持つヘルパであり、MB のドメイン interface のインフラ実装（verify 用 clone 作成・verify イメージ削除）やユースケース層の事前取得（cluster ID）が同じ処理を必要とする。一方でこれらは `mantlerestore_controller.go`・`persistentvolume_controller.go`・`replication.go` とも共有されている。`internal/controller` パッケージは `usecase`・`infra` を import 済みのため、`usecase`・`infra` 側から `internal/controller` のシンボルを参照すると import 循環になり、そのままでは再利用できない。
 
-そこで、これらのヘルパは**エクスポートした上でインフラ層（`internal/controller/infra`）へ移動**し、`internal/controller` 側（他コントローラ・`replication.go`・既存テスト）は infra を参照するように機械的に修正する（`internal/controller` → `infra` の依存は既存のため循環しない）。移動は<<migration-strategy-note,移行戦略>>の方針 4 に従い、それぞれを初めて必要とする PR で行う：`getCephClusterIDFromPVC` は PR 6、`createCloneByPV` は PR 8、`deleteRBDImageAsynchronously` は PR 9。ユースケース層からの利用（PR 6 の cluster ID 取得）は、<<d5>> のオブジェクトストレージクライアントと同様に、ユースケース層で定義したインターフェースをインフラ層が実装する形（依存性逆転）とする。
+そこで、これらのヘルパは**エクスポートした上でインフラ層（`internal/controller/infra`）へ移動**し、`internal/controller` 側（他コントローラ・`replication.go`・既存テスト）は infra を参照するように機械的に修正する（`internal/controller` → `infra` の依存は既存のため循環しない）。移動は<<migration-strategy-note,移行戦略>>の方針 4 に従い、それぞれを初めて必要とする PR で行う：`getCephClusterIDFromPVC` は PR 5、`createCloneByPV` は PR 7、`deleteRBDImageAsynchronously` は PR 8。ユースケース層からの利用（PR 5 の cluster ID 取得）は、<<d5>> のオブジェクトストレージクライアントと同様に、ユースケース層で定義したインターフェースをインフラ層が実装する形（依存性逆転）とする。
 
 [#d7]
 === D7: verify とレプリケーションの並行進行（primary）
@@ -242,7 +243,7 @@ if 未verify または（primary で）未同期 {
 return cleanup
 ```
 
-verify Job の存在・完了状態はユースケース層が事前取得したデータで判定する（<<d3>>）。2 つ目の `if` が return しない「継続処理」であることは、expire（PR 6）やメトリクス出力と同様に new-architecture.adoc が許容する逐次 `if` の例外として扱う。cleanup の前の「未verify なら requeue」のガードは、verify Job の実行中に cleanup が verify リソース（Job・PV/PVC・clone）を削除してしまうことを防ぐために必須である。この構造により：
+verify Job の存在・完了状態はユースケース層が事前取得したデータで判定する（<<d3>>）。2 つ目の `if` が return しない「継続処理」であることは、expire（PR 5）やメトリクス出力と同様に new-architecture.adoc が許容する逐次 `if` の例外として扱う。cleanup の前の「未verify なら requeue」のガードは、verify Job の実行中に cleanup が verify リソース（Job・PV/PVC・clone）を削除してしまうことを防ぐために必須である。この構造により：
 
 * primary では verify Job の実行中・完了のパスでも後続のレプリケーションの `if` に到達し、現行どおり検証とレプリケーションが並行進行する。standalone・secondary では verify の後続はガードと cleanup のみである。
 * verify リソース作成の `if` は return するため、現行（作成と同一パスでレプリケーションも進む）に比べ検証開始パスでリコンサイルが 1 周増える（<<risk-requeue>> の許容例外）。
@@ -258,7 +259,7 @@ primary の `--max-export-data-pvcs` は、managed Ceph cluster の namespace �
 * upload Job が完了した part は、最新の完了 part を含めて export-data PVC を直ちに削除する。最新の完了 upload Job は進捗管理のため残す一方、その part の export Job・upload Job の Pod は削除し、pvc-protection によって PVC が Terminating のままスロットを占有し続けることを防ぐ。最新でない完了 Job は従来どおり Job 自体の削除により Pod も削除される。
 * `MaxExportDataPVCs` は primary の設定としてユースケース層・ドメイン層へ渡す。対象 part の PVC、ラベル付き PVC 一覧、完了 Job の状態はユースケース層が事前取得し、作成可否と解放対象はドメイン層が判定する。PVC・Pod の削除は Operation とし、現行どおり PVC の削除要求後に最新完了 part の Pod を削除する順序で発行する。Pod の一覧取得と DeleteCollection は Operation 実行器が一続きで行う。
 
-この挙動を崩すと、特に `MaxExportDataPVCs == 1` の multi-part backup で、前 part の PVC がスロットを占有して次 part の PVC を作れないデッドロックが発生する。PR 12・13 では既存の envtest・E2E テストに加え、ドメイン層のユニットテストでこの不変条件を担保する。
+この挙動を崩すと、特に `MaxExportDataPVCs == 1` の multi-part backup で、前 part の PVC がスロットを占有して次 part の PVC を作れないデッドロックが発生する。PR 11・12 では既存の envtest・E2E テストに加え、ドメイン層のユニットテストでこの不変条件を担保する。
 
 == 段階的移行計画
 
@@ -267,67 +268,60 @@ primary の `--max-export-data-pvcs` は、managed Ceph cluster の namespace �
 
 ストラングラーフィグパターンに基づき、次の方針で進める：
 
-1. **最初に最終形と同じ呼び出し経路（`Reconcile` → `usecase.Run` → 管理対象の事前判定 → `domain.Provision`/`Finalize`）を骨組みとして導入する**（PR 3 で何もしないスケルトンと呼び出し経路を、PR 4 で legacy 委譲の仕組みを導入する）。ドメイン層の関数を旧コードから直接呼ぶ中間状態は作らず、ドメイン化された処理は常にユースケース層経由で実行される。管理対象の事前判定は PR 6 でこの経路に追加する。
+1. **最初に最終形と同じ呼び出し経路（`Reconcile` → `usecase.Run` → 管理対象の事前判定 → `domain.Provision`/`Finalize`）を骨組みとして導入する**（PR 2 で何もしないスケルトンと呼び出し経路を、PR 3 で legacy 委譲の仕組みを導入する）。ドメイン層の関数を旧コードから直接呼ぶ中間状態は作らず、ドメイン化された処理は常にユースケース層経由で実行される。管理対象の事前判定は PR 5 でこの経路に追加する。
 2. 移行が完了していない状況に対しては、`Provision`/`Finalize` が「旧コードに委譲する」ことを表す一時的な戻り値（以下 **legacy 委譲シグナル**）を返す。`Run` は、そこまでにドメイン層が行ったリコンサイル対象の変更の永続化と Operations の適用を済ませた上でシグナルを呼び出し元へ伝え、`Reconcile` が旧コード経路を実行する。
 3. サブフローを 1 つずつドメイン化し、`Provision`/`Finalize` の逐次 `if` に追記していく。ドメイン化したサブフローの旧コードは同じ PR で削除する。あるロールの全サブフローが揃ったら、そのロールの legacy 委譲シグナルと旧コード経路を削除する。従来方式のような「一括切り替え PR」は不要になり、ロール完成時の PR は削除が主体の低リスクなものになる。
-4. Operation 型・インフラ層の Operation 実行器・ドメイン interface のインフラ実装は、先行 PR でまとめて導入せず、**それらを初めて使用する PR で一緒に追加する**。レビュー時に発行側（ドメイン層）と実行側（インフラ層）を突き合わせて確認できるようにするためでもある。
+4. Operation 型・インフラ層の Operation 実行器・ドメイン interface のインフラ実装、および定数・ヘルパは、先行 PR でまとめて移動・導入せず、**それらを使用するコンポーネントを移す PR で一緒に移動・追加する**。複数のコンポーネントで共有する定数・ヘルパは最初の利用コンポーネントの移動時に移す。レビュー時に利用側と定義・実行側を突き合わせて確認できるようにするためでもある。
 5. ロールは standalone → primary → secondary の順に完成させる。standalone のフローは primary の部分集合（ローカルバックアップ＋verify＋cleanup）なので、共有部分のドメイン化がそのまま primary の下準備になる。
 
 「最初からユースケース層経由」での移行が可能な理由と、そのために必要な一時的な仕組みは次の通り：
 
-* `Provision`/`Finalize` は「`if 条件 { return 処理 }` の逐次実行」であり、原則として 1 回のリコンサイルは最初に成立した条件の処理だけを実行して終わる（expire や verify の condition 更新のような、処理をしても return しない「継続処理」の例外はある。PR 6・<<d7>> 参照）。そのため「移行済みの条件の `if`」と「未移行の状況で legacy 委譲シグナルを返す `if`」が同じ関数内に矛盾なく共存でき、サブフローをフロー順に縛られることなく 1 つずつ移行できる。
-* legacy 委譲シグナルはドメイン層に定義する一時的な戻り値であり、全ロールの移行完了時（PR 17）に仕組みごと削除する。
-* 例外として、primary でリコンサイルごとに実行されるメトリクス復元処理（`setExportedDiffSizeMetric` 系。現状は所有権ガード・expire・deletionTimestamp 確認・ローカルバックアップ処理の後、verify とレプリケーションの前に実行される）は「条件で終端する処理」ではないため逐次 `if` に馴染まない。`usecase.Run` より前へ巻き上げると、本来は所有権スキップやローカルバックアップのエラーで到達しない backup に対して K8s/S3 アクセスが発生するため、その形は採らない。PR 8 で `exportedDiffSizeCache` とともに primary のユースケース層へ移し、管理対象判定・所有権ガード・expire・deletionTimestamp 確認・ローカルバックアップ処理がすべて後続へ進める状態であることをドメイン層の純粋関数で確認した後、verify の事前取得・判定より前に実行する。キャッシュを使った増分取得の責務は <<d5>> に従う。PR 8 では旧 `reconcileAsPrimary` のメトリクス復元ブロックに加え、legacy `startUpload` 内の同じメトリクス更新呼び出しも削除し、キャッシュ所有権と更新経路をユースケース層へ一本化する。いずれも同一リコンサイル開始時に存在する完了 upload Job を入力とするため、ユースケース層の復元処理が同じ最大完了 part を先に観測できる。
+* `Provision`/`Finalize` は「`if 条件 { return 処理 }` の逐次実行」であり、原則として 1 回のリコンサイルは最初に成立した条件の処理だけを実行して終わる（expire や verify の condition 更新のような、処理をしても return しない「継続処理」の例外はある。PR 5・<<d7>> 参照）。そのため「移行済みの条件の `if`」と「未移行の状況で legacy 委譲シグナルを返す `if`」が同じ関数内に矛盾なく共存でき、サブフローをフロー順に縛られることなく 1 つずつ移行できる。
+* legacy 委譲シグナルはドメイン層に定義する一時的な戻り値であり、全ロールの移行完了時（PR 16）に仕組みごと削除する。
+* 例外として、primary でリコンサイルごとに実行されるメトリクス復元処理（`setExportedDiffSizeMetric` 系。現状は所有権ガード・expire・deletionTimestamp 確認・ローカルバックアップ処理の後、verify とレプリケーションの前に実行される）は「条件で終端する処理」ではないため逐次 `if` に馴染まない。`usecase.Run` より前へ巻き上げると、本来は所有権スキップやローカルバックアップのエラーで到達しない backup に対して K8s/S3 アクセスが発生するため、その形は採らない。PR 7 で `exportedDiffSizeCache` とともに primary のユースケース層へ移し、管理対象判定・所有権ガード・expire・deletionTimestamp 確認・ローカルバックアップ処理がすべて後続へ進める状態であることをドメイン層の純粋関数で確認した後、verify の事前取得・判定より前に実行する。キャッシュを使った増分取得の責務は <<d5>> に従う。PR 7 では旧 `reconcileAsPrimary` のメトリクス復元ブロックに加え、legacy `startUpload` 内の同じメトリクス更新呼び出しも削除し、キャッシュ所有権と更新経路をユースケース層へ一本化する。いずれも同一リコンサイル開始時に存在する完了 upload Job を入力とするため、ユースケース層の復元処理が同じ最大完了 part を先に観測できる。
 
 この戦略により、どの時点でも未移行の経路は旧コードが現役で動き続け、各 PR のレビュー範囲が「1 サブフローのドメイン化とそのテスト」に限定される。
 
 === PR 一覧
 
-依存関係は原則「番号順」だが、PR 11〜14（primary 系）と PR 15〜16（secondary 系）は互いに独立しており並行して進められる。双方が使用するオブジェクトストレージクライアントのインフラ層コンポーネントは PR 8 で導入済みとする（<<d5>> 参照）。
+依存関係は原則「番号順」だが、PR 10〜13（primary 系）と PR 14〜15（secondary 系）は互いに独立しており並行して進められる。双方が使用するオブジェクトストレージクライアントのインフラ層コンポーネントは PR 7 で導入済みとする（<<d5>> 参照）。
 
 ==== PR 1: デッドコードの削除
 
-* **内容**: `IsPartNextToLargestCompletedPart` を削除する。定義以外に参照が存在しない（テストからの参照も無い）デッドコードであり、かつ名前と逆の意味（次の part で**ない**とき true）を返すため、後続 PR で機械的にドメイン層へ移動する前に削除する。実際の part 進行判定は「最大完了 part 番号 + 1」の直接計算で行われており、この関数は使われていない。
+* **内容**: `IsPartNextToLargestCompletedPart` を削除する。定義以外に参照が存在しない（テストからの参照も無い）デッドコードであり、かつ名前と逆の意味（次の part で**ない**とき true）を返すため、利用コンポーネントと一緒にヘルパをドメイン層へ移動する後続 PR より前に削除する。実際の part 進行判定は「最大完了 part 番号 + 1」の直接計算で行われており、この関数は使われていない。
 * **nop**: なし（削除のみ）。
 * **テスト**: 不要。
 * **規模**: 極小。
 
-==== PR 2: 純粋ヘルパ・共有定数のドメイン層への移動
-
-* **内容**: MB-C 先頭の定数群（ラベル・アノテーション・sync-mode・名前プレフィックス）と、外部アクセスを持たない純粋関数（`Make*Name`、`ExtractPartNumFrom*`、`isCreatedWhenMantleControllerWasSecondary`、`convertToMap`、`searchForDiffOriginMantleBackup`、`calculateExportDataPVCSize`、`isPVSmallerThanPVC` など）を `internal/controller/domain` に移動する。`replication.go`・既存テストの参照は機械的に修正する。
-* **nop**: なし（移動のみ）。
-* **テスト**: 移動した純粋関数のうちテストが薄いものに AAA ユニットテストを追加する（特に `searchForDiffOriginMantleBackup`、`ExtractPartNumFrom*`）。既存の関連テストが `internal/controller` 側にあればテスト関数ごと domain 側へ移す。
-* **規模**: 大きめだが、ほぼ機械的な移動 diff。
-
-==== PR 3: ドメイン層・ユースケース層のスケルトン導入
+==== PR 2: ドメイン層・ユースケース層のスケルトン導入
 
 * **内容**: 3 ロール分のドメインリコンサイラ（`MBStandaloneReconciler`・`MBPrimaryReconciler`・`MBSecondaryReconciler`）の空の `Provision`/`Finalize` と、ユースケース層の `ReconcileMB{Standalone,Primary,Secondary}`（何もしない `Run`）をスケルトンとして追加し、`Reconcile` の各ロール分岐の冒頭から `usecase.Run` を呼び出すように配線する。この時点の `Run`・`Provision`・`Finalize` は何もせずに即座に戻り、`Reconcile` はその後も従来の旧コード経路をそのまま実行するため、外部挙動は変わらない。ユースケース層の遅延初期化（`sync.Once`。<<d5>> 参照）もこの PR で行う。
 * **nop**: `Run`・`Provision`/`Finalize` は何も処理しない（呼び出されるが nop）。
 * **テスト**: 不要（検証すべき振る舞いがないため）。コンパイルと既存テストの通過のみ確認する。
 * **規模**: 小。最終形と同じ呼び出し経路（`Reconcile` → `usecase.Run` → `domain.Provision`/`Finalize`）の骨格を最初に確立する PR。
 
-==== PR 4: legacy 委譲シグナルと Run の骨組みの実装
+==== PR 3: legacy 委譲シグナルと Run の骨組みの実装
 
-* **内容**: PR 3 のスケルトンに骨組みの実装を入れる。legacy 委譲シグナル（ドメイン層に定義する一時的な戻り値）を導入し、この時点の `Provision`/`Finalize` はそれを返すだけとする。`Run` には「必要リソースの取得 → `DeletionTimestamp` による `Provision`/`Finalize` の呼び分け → 変更された `MantleBackup` の永続化 → Operations のインフラ層への引き渡し → legacy 委譲シグナルの伝播」の骨組みを実装し、`Reconcile` はシグナルを受けた場合に旧コード経路へ委譲するようにする。`Provision`/`Finalize` は legacy 委譲シグナルを返すだけなので、外部挙動は変わらない。`Run` は呼び出し前の DeepCopy と比較し、メタデータ・spec と status の dirty 判定を独立に行う。メタデータ・spec に差分がある場合だけ `Update`、status に差分がある場合だけ `Status().Update` を行い、両方に差分がある場合はこの順序で実行して更新後の resourceVersion を引き継ぐ。先行する永続化に失敗した場合は後続の永続化と Operations を実行しない。現行コードが競合対策として用いている再取得つき status 更新・`Patch` に相当する競合時の方針（conflict エラーを requeue に任せる、再取得してリトライする等）もこの PR で定める。
+* **内容**: PR 2 のスケルトンに骨組みの実装を入れる。legacy 委譲シグナル（ドメイン層に定義する一時的な戻り値）を導入し、この時点の `Provision`/`Finalize` はそれを返すだけとする。`Run` には「必要リソースの取得 → `DeletionTimestamp` による `Provision`/`Finalize` の呼び分け → 変更された `MantleBackup` の永続化 → Operations のインフラ層への引き渡し → legacy 委譲シグナルの伝播」の骨組みを実装し、`Reconcile` はシグナルを受けた場合に旧コード経路へ委譲するようにする。`Provision`/`Finalize` は legacy 委譲シグナルを返すだけなので、外部挙動は変わらない。`Run` は呼び出し前の DeepCopy と比較し、メタデータ・spec と status の dirty 判定を独立に行う。メタデータ・spec に差分がある場合だけ `Update`、status に差分がある場合だけ `Status().Update` を行い、両方に差分がある場合はこの順序で実行して更新後の resourceVersion を引き継ぐ。先行する永続化に失敗した場合は後続の永続化と Operations を実行しない。現行コードが競合対策として用いている再取得つき status 更新・`Patch` に相当する競合時の方針（conflict エラーを requeue に任せる、再取得してリトライする等）もこの PR で定める。
 * **nop**: `Provision`/`Finalize` は何も処理しないため、`Run` の骨組み以外は実質 nop。
 * **テスト**: `Run` の骨組み（`DeletionTimestamp` による呼び分け・metadata-only では `Update` のみ、status-only では `Status().Update` のみ、両方の変更では `Update` → `Status().Update` の順序と resourceVersion の引き継ぎ、先行する永続化失敗時の後続永続化・Operations の抑止、legacy 委譲シグナルの伝播）に対する AAA ユニットテスト。finalizer 除去だけのパスで `Status().Update` を呼ばないことも確認する。
 * **規模**: 小〜中。
-* **備考**: Operation 型・`infra.ApplyReconcilerOperations` の実行器・ドメイン interface のインフラ実装は、この PR ではまとめて導入せず、それらを初めて使用する後続 PR で一緒に追加する（<<migration-strategy-note,移行戦略>> の方針 4）。そのため、この PR 時点では MB 用の Operation 型と適用契約は存在しない。`Run` の「Operations の引き渡し」は PoC 由来の汎用機構（`domain.Operation`・`domain.ReconcilerOperations`）とユースケース層定義の適用インターフェースに対して実装し、この PR のユニットテストは fake の Operation・適用先で行う（MB 用実行器と打ち切り契約は PR 6 で導入・決定する。<<risk-op-order>>）。
+* **備考**: Operation 型・`infra.ApplyReconcilerOperations` の実行器・ドメイン interface のインフラ実装は、この PR ではまとめて導入せず、それらを初めて使用する後続 PR で一緒に追加する（<<migration-strategy-note,移行戦略>> の方針 4）。そのため、この PR 時点では MB 用の Operation 型と適用契約は存在しない。`Run` の「Operations の引き渡し」は PoC 由来の汎用機構（`domain.Operation`・`domain.ReconcilerOperations`）とユースケース層定義の適用インターフェースに対して実装し、この PR のユニットテストは fake の Operation・適用先で行う（MB 用実行器と打ち切り契約は PR 5 で導入・決定する。<<risk-op-order>>）。
 
-==== PR 5: 所有権ガードのドメイン化
+==== PR 4: 所有権ガードのドメイン化
 
-* **内容**: `isCreatedWhenMantleControllerWasSecondary` による所有権スキップ判定（standalone・primary ではリモートの mantle-controller が作成した backup を、secondary では自身が secondary として作成したのでない backup を、データ喪失防止のためスキップして成功扱いにする）をドメイン化し、全ロールの `Provision`/`Finalize` の冒頭の `if` として追記する。旧コードの該当分岐（`reconcileLocalBackup` 冒頭・`reconcileAsSecondary` 冒頭）は削除する。外部アクセスを伴わない純粋な判定のみのため、Operation・interface は導入しない。
+* **内容**: `isCreatedWhenMantleControllerWasSecondary` による所有権スキップ判定（standalone・primary ではリモートの mantle-controller が作成した backup を、secondary では自身が secondary として作成したのでない backup を、データ喪失防止のためスキップして成功扱いにする）をドメイン化し、このヘルパと使用する定数を同じ PR でドメイン層へ移動した上で、全ロールの `Provision`/`Finalize` の冒頭の `if` として追記する。旧コードの該当分岐（`reconcileLocalBackup` 冒頭・`reconcileAsSecondary` 冒頭）は削除する。外部アクセスを伴わない純粋な判定のみのため、Operation・interface は導入しない。
 * **テスト**: ロールごとにスキップ条件の向きが逆になることの AAA ユニットテスト。
 * **規模**: 小。最初のサブフロー移行 PR。
-* **備考**: expire（PR 6）より前に必ず本 PR を完了させること。所有権ガードが旧コード側に残ったまま expire をドメイン層の `Provision` に置くと、本来スキップすべき backup（例：primary 上のリモート作成 backup）をドメイン層の expire が削除しうるため（<<risk-legacy>> 参照）。
+* **備考**: expire（PR 5）より前に必ず本 PR を完了させること。所有権ガードが旧コード側に残ったまま expire をドメイン層の `Provision` に置くと、本来スキップすべき backup（例：primary 上のリモート作成 backup）をドメイン層の expire が削除しうるため（<<risk-legacy>> 参照）。
 
-==== PR 6: expire と checkManagedBackup のドメイン化
+==== PR 5: expire と checkManagedBackup のドメイン化
 
-* **内容**: `expire` の判定ロジック（CreatedAt 未設定・deletionTimestamp・retain-if-expired アノテーション・期限計算）をドメイン化し、削除は `DeleteMantleBackupOperation`、遅延 requeue は `ScheduleExpireOperation` として発行する。`checkManagedBackup` の判定部分（ラベル一致・cluster ID 照合）もドメイン層の純粋な判定関数としてドメイン化し、<<managed-backup-preflight>> のとおり `Run` が `Provision`/`Finalize` より前に呼び出す。PVC と cluster ID の取得はユースケース層（`Run`）が行う。cluster ID の取得はユースケース層定義のインターフェース経由とし、その実装としてインフラ層へ移動した `getCephClusterIDFromPVC` を用いる（<<d6>>。`mantlerestore_controller.go`・`replication.go`・既存テストの参照は機械的に修正する）。PVC の取得は従来どおり `labelClusterID` 未付与の場合にのみ行い（要否はドメイン層の判定関数で決める）、NotFound はエラーとせずデータとしてドメイン層へ渡す（無条件取得＋NotFound を requeue にすると、PVC 削除済み backup の finalize が進まなくなるため）。管理対象外ならロール固有の事前取得を行わず成功扱いで終了する。expire の `if` は全ロールの `Provision` の所有権ガードの後へ追記する。expire は deletionTimestamp が付いた backup では何もしないため、`Finalize` への追記は不要。旧 `expire`・`checkManagedBackup` は削除する。両 Operation の型とインフラ層の実行器（`expireQueueCh` の注入を含む）はこの PR で追加する。MB 用の Operation 適用は「発行順に実行し、失敗したら残りを打ち切る」契約とし、この PR で定める（<<risk-op-order>> 参照）。なお expire は、未失効の場合に `ScheduleExpireOperation` を発行した上で後続の `if` へ処理を続ける。これは「`if 条件 { return 処理 }`」の逐次実行に馴染まない継続処理だが、Operation の発行のみで判定には影響しないため、メトリクス出力と同様に new-architecture.adoc が許容する例外として扱う。
+* **内容**: `expire` の判定ロジック（CreatedAt 未設定・deletionTimestamp・retain-if-expired アノテーション・期限計算）をドメイン化し、削除は `DeleteMantleBackupOperation`、遅延 requeue は `ScheduleExpireOperation` として発行する。`checkManagedBackup` の判定部分（ラベル一致・cluster ID 照合）もドメイン層の純粋な判定関数としてドメイン化し、これらの処理が使用する定数・純粋ヘルパを同じ PR でドメイン層へ移動した上で、<<managed-backup-preflight>> のとおり `Run` が `Provision`/`Finalize` より前に呼び出す。PVC と cluster ID の取得はユースケース層（`Run`）が行う。cluster ID の取得はユースケース層定義のインターフェース経由とし、その実装としてインフラ層へ移動した `getCephClusterIDFromPVC` を用いる（<<d6>>。`mantlerestore_controller.go`・`replication.go`・既存テストの参照は機械的に修正する）。PVC の取得は従来どおり `labelClusterID` 未付与の場合にのみ行い（要否はドメイン層の判定関数で決める）、NotFound はエラーとせずデータとしてドメイン層へ渡す（無条件取得＋NotFound を requeue にすると、PVC 削除済み backup の finalize が進まなくなるため）。管理対象外ならロール固有の事前取得を行わず成功扱いで終了する。expire の `if` は全ロールの `Provision` の所有権ガードの後へ追記する。expire は deletionTimestamp が付いた backup では何もしないため、`Finalize` への追記は不要。旧 `expire`・`checkManagedBackup` は削除する。両 Operation の型とインフラ層の実行器（`expireQueueCh` の注入を含む）はこの PR で追加する。MB 用の Operation 適用は「発行順に実行し、失敗したら残りを打ち切る」契約とし、この PR で定める（<<risk-op-order>> 参照）。なお expire は、未失効の場合に `ScheduleExpireOperation` を発行した上で後続の `if` へ処理を続ける。これは「`if 条件 { return 処理 }`」の逐次実行に馴染まない継続処理だが、Operation の発行のみで判定には影響しないため、メトリクス出力と同様に new-architecture.adoc が許容する例外として扱う。
 * **テスト**: 「管理対象外ならロール固有の事前取得を行わず成功する」「管理対象の secondary では S3 初期化より先に管理対象判定を行う」「期限切れなら削除 Operation を発行する」「retain-if-expired なら何もしない」「未期限なら schedule Operation を発行する」「PVC NotFound なら requeue する」等の AAA ユニットテスト。
 * **規模**: 小〜中。Operation を用いる最初のサブフロー移行としてパターンを確立する PR。
 
-==== PR 7: ローカルバックアップ準備とスナップショット作成のドメイン化
+==== PR 6: ローカルバックアップ準備とスナップショット作成のドメイン化
 
 * **内容**:
 ** `reconcileLocalBackup` のうち、ラベル（cluster-id / local-backup-target-pvc-uid）と finalizer の付与、`getSnapshotTarget` の判定部分（PVC UID 照合、`checkPVCBound`、PV からの image/pool 抽出）をドメイン化する。PVC・PV の取得はユースケース層が行いドメイン層へ渡す。
@@ -336,64 +330,64 @@ primary の `--max-export-data-pvcs` は、managed Ceph cluster の namespace �
 * **テスト**: ラベル・finalizer 付与、マニフェスト未保存時の requeue、スナップショット作成後の status 更新、fake interface を使った作成失敗時の挙動。
 * **規模**: 中。ドメイン interface を使う最初の PR。
 
-==== PR 8: verify と primary のメトリクス復元のドメイン化
+==== PR 7: verify と primary のメトリクス復元のドメイン化
 
-* **内容**: `verify` を <<d7>> の構造（「verify Job が無ければ clone 作成（interface）・静的 PV/PVC・verify Job の作成（Operation）を行い requeue」「verify Job が完了していれば Verified condition をメモリ上で更新して後続へ継続」、cleanup 前の「未verify なら requeue」ガード）に書き換える。verify Job の存在・完了状態はユースケース層が `checkJobStatus` 相当で取得してデータとして渡す。clone 作成 interface のインフラ実装（`createCloneByPV` のインフラ層への移動を含む。<<d6>>）と各 Operation の型・実行器（`createOrUpdateVerifyJob` の Job spec 構築、`createStaticPV(C)IfNotExists` の本体を含む）はこの PR で追加する。全ロールの `Provision` の該当 `if` として追記し、旧 `verify` 系コードを削除する。とくに primary では verify Job の実行中・完了パスでレプリケーション（PR 13 までは legacy 委譲経由の旧コード）へ処理が継続し、検証とレプリケーションが従来どおり並行進行することを、削除した旧コードの分岐条件と突き合わせて確認する。また旧コードの削除にあたっては、「未 verify なら requeue」（cleanup へ到達させない）に相当するガードが各ロールでドメイン側・旧コード側のどちらかに必ず残ることを確認する（standalone・secondary の旧コードではこのガードは verify 呼び出しと同じ `if` ブロックにあるため、ブロックごと削除するとガードが失われる。<<risk-legacy>> 参照）。あわせて primary のメトリクス復元処理と `exportedDiffSizeCache` をユースケース層へ移し、オブジェクトストレージクライアントのインフラ層コンポーネントを導入する。メトリクス用の K8s/S3 事前取得は、管理対象判定・所有権ガード・expire・deletionTimestamp 確認・ローカルバックアップ処理が後続へ進める場合だけ、verify の事前取得より前に実行する。旧 `reconcileAsPrimary` のメトリクス復元ブロックと legacy `startUpload` 内のメトリクス更新呼び出しは削除し、更新経路をユースケース層へ一本化する。
+* **内容**: `verify` を <<d7>> の構造（「verify Job が無ければ clone 作成（interface）・静的 PV/PVC・verify Job の作成（Operation）を行い requeue」「verify Job が完了していれば Verified condition をメモリ上で更新して後続へ継続」、cleanup 前の「未verify なら requeue」ガード）に書き換える。verify Job の存在・完了状態はユースケース層が `checkJobStatus` 相当で取得してデータとして渡す。clone 作成 interface のインフラ実装（`createCloneByPV` のインフラ層への移動を含む。<<d6>>）と各 Operation の型・実行器（`createOrUpdateVerifyJob` の Job spec 構築、`createStaticPV(C)IfNotExists` の本体を含む）はこの PR で追加する。全ロールの `Provision` の該当 `if` として追記し、旧 `verify` 系コードを削除する。とくに primary では verify Job の実行中・完了パスでレプリケーション（PR 12 までは legacy 委譲経由の旧コード）へ処理が継続し、検証とレプリケーションが従来どおり並行進行することを、削除した旧コードの分岐条件と突き合わせて確認する。また旧コードの削除にあたっては、「未 verify なら requeue」（cleanup へ到達させない）に相当するガードが各ロールでドメイン側・旧コード側のどちらかに必ず残ることを確認する（standalone・secondary の旧コードではこのガードは verify 呼び出しと同じ `if` ブロックにあるため、ブロックごと削除するとガードが失われる。<<risk-legacy>> 参照）。あわせて primary のメトリクス復元処理と `exportedDiffSizeCache` をユースケース層へ移し、オブジェクトストレージクライアントのインフラ層コンポーネントを導入する。メトリクス用の K8s/S3 事前取得は、管理対象判定・所有権ガード・expire・deletionTimestamp 確認・ローカルバックアップ処理が後続へ進める場合だけ、verify の事前取得より前に実行する。旧 `reconcileAsPrimary` のメトリクス復元ブロックと legacy `startUpload` 内のメトリクス更新呼び出しは削除し、更新経路をユースケース層へ一本化する。
 * **テスト**: verify Job が無ければ作成 Operation を発行して requeue する、Job 実行中は何もせず後続へ継続する、成功／失敗に応じた condition 設定と後続への継続、未verify の間は cleanup に到達しない、各 Operation の発行内容。primary では管理対象外・所有権スキップ・期限切れ・削除中・ローカルバックアップが後続へ進めない各ケースでメトリクス用 K8s/S3 アクセスを行わず、後続へ進める場合は verify より先に一度だけ実行すること、legacy のレプリケーション経路へ継続しても同じリコンサイルでメトリクス更新を二重実行しないことも確認する。
 * **規模**: 中。
 
-==== PR 9: primaryCleanup と finalizeStandalone のドメイン化
+==== PR 8: primaryCleanup と finalizeStandalone のドメイン化
 
-* **内容**: `primaryCleanup`（source backup の diff-to アノテーション削除、export/upload Job・export-data PVC・verify リソースの削除、verify 用 RBD イメージの削除、対象 backup の diff-from・sync-mode アノテーション削除）と `finalizeStandalone`（diff-to アノテーション確認、cleanup、RBD スナップショット削除、メトリクス削除、finalizer 除去）をドメイン化する。リソース削除・source の diff-to 削除は Operation、RBD スナップショット削除（`removeRBDSnapshot`：存在確認 → 削除 → 確認）と verify イメージ削除はドメイン interface とする。verify イメージ削除のインフラ実装は、インフラ層へ移動した `deleteRBDImageAsynchronously` を利用する（<<d6>>。`persistentvolume_controller.go` の参照は機械的に修正する）。削除 Operation の発行と対象 backup 自身の変更（アノテーション削除・finalizer 除去）は <<risk-finalize-order>> に従って別パスに分ける。Operation の型・実行器と interface のインフラ実装はこの PR で追加する。standalone・primary の `Provision`（cleanup の `if`）と `Finalize` に追記し、旧コードを削除する。現行の `finalizeStandalone` が行っている `exportedDiffSizeCache` のエントリ削除は、PR 8 でキャッシュを移した primary のユースケース層の Finalize 経路で行う。メトリクス復元は削除中の backup では実行されないため、finalize 完了前にエントリを消しても挙動に影響しない。
+* **内容**: `primaryCleanup`（source backup の diff-to アノテーション削除、export/upload Job・export-data PVC・verify リソースの削除、verify 用 RBD イメージの削除、対象 backup の diff-from・sync-mode アノテーション削除）と `finalizeStandalone`（diff-to アノテーション確認、cleanup、RBD スナップショット削除、メトリクス削除、finalizer 除去）をドメイン化する。リソース削除・source の diff-to 削除は Operation、RBD スナップショット削除（`removeRBDSnapshot`：存在確認 → 削除 → 確認）と verify イメージ削除はドメイン interface とする。verify イメージ削除のインフラ実装は、インフラ層へ移動した `deleteRBDImageAsynchronously` を利用する（<<d6>>。`persistentvolume_controller.go` の参照は機械的に修正する）。削除 Operation の発行と対象 backup 自身の変更（アノテーション削除・finalizer 除去）は <<risk-finalize-order>> に従って別パスに分ける。Operation の型・実行器と interface のインフラ実装はこの PR で追加する。standalone・primary の `Provision`（cleanup の `if`）と `Finalize` に追記し、旧コードを削除する。現行の `finalizeStandalone` が行っている `exportedDiffSizeCache` のエントリ削除は、PR 7 でキャッシュを移した primary のユースケース層の Finalize 経路で行う。メトリクス復元は削除中の backup では実行されないため、finalize 完了前にエントリを消しても挙動に影響しない。
 * **テスト**: diff-to があればスキップ、finalizer がなければスキップ、削除 Operation の発行内容、スナップショット既削除時に成功扱いになること、削除対象（source の diff-to・Job・PVC・PV）が残っている間は対象 backup を変更せず requeue し、消えたパスで初めてアノテーション削除・finalizer 除去を行うこと（<<risk-finalize-order>>）。
 * **規模**: 中。
 
-==== PR 10: standalone ロールの完成（legacy 委譲の撤去）
+==== PR 9: standalone ロールの完成（legacy 委譲の撤去）
 
-* **内容**: PR 5〜9 により `MBStandaloneReconciler` の `Provision`/`Finalize` が standalone の全サブフローをカバーしたので、standalone 経路の legacy 委譲シグナルの返却箇所と standalone 専用の旧コードを削除する。ロジックの変更は含めない。
+* **内容**: PR 4〜8 により `MBStandaloneReconciler` の `Provision`/`Finalize` が standalone の全サブフローをカバーしたので、standalone 経路の legacy 委譲シグナルの返却箇所と standalone 専用の旧コードを削除する。ロジックの変更は含めない。
 * **テスト**: `Provision`/`Finalize` の分岐網羅（スナップショット未作成 → 作成、verify Job なし → 作成、verify 実行中 → requeue（<<d7>> のガード）、全完了 → cleanup、finalize の各段階）が AAA ユニットテストで揃っていることを確認し、不足分を補う。
 * **規模**: 小〜中（削除が主体）。standalone が新アーキテクチャで完結する最初のマイルストーン。
 
-==== PR 11: レプリケーションのマニフェスト同期と同期準備のドメイン化（nop）
+==== PR 10: レプリケーションのマニフェスト同期と同期準備のドメイン化（nop）
 
 * **内容**: `replicateManifests`（先行 backup の同期確認 → 送信用 PVC/MantleBackup マニフェスト構築 → gRPC 送信）をドメイン化し、gRPC 2 呼び出しを複合 Operation `ReplicateManifestsOperation` にする。事前取得は現行の呼び出し順を保つため段階化する。まず primary の同一 PVC に属する backup 一覧を K8s から取得し、ドメイン層の純粋関数で対象より先行する全 backup が同期済みか判定する。未同期の先行 backup があれば gRPC を呼ばず requeue する。すべて同期済みの場合だけ、セカンダリの backup 一覧を gRPC `ListMantleBackup` で取得する。取得した primary/secondary の一覧を使う full/incremental/diff-from の判定もドメイン層の純粋関数にする。`SetSynchronizing` は Operation 化する。現行実装は同一リコンサイルパス内で「gRPC 送信 → `ListMantleBackup` で送信結果を確認」しているが、Operation は `Run` の末尾で適用されるため、セカンダリ一覧に対象 backup がまだ存在しない初回だけはこの関係を 2 周のリコンサイルに分解する：対象 backup が無ければ `ReplicateManifestsOperation` を発行して requeue し、次周で一覧に現れてから同期準備の判定へ進む。これにより初回同期のリコンサイルが 1 周増えるが、許容する（<<risk-requeue>> 参照）。現行で「セカンダリに対象 backup が見つからない」場合に Failed としていた経路は、この分解に伴い正常な requeue 経路に変わる。セカンダリに対象 backup が存在してから `SnapshotCaptured` になるまでは、PVC や backup の削除・変更に対する現行の自己修復性を維持するため、各リコンサイルで `ReplicateManifestsOperation` を発行した上で同期準備・export/upload の判定へ進む。対象 backup が `SnapshotCaptured` になった後は再送信しない。
-* **nop**: この PR では `Provision` への配線を行わず、追加するドメイン関数・Operation は PR 13 まで未使用（nop）。「同期されていない」状況の 1 パスはマニフェスト同期から upload までが一続きの処理であり、部分的に配線すると移行期間中に gRPC 呼び出し回数が増えてしまうため、配線は upload まで揃う PR 13 でまとめて行う。
+* **nop**: この PR では `Provision` への配線を行わず、追加するドメイン関数・Operation は PR 12 まで未使用（nop）。「同期されていない」状況の 1 パスはマニフェスト同期から upload までが一続きの処理であり、部分的に配線すると移行期間中に gRPC 呼び出し回数が増えてしまうため、配線は upload まで揃う PR 12 でまとめて行う。
 * **テスト**: 先行 backup 未同期時は requeue し `ListMantleBackup` を呼ばないこと、先行 backup がすべて同期済みの場合だけ `ListMantleBackup` を呼ぶこと、送信マニフェストの内容（アノテーション・ラベル・容量）、セカンダリに対象 backup が無い場合は送信して requeue すること、対象 backup が存在しても `SnapshotCaptured` までは再送すること、`SnapshotCaptured` 後は再送しないこと、sync-mode アノテーションと diff-from 探索の分岐網羅。
 * **規模**: 中。gRPC 系 Operation の型と実行器をここで導入する。
 
-==== PR 12: export のドメイン化（nop）
+==== PR 11: export のドメイン化（nop）
 
 * **内容**: `startExport` 系（export-data PVC・export Job の作成判定、完了 export Job の処理、`canNewExportJobBeCreated` の Job 同時実行数制限、`canNewExportDataPVCBeCreated` の PVC 数制限、part 番号管理、diff-from/diff-to アノテーションの付与）をドメイン化する。`MaxExportDataPVCs` は primary の設定からユースケース層・ドメイン層へ渡す。Job/PVC 一覧・完了状態と次 part の PVC の存在はユースケース層で事前取得しデータとして渡す。PVC 上限判定は <<d8>> のとおり、対象 PVC が既存なら上限到達時も続行し、新規作成時は削除中を含むラベル付き PVC を数える。Job spec 構築（`createOrUpdateExportJob`・`createOrUpdateExportDataPVC`）はインフラ層の Operation 実行器としてこの PR で追加する。
-* **nop**: PR 11 と同じ理由で `Provision` への配線は行わず、PR 13 まで未使用（nop）。
+* **nop**: PR 10 と同じ理由で `Provision` への配線は行わず、PR 12 まで未使用（nop）。
 * **テスト**: part 進行の判定（最大完了 part 番号 + 1 を次 part とする選定）、Job 同時実行数制限、export-data PVC 数制限（0 なら無制限、上限到達時の新規作成抑止、対象 PVC が既存なら続行、削除中 PVC も数える）、full/incremental による Job パラメータの違い、全 part 完了の判定。
 * **規模**: 中〜大。
 
-==== PR 13: upload のドメイン化と replicate 経路の配線
+==== PR 12: upload のドメイン化と replicate 経路の配線
 
-* **内容**: `startUpload` 系（upload Job の作成判定、完了 upload Job の処理によるアップロード完了確認と part リソースの解放）をドメイン化する。アップロード完了確認は K8s 上の完了 upload Job の状態で行う（オブジェクトストレージの `Exists` は primary 経路では使われない）。完了した全 part（最新を含む）の export-data PVC を削除し、最新完了 part では進捗管理用の export/upload Job を残したまま両 Job の Pod を削除する処理を、<<d8>> の順序を維持する Operation として追加する。Pod の DeleteCollection に必要な既存 RBAC 権限も維持する。upload 完了に伴うメトリクス設定は PR 8 でユースケース層へ移した `exportedDiffSizeCache`・メトリクス復元処理・オブジェクトストレージクライアントを再利用し、<<d5>> の責務分担で未取得 part だけを取得する。クライアント初期化または `GetSize` に失敗した場合は、現行どおりログを出してメトリクス更新だけをスキップし、リコンサイル処理は継続する。Job spec 構築（`createOrUpdateUploadJobs`）はインフラ層の Operation 実行器としてこの PR で追加する。PR 11・12 のドメイン関数と合わせて primary の `Provision` の「同期されていない」`if` 分岐を構成・配線し、旧 `replicate` 系コードを削除する。
+* **内容**: `startUpload` 系（upload Job の作成判定、完了 upload Job の処理によるアップロード完了確認と part リソースの解放）をドメイン化する。アップロード完了確認は K8s 上の完了 upload Job の状態で行う（オブジェクトストレージの `Exists` は primary 経路では使われない）。完了した全 part（最新を含む）の export-data PVC を削除し、最新完了 part では進捗管理用の export/upload Job を残したまま両 Job の Pod を削除する処理を、<<d8>> の順序を維持する Operation として追加する。Pod の DeleteCollection に必要な既存 RBAC 権限も維持する。upload 完了に伴うメトリクス設定は PR 7 でユースケース層へ移した `exportedDiffSizeCache`・メトリクス復元処理・オブジェクトストレージクライアントを再利用し、<<d5>> の責務分担で未取得 part だけを取得する。クライアント初期化または `GetSize` に失敗した場合は、現行どおりログを出してメトリクス更新だけをスキップし、リコンサイル処理は継続する。Job spec 構築（`createOrUpdateUploadJobs`）はインフラ層の Operation 実行器としてこの PR で追加する。PR 10・11 のドメイン関数と合わせて primary の `Provision` の「同期されていない」`if` 分岐を構成・配線し、旧 `replicate` 系コードを削除する。
 * **テスト**: upload Job の作成判定・アップロード済みスキップ・メトリクス設定、キャッシュ済み part を再取得せず新規完了 part だけ `GetSize` すること、途中の part の取得失敗時にキャッシュを更新しないこと、S3 クライアント初期化または `GetSize` の失敗時にも verify・レプリケーション・cleanup を継続すること、完了 part の PVC 削除、最新完了 part の Job を残した Pod 削除、`MaxExportDataPVCs == 1` でも multi-part backup が次 part へ進めることに加え、配線した `if` 分岐全体（マニフェスト同期 → export → upload → 同期完了）の進行を担保する。
 * **規模**: 中〜大。
-* **備考**: この PR で primary の未同期分岐が新旧いっぺんに切り替わる。PR 11・12 のユニットテストが分岐を網羅していることを配線前に確認する。
+* **備考**: この PR で primary の未同期分岐が新旧いっぺんに切り替わる。PR 10・11 のユニットテストが分岐を網羅していることを配線前に確認する。
 
-==== PR 14: primary ロールの完成（legacy 委譲の撤去）
+==== PR 13: primary ロールの完成（legacy 委譲の撤去）
 
 * **内容**: primary 経路の legacy 委譲シグナルの返却箇所と、primary 専用の旧コード（`replicate` 系のオーケストレーションなど）を削除する。ロジックの変更は含めない。
 * **テスト**: `Provision` の分岐網羅（verify Job なし → 作成、verify 実行中・完了 → replicate への継続（<<d7>>）、未同期 → replicate、同期済み → condition 更新と requeue、全完了 → cleanup）が揃っていることを確認し、不足分を補う。
 * **規模**: 小〜中（削除が主体）。
 
-==== PR 15: インポート（secondary の provision）のドメイン化
+==== PR 14: インポート（secondary の provision）のドメイン化
 
-* **内容**: `startImport` 系をドメイン化する。sync-mode アノテーション確認・part 0 アップロード確認（`Exists` はユースケース層で事前取得）・PV/PVC サイズ比較・status マニフェスト更新（メモリ上）・zero-out Job / import Job / 静的 PV/PVC の作成（Operation）・`markSecondarySnapshotCaptured` を逐次 `if` に整理する。`lockVolume`/`unlockVolume` はドメイン interface とする。ロックは複数リコンサイルパスにわたって保持される（zero-out / import Job が未完了の間は unlock せず requeue し、次パスでは取得済みの自ロックを確認して続行する）ため、ロック保持中の判定・Job Operation の発行順序・unlock する条件をドメイン層で明示する。`markSecondarySnapshotCaptured` が行うインポート済み RBD スナップショットの検索（結果の SnapID を status に書く）もドメイン層定義の interface とし、インフラ層が `ceph.FindRBDSnapshot` で実装する（<<d3>>）。Operation の型・実行器（Job spec 構築を含む）と各 interface のインフラ実装はこの PR で追加する。オブジェクトストレージクライアントは PR 8 で導入したインフラ層コンポーネントを利用する（<<d5>>）。secondary の `Run` は現行と同様に、<<managed-backup-preflight,管理対象の事前判定>>を通過した後、`Provision` の所有権ガードより前にオブジェクトストレージクライアントを初期化し、初期化失敗時のエラー経路を変えない（<<d5>>）。secondary の `Provision` に追記し、旧コードの該当部分を削除する。
+* **内容**: `startImport` 系をドメイン化する。sync-mode アノテーション確認・part 0 アップロード確認（`Exists` はユースケース層で事前取得）・PV/PVC サイズ比較・status マニフェスト更新（メモリ上）・zero-out Job / import Job / 静的 PV/PVC の作成（Operation）・`markSecondarySnapshotCaptured` を逐次 `if` に整理する。`lockVolume`/`unlockVolume` はドメイン interface とする。ロックは複数リコンサイルパスにわたって保持される（zero-out / import Job が未完了の間は unlock せず requeue し、次パスでは取得済みの自ロックを確認して続行する）ため、ロック保持中の判定・Job Operation の発行順序・unlock する条件をドメイン層で明示する。`markSecondarySnapshotCaptured` が行うインポート済み RBD スナップショットの検索（結果の SnapID を status に書く）もドメイン層定義の interface とし、インフラ層が `ceph.FindRBDSnapshot` で実装する（<<d3>>）。Operation の型・実行器（Job spec 構築を含む）と各 interface のインフラ実装はこの PR で追加する。オブジェクトストレージクライアントは PR 7 で導入したインフラ層コンポーネントを利用する（<<d5>>）。secondary の `Run` は現行と同様に、<<managed-backup-preflight,管理対象の事前判定>>を通過した後、`Provision` の所有権ガードより前にオブジェクトストレージクライアントを初期化し、初期化失敗時のエラー経路を変えない（<<d5>>）。secondary の `Provision` に追記し、旧コードの該当部分を削除する。
 * **テスト**: sync-mode 未設定時の requeue、part 0 未アップロード時の requeue、ロック取得失敗時の requeue、zero-out → import の順序、snapshot captured 化の条件。
 * **規模**: 大。必要なら「zero-out・静的 PV/PVC」「import Job・ロック」の 2 PR に分割してよい。
 
-==== PR 16: secondaryCleanup と finalizeSecondary のドメイン化
+==== PR 15: secondaryCleanup と finalizeSecondary のドメイン化
 
-* **内容**: `secondaryCleanup`（source backup の diff-to アノテーション削除、import Job・zero-out Job とその PVC/PV の削除、オブジェクトストレージ上のエクスポートデータ削除、中間スナップショット削除、verify リソース削除、対象 backup の diff-from・sync-mode アノテーション削除）と `finalizeSecondary` をドメイン化する。オブジェクトストレージ削除と中間スナップショット削除（一覧 → 判定 → 削除）はドメイン interface とする。オブジェクトストレージ削除は Provision の通常 cleanup（現行の `secondaryCleanup(ctx, backup, true)` 相当）でのみ同期的に実行し、全 part の削除成功を確認できた場合だけ対象 backup のアノテーション削除へ進む。削除に失敗した場合は対象 backup を変更せずエラーを返し、次回のリコンサイルで再試行する。Finalize（現行の `secondaryCleanup(ctx, backup, false)` 相当）ではオブジェクトストレージ削除を呼ばず、finalizer 除去をその成否に依存させない。中間スナップショットについては現行の「対象 backup の diff-from・sync-mode アノテーションの永続化 → 中間スナップショット削除」の順序を保つため、別パスに分ける。K8s リソースの削除 Operation の発行と対象 backup 自身の変更（アノテーション削除・finalizer 除去）は PR 9 と同様に <<risk-finalize-order>> に従って別パスに分ける。Operation の型・実行器と interface のインフラ実装はこの PR で追加する。secondary の `Provision`（cleanup の `if`）と `Finalize` に追記し、旧コードを削除する。
-* **テスト**: PR 9 と同様の観点＋Provision の cleanup ではオブジェクトストレージ削除失敗時に対象 backup を変更せず再試行可能な状態を維持すること、全 part の削除成功後にだけ対象 backup のアノテーションを削除すること、Finalize ではオブジェクトストレージ削除を呼ばないこと、対象アノテーションが永続化済みになるまで中間スナップショットを削除しないこと、中間スナップショットの削除対象判定。
+* **内容**: `secondaryCleanup`（source backup の diff-to アノテーション削除、import Job・zero-out Job とその PVC/PV の削除、オブジェクトストレージ上のエクスポートデータ削除、中間スナップショット削除、verify リソース削除、対象 backup の diff-from・sync-mode アノテーション削除）と `finalizeSecondary` をドメイン化する。オブジェクトストレージ削除と中間スナップショット削除（一覧 → 判定 → 削除）はドメイン interface とする。オブジェクトストレージ削除は Provision の通常 cleanup（現行の `secondaryCleanup(ctx, backup, true)` 相当）でのみ同期的に実行し、全 part の削除成功を確認できた場合だけ対象 backup のアノテーション削除へ進む。削除に失敗した場合は対象 backup を変更せずエラーを返し、次回のリコンサイルで再試行する。Finalize（現行の `secondaryCleanup(ctx, backup, false)` 相当）ではオブジェクトストレージ削除を呼ばず、finalizer 除去をその成否に依存させない。中間スナップショットについては現行の「対象 backup の diff-from・sync-mode アノテーションの永続化 → 中間スナップショット削除」の順序を保つため、別パスに分ける。K8s リソースの削除 Operation の発行と対象 backup 自身の変更（アノテーション削除・finalizer 除去）は PR 8 と同様に <<risk-finalize-order>> に従って別パスに分ける。Operation の型・実行器と interface のインフラ実装はこの PR で追加する。secondary の `Provision`（cleanup の `if`）と `Finalize` に追記し、旧コードを削除する。
+* **テスト**: PR 8 と同様の観点＋Provision の cleanup ではオブジェクトストレージ削除失敗時に対象 backup を変更せず再試行可能な状態を維持すること、全 part の削除成功後にだけ対象 backup のアノテーションを削除すること、Finalize ではオブジェクトストレージ削除を呼ばないこと、対象アノテーションが永続化済みになるまで中間スナップショットを削除しないこと、中間スナップショットの削除対象判定。
 * **規模**: 中。
 
-==== PR 17: secondary ロールの完成（legacy 委譲の撤去）・最終整理
+==== PR 16: secondary ロールの完成（legacy 委譲の撤去）・最終整理
 
 * **内容**: secondary 経路の legacy 委譲シグナルの返却箇所と旧コードを削除する。全ロールの完成に伴い、legacy 委譲シグナルの仕組み自体をドメイン層・ユースケース層から削除し、`mantlebackup_controller.go` を「struct 定義・`SetupWithManager`・薄い `Reconcile`・ユースケース層の初期化」のみに縮小する。
 * **テスト**: `Provision`/`Finalize` の分岐網羅（remote 作成でない backup のスキップ、import → verify → cleanup の進行）が揃っていることを確認し、不足分を補う。
@@ -404,6 +398,7 @@ primary の `--max-export-data-pvcs` は、managed Ceph cluster の namespace �
 * `make build`・`make lint`・`make test` が通る（lint は `make test` に含まれない独立ターゲット。domain・usecase パッケージには専用設定 `.golangci-new.yml` が適用される）。
 * 既存のインテグレーションテスト（envtest）・E2E テストに実質的変更がない（機械的な参照先修正を除く）。
 * 追加したドメイン層コードに AAA ユニットテストがあり、`// Arrange`・`// Act`・`// Assert` コメントを明示している。テストは plain `go test` + testify、`t.Parallel()`、functional options によるフィクスチャビルダ（`domain/mbc_primary_reconciler_test.go` のスタイル）に従う。
+* 移動対象のコンポーネントが使用する定数・ヘルパは同じ PR で適切な層へ移し、移動した純粋ヘルパの既存テストも同じ PR で移動する。テストが薄い場合は、その PR で AAA ユニットテストを補う。
 * nop コードを含む場合、どの後続 PR で使用予定かを PR 説明に明記する。
 * 外部から観測可能な挙動（リソース名・ラベル・アノテーション・status 遷移・メトリクス）に変化がない（<<risk-requeue>> に列挙した許容例外を除く）。
 
@@ -412,7 +407,7 @@ primary の `--max-export-data-pvcs` は、managed Ceph cluster の namespace �
 [#risk-persist-order]
 === status 永続化と Ceph 操作の順序不変条件
 
-`provisionRBDSnapshot` は「PVC/PV マニフェストを status に**永続化した後に** RBD スナップショットを作成する」ことでクラッシュ時の孤児スナップショットを防いでいる（MB-C 内コメント参照）。「変更をメモリ上に溜めて `Run` の最後に一括永続化」する標準パターンではこの不変条件が壊れる。同種の不変条件として「ラベル（local-backup-target-pvc-uid）・finalizer を永続化した後にスナップショットを作成する」もある（`labelClusterID` 定数のコメントおよび `reconcileLocalBackup` のラベル付与コメント参照）。PR 7 の通り、リコンサイルを 2 周（ラベル・finalizer・マニフェストの永続化 → 次周でスナップショット作成）に分けることで、これらの不変条件を保ちながらドメイン化する。リコンサイルが 1 周増えるが、外部から見た状態遷移の順序は変わらない。同様に「途中で永続化してから次の外部操作を行う」箇所が他にないか、各 PR で移行対象コードを精査すること。
+`provisionRBDSnapshot` は「PVC/PV マニフェストを status に**永続化した後に** RBD スナップショットを作成する」ことでクラッシュ時の孤児スナップショットを防いでいる（MB-C 内コメント参照）。「変更をメモリ上に溜めて `Run` の最後に一括永続化」する標準パターンではこの不変条件が壊れる。同種の不変条件として「ラベル（local-backup-target-pvc-uid）・finalizer を永続化した後にスナップショットを作成する」もある（`labelClusterID` 定数のコメントおよび `reconcileLocalBackup` のラベル付与コメント参照）。PR 6 の通り、リコンサイルを 2 周（ラベル・finalizer・マニフェストの永続化 → 次周でスナップショット作成）に分けることで、これらの不変条件を保ちながらドメイン化する。リコンサイルが 1 周増えるが、外部から見た状態遷移の順序は変わらない。同様に「途中で永続化してから次の外部操作を行う」箇所が他にないか、各 PR で移行対象コードを精査すること。
 
 [#risk-finalize-order]
 === クリーンアップ・ファイナライズにおける外部作用と対象の永続化の順序
@@ -438,9 +433,9 @@ primary の `--max-export-data-pvcs` は、managed Ceph cluster の namespace �
 [#risk-op-order]
 === Operation 実行の順序と失敗時の打ち切り
 
-PoC の `infra.KubernetesClient.ApplyReconcilerOperations` は、Operation が失敗しても `errors.Join` で後続の実行を続ける。一方 MB には「diff-to アノテーションの付与 → `SetSynchronizing` → export Job 作成」のように、先行の失敗時に後続を実行してはならない順序依存の Operation 列がある。MB 用の Operation 適用は「発行順に実行し、失敗したら残りを打ち切る」契約とし、最初に Operation 実行器を導入する PR 6 で定める。その際 MBC 側の既存挙動を変えないこと（実行器を分けるか、MBC も打ち切りセマンティクスへ統一して問題ないかは PR 6 で判断する）。
+PoC の `infra.KubernetesClient.ApplyReconcilerOperations` は、Operation が失敗しても `errors.Join` で後続の実行を続ける。一方 MB には「diff-to アノテーションの付与 → `SetSynchronizing` → export Job 作成」のように、先行の失敗時に後続を実行してはならない順序依存の Operation 列がある。MB 用の Operation 適用は「発行順に実行し、失敗したら残りを打ち切る」契約とし、最初に Operation 実行器を導入する PR 5 で定める。その際 MBC 側の既存挙動を変えないこと（実行器を分けるか、MBC も打ち切りセマンティクスへ統一して問題ないかは PR 5 で判断する）。
 
-なおこの打ち切り契約は、new-architecture.adoc の「渡されたイベントが複数ある場合、エラーの有無に関わらず全てのイベントの実行を試行する」という記述からの**意図的な逸脱**である。PR 6 で契約を定める際、new-architecture.adoc 側にも「順序依存の Operation 列を持つリコンサイラでは失敗時の打ち切りを許容する」旨の例外を追記する。
+なおこの打ち切り契約は、new-architecture.adoc の「渡されたイベントが複数ある場合、エラーの有無に関わらず全てのイベントの実行を試行する」という記述からの**意図的な逸脱**である。PR 5 で契約を定める際、new-architecture.adoc 側にも「順序依存の Operation 列を持つリコンサイラでは失敗時の打ち切りを許容する」旨の例外を追記する。
 
 === 事前取得によるアクセス増加
 
@@ -449,22 +444,22 @@ PoC の `infra.KubernetesClient.ApplyReconcilerOperations` は、Operation が�
 [#risk-legacy]
 === legacy 委譲境界のリスク
 
-移行期間中は「どの状況をドメイン層が処理し、どの状況を旧コードに委譲するか」の境界が PR ごとに動く。委譲を判定する `if` 条件が削除した旧コードの分岐条件と一致していないと、特定の状況がどちらの経路でも処理されない（または二重に処理される）恐れがある。サブフロー移行 PR のレビューでは、追記した `if` 条件・legacy 委譲条件・削除した旧コードの分岐条件の対応を必ず突き合わせる。ロール完成 PR（PR 10・14・17）はロジック変更を含まない削除主体の PR とし、既存のインテグレーション・E2E テストの通過をもって等価性を確認する。
+移行期間中は「どの状況をドメイン層が処理し、どの状況を旧コードに委譲するか」の境界が PR ごとに動く。委譲を判定する `if` 条件が削除した旧コードの分岐条件と一致していないと、特定の状況がどちらの経路でも処理されない（または二重に処理される）恐れがある。サブフロー移行 PR のレビューでは、追記した `if` 条件・legacy 委譲条件・削除した旧コードの分岐条件の対応を必ず突き合わせる。ロール完成 PR（PR 9・13・16）はロジック変更を含まない削除主体の PR とし、既存のインテグレーション・E2E テストの通過をもって等価性を確認する。
 
 [#risk-requeue]
 === requeue タイミングの等価性
 
 旧コードの `reconcile.Requeue()` は `REQUEUE_RECONCILIATION_AFTER` 環境変数由来の遅延を持つ。ドメイン化の際に requeue の発生箇所・回数が変わると、バックアップ完了までの時間が観測可能に変わりうる。原則として旧コードと同じ箇所で同じ種別の結果を返すこと。ただし次の例外は許容する：
 
-* PR 7：`provisionRBDSnapshot` の 2 周分解により、スナップショット作成までのリコンサイルが 1 周増える。また、逐次 `if` の「処理を実行したら return する」構造により、従来 1 パス内で連続実行されていたサブフローの境界（スナップショット作成 → verify 開始など）でもそれぞれ 1 周増える。
-* PR 8：verify リソース作成の `if` が return するため、検証開始パスでリコンサイルが 1 周増える（現行は作成と同一パスでレプリケーションも進行する。<<d7>> 参照）。
-* PR 9・16：cleanup・finalize の複数パス分解（<<risk-finalize-order>>）により、アノテーション削除・finalizer 除去が削除完了の確認後のパスへ移り、リコンサイルが数周増える。
-* PR 11・13：マニフェスト同期の 2 周分解により、初回同期のリコンサイルが 1 周増える。また「セカンダリに対象 backup が見つからない」場合に Failed としていた経路が正常な requeue に変わる。セカンダリに対象 backup が存在してから `SnapshotCaptured` になるまでは現行どおりマニフェストを再送し、`SnapshotCaptured` 後は再送しない（PR 11 参照）。
-* 現行は verify 完了後に余分なリコンサイルが 1 周発生している。原因はロールにより異なる：primary では `updateMantleBackupCondition` が DeepCopy に対する `Patch` を行うためメモリ上の backup に結果が反映されず、後続の判定が古い condition を見て requeue する。standalone・secondary では verify 呼び出し後に無条件で requeue を返すコードになっており、`Patch` の反映有無とは無関係に発生する。メモリ上で変更する標準パターンと <<d7>> の構造への移行により、いずれの余分な 1 周も消える（requeue が減る方向の変化）。後者の解消は `Patch` 問題の副産物ではなく「無条件 requeue の削除」という意図的な変更であることに注意する。PR 8・10・14・17 の等価性確認ではこの差を織り込む。
+* PR 6：`provisionRBDSnapshot` の 2 周分解により、スナップショット作成までのリコンサイルが 1 周増える。また、逐次 `if` の「処理を実行したら return する」構造により、従来 1 パス内で連続実行されていたサブフローの境界（スナップショット作成 → verify 開始など）でもそれぞれ 1 周増える。
+* PR 7：verify リソース作成の `if` が return するため、検証開始パスでリコンサイルが 1 周増える（現行は作成と同一パスでレプリケーションも進行する。<<d7>> 参照）。
+* PR 8・15：cleanup・finalize の複数パス分解（<<risk-finalize-order>>）により、アノテーション削除・finalizer 除去が削除完了の確認後のパスへ移り、リコンサイルが数周増える。
+* PR 10・12：マニフェスト同期の 2 周分解により、初回同期のリコンサイルが 1 周増える。また「セカンダリに対象 backup が見つからない」場合に Failed としていた経路が正常な requeue に変わる。セカンダリに対象 backup が存在してから `SnapshotCaptured` になるまでは現行どおりマニフェストを再送し、`SnapshotCaptured` 後は再送しない（PR 10 参照）。
+* 現行は verify 完了後に余分なリコンサイルが 1 周発生している。原因はロールにより異なる：primary では `updateMantleBackupCondition` が DeepCopy に対する `Patch` を行うためメモリ上の backup に結果が反映されず、後続の判定が古い condition を見て requeue する。standalone・secondary では verify 呼び出し後に無条件で requeue を返すコードになっており、`Patch` の反映有無とは無関係に発生する。メモリ上で変更する標準パターンと <<d7>> の構造への移行により、いずれの余分な 1 周も消える（requeue が減る方向の変化）。後者の解消は `Patch` 問題の副産物ではなく「無条件 requeue の削除」という意図的な変更であることに注意する。PR 7・9・13・16 の等価性確認ではこの差を織り込む。
 
 === 定数移動のワイヤ契約
 
-PR 2 で移動する定数は primary↔secondary 間の通信・リソース契約であり、**値の変更は一切禁止**。移動時は文字列リテラルの diff がないことをレビューで確認する。
+各コンポーネントの移動 PR で一緒に移動する定数は primary↔secondary 間の通信・リソース契約であり、**値の変更は一切禁止**。移動時は文字列リテラルの diff がないことをレビューで確認する。
 
 == 参考
 
