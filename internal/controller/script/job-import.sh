@@ -58,12 +58,21 @@ write_endpoints
 
 # import
 rbd_import() {
+    echo "start import"
     if [ "${CERT_FILE}" != "" ]; then
         s5cmd --endpoint-url "${OBJECT_STORAGE_ENDPOINT}" --credentials-file ${CERT_FILE} cat "s3://${BUCKET_NAME}/${OBJ_NAME}" | rbd import-diff -p ${POOL_NAME} - ${DST_IMAGE_NAME}
     else
         s5cmd --endpoint-url "${OBJECT_STORAGE_ENDPOINT}" cat "s3://${BUCKET_NAME}/${OBJ_NAME}" | rbd import-diff -p ${POOL_NAME} - ${DST_IMAGE_NAME}
     fi
+    echo "finish import"
 }
+
+rbd_snap_rollback() {
+    echo "start rollback"
+    rbd snap rollback "$@"
+    echo "finish rollback"
+}
+
 if [ -z "${FROM_SNAP_NAME}" ]; then
     set +o pipefail
     set +e
@@ -71,16 +80,20 @@ if [ -z "${FROM_SNAP_NAME}" ]; then
     set -e
     set -o pipefail
     if [ "$count" -eq 0 ]; then
+        echo "start initialsnap creation"
         rbd snap create ${POOL_NAME}/${DST_IMAGE_NAME}@initialsnap
+        echo "finish initialsnap creation"
     else
         # Roll back here to guarantee that the import target is exactly
         # the expected state, so that the subsequent import-diff applies correctly.
-        rbd snap rollback ${POOL_NAME}/${DST_IMAGE_NAME}@initialsnap
+        rbd_snap_rollback "${POOL_NAME}/${DST_IMAGE_NAME}@initialsnap"
     fi
     rbd_import
+    echo "start initialsnap deletion"
     rbd snap rm ${POOL_NAME}/${DST_IMAGE_NAME}@initialsnap
+    echo "finish initialsnap deletion"
 else
     # See the comment above for why we roll back here.
-    rbd snap rollback ${POOL_NAME}/${DST_IMAGE_NAME}@${FROM_SNAP_NAME}
+    rbd_snap_rollback "${POOL_NAME}/${DST_IMAGE_NAME}@${FROM_SNAP_NAME}"
     rbd_import
 fi
