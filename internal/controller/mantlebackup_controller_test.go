@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sync"
 	"time"
@@ -44,6 +45,8 @@ const (
 	dummyPoolName  = "dummy"
 	dummyImageName = "dummy"
 	dummyPVCName   = "dummy"
+
+	testManagedCephClusterID = "test-cluster"
 )
 
 // customMatcherHelper is a helper for implementing custom gomock.Matcher instantly.
@@ -1078,6 +1081,562 @@ func newMantleBackup(
 
 	return newMB
 }
+
+// createMantleBackupInClient creates backup in ctrlClient. If backup already has a
+// DeletionTimestamp set, it additionally simulates deletion (adding a finalizer, then
+// deleting), since Create silently clears any DeletionTimestamp given to it.
+func createMantleBackupInClient(ctrlClient client.Client, backup *mantlev1.MantleBackup) {
+	GinkgoHelper()
+	shouldBeDeleted := !backup.DeletionTimestamp.IsZero()
+	Expect(ctrlClient.Create(context.Background(), backup)).To(Succeed())
+	if shouldBeDeleted {
+		Expect(controllerutil.AddFinalizer(backup, MantleBackupFinalizerName)).To(BeTrue())
+		Expect(ctrlClient.Update(context.Background(), backup)).To(Succeed())
+		Expect(ctrlClient.Delete(context.Background(), backup)).To(Succeed())
+	}
+}
+
+// highPriorityLabels returns labels for a MantleBackup with backup-priority=high in
+// testManagedCephClusterID, with overrides applied on top.
+func highPriorityLabels(overrides map[string]string) map[string]string {
+	l := map[string]string{
+		LabelBackupPriority: labelBackupPriorityHigh,
+		labelClusterID:      testManagedCephClusterID,
+	}
+	maps.Copy(l, overrides)
+
+	return l
+}
+
+var _ = Describe("listHigherPriorityBackups", func() {
+	doTest := func(others []*mantlev1.MantleBackup, wantNames []string) {
+		ctrlClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+		for _, other := range others {
+			createMantleBackupInClient(ctrlClient, other)
+		}
+
+		mbr := NewMantleBackupReconciler(ctrlClient,
+			ctrlClient.Scheme(), testManagedCephClusterID, RolePrimary, nil, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"))
+
+		backups, err := mbr.listHigherPriorityBackups(context.Background())
+		Expect(err).NotTo(HaveOccurred())
+
+		names := make([]string, 0, len(backups))
+		for _, b := range backups {
+			names = append(names, b.GetName())
+		}
+		Expect(names).To(Equal(wantNames))
+	}
+
+	DescribeTable("lists the high priority MantleBackups", doTest,
+		Entry("no high priority MantleBackup exists",
+			[]*mantlev1.MantleBackup{},
+			[]string{},
+		),
+		Entry("finds a high priority MantleBackup regardless of its namespace",
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("high1", "other-ns", nil, highPriorityLabels(nil), false, 1,
+					metav1.ConditionTrue, metav1.ConditionFalse),
+			},
+			[]string{"high1"},
+		),
+		Entry("excludes a high priority MantleBackup from a different managed Ceph cluster",
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("high1", "other-ns", nil,
+					highPriorityLabels(map[string]string{labelClusterID: "another-cluster"}), false, 1,
+					metav1.ConditionTrue, metav1.ConditionFalse),
+			},
+			[]string{},
+		),
+		Entry("excludes a high priority MantleBackup that is being deleted",
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("high1", "other-ns", nil, highPriorityLabels(nil), true, 1,
+					metav1.ConditionTrue, metav1.ConditionFalse),
+			},
+			[]string{},
+		),
+	)
+})
+
+var _ = Describe("shouldWaitForHigherPriorityBackup", func() {
+	doTest := func(target *mantlev1.MantleBackup, others []*mantlev1.MantleBackup, wantWait bool) {
+		ctrlClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+		for _, other := range others {
+			createMantleBackupInClient(ctrlClient, other)
+		}
+
+		mbr := NewMantleBackupReconciler(ctrlClient,
+			ctrlClient.Scheme(), testManagedCephClusterID, RolePrimary, nil, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"))
+
+		wait, err := mbr.shouldWaitForHigherPriorityBackup(context.Background(), target)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(wait).To(Equal(wantWait))
+	}
+
+	// Which MantleBackups count as higher priority is tested in listHigherPriorityBackups and
+	// isHighPriority; these entries focus on how shouldWaitForHigherPriorityBackup composes
+	// them.
+	DescribeTable("decides whether a MantleBackup should wait for higher priority ones", doTest,
+		Entry("the target itself has the priority label: never waits",
+			newMantleBackup("target", "target-ns", nil,
+				map[string]string{LabelBackupPriority: labelBackupPriorityHigh}, false, 1,
+				metav1.ConditionTrue, metav1.ConditionFalse),
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("high1", "other-ns", nil, highPriorityLabels(nil), false, 1,
+					metav1.ConditionTrue, metav1.ConditionFalse),
+			},
+			false,
+		),
+		Entry("waits for a higher priority MantleBackup that has not synced yet",
+			newMantleBackup("target", "target-ns", nil, nil, false, 1,
+				metav1.ConditionTrue, metav1.ConditionFalse),
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("high1", "other-ns", nil, highPriorityLabels(nil), false, 1,
+					metav1.ConditionTrue, metav1.ConditionFalse),
+			},
+			true,
+		),
+		Entry("does not wait for an unsynced high priority MantleBackup that targets the same "+
+			"PVC: exempt",
+			newMantleBackup("target", "target-ns", nil,
+				map[string]string{labelLocalBackupTargetPVCUID: "shared-pvc-uid"}, false, 1,
+				metav1.ConditionTrue, metav1.ConditionFalse),
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("same-pvc-high", "other-ns", nil,
+					map[string]string{labelLocalBackupTargetPVCUID: "shared-pvc-uid", LabelBackupPriority: labelBackupPriorityHigh, labelClusterID: testManagedCephClusterID},
+					false, 1, metav1.ConditionTrue, metav1.ConditionFalse),
+			},
+			false,
+		),
+		Entry("the same-PVC exemption takes priority even when an unrelated unsynced high "+
+			"priority MantleBackup also exists",
+			newMantleBackup("target", "target-ns", nil,
+				map[string]string{labelLocalBackupTargetPVCUID: "shared-pvc-uid"}, false, 1,
+				metav1.ConditionTrue, metav1.ConditionFalse),
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("same-pvc-high", "other-ns", nil,
+					map[string]string{labelLocalBackupTargetPVCUID: "shared-pvc-uid", LabelBackupPriority: labelBackupPriorityHigh, labelClusterID: testManagedCephClusterID},
+					false, 1, metav1.ConditionTrue, metav1.ConditionFalse),
+				newMantleBackup("high1", "other-ns", nil, highPriorityLabels(nil), false, 1,
+					metav1.ConditionTrue, metav1.ConditionFalse),
+			},
+			false,
+		),
+		Entry("does not wait once the higher priority MantleBackup has synced",
+			newMantleBackup("target", "target-ns", nil, nil, false, 1,
+				metav1.ConditionTrue, metav1.ConditionFalse),
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("high1", "other-ns", nil, highPriorityLabels(nil), false, 1,
+					metav1.ConditionTrue, metav1.ConditionTrue),
+			},
+			false,
+		),
+	)
+})
+
+var _ = Describe("shouldWaitForHigherPriorityImport", func() {
+	doTest := func(target *mantlev1.MantleBackup, others []*mantlev1.MantleBackup, wantWait bool) {
+		ctrlClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+		for _, other := range others {
+			createMantleBackupInClient(ctrlClient, other)
+		}
+
+		mbr := NewMantleBackupReconciler(ctrlClient,
+			ctrlClient.Scheme(), testManagedCephClusterID, RoleSecondary, nil, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"))
+
+		wait, err := mbr.shouldWaitForHigherPriorityImport(context.Background(), target)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(wait).To(Equal(wantWait))
+	}
+
+	// shouldWaitForHigherPriorityImport has the same logic as
+	// shouldWaitForHigherPriorityBackup, so these entries mirror its test cases, just
+	// checking SnapshotCaptured instead of SyncedToRemote, since SyncedToRemote is
+	// only ever set on the primary.
+	DescribeTable("decides whether a MantleBackup should wait for higher priority imports", doTest,
+		Entry("the target itself has the priority label: never waits",
+			newMantleBackup("target", "target-ns", nil,
+				map[string]string{LabelBackupPriority: labelBackupPriorityHigh}, false, 1,
+				metav1.ConditionFalse, metav1.ConditionUnknown),
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("high1", "other-ns", nil, highPriorityLabels(nil), false, 1,
+					metav1.ConditionFalse, metav1.ConditionUnknown),
+			},
+			false,
+		),
+		Entry("waits for a higher priority MantleBackup that has not finished importing yet",
+			newMantleBackup("target", "target-ns", nil, nil, false, 1,
+				metav1.ConditionFalse, metav1.ConditionUnknown),
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("high1", "other-ns", nil, highPriorityLabels(nil), false, 1,
+					metav1.ConditionFalse, metav1.ConditionUnknown),
+			},
+			true,
+		),
+		Entry("does not wait for an unimported high priority MantleBackup that targets the "+
+			"same PVC: exempt",
+			newMantleBackup("target", "target-ns", nil,
+				map[string]string{labelLocalBackupTargetPVCUID: "shared-pvc-uid"}, false, 1,
+				metav1.ConditionFalse, metav1.ConditionUnknown),
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("same-pvc-high", "other-ns", nil,
+					map[string]string{labelLocalBackupTargetPVCUID: "shared-pvc-uid", LabelBackupPriority: labelBackupPriorityHigh, labelClusterID: testManagedCephClusterID},
+					false, 1, metav1.ConditionFalse, metav1.ConditionUnknown),
+			},
+			false,
+		),
+		Entry("the same-PVC exemption takes priority even when an unrelated unimported high "+
+			"priority MantleBackup also exists",
+			newMantleBackup("target", "target-ns", nil,
+				map[string]string{labelLocalBackupTargetPVCUID: "shared-pvc-uid"}, false, 1,
+				metav1.ConditionFalse, metav1.ConditionUnknown),
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("same-pvc-high", "other-ns", nil,
+					map[string]string{labelLocalBackupTargetPVCUID: "shared-pvc-uid", LabelBackupPriority: labelBackupPriorityHigh, labelClusterID: testManagedCephClusterID},
+					false, 1, metav1.ConditionFalse, metav1.ConditionUnknown),
+				newMantleBackup("high1", "other-ns", nil, highPriorityLabels(nil), false, 1,
+					metav1.ConditionFalse, metav1.ConditionUnknown),
+			},
+			false,
+		),
+		Entry("does not wait once the higher priority MantleBackup has finished importing",
+			newMantleBackup("target", "target-ns", nil, nil, false, 1,
+				metav1.ConditionFalse, metav1.ConditionUnknown),
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("high1", "other-ns", nil, highPriorityLabels(nil), false, 1,
+					metav1.ConditionTrue, metav1.ConditionUnknown),
+			},
+			false,
+		),
+	)
+})
+
+var _ = Describe("replicateManifests", func() {
+	doTest := func(backupLabels map[string]string, wantPriorityLabelPresent bool, wantPriorityLabelValue string) {
+		var t reporter
+		mockCtrl := gomock.NewController(t)
+		defer mockCtrl.Finish()
+		grpcClient := proto.NewMockMantleServiceClient(mockCtrl)
+
+		testNamespace := "test-ns"
+		testPVCUID := "11111111-1111-1111-1111-111111111111"
+
+		pvc := corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pvc",
+				Namespace: testNamespace,
+				UID:       types.UID(testPVCUID),
+			},
+			Spec: corev1.PersistentVolumeClaimSpec{
+				Resources: corev1.VolumeResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceStorage: resource.MustParse("1Gi"),
+					},
+				},
+			},
+		}
+		pvcManifest, err := json.Marshal(pvc)
+		Expect(err).NotTo(HaveOccurred())
+
+		snapID := 1
+		var snapSize int64 = 1 << 30
+		backup := &mantlev1.MantleBackup{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-backup",
+				Namespace: testNamespace,
+				Labels:    backupLabels,
+			},
+			Status: mantlev1.MantleBackupStatus{
+				PVCManifest: string(pvcManifest),
+				SnapID:      &snapID,
+				SnapSize:    &snapSize,
+			},
+		}
+
+		ctrlClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+
+		grpcClient.EXPECT().CreateOrUpdatePVC(gomock.Any(), gomock.Any()).Times(1).
+			Return(&proto.CreateOrUpdatePVCResponse{Uid: testPVCUID}, nil)
+
+		var sentBackup mantlev1.MantleBackup
+		grpcClient.EXPECT().CreateMantleBackup(gomock.Any(), gomock.Any()).Times(1).
+			DoAndReturn(func(
+				ctx context.Context,
+				req *proto.CreateMantleBackupRequest,
+				opts ...grpc.CallOption,
+			) (*proto.CreateMantleBackupResponse, error) {
+				Expect(json.Unmarshal(req.GetMantleBackup(), &sentBackup)).To(Succeed())
+
+				return &proto.CreateMantleBackupResponse{}, nil
+			})
+
+		mbr := NewMantleBackupReconciler(ctrlClient, ctrlClient.Scheme(), "test-cluster", RolePrimary,
+			&PrimarySettings{Client: grpcClient}, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"))
+
+		result := mbr.replicateManifests(context.Background(), backup)
+		_, err = result.ToCtrlResult()
+		Expect(err).NotTo(HaveOccurred())
+
+		value, ok := sentBackup.GetLabels()[LabelBackupPriority]
+		Expect(ok).To(Equal(wantPriorityLabelPresent))
+		if wantPriorityLabelPresent {
+			Expect(value).To(Equal(wantPriorityLabelValue))
+		}
+	}
+
+	DescribeTable("propagates the backup priority label to the secondary MantleBackup", doTest,
+		Entry("the primary MantleBackup has the priority label",
+			map[string]string{LabelBackupPriority: labelBackupPriorityHigh}, true, labelBackupPriorityHigh),
+		Entry("the primary MantleBackup does not have the priority label",
+			map[string]string{}, false, ""),
+	)
+})
+
+var _ = Describe("isHighPriority", func() {
+	DescribeTable("decides whether a MantleBackup has the priority label set to high",
+		func(labels map[string]string, want bool) {
+			backup := newMantleBackup("target", "target-ns", nil, labels, false, 1,
+				metav1.ConditionTrue, metav1.ConditionFalse)
+			Expect(isHighPriority(backup)).To(Equal(want))
+		},
+		Entry("has the priority label set to high", map[string]string{LabelBackupPriority: labelBackupPriorityHigh}, true),
+		Entry("has no labels", map[string]string{}, false),
+		Entry("has the priority label set to an unrecognized value",
+			map[string]string{LabelBackupPriority: "low"}, false),
+	)
+})
+
+var _ = Describe("syncPriorityLabelFromMBC", func() {
+	const testMBCName = "test-mbc"
+	const testMBCUID = "test-mbc-uid"
+	const testNamespace = "target-ns"
+
+	newMBC := func(priorityLabels map[string]string) *mantlev1.MantleBackupConfig {
+		return &mantlev1.MantleBackupConfig{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      testMBCName,
+				Namespace: testNamespace,
+				UID:       testMBCUID,
+				Labels:    priorityLabels,
+			},
+			Spec: mantlev1.MantleBackupConfigSpec{
+				PVC:      "dummy-pvc",
+				Schedule: "0 0 * * *",
+				Expire:   "24h",
+			},
+		}
+	}
+
+	doTest := func(
+		backupLabels map[string]string,
+		mbc *mantlev1.MantleBackupConfig,
+		wantPriorityLabelPresent bool,
+		wantPriorityLabelValue string,
+	) {
+		ctrlClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).
+			WithIndex(&mantlev1.MantleBackupConfig{}, ".metadata.uid", func(rawObj client.Object) []string {
+				return []string{string(rawObj.(*mantlev1.MantleBackupConfig).GetUID())}
+			}).
+			Build()
+		if mbc != nil {
+			Expect(ctrlClient.Create(context.Background(), mbc)).To(Succeed())
+		}
+
+		backup := newMantleBackup("target", testNamespace, nil, backupLabels, false, 1,
+			metav1.ConditionTrue, metav1.ConditionFalse)
+		createMantleBackupInClient(ctrlClient, backup)
+
+		mbr := NewMantleBackupReconciler(ctrlClient,
+			ctrlClient.Scheme(), testManagedCephClusterID, RolePrimary, nil, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"))
+
+		err := mbr.syncPriorityLabelFromMBC(context.Background(), backup)
+		Expect(err).NotTo(HaveOccurred())
+
+		checkPriorityLabel := func(labels map[string]string) {
+			value, ok := labels[LabelBackupPriority]
+			Expect(ok).To(Equal(wantPriorityLabelPresent))
+			if wantPriorityLabelPresent {
+				Expect(value).To(Equal(wantPriorityLabelValue))
+			}
+		}
+
+		// The function both mutates backup.Labels in-memory and patches the client, so
+		// check both reflect the same outcome.
+		checkPriorityLabel(backup.GetLabels())
+
+		var stored mantlev1.MantleBackup
+		Expect(ctrlClient.Get(context.Background(),
+			types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, &stored)).To(Succeed())
+		checkPriorityLabel(stored.GetLabels())
+	}
+
+	DescribeTable("syncs backup's priority label with its MantleBackupConfig's current one", doTest,
+		Entry("the MantleBackupConfig has no priority label, and neither does the backup: no-op",
+			map[string]string{MantleBackupConfigUID: testMBCUID},
+			newMBC(nil),
+			false, "",
+		),
+		Entry("the MantleBackupConfig has the priority label, but the backup does not have it yet: "+
+			"the label is added",
+			map[string]string{MantleBackupConfigUID: testMBCUID},
+			newMBC(map[string]string{LabelBackupPriority: labelBackupPriorityHigh}),
+			true, labelBackupPriorityHigh,
+		),
+		Entry("the MantleBackupConfig no longer has the priority label, but the backup still has the "+
+			"stale one: the label is removed",
+			map[string]string{MantleBackupConfigUID: testMBCUID, LabelBackupPriority: labelBackupPriorityHigh},
+			newMBC(nil),
+			false, "",
+		),
+		Entry("the backup has no MantleBackupConfigUID label at all, as with a MantleBackup "+
+			"created before that label existed: no-op",
+			nil,
+			nil,
+			false, "",
+		),
+		Entry("MantleBackupConfigUID points to a MantleBackupConfig that has since been deleted: "+
+			"no-op",
+			map[string]string{MantleBackupConfigUID: "deleted-mbc-uid"},
+			nil,
+			false, "",
+		),
+	)
+})
+
+var _ = Describe("priority gate vs SnapID-ordering gate deadlock regression", func() {
+	It("does not deadlock when an older non-priority backup shares a PVC with a newer high priority one", func() {
+		ctx := context.Background()
+
+		var t reporter
+		mockCtrl := gomock.NewController(t)
+		defer mockCtrl.Finish()
+		grpcClient := proto.NewMockMantleServiceClient(mockCtrl)
+
+		testNamespace := "priority-gate-ns"
+		testPVCUID := "55555555-5555-5555-5555-555555555555"
+
+		pvc := corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pvc",
+				Namespace: testNamespace,
+				UID:       types.UID(testPVCUID),
+			},
+			Spec: corev1.PersistentVolumeClaimSpec{
+				Resources: corev1.VolumeResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")},
+				},
+			},
+		}
+		pvcManifest, err := json.Marshal(pvc)
+		Expect(err).NotTo(HaveOccurred())
+
+		newUnsyncedBackup := func(name string, snapID int, extraLabels map[string]string) *mantlev1.MantleBackup {
+			backupLabels := map[string]string{
+				labelClusterID:               testManagedCephClusterID,
+				labelLocalBackupTargetPVCUID: testPVCUID,
+			}
+			maps.Copy(backupLabels, extraLabels)
+
+			snapSize := int64(1 << 30)
+
+			return &mantlev1.MantleBackup{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace, Labels: backupLabels},
+				Status: mantlev1.MantleBackupStatus{
+					PVCManifest: string(pvcManifest),
+					SnapID:      &snapID,
+					SnapSize:    &snapSize,
+				},
+			}
+		}
+
+		ctrlClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+
+		// A: older SnapID, no priority label. B: newer SnapID, high priority label,
+		// targeting the same PVC as A.
+		backupA := newUnsyncedBackup("backup-a", 1, nil)
+		Expect(ctrlClient.Create(ctx, backupA)).To(Succeed())
+		backupB := newUnsyncedBackup("backup-b", 2, map[string]string{LabelBackupPriority: labelBackupPriorityHigh})
+		Expect(ctrlClient.Create(ctx, backupB)).To(Succeed())
+
+		mbr := NewMantleBackupReconciler(ctrlClient, ctrlClient.Scheme(), testManagedCephClusterID, RolePrimary,
+			&PrimarySettings{Client: grpcClient}, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"))
+
+		By("A no longer waits on B's priority, since they share a PVC")
+		waitA, err := mbr.shouldWaitForHigherPriorityBackup(ctx, backupA)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(waitA).To(BeFalse())
+
+		By("B still waits for A to sync first, per the existing SnapID ordering")
+		resultReplicateB := mbr.replicateManifests(ctx, backupB)
+		ctrlResultB, err := resultReplicateB.ToCtrlResult()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ctrlResultB).To(Equal(reconcile.RequeueAfter()))
+
+		By("A, no longer blocked by the priority gate, can proceed through replicateManifests")
+		grpcClient.EXPECT().CreateOrUpdatePVC(gomock.Any(), gomock.Any()).Times(1).
+			Return(&proto.CreateOrUpdatePVCResponse{Uid: testPVCUID}, nil)
+		grpcClient.EXPECT().CreateMantleBackup(gomock.Any(), gomock.Any()).Times(1).
+			Return(&proto.CreateMantleBackupResponse{}, nil)
+		resultReplicateA := mbr.replicateManifests(ctx, backupA)
+		_, err = resultReplicateA.ToCtrlResult()
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("does not deadlock across two PVCs, each with an older non-priority backup and a "+
+		"newer high priority one", func() {
+		ctx := context.Background()
+
+		testNamespace := "priority-gate-cross-pvc-ns"
+
+		newPVCBackup := func(pvcUID, name string, snapID int, extraLabels map[string]string) *mantlev1.MantleBackup {
+			backupLabels := map[string]string{
+				labelClusterID:               testManagedCephClusterID,
+				labelLocalBackupTargetPVCUID: pvcUID,
+			}
+			maps.Copy(backupLabels, extraLabels)
+
+			snapSize := int64(1 << 30)
+
+			return &mantlev1.MantleBackup{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace, Labels: backupLabels},
+				Status: mantlev1.MantleBackupStatus{
+					SnapID:   &snapID,
+					SnapSize: &snapSize,
+				},
+			}
+		}
+
+		ctrlClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+
+		// PVC_A: backupA1 (older, no priority), backupA2 (newer, high priority).
+		// PVC_B: backupB1 (older, no priority), backupB2 (newer, high priority).
+		// Without the same-PVC exemption applying regardless of unrelated high priority
+		// backups elsewhere, backupA1 would wait on backupB2 and backupB1 would wait on
+		// backupA2, while backupA2/backupB2 each wait on their own PVC's older backup via
+		// SnapID ordering: a circular wait across the two PVCs.
+		backupA1 := newPVCBackup("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "backup-a1", 1, nil)
+		Expect(ctrlClient.Create(ctx, backupA1)).To(Succeed())
+		backupA2 := newPVCBackup("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "backup-a2", 2,
+			map[string]string{LabelBackupPriority: labelBackupPriorityHigh})
+		Expect(ctrlClient.Create(ctx, backupA2)).To(Succeed())
+		backupB1 := newPVCBackup("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "backup-b1", 1, nil)
+		Expect(ctrlClient.Create(ctx, backupB1)).To(Succeed())
+		backupB2 := newPVCBackup("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "backup-b2", 2,
+			map[string]string{LabelBackupPriority: labelBackupPriorityHigh})
+		Expect(ctrlClient.Create(ctx, backupB2)).To(Succeed())
+
+		mbr := NewMantleBackupReconciler(ctrlClient,
+			ctrlClient.Scheme(), testManagedCephClusterID, RolePrimary, nil, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"))
+
+		waitA1, err := mbr.shouldWaitForHigherPriorityBackup(ctx, backupA1)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(waitA1).To(BeFalse())
+
+		waitB1, err := mbr.shouldWaitForHigherPriorityBackup(ctx, backupB1)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(waitB1).To(BeFalse())
+	})
+})
 
 var _ = Describe("prepareForDataSynchronization", func() {
 	testPVCUID := "d3b07384-d9a7-4e6b-8a3b-1f4b7b7b7b7b"
