@@ -57,6 +57,8 @@ const (
 	labelClusterID                = "mantle.cybozu.io/cluster-id"
 	labelLocalBackupTargetPVCUID  = "mantle.cybozu.io/local-backup-target-pvc-uid"
 	labelRemoteBackupTargetPVCUID = "mantle.cybozu.io/remote-backup-target-pvc-uid"
+	LabelBackupPriority           = "mantle.cybozu.io/backup-priority"
+	labelBackupPriorityHigh       = "high"
 	labelAppNameValue             = "mantle"
 	labelComponentExportData      = "export-data"
 	labelComponentExportJob       = "export-job"
