@@ -74,6 +74,12 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 	err = os.Setenv("REQUEUE_RECONCILIATION_AFTER", "10s")
 	Expect(err).NotTo(HaveOccurred())
 
+	err = os.Setenv("SLOW_REQUEUE_RECONCILIATION_AFTER", "1m")
+	Expect(err).NotTo(HaveOccurred())
+
+	err = InitSlowRequeueAfter()
+	Expect(err).NotTo(HaveOccurred())
+
 	By("Setup common resources")
 	resMgr = testutil.NewResourceManager(ctx, k8sClient)
 })

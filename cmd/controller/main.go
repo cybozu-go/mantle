@@ -255,6 +255,12 @@ func setupReconcilers(
 	primarySettings *controller.PrimarySettings,
 	secondarySettings *controller.SecondarySettings,
 ) error {
+	if err := controller.InitSlowRequeueAfter(); err != nil {
+		setupLog.Error(err, "failed to initialize slow requeue duration")
+
+		return err
+	}
+
 	managedCephClusterID, err := getManagedCephClusterID()
 	if err != nil {
 		return fmt.Errorf("failed to get managed Ceph cluster ID: %w", err)

@@ -145,6 +145,10 @@ type exportedDiffSizeCacheEntry struct {
 	totalSize      int64
 }
 
+func InitSlowRequeueAfter() error {
+	return reconcile.InitSlowRequeueAfter()
+}
+
 // NewMantleBackupReconciler returns NodeReconciler.
 func NewMantleBackupReconciler(
 	client client.Client,
