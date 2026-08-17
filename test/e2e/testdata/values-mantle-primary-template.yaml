@@ -17,6 +17,8 @@ controller:
   env:
     - name: REQUEUE_RECONCILIATION_AFTER
       value: "10s"
+    - name: SLOW_REQUEUE_RECONCILIATION_AFTER
+      value: "1m"
   backupTransferPartSize: {BACKUP_TRANSFER_PART_SIZE}
   mtls:
     serverCACertConfigMap: mantle-secondary-ca-crt

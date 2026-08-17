@@ -227,6 +227,21 @@ func (s *SecondaryServer) CreateMantleBackup(
 		}
 	}
 
+	// Patches the priority label to match the primary's current value.
+	priorityReceived, priorityReceivedOK := backupReceived.Labels[LabelBackupPriority]
+	priorityExists, priorityExistsOK := backupExists.Labels[LabelBackupPriority]
+	if priorityReceivedOK != priorityExistsOK || priorityReceived != priorityExists {
+		newBackup := backupExists.DeepCopy()
+		if priorityReceivedOK {
+			newBackup.Labels[LabelBackupPriority] = priorityReceived
+		} else {
+			delete(newBackup.Labels, LabelBackupPriority)
+		}
+		if err := s.client.Patch(ctx, newBackup, client.MergeFrom(&backupExists)); err != nil {
+			return nil, fmt.Errorf("failed to patch labels of MantleBackup: %w", err)
+		}
+	}
+
 	// Already exists with matching pvc-uid and remote-uid, do nothing.
 	return &proto.CreateMantleBackupResponse{}, nil
 }

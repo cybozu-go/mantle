@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -304,6 +305,77 @@ func (test *replicationUnitTest) testCreateMantleBackup() {
 
 		// Assert
 		test.expectPersistedMantleBackup(ctx, origMB)
+	})
+
+	It("updates the secondary's priority label if it is added on the primary after the MantleBackup already exists", func(ctx SpecContext) {
+		// Arrange
+		mb := test.newMantleBackup()
+
+		// This MantleBackup is never deleted, so it persists after this test case
+		// finishes and remains visible to every other test case sharing this envtest
+		// cluster. Mark it as synced so no other test case mistakes it for an unsynced
+		// high priority backup it must wait for.
+		meta.SetStatusCondition(&mb.Status.Conditions, metav1.Condition{
+			Type:   mantlev1.BackupConditionSyncedToRemote,
+			Status: metav1.ConditionTrue,
+			Reason: mantlev1.ConditionReasonSyncedToRemoteNoProblem,
+		})
+		mbJson, err := json.Marshal(mb)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = test.client.CreateMantleBackup(ctx, &proto.CreateMantleBackupRequest{
+			MantleBackup: mbJson,
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		mb.Labels[LabelBackupPriority] = labelBackupPriorityHigh
+		mbJson, err = json.Marshal(mb)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Act
+		_, err = test.client.CreateMantleBackup(ctx, &proto.CreateMantleBackupRequest{
+			MantleBackup: mbJson,
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Assert
+		test.expectPersistedMantleBackup(ctx, mb)
+	})
+
+	It("removes the secondary's priority label if it is removed on the primary after the MantleBackup already exists", func(ctx SpecContext) {
+		// Arrange
+		mb := test.newMantleBackup()
+		mb.Labels[LabelBackupPriority] = labelBackupPriorityHigh
+
+		// This MantleBackup is never deleted, so it persists after this test case
+		// finishes and remains visible to every other test case sharing this envtest
+		// cluster. Mark it as synced so no other test case mistakes it for an unsynced
+		// high priority backup it must wait for.
+		meta.SetStatusCondition(&mb.Status.Conditions, metav1.Condition{
+			Type:   mantlev1.BackupConditionSyncedToRemote,
+			Status: metav1.ConditionTrue,
+			Reason: mantlev1.ConditionReasonSyncedToRemoteNoProblem,
+		})
+		mbJson, err := json.Marshal(mb)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = test.client.CreateMantleBackup(ctx, &proto.CreateMantleBackupRequest{
+			MantleBackup: mbJson,
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		delete(mb.Labels, LabelBackupPriority)
+		mbJson, err = json.Marshal(mb)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Act
+		_, err = test.client.CreateMantleBackup(ctx, &proto.CreateMantleBackupRequest{
+			MantleBackup: mbJson,
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Assert
+		test.expectPersistedMantleBackup(ctx, mb)
 	})
 
 	It("should set status if MantleBackup already exists without status", func(ctx SpecContext) {

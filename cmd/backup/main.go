@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
+	"github.com/cybozu-go/mantle/internal/controller"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -114,11 +115,18 @@ func createMantleBackup(ctx context.Context, cli client.Client, mbc *mantlev1.Ma
 	mbName := getMBName(mbc, jobID)
 	mbNamespace := mbcNamespace
 
+	mbLabels := map[string]string{
+		MantleBackupConfigUID: string(mbc.GetUID()),
+	}
+	if priority, ok := mbc.GetLabels()[controller.LabelBackupPriority]; ok {
+		mbLabels[controller.LabelBackupPriority] = priority
+	}
+
 	err = cli.Create(ctx, &mantlev1.MantleBackup{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      mbName,
 			Namespace: mbNamespace,
-			Labels:    map[string]string{MantleBackupConfigUID: string(mbc.GetUID())},
+			Labels:    mbLabels,
 		},
 		Spec: mantlev1.MantleBackupSpec{
 			Expire: mbc.Spec.Expire,

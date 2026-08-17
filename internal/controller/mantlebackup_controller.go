@@ -57,6 +57,9 @@ const (
 	labelClusterID                = "mantle.cybozu.io/cluster-id"
 	labelLocalBackupTargetPVCUID  = "mantle.cybozu.io/local-backup-target-pvc-uid"
 	labelRemoteBackupTargetPVCUID = "mantle.cybozu.io/remote-backup-target-pvc-uid"
+	LabelBackupPriority           = "mantle.cybozu.io/backup-priority"
+	labelBackupPriorityHigh       = "high"
+	MantleBackupConfigUID         = "mantle.cybozu.io/mbc-uid"
 	labelAppNameValue             = "mantle"
 	labelComponentExportData      = "export-data"
 	labelComponentExportJob       = "export-job"
@@ -141,6 +144,10 @@ type MantleBackupReconciler struct {
 type exportedDiffSizeCacheEntry struct {
 	largestPartNum int
 	totalSize      int64
+}
+
+func InitSlowRequeueAfter() error {
+	return reconcile.InitSlowRequeueAfter()
 }
 
 // NewMantleBackupReconciler returns NodeReconciler.
@@ -373,6 +380,7 @@ func (r *MantleBackupReconciler) expire(ctx context.Context, backup *mantlev1.Ma
 
 //+kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlebackups,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlebackups/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlebackupconfigs,verbs=list;watch
 //+kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlebackups/finalizers,verbs=update
 //+kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch
 //+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
@@ -567,6 +575,10 @@ func (r *MantleBackupReconciler) reconcileAsPrimary(ctx context.Context, backup 
 	}
 
 	if !backup.IsSynced() {
+		if err := r.syncPriorityLabelFromMBC(ctx, backup); err != nil {
+			return reconcile.Failed("failed to sync priority label from MantleBackupConfig: %w", err)
+		}
+
 		if result := r.replicate(ctx, backup); result.ShouldReturn() {
 			return result.WrapIfError("failed to replicate backup")
 		}
@@ -577,6 +589,156 @@ func (r *MantleBackupReconciler) reconcileAsPrimary(ctx context.Context, backup 
 	}
 
 	return r.primaryCleanup(ctx, backup)
+}
+
+// syncPriorityLabelFromMBC patches backup's priority label to match its
+// MantleBackupConfig's current one, keeping it current even when the config's
+// priority changes after backup was created. This has no effect on MantleBackups
+// without a MantleBackupConfigUID label (created before it existed) or whose
+// MantleBackupConfig has since been deleted.
+func (r *MantleBackupReconciler) syncPriorityLabelFromMBC(
+	ctx context.Context, backup *mantlev1.MantleBackup,
+) error {
+	mbcUID, ok := backup.GetLabels()[MantleBackupConfigUID]
+	if !ok {
+		return nil
+	}
+
+	var mbcList mantlev1.MantleBackupConfigList
+	if err := r.List(ctx, &mbcList, client.InNamespace(backup.GetNamespace()),
+		client.MatchingFields{".metadata.uid": mbcUID}); err != nil {
+		return fmt.Errorf("failed to list MantleBackupConfig resources: %s: %w", backup.GetNamespace(), err)
+	}
+	if len(mbcList.Items) == 0 {
+		return nil
+	}
+	mbc := &mbcList.Items[0]
+
+	priority, mbcHasPriority := mbc.GetLabels()[LabelBackupPriority]
+	current, backupHasPriority := backup.GetLabels()[LabelBackupPriority]
+	if mbcHasPriority == backupHasPriority && priority == current {
+		return nil
+	}
+
+	newBackup := backup.DeepCopy()
+	if newBackup.Labels == nil {
+		newBackup.Labels = map[string]string{}
+	}
+	if mbcHasPriority {
+		newBackup.Labels[LabelBackupPriority] = priority
+	} else {
+		delete(newBackup.Labels, LabelBackupPriority)
+	}
+	if err := r.Patch(ctx, newBackup, client.MergeFrom(backup)); err != nil {
+		return fmt.Errorf("failed to patch priority label from MantleBackupConfig: %w", err)
+	}
+	backup.Labels = newBackup.Labels
+
+	return nil
+}
+
+// shouldWaitForHigherPriorityBackup reports whether backup should wait for a higher
+// priority one to finish syncing to the secondary before starting its own sync.
+func (r *MantleBackupReconciler) shouldWaitForHigherPriorityBackup(
+	ctx context.Context, backup *mantlev1.MantleBackup,
+) (bool, error) {
+	if isHighPriority(backup) {
+		return false, nil
+	}
+
+	higherPriorityBackups, err := r.listHigherPriorityBackups(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	pvcUID, hasPVC := backup.GetLabels()[labelLocalBackupTargetPVCUID]
+	wait := false
+	for _, b := range higherPriorityBackups {
+		if b.IsSynced() {
+			continue
+		}
+		if hasPVC && b.GetLabels()[labelLocalBackupTargetPVCUID] == pvcUID {
+			return false, nil
+		}
+
+		wait = true
+	}
+
+	return wait, nil
+}
+
+// shouldWaitForHigherPriorityImport is the secondary-side counterpart of
+// shouldWaitForHigherPriorityBackup. It checks SnapshotCaptured, which on the secondary
+// means import has completed, because SyncedToRemote is only ever set on the primary.
+func (r *MantleBackupReconciler) shouldWaitForHigherPriorityImport(
+	ctx context.Context, backup *mantlev1.MantleBackup,
+) (bool, error) {
+	if isHighPriority(backup) {
+		return false, nil
+	}
+
+	higherPriorityBackups, err := r.listHigherPriorityBackups(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	pvcUID, hasPVC := backup.GetLabels()[labelLocalBackupTargetPVCUID]
+	wait := false
+	for _, b := range higherPriorityBackups {
+		if b.IsSnapshotCaptured() {
+			continue
+		}
+		if hasPVC && b.GetLabels()[labelLocalBackupTargetPVCUID] == pvcUID {
+			return false, nil
+		}
+
+		wait = true
+	}
+
+	return wait, nil
+}
+
+func isHighPriority(backup *mantlev1.MantleBackup) bool {
+	return backup.GetLabels()[LabelBackupPriority] == labelBackupPriorityHigh
+}
+
+func (r *MantleBackupReconciler) listMantleBackupsByPVCUID(
+	ctx context.Context, pvcUID string,
+) ([]mantlev1.MantleBackup, error) {
+	var backupList mantlev1.MantleBackupList
+	if err := r.List(ctx, &backupList, &client.ListOptions{
+		LabelSelector: labels.SelectorFromSet(map[string]string{labelLocalBackupTargetPVCUID: pvcUID}),
+	}); err != nil {
+		return nil, fmt.Errorf("failed to list MantleBackup resources for the same PVC: %w", err)
+	}
+
+	return backupList.Items, nil
+}
+
+// listHigherPriorityBackups returns the high priority MantleBackups. MantleBackups
+// being deleted are excluded, since they are no longer making progress and would
+// make lower priority ones wait for nothing.
+func (r *MantleBackupReconciler) listHigherPriorityBackups(
+	ctx context.Context,
+) ([]mantlev1.MantleBackup, error) {
+	var backupList mantlev1.MantleBackupList
+	if err := r.List(ctx, &backupList, &client.ListOptions{
+		LabelSelector: labels.SelectorFromSet(map[string]string{
+			LabelBackupPriority: labelBackupPriorityHigh,
+			labelClusterID:      r.managedCephClusterID,
+		}),
+	}); err != nil {
+		return nil, fmt.Errorf("failed to list high priority MantleBackup resources: %w", err)
+	}
+
+	backups := make([]mantlev1.MantleBackup, 0, len(backupList.Items))
+	for _, b := range backupList.Items {
+		if b.DeletionTimestamp.IsZero() {
+			backups = append(backups, b)
+		}
+	}
+
+	return backups, nil
 }
 
 func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backup *mantlev1.MantleBackup) *reconcile.Result {
@@ -702,6 +864,17 @@ func (r *MantleBackupReconciler) replicate(
 		return reconcile.Requeue()
 	}
 
+	// Must run after the cheap already-synced check above: otherwise a low priority
+	// backup could never mark itself SyncedToRemote while waiting on unrelated high
+	// priority backups.
+	if wait, err := r.shouldWaitForHigherPriorityBackup(ctx, backup); err != nil {
+		return reconcile.Failed("failed to check backup priority: %w", err)
+	} else if wait {
+		logger.Info("waiting for higher priority backups to be replicated first")
+
+		return reconcile.SlowRequeue()
+	}
+
 	return r.startExportAndUpload(ctx, backup, prepareResult)
 }
 
@@ -721,17 +894,15 @@ func (r *MantleBackupReconciler) replicateManifests(
 	}
 
 	// Make sure all of the preceding backups for the same PVC have already been replicated.
-	var backupList mantlev1.MantleBackupList
-	if err := r.List(ctx, &backupList, &client.ListOptions{
-		LabelSelector: labels.SelectorFromSet(map[string]string{labelLocalBackupTargetPVCUID: string(pvc.GetUID())}),
-	}); err != nil {
-		return reconcile.Failed("failed to list MantleBackup resources for the same PVC: %w", err)
+	backupsByPVCUID, err := r.listMantleBackupsByPVCUID(ctx, string(pvc.GetUID()))
+	if err != nil {
+		return reconcile.Failed("failed to list MantleBackups for the same PVC: %w", err)
 	}
-	for _, backup1 := range backupList.Items {
-		if backup1.Status.SnapID == nil ||
-			*backup1.Status.SnapID < *backup.Status.SnapID &&
-				backup1.DeletionTimestamp.IsZero() &&
-				!backup1.IsSynced() {
+	for _, b := range backupsByPVCUID {
+		if b.Status.SnapID == nil ||
+			*b.Status.SnapID < *backup.Status.SnapID &&
+				b.DeletionTimestamp.IsZero() &&
+				!b.IsSynced() {
 			return reconcile.Requeue()
 		}
 	}
@@ -777,11 +948,15 @@ func (r *MantleBackupReconciler) replicateManifests(
 	backupSent.SetAnnotations(map[string]string{
 		annotRemoteUID: string(backup.GetUID()),
 	})
-	backupSent.SetLabels(map[string]string{
+	backupSentLabels := map[string]string{
 		labelClusterID:                r.managedCephClusterID,
 		labelLocalBackupTargetPVCUID:  resp.GetUid(),
 		labelRemoteBackupTargetPVCUID: string(pvc.GetUID()),
-	})
+	}
+	if priority, ok := backup.GetLabels()[LabelBackupPriority]; ok {
+		backupSentLabels[LabelBackupPriority] = priority
+	}
+	backupSent.SetLabels(backupSentLabels)
 	backupSent.SetFinalizers([]string{MantleBackupFinalizerName})
 	backupSent.Spec = backup.Spec
 	backupSent.Status.CreatedAt = backup.Status.CreatedAt
@@ -2360,6 +2535,16 @@ func (r *MantleBackupReconciler) startImport(
 
 	if result := r.updateStatusManifests(ctx, backup, target.pv, target.pvc); result.ShouldReturn() {
 		return result.WrapIfError("failed to update status manifests")
+	}
+
+	// Must run before lockVolume below: otherwise a low priority backup would hold the
+	// lock for as long as it keeps waiting.
+	if wait, err := r.shouldWaitForHigherPriorityImport(ctx, backup); err != nil {
+		return reconcile.Failed("failed to check backup priority: %w", err)
+	} else if wait {
+		logger.Info("waiting for higher priority backups to be imported first")
+
+		return reconcile.SlowRequeue()
 	}
 
 	succeed, result := r.lockVolume(target.poolName, target.imageName, string(backup.GetUID()))

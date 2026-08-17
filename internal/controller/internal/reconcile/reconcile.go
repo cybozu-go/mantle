@@ -11,13 +11,14 @@ import (
 )
 
 // Result represents the outcome of a reconciliation attempt, holding one
-// of three results: finished, requeueing, or error. At most one of these is set at a
-// time. A nil Result, or a Result with none of these set, indicates that the
-// reconciliation should continue to the next step.
+// of four results: finished, requeueing, slow requeueing, or error. At most one of
+// these is set at a time. A nil Result, or a Result with none of these set, indicates
+// that the reconciliation should continue to the next step.
 type Result struct {
-	finished   bool
-	requeueing bool
-	err        error
+	finished       bool
+	requeueing     bool
+	slowRequeueing bool
+	err            error
 }
 
 func Succeeded() *Result {
@@ -26,6 +27,13 @@ func Succeeded() *Result {
 
 func Requeue() *Result {
 	return &Result{requeueing: true}
+}
+
+// SlowRequeue behaves like Requeue, but waits longer before the next reconciliation
+// attempt. Use it when there's no need to requeue soon — for example, while waiting
+// for a higher priority backup to finish.
+func SlowRequeue() *Result {
+	return &Result{slowRequeueing: true}
 }
 
 func Failed(format string, args ...any) *Result {
@@ -37,7 +45,7 @@ func (r *Result) ShouldReturn() bool {
 		return false
 	}
 
-	return r.finished || r.requeueing || r.err != nil
+	return r.finished || r.requeueing || r.slowRequeueing || r.err != nil
 }
 
 // WrapIfError wraps the held error with the given message only when this result holds
@@ -56,14 +64,16 @@ func (r *Result) ToCtrlResult() (ctrl.Result, error) {
 		return ctrl.Result{}, nil
 	}
 
-	// error
 	if r.err != nil {
 		return ctrl.Result{}, r.err
 	}
 
-	// requeueing
 	if r.requeueing {
 		return RequeueAfter(), nil
+	}
+
+	if r.slowRequeueing {
+		return SlowRequeueAfter(), nil
 	}
 
 	// finished (or none of the above set, which also means continue/finish with no error)
@@ -83,4 +93,39 @@ func RequeueAfter() ctrl.Result {
 	}
 
 	return ctrl.Result{RequeueAfter: duration}
+}
+
+var slowRequeueAfter *time.Duration
+
+// SlowRequeueAfter is like RequeueAfter but uses SLOW_REQUEUE_RECONCILIATION_AFTER,
+// expected to be set longer than REQUEUE_RECONCILIATION_AFTER. Unlike RequeueAfter,
+// an unset value falls back to RequeueAfter's duration rather than panicking.
+func SlowRequeueAfter() ctrl.Result {
+	if slowRequeueAfter == nil {
+		return RequeueAfter()
+	}
+
+	return ctrl.Result{RequeueAfter: *slowRequeueAfter}
+}
+
+// InitSlowRequeueAfter parses SLOW_REQUEUE_RECONCILIATION_AFTER once, if set, and
+// caches the result for SlowRequeueAfter to use, so a misconfigured value fails
+// fast as an error at startup instead of panicking the first time SlowRequeueAfter
+// is called. REQUEUE_RECONCILIATION_AFTER is unaffected: RequeueAfter keeps
+// reading and panicking on it on every call, as before.
+func InitSlowRequeueAfter() error {
+	slowRequeueAfter = nil
+
+	slowRequeueAfterEnv := os.Getenv("SLOW_REQUEUE_RECONCILIATION_AFTER")
+	if len(slowRequeueAfterEnv) == 0 {
+		return nil
+	}
+
+	duration, err := time.ParseDuration(slowRequeueAfterEnv)
+	if err != nil {
+		return fmt.Errorf("set SLOW_REQUEUE_RECONCILIATION_AFTER properly: %w", err)
+	}
+	slowRequeueAfter = &duration
+
+	return nil
 }
