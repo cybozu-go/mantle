@@ -33,6 +33,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/kube-openapi/pkg/validation/strfmt"
 	"sigs.k8s.io/yaml"
 )
 
@@ -1168,6 +1169,31 @@ func DeleteMantleBackup(cluster int, namespace, backupName string) {
 	By("deleting MantleBackup")
 	stdout, stderr, err := Kubectl(cluster, nil, "delete", "-n", namespace, "mantlebackup", backupName, "--timeout=3m")
 	Expect(err).NotTo(HaveOccurred(), "stdout: %s, stderr: %s", string(stdout), string(stderr))
+}
+
+// ExpireMantleBackupNow forces the given MantleBackup to be treated as
+// already expired on its next reconcile, by patching status.createdAt
+// directly to a time far enough in the past that
+// createdAt.Add(spec.expire) is already before now. This lets tests
+// trigger the controller's expire() immediate-delete path without
+// actually waiting out spec.expire in real wall-clock time (its minimum
+// is 1 real day, and it's immutable).
+func ExpireMantleBackupNow(cluster int, namespace, backupName string) {
+	GinkgoHelper()
+	By(fmt.Sprintf("forcing MantleBackup %s/%s to expire immediately", namespace, backupName))
+
+	mb, err := GetMB(cluster, namespace, backupName)
+	Expect(err).NotTo(HaveOccurred())
+
+	expire, err := strfmt.ParseDuration(mb.Spec.Expire)
+	Expect(err).NotTo(HaveOccurred())
+
+	newCreatedAt := time.Now().UTC().Add(-expire).Add(-time.Hour)
+	patch := fmt.Sprintf(`{"status":{"createdAt":%q}}`, newCreatedAt.Format(time.RFC3339))
+
+	_, stderr, err := Kubectl(cluster, nil, "patch", "mantlebackup", "-n", namespace, backupName,
+		"--type=merge", "--subresource=status", "-p", patch)
+	Expect(err).NotTo(HaveOccurred(), "stderr: %s", string(stderr))
 }
 
 func GetBackupTransferPartSize() (*resource.Quantity, error) {
