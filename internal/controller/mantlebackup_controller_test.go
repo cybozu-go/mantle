@@ -44,6 +44,18 @@ const (
 	dummyPoolName  = "dummy"
 	dummyImageName = "dummy"
 	dummyPVCName   = "dummy"
+
+	// investigateLabel tags the two specs added to reproduce the suspected
+	// "primary expires mid multi-part-transfer, secondary import gets stuck
+	// requeuing forever" bug (see the "expire while a multi-part transfer is
+	// still in progress" and "should requeue forever, with no error, ..."
+	// specs below for the full write-up). TEMPORARY: suite_test.go scopes
+	// the whole suite down to just this label, since this branch exists only
+	// to demonstrate the bug and won't be merged -- there's no need to also
+	// re-run the rest of the (untouched, already-passing) suite. Remove this
+	// label and the SuiteConfig override in suite_test.go if this ever needs
+	// to become a real, mergeable change.
+	investigateLabel = "investigate-expire-mid-transfer"
 )
 
 // customMatcherHelper is a helper for implementing custom gomock.Matcher instantly.
@@ -2134,6 +2146,103 @@ var _ = Describe("export and upload", func() {
 		})
 	})
 
+	// --- Bug hypothesis under investigation (primary side) -----------------
+	//
+	// Hypothesis being checked (a large backup transferred in numbered parts,
+	// e.g. part 0, part 1, ... part 6, ...):
+	//   1. import Job progresses normally up through part 5.
+	//   2. at that point, the primary's MantleBackup gets deleted -- by
+	//      Spec.Expire elapsing (or something else) -- before part 6 is
+	//      exported/uploaded.
+	//   3. the secondary starts importing part 6 and takes a lock via
+	//      lockVolume().
+	//   4. reconcileImportJob() finds no part 6 data in the object storage
+	//      and requeues.
+	//   -> from step 4 onward, since the primary's MantleBackup is gone,
+	//      part 6 can never be uploaded, so the secondary requeues forever.
+	//
+	// This spec exercises hypothesis step 2 specifically: does the primary
+	// controller notice a multi-part transfer is still mid-flight and hold
+	// off deleting the backup on expiry, or does it delete everything
+	// regardless, permanently losing the not-yet-uploaded part's data? Uses
+	// 2 parts instead of 5/6 for speed; the mechanism is identical. Steps 1
+	// and 3 (that import had really reached part 5, and that lockVolume() is
+	// involved) are NOT verified here -- there was no production log
+	// available to confirm them, only the code path itself. Step 4's
+	// "requeues forever" consequence is exercised by the companion spec in
+	// the "import" Describe below.
+	Context("expire while a multi-part transfer is still in progress", func() {
+		It("should delete the backup and every part's Jobs even though a later part never finished uploading", Label(investigateLabel), func(ctx SpecContext) {
+			// (a) Force the snapshot to be split into 2 parts (part 0 and
+			// part 1), so there is a "later part" to leave incomplete. Using
+			// 2 parts instead of 5/6 keeps the test fast; the mechanism is
+			// the same regardless of how many parts there are.
+			mbr.backupTransferPartSize = *resource.NewQuantity(int64(testutil.FakeRBDSnapshotSize-1), resource.BinarySI)
+
+			target := createAndExportMantleBackup(ctx, mbr, "target", ns, false, false, nil)
+
+			// (b) Finish part 0's export and upload (as if it had already
+			// reached the object storage). Part 1's export Job now exists but
+			// is deliberately left incomplete, so part 1's data never reaches
+			// the object storage -- this stands in for "part 6 never got
+			// exported/uploaded" in hypothesis step 2.
+			completeJob(ctx, MakeExportJobName(target, 0))
+			runStartExportAndUpload(ctx, target)
+			completeJob(ctx, MakeUploadJobName(target, 0))
+			runStartExportAndUpload(ctx, target)
+
+			var exportJob1 batchv1.Job
+			err := k8sClient.Get(ctx,
+				types.NamespacedName{Name: MakeExportJobName(target, 1), Namespace: nsController}, &exportJob1)
+			Expect(err).NotTo(HaveOccurred())
+
+			// (c) Simulate "Spec.Expire has just elapsed" by backdating
+			// Status.CreatedAt, exactly like the existing expire tests above do.
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: target.GetName(), Namespace: target.GetNamespace()}, target)
+			Expect(err).NotTo(HaveOccurred())
+			expire, err := strfmt.ParseDuration(target.Spec.Expire)
+			Expect(err).NotTo(HaveOccurred())
+			now := time.Unix(time.Now().Unix(), 0).UTC()
+			target.Status.CreatedAt = metav1.NewTime(now.Add(-expire).Add(-time.Hour))
+			err = k8sClient.Status().Update(ctx, target)
+			Expect(err).NotTo(HaveOccurred())
+
+			// (d) Run the reconciler once -- exactly what a normal reconcile
+			// loop does. This is the crux of the bug: expire() deletes the
+			// backup right away, with no check at all for part 1's
+			// incomplete state (see mantlebackup_controller.go's expire():
+			// it only compares Status.CreatedAt against Spec.Expire, and
+			// never looks at whether replication/export has finished).
+			_, err = mbr.reconcileLocalBackup(ctx, target).ToCtrlResult()
+			Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: target.GetName(), Namespace: target.GetNamespace()}, target)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(target.GetDeletionTimestamp().IsZero()).To(BeFalse())
+
+			// (e) Run the reconciler a second time, so it now sees the
+			// DeletionTimestamp and runs finalizeStandalone -> primaryCleanup.
+			// primaryCleanup deletes every part's Jobs unconditionally (it
+			// loops over all parts computed from SnapSize/TransferPartSize),
+			// so it doesn't matter that part 1 never finished.
+			result, err := mbr.reconcileLocalBackup(ctx, target).ToCtrlResult()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.IsZero()).To(BeTrue())
+
+			testutil.CheckDeletedEventually[mantlev1.MantleBackup](ctx, k8sClient, target.Name, target.Namespace)
+
+			// (f) The proof: part 1's export Job -- the one that never
+			// finished uploading -- is gone too, deleted along with
+			// everything else. There is now no way, ever, for the primary to
+			// produce part 1's data again: the source backup, its Jobs, and
+			// (in real usage) the underlying RBD snapshot are all gone. Any
+			// secondary still waiting for part 1 will wait forever.
+			err = k8sClient.Get(ctx,
+				types.NamespacedName{Name: MakeExportJobName(target, 1), Namespace: nsController}, &exportJob1)
+			Expect(aerrors.IsNotFound(err)).To(BeTrue())
+		})
+	})
+
 	Context("upload", func() {
 		DescribeTable(
 			"Deletion of completed upload Jobs",
@@ -2352,6 +2461,181 @@ var _ = Describe("import", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.IsZero()).To(BeTrue())
 		})
+
+		// --- Bug hypothesis under investigation (secondary side) -----------
+		//
+		// Continuing hypothesis steps 3-4 from the primary-side test above
+		// ("expire while a multi-part transfer is still in progress"): once
+		// the primary's MantleBackup is gone, part 1's object will never
+		// exist in the object storage, no matter how long the secondary
+		// waits. This spec checks what reconcileImportJob() actually does
+		// in that situation: does it eventually give up and surface an
+		// error (good), or does it just keep requeuing forever with no
+		// indication anything is wrong (the bug)?
+		//
+		// Note: this spec does not exercise lockVolume() (hypothesis step 3)
+		// -- that lock is taken elsewhere, on the import Job's snapshot
+		// target, and isn't relevant to whether reconcileImportJob() can
+		// tell "not yet uploaded" apart from "will never be uploaded".
+		It("should requeue forever, with no error, if a later part's data never appears in the object storage", Label(investigateLabel), func(ctx SpecContext) {
+			// (a) Set up a 2-part backup on the secondary side (same
+			// simplification as the primary-side test: 2 parts instead of
+			// 5/6, same mechanism).
+			backup, err := createMantleBackupUsingDummyPVC(ctx, "target-stuck", ns)
+			Expect(err).NotTo(HaveOccurred())
+
+			err = updateStatus(ctx, k8sClient, backup, func() error {
+				backup.Status.SnapSize = ptr.To(int64(testutil.FakeRBDSnapshotSize))
+				transferPartSize := *resource.NewQuantity(int64(testutil.FakeRBDSnapshotSize-1), resource.BinarySI)
+				backup.Status.TransferPartSize = &transferPartSize
+
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			snapshotTarget, err := getSnapshotTargetByDummyMB(backup)
+			Expect(err).NotTo(HaveOccurred())
+
+			// (b) Part 0's object exists in the object storage (it was
+			// uploaded before the primary disappeared). Part 1's object
+			// will never exist: per hypothesis step 2, the primary was
+			// deleted before part 1's export/upload ever ran, so nothing
+			// will ever write that object.
+			mockObjectStorage.EXPECT().
+				Exists(gomock.Any(), gomock.Eq(MakeObjectNameOfExportedData(backup.GetName(), backup.GetAnnotations()[annotRemoteUID], 0))).
+				Return(true, nil).AnyTimes()
+			mockObjectStorage.EXPECT().
+				Exists(gomock.Any(), gomock.Eq(MakeObjectNameOfExportedData(backup.GetName(), backup.GetAnnotations()[annotRemoteUID], 1))).
+				Return(false, nil).AnyTimes()
+
+			// (c) Import and complete part 0, same as normal operation.
+			res, err := mbr.reconcileImportJob(ctx, backup, snapshotTarget, -1).ToCtrlResult()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.RequeueAfter).NotTo(BeZero())
+
+			var importJob0 batchv1.Job
+			err = k8sClient.Get(ctx, types.NamespacedName{
+				Name:      MakeImportJobName(backup, 0),
+				Namespace: nsController,
+			}, &importJob0)
+			Expect(err).NotTo(HaveOccurred())
+			completeJob(ctx, importJob0.GetNamespace(), importJob0.GetName())
+
+			// (d) The proof: from here on, reconcileImportJob() is waiting
+			// for part 1, which will never arrive (hypothesis step 4). Call
+			// it repeatedly, standing in for the controller's normal
+			// reconcile loop calling it once per event/resync. Every single
+			// call keeps returning "please requeue" with no error and no
+			// terminal state -- there is no retry limit, no timeout, and no
+			// way to ever detect "this part will never show up". A real
+			// secondary would requeue like this forever.
+			for range 20 {
+				res, err := mbr.reconcileImportJob(ctx, backup, snapshotTarget, 0).ToCtrlResult()
+				Expect(err).NotTo(HaveOccurred())
+				Expect(res.RequeueAfter).NotTo(BeZero())
+			}
+		})
+
+		// The spec above calls reconcileImportJob() directly. That function
+		// doesn't touch the RBD lock at all -- lockVolume()/unlockVolume()
+		// are called by startImport(), one level up, around the call to
+		// reconcileImportJob(). Since reconcileImportJob() requeuing makes
+		// startImport() return before ever reaching unlockVolume(), this
+		// spec checks the follow-up question raised in review: is the RBD
+		// lock actually left held forever too, not just the reconcile loop
+		// left stuck?
+		//
+		// Holding the lock across several Requeue cycles on its own is
+		// completely normal -- it's meant to be held for the whole
+		// multi-part transfer, which legitimately takes more than one
+		// reconcile. The bug is that this transfer can never finish once
+		// the primary is gone, so a lock that's supposed to be temporary
+		// becomes permanent, with nothing to ever detect or break that.
+		It("should take the RBD lock via startImport but never release it, since a later part's data never arrives",
+			Label(investigateLabel), func(ctx SpecContext) {
+				backup, err := createMantleBackupUsingDummyPVC(ctx, "target-lock-stuck", ns)
+				Expect(err).NotTo(HaveOccurred())
+
+				// The dummy PV manifest createMantleBackupUsingDummyPVC sets
+				// up has no Capacity, which reconcileImportJob() alone never
+				// notices, but startImport() does (via isPVSmallerThanPVC(),
+				// which would otherwise requeue before ever taking the RBD
+				// lock). Give it a capacity matching the dummy PVC's.
+				var pv corev1.PersistentVolume
+				Expect(json.Unmarshal([]byte(backup.Status.PVManifest), &pv)).To(Succeed())
+				pv.Spec.Capacity = corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")}
+				pvManifest, err := json.Marshal(pv)
+				Expect(err).NotTo(HaveOccurred())
+
+				err = updateStatus(ctx, k8sClient, backup, func() error {
+					backup.Status.PVManifest = string(pvManifest)
+					backup.Status.SnapSize = ptr.To(int64(testutil.FakeRBDSnapshotSize))
+					transferPartSize := *resource.NewQuantity(int64(testutil.FakeRBDSnapshotSize-1), resource.BinarySI)
+					backup.Status.TransferPartSize = &transferPartSize
+
+					return nil
+				})
+				Expect(err).NotTo(HaveOccurred())
+
+				// startImport() requires the sync-mode annotation to
+				// proceed at all. Using "incremental" rather than "full"
+				// keeps the setup simple: reconcileZeroOutJob() (called
+				// between lockVolume() and reconcileImportJob()) is a no-op
+				// unless the mode is "full".
+				err = k8sClient.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup)
+				Expect(err).NotTo(HaveOccurred())
+				if backup.Annotations == nil {
+					backup.Annotations = map[string]string{}
+				}
+				backup.Annotations[annotSyncMode] = syncModeIncremental
+				Expect(k8sClient.Update(ctx, backup)).To(Succeed())
+
+				snapshotTarget, err := getSnapshotTargetByDummyMB(backup)
+				Expect(err).NotTo(HaveOccurred())
+
+				// Part 0's object exists; part 1's never will.
+				mockObjectStorage.EXPECT().
+					Exists(gomock.Any(), gomock.Eq(MakeObjectNameOfExportedData(backup.GetName(), backup.GetAnnotations()[annotRemoteUID], 0))).
+					Return(true, nil).AnyTimes()
+				mockObjectStorage.EXPECT().
+					Exists(gomock.Any(), gomock.Eq(MakeObjectNameOfExportedData(backup.GetName(), backup.GetAnnotations()[annotRemoteUID], 1))).
+					Return(false, nil).AnyTimes()
+
+				// First call: takes the RBD lock, creates part 0's import
+				// Job, and requeues -- as normal, since the lock is
+				// legitimately still needed while part 0 is in flight.
+				_, err = mbr.startImport(ctx, backup, snapshotTarget).ToCtrlResult()
+				Expect(err).NotTo(HaveOccurred())
+
+				locks, err := mbr.ceph.RBDLockLs(snapshotTarget.poolName, snapshotTarget.imageName)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(locks).To(HaveLen(1))
+				Expect(locks[0].LockID).To(Equal(string(backup.GetUID())))
+
+				var importJob0 batchv1.Job
+				err = k8sClient.Get(ctx, types.NamespacedName{
+					Name:      MakeImportJobName(backup, 0),
+					Namespace: nsController,
+				}, &importJob0)
+				Expect(err).NotTo(HaveOccurred())
+				completeJob(ctx, importJob0.GetNamespace(), importJob0.GetName())
+
+				// The proof: from here on, part 1 will never appear. Call
+				// startImport() repeatedly -- standing in for the
+				// controller's normal reconcile loop -- and confirm the RBD
+				// lock is still held every single time: unlockVolume() is
+				// never reached because reconcileImportJob() never stops
+				// requeuing.
+				for range 20 {
+					_, err := mbr.startImport(ctx, backup, snapshotTarget).ToCtrlResult()
+					Expect(err).NotTo(HaveOccurred())
+
+					locks, err := mbr.ceph.RBDLockLs(snapshotTarget.poolName, snapshotTarget.imageName)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(locks).To(HaveLen(1))
+					Expect(locks[0].LockID).To(Equal(string(backup.GetUID())))
+				}
+			})
 	})
 
 	Context("import job throttling", func() {

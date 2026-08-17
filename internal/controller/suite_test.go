@@ -38,7 +38,17 @@ func TestControllers(t *testing.T) {
 	SetDefaultEventuallyTimeout(3 * time.Minute)
 	EnforceDefaultTimeoutsWhenUsingContexts()
 
-	RunSpecs(t, "Controller Suite")
+	// TEMPORARY: scope this run to only the specs reproducing the suspected
+	// primary-expire-mid-transfer stuck-import bug (see investigateLabel in
+	// mantlebackup_controller_test.go), so CI doesn't spend time re-running
+	// the rest of the (untouched, already-passing) suite. Remove this
+	// SuiteConfig override once the investigation is done.
+	suiteConfig, reporterConfig := GinkgoConfiguration()
+	if suiteConfig.LabelFilter == "" {
+		suiteConfig.LabelFilter = investigateLabel
+	}
+
+	RunSpecs(t, "Controller Suite", suiteConfig, reporterConfig)
 }
 
 var _ = BeforeSuite(func(ctx SpecContext) {
