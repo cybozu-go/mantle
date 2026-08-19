@@ -37,6 +37,7 @@ jobs:
           - change-to-standalone
           - lock
           - multi-controller
+          - compression
           - "!//" # select unlabelled tests
         include:
           # testing various backup-transfer-part-size

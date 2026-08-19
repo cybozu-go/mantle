@@ -211,8 +211,9 @@ func (test *replicationUnitTest) newMantleBackup() *mantlev1.MantleBackup {
 			},
 		},
 		Spec: mantlev1.MantleBackupSpec{
-			PVC:    util.GetUniqueName("test-pvc-"),
-			Expire: "1d",
+			PVC:                 util.GetUniqueName("test-pvc-"),
+			Expire:              "1d",
+			TransferCompression: transferCompressionZstd,
 		},
 		Status: mantlev1.MantleBackupStatus{
 			CreatedAt:        metav1.Time(snapshot.Timestamp),
@@ -239,6 +240,7 @@ func (test *replicationUnitTest) expectPersistedMantleBackup(ctx SpecContext, ex
 	Expect(actual.Status.CreatedAt.Equal(&expected.Status.CreatedAt)).To(BeTrue())
 	Expect(actual.Status.SnapSize).To(Equal(expected.Status.SnapSize))
 	Expect(actual.Status.TransferPartSize).To(Equal(expected.Status.TransferPartSize))
+	Expect(actual.Spec.TransferCompression).To(Equal(expected.Spec.TransferCompression))
 }
 
 func (test *replicationUnitTest) testCreateMantleBackup() {

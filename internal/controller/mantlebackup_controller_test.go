@@ -388,6 +388,18 @@ var _ = Describe("MantleBackup controller", func() {
 			Expect(err).To(MatchError(ContainSubstring("spec.expire is immutable")))
 		})
 
+		It("Should reject setting transfer compression after creation", func(ctx SpecContext) {
+			_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+
+			backup, err := resMgr.CreateUniqueBackupFor(ctx, pvc)
+			Expect(err).NotTo(HaveOccurred())
+
+			backup.Spec.TransferCompression = "zstd"
+			err = k8sClient.Update(ctx, backup)
+			Expect(err).To(MatchError(ContainSubstring("spec.transferCompression is immutable")))
+		})
+
 		DescribeTable("MantleBackup expiration",
 			func(ctx SpecContext, offset time.Duration) {
 				_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)

@@ -10,6 +10,7 @@ import (
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
 // MantleBackupSpec defines the desired state of MantleBackup
+// +kubebuilder:validation:XValidation:message="spec.transferCompression is immutable",rule="(has(self.transferCompression) ? self.transferCompression : \"\") == (has(oldSelf.transferCompression) ? oldSelf.transferCompression : \"\")"
 type MantleBackupSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
@@ -27,6 +28,10 @@ type MantleBackupSpec struct {
 	//+kubebuilder:validation:XValidation:message="expire must be <= 15d",rule="self <= duration('360h')"
 	//+kubebuilder:validation:XValidation:message="spec.expire is immutable",rule="self == oldSelf"
 	Expire string `json:"expire"`
+
+	// 'transferCompression' is an experimental field that specifies the compression format used for data transferred from the primary to the secondary. This field may be removed or changed in a future release.
+	//+kubebuilder:validation:Pattern=^(|zstd)$
+	TransferCompression string `json:"transferCompression,omitempty"`
 }
 
 // MantleBackupStatus defines the observed state of MantleBackup

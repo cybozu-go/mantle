@@ -179,8 +179,16 @@ func ApplyObject(clusterNo int, obj runtime.Object) error {
 	return nil
 }
 
-func ApplyMantleBackupTemplate(clusterNo int, namespace, pvcName, backupName string) error {
-	manifest := fmt.Sprintf(testMantleBackupTemplate, backupName, backupName, namespace, pvcName)
+func ApplyMantleBackupTemplate(
+	clusterNo int,
+	namespace, pvcName, backupName string,
+	transferCompression ...string,
+) error {
+	compression := ""
+	if len(transferCompression) > 0 {
+		compression = transferCompression[0]
+	}
+	manifest := fmt.Sprintf(testMantleBackupTemplate, backupName, backupName, namespace, pvcName, compression)
 	_, _, err := Kubectl(clusterNo, []byte(manifest), "apply", "-f", "-")
 	if err != nil {
 		return fmt.Errorf("kubectl apply mantlebackup failed. err: %w", err)

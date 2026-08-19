@@ -87,8 +87,9 @@ const (
 	MantleZeroOutPVCPrefix    = "mantle-zeroout-"
 	MantleZeroOutPVPrefix     = "mantle-zeroout-"
 
-	syncModeFull        = "full"
-	syncModeIncremental = "incremental"
+	syncModeFull            = "full"
+	syncModeIncremental     = "incremental"
+	transferCompressionZstd = "zstd"
 
 	EnvExportJobScript = "EXPORT_JOB_SCRIPT"
 	EnvUploadJobScript = "UPLOAD_JOB_SCRIPT"
@@ -1836,7 +1837,7 @@ func (r *MantleBackupReconciler) setExportedDiffSizeMetric(
 	}
 
 	for partNum := firstPartNum; partNum <= largestCompletedUploadPartNum; partNum++ {
-		key := MakeObjectNameOfExportedData(backup.GetName(), string(backup.GetUID()), partNum)
+		key := MakeObjectNameOfExportedData(backup.GetName(), string(backup.GetUID()), partNum, backup.Spec.TransferCompression)
 		size, err := r.objectStorageClient.GetSize(ctx, key)
 		if err != nil {
 			return fmt.Errorf("failed to get size of exported data part %d: %w", partNum, err)
@@ -2087,8 +2088,13 @@ func MakeExportDataPVCName(target *mantlev1.MantleBackup, index int) string {
 	return fmt.Sprintf("%s%s-%d", MantleExportDataPVCPrefix, string(target.GetUID()), index)
 }
 
-func MakeObjectNameOfExportedData(name, uid string, index int) string {
-	return fmt.Sprintf("%s-%s-%d.bin", name, uid, index)
+func MakeObjectNameOfExportedData(name, uid string, index int, transferCompression string) string {
+	extension := ".bin"
+	if transferCompression == transferCompressionZstd {
+		extension += ".zst"
+	}
+
+	return fmt.Sprintf("%s-%s-%d%s", name, uid, index, extension)
 }
 
 func MakeImportJobName(target *mantlev1.MantleBackup, index int) string {
@@ -2244,6 +2250,10 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(
 						Value: strconv.Itoa(partNum),
 					},
 					{
+						Name:  "TRANSFER_COMPRESSION",
+						Value: target.Spec.TransferCompression,
+					},
+					{
 						Name:  "TRANSFER_PART_SIZE_IN_BYTES",
 						Value: strconv.FormatInt(transferPartSize, 10),
 					},
@@ -2385,7 +2395,7 @@ func (r *MantleBackupReconciler) createOrUpdateUploadJobs(
 					Env: []corev1.EnvVar{
 						{
 							Name:  "OBJ_NAME",
-							Value: MakeObjectNameOfExportedData(target.GetName(), string(target.GetUID()), partNum),
+							Value: MakeObjectNameOfExportedData(target.GetName(), string(target.GetUID()), partNum, target.Spec.TransferCompression),
 						},
 						{
 							Name:  "BUCKET_NAME",
@@ -2432,6 +2442,10 @@ func (r *MantleBackupReconciler) createOrUpdateUploadJobs(
 						{
 							Name:  "PART_NUM",
 							Value: strconv.Itoa(partNum),
+						},
+						{
+							Name:  "TRANSFER_COMPRESSION",
+							Value: target.Spec.TransferCompression,
 						},
 					},
 					Image:           r.podImage,
@@ -2647,7 +2661,7 @@ func (r *MantleBackupReconciler) isExportDataAlreadyUploaded(
 	target *mantlev1.MantleBackup,
 	index int,
 ) (bool, *reconcile.Result) {
-	key := MakeObjectNameOfExportedData(target.GetName(), target.GetAnnotations()[annotRemoteUID], index)
+	key := MakeObjectNameOfExportedData(target.GetName(), target.GetAnnotations()[annotRemoteUID], index, target.Spec.TransferCompression)
 	uploaded, err := r.objectStorageClient.Exists(ctx, key)
 	if err != nil {
 		return false, reconcile.Failed("failed to check if an object exists in the object storage: %s: %w", key, err)
@@ -3295,7 +3309,7 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 				},
 				{
 					Name:  "OBJ_NAME",
-					Value: MakeObjectNameOfExportedData(backup.GetName(), backup.GetAnnotations()[annotRemoteUID], partNum),
+					Value: MakeObjectNameOfExportedData(backup.GetName(), backup.GetAnnotations()[annotRemoteUID], partNum, backup.Spec.TransferCompression),
 				},
 				{
 					Name:  "BUCKET_NAME",
@@ -3330,6 +3344,10 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 				{
 					Name:  "PART_NUM",
 					Value: strconv.Itoa(partNum),
+				},
+				{
+					Name:  "TRANSFER_COMPRESSION",
+					Value: backup.Spec.TransferCompression,
 				},
 			},
 			Image:           r.podImage,
@@ -3727,7 +3745,7 @@ func (r *MantleBackupReconciler) deleteAllExportedData(ctx context.Context, back
 	}
 
 	for partNum := range numParts {
-		key := MakeObjectNameOfExportedData(backup.GetName(), backup.GetAnnotations()[annotRemoteUID], partNum)
+		key := MakeObjectNameOfExportedData(backup.GetName(), backup.GetAnnotations()[annotRemoteUID], partNum, backup.Spec.TransferCompression)
 		if err := r.objectStorageClient.Delete(ctx, key); err != nil {
 			return reconcile.Failed("failed to delete exported data in the object storage: %s: %w", key, err)
 		}

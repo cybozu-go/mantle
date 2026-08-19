@@ -42,7 +42,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
     apt-get install --no-install-recommends -y \
         libstdc++-11-dev jq kmod lvm2 gdisk ca-certificates e2fsprogs attr udev libgflags2.2 \
-        curl unzip &&\
+        curl unzip zstd &&\
     cd /tmp && \
     curl -L -o packages.zip https://github.com/cybozu-go/mantle/releases/download/ceph-export-diff-v${EXPORT_DIFF_VERSION}/packages.zip && \
     unzip packages.zip && \

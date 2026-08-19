@@ -12,3 +12,4 @@ metadata:
 spec:
   pvc: "%s"
   expire: "1d"
+  transferCompression: "%s"
