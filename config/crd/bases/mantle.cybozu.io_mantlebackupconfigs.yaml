@@ -63,6 +63,13 @@ spec:
               suspend:
                 default: false
                 type: boolean
+              transferCompression:
+                description: '''transferCompression'' is an experimental field that
+                  specifies the compression format used for data transferred from
+                  the primary to the secondary. This field may be removed or changed
+                  in a future release.'
+                pattern: ^(|zstd)$
+                type: string
             required:
             - expire
             - pvc

@@ -16,14 +16,18 @@ func TestCreateMantleBackup(t *testing.T) {
 	t.Setenv("JOB_NAME", "some-job-12345678")
 
 	testCases := map[string]struct {
-		mbcLabels      map[string]string
-		wantLabelValue string
-		wantLabelSet   bool
+		mbcLabels           map[string]string
+		transferCompression string
+		wantLabelValue      string
+		wantLabelSet        bool
 	}{
 		"MBC has the priority label": {
 			mbcLabels:      map[string]string{controller.LabelBackupPriority: "high"},
 			wantLabelValue: "high",
 			wantLabelSet:   true,
+		},
+		"MBC has transfer compression in spec": {
+			transferCompression: "zstd",
 		},
 		"MBC does not have the priority label": {
 			mbcLabels:    map[string]string{},
@@ -42,8 +46,9 @@ func TestCreateMantleBackup(t *testing.T) {
 					Labels:    tc.mbcLabels,
 				},
 				Spec: mantlev1.MantleBackupConfigSpec{
-					PVC:    "test-pvc",
-					Expire: "1d",
+					PVC:                 "test-pvc",
+					Expire:              "1d",
+					TransferCompression: tc.transferCompression,
 				},
 			}
 
@@ -62,6 +67,8 @@ func TestCreateMantleBackup(t *testing.T) {
 			if ok {
 				require.Equal(t, tc.wantLabelValue, value)
 			}
+
+			require.Equal(t, tc.transferCompression, mb.Spec.TransferCompression)
 		})
 	}
 }

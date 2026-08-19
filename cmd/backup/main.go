@@ -129,8 +129,9 @@ func createMantleBackup(ctx context.Context, cli client.Client, mbc *mantlev1.Ma
 			Labels:    mbLabels,
 		},
 		Spec: mantlev1.MantleBackupSpec{
-			Expire: mbc.Spec.Expire,
-			PVC:    mbc.Spec.PVC,
+			Expire:              mbc.Spec.Expire,
+			PVC:                 mbc.Spec.PVC,
+			TransferCompression: mbc.Spec.TransferCompression,
 		},
 	})
 	if err == nil {
