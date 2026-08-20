@@ -106,6 +106,9 @@ spec:
             {{- with .Values.controller.backupTransferPartSize }}
             - --backup-transfer-part-size={{ . }}
             {{- end }}
+            {{- with .Values.controller.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
 
             {{- if eq .Values.controller.role "primary" }}
             - --replication-tls-client-cert-path=/mnt/replication-tls-client-cert/tls.crt
