@@ -2155,6 +2155,28 @@ var (
 	defaultTransferPartSize = resource.MustParse("1Gi")
 )
 
+// makeTestAffinity returns an affinity that requires Pods to be scheduled onto
+// the nodes whose "role" label is nodeRole.
+func makeTestAffinity(nodeRole string) *corev1.Affinity {
+	return &corev1.Affinity{
+		NodeAffinity: &corev1.NodeAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+				NodeSelectorTerms: []corev1.NodeSelectorTerm{
+					{
+						MatchExpressions: []corev1.NodeSelectorRequirement{
+							{
+								Key:      "role",
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{nodeRole},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 var _ = Describe("export and upload", func() {
 	var mockCtrl *gomock.Controller
 	var grpcClient *proto.MockMantleServiceClient
@@ -2342,6 +2364,51 @@ var _ = Describe("export and upload", func() {
 		if mockCtrl != nil {
 			mockCtrl.Finish()
 		}
+	})
+
+	Context("affinity of export and upload Jobs", func() {
+		getJob := func(ctx SpecContext, jobName string) batchv1.Job {
+			GinkgoHelper()
+
+			var job batchv1.Job
+			err := k8sClient.Get(ctx,
+				types.NamespacedName{Name: jobName, Namespace: nsController}, &job)
+			Expect(err).NotTo(HaveOccurred())
+
+			return job
+		}
+
+		It("should set the specified affinity to the export and upload Jobs", func(ctx SpecContext) {
+			exportAffinity := makeTestAffinity("export-node")
+			uploadAffinity := makeTestAffinity("upload-node")
+			mbr.primarySettings.ExportJobAffinity = exportAffinity
+			mbr.primarySettings.UploadJobAffinity = uploadAffinity
+
+			target := createAndExportMantleBackup(ctx, mbr, "target-affinity", ns, false, false, nil)
+
+			exportJob := getJob(ctx, MakeExportJobName(target, 0))
+			Expect(exportJob.Spec.Template.Spec.Affinity).To(Equal(exportAffinity))
+
+			// An upload Job is created after the export Job of the same part completes.
+			completeJob(ctx, MakeExportJobName(target, 0))
+			runStartExportAndUpload(ctx, target)
+
+			uploadJob := getJob(ctx, MakeUploadJobName(target, 0))
+			Expect(uploadJob.Spec.Template.Spec.Affinity).To(Equal(uploadAffinity))
+		})
+
+		It("should not set any affinity if it isn't specified", func(ctx SpecContext) {
+			target := createAndExportMantleBackup(ctx, mbr, "target-no-affinity", ns, false, false, nil)
+
+			exportJob := getJob(ctx, MakeExportJobName(target, 0))
+			Expect(exportJob.Spec.Template.Spec.Affinity).To(BeNil())
+
+			completeJob(ctx, MakeExportJobName(target, 0))
+			runStartExportAndUpload(ctx, target)
+
+			uploadJob := getJob(ctx, MakeUploadJobName(target, 0))
+			Expect(uploadJob.Spec.Template.Spec.Affinity).To(BeNil())
+		})
 	})
 
 	Context("export", func() {
@@ -2861,6 +2928,55 @@ var _ = Describe("import", func() {
 		Entry("not exist", false, false, false, false),
 		Entry("error", false, true, false, true),
 	)
+
+	Context("affinity of import Jobs", func() {
+		createImportJob := func(ctx SpecContext, name string) *batchv1.Job {
+			GinkgoHelper()
+
+			backup, err := createMantleBackupUsingDummyPVC(ctx, name, ns)
+			Expect(err).NotTo(HaveOccurred())
+
+			err = updateStatus(ctx, k8sClient, backup, func() error {
+				backup.Status.SnapSize = ptr.To(int64(testutil.FakeRBDSnapshotSize))
+				transferPartSize := resource.MustParse("1Gi")
+				backup.Status.TransferPartSize = &transferPartSize
+
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			snapshotTarget, err := getSnapshotTargetByDummyMB(backup)
+			Expect(err).NotTo(HaveOccurred())
+
+			mockObjectStorage.EXPECT().Exists(gomock.Any(), gomock.Any()).
+				Return(true, nil).AnyTimes()
+
+			_, err = mbr.reconcileImportJob(ctx, backup, snapshotTarget, -1).ToCtrlResult()
+			Expect(err).NotTo(HaveOccurred())
+
+			var importJob batchv1.Job
+			err = k8sClient.Get(ctx, types.NamespacedName{
+				Name:      MakeImportJobName(backup, 0),
+				Namespace: nsController,
+			}, &importJob)
+			Expect(err).NotTo(HaveOccurred())
+
+			return &importJob
+		}
+
+		It("should set the specified affinity to the import Job", func(ctx SpecContext) {
+			importAffinity := makeTestAffinity("import-node")
+			mbr.secondarySettings = &SecondarySettings{ImportJobAffinity: importAffinity}
+
+			importJob := createImportJob(ctx, "target-affinity")
+			Expect(importJob.Spec.Template.Spec.Affinity).To(Equal(importAffinity))
+		})
+
+		It("should not set any affinity if it isn't specified", func(ctx SpecContext) {
+			importJob := createImportJob(ctx, "target-no-affinity")
+			Expect(importJob.Spec.Template.Spec.Affinity).To(BeNil())
+		})
+	})
 
 	Context("reconcileImportJob", func() {
 		It("should work correctly", func(ctx SpecContext) {

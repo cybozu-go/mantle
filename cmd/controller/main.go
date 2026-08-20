@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -23,6 +24,7 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	"github.com/spf13/cobra"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -59,6 +61,9 @@ var (
 	maxUploadJobs                int
 	maxExportDataPVCs            int
 	exportDataStorageClass       string
+	exportJobAffinity            string
+	uploadJobAffinity            string
+	importJobAffinity            string
 	envSecret                    string
 	objectStorageBucketName      string
 	objectStorageEndpoint        string
@@ -109,6 +114,18 @@ func init() {
 		"The maximum number of export data PVCs that can be created. If you set this to 0, there is no limit.")
 	flags.StringVar(&exportDataStorageClass, "export-data-storage-class", "",
 		"The storage class of PVCs used to store exported data temporarily.")
+	flags.StringVar(&exportJobAffinity, "export-job-affinity", "",
+		"The affinity of the Pods of export Jobs, specified as a JSON representation of corev1.Affinity. "+
+			"If this is empty, no affinity is set. Only used when --role is 'primary'. "+
+			"Note that these Pods mount export data PVCs, so the affinity must not conflict with the "+
+			"topology of the PVs bound to them. Otherwise, the Pods stay Pending forever.")
+	flags.StringVar(&uploadJobAffinity, "upload-job-affinity", "",
+		"The affinity of the Pods of upload Jobs, specified as a JSON representation of corev1.Affinity. "+
+			"If this is empty, no affinity is set. Only used when --role is 'primary'. "+
+			"The same note as --export-job-affinity applies because these Pods also mount export data PVCs.")
+	flags.StringVar(&importJobAffinity, "import-job-affinity", "",
+		"The affinity of the Pods of import Jobs, specified as a JSON representation of corev1.Affinity. "+
+			"If this is empty, no affinity is set. Only used when --role is 'secondary'.")
 	flags.StringVar(&envSecret, "env-secret", "",
 		"The name of the Secret resource that contains environment variables related to the controller and Jobs.")
 	flags.StringVar(&objectStorageBucketName, "object-storage-bucket-name", "",
@@ -237,6 +254,21 @@ func checkCommandlineArgs() error {
 	}
 
 	return nil
+}
+
+// parseAffinity parses a JSON representation of corev1.Affinity specified by
+// the flag flagName. It returns nil if value is empty.
+func parseAffinity(flagName, value string) (*corev1.Affinity, error) {
+	if value == "" {
+		return nil, nil
+	}
+
+	var affinity corev1.Affinity
+	if err := json.Unmarshal([]byte(value), &affinity); err != nil {
+		return nil, fmt.Errorf("failed to parse %s: %w", flagName, err)
+	}
+
+	return &affinity, nil
 }
 
 func getManagedCephClusterID() (string, error) {
@@ -433,6 +465,19 @@ func setupPrimary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup) 
 		_ = conn.Close()
 	})
 
+	parsedExportJobAffinity, err := parseAffinity("--export-job-affinity", exportJobAffinity)
+	if err != nil {
+		setupLog.Error(err, "failed to parse the affinity of export Jobs")
+
+		return err
+	}
+	parsedUploadJobAffinity, err := parseAffinity("--upload-job-affinity", uploadJobAffinity)
+	if err != nil {
+		setupLog.Error(err, "failed to parse the affinity of upload Jobs")
+
+		return err
+	}
+
 	primarySettings := &controller.PrimarySettings{
 		ServiceEndpoint:        mantleServiceEndpoint,
 		Conn:                   conn,
@@ -441,6 +486,8 @@ func setupPrimary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup) 
 		MaxUploadJobs:          maxUploadJobs,
 		MaxExportDataPVCs:      maxExportDataPVCs,
 		ExportDataStorageClass: exportDataStorageClass,
+		ExportJobAffinity:      parsedExportJobAffinity,
+		UploadJobAffinity:      parsedUploadJobAffinity,
 	}
 
 	return setupReconcilers(mgr, primarySettings, nil)
@@ -501,8 +548,16 @@ func setupSecondary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup
 		serv.GracefulStop()
 	})
 
+	parsedImportJobAffinity, err := parseAffinity("--import-job-affinity", importJobAffinity)
+	if err != nil {
+		setupLog.Error(err, "failed to parse the affinity of import Jobs")
+
+		return err
+	}
+
 	return setupReconcilers(mgr, nil, &controller.SecondarySettings{
-		MaxImportJobs: maxImportJobs,
+		MaxImportJobs:     maxImportJobs,
+		ImportJobAffinity: parsedImportJobAffinity,
 	})
 }
 

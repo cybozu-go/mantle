@@ -31,10 +31,16 @@ type PrimarySettings struct {
 	MaxUploadJobs          int
 	MaxExportDataPVCs      int
 	ExportDataStorageClass string
+	// ExportJobAffinity is the affinity of the Pods of export Jobs. Nil means no affinity.
+	ExportJobAffinity *corev1.Affinity
+	// UploadJobAffinity is the affinity of the Pods of upload Jobs. Nil means no affinity.
+	UploadJobAffinity *corev1.Affinity
 }
 
 type SecondarySettings struct {
 	MaxImportJobs int
+	// ImportJobAffinity is the affinity of the Pods of import Jobs. Nil means no affinity.
+	ImportJobAffinity *corev1.Affinity
 }
 
 type SecondaryServer struct {

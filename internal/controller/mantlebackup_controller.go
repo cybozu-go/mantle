@@ -2207,6 +2207,10 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(
 
 		job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
 
+		if r.primarySettings != nil {
+			job.Spec.Template.Spec.Affinity = r.primarySettings.ExportJobAffinity
+		}
+
 		job.Spec.Template.Spec.Containers = []corev1.Container{
 			{
 				Name:    "export",
@@ -2377,6 +2381,10 @@ func (r *MantleBackupReconciler) createOrUpdateUploadJobs(
 			}
 
 			job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
+
+			if r.primarySettings != nil {
+				job.Spec.Template.Spec.Affinity = r.primarySettings.UploadJobAffinity
+			}
 
 			job.Spec.Template.Spec.Containers = []corev1.Container{
 				{
@@ -3260,6 +3268,10 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 		}
 
 		job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
+
+		if r.secondarySettings != nil {
+			job.Spec.Template.Spec.Affinity = r.secondarySettings.ImportJobAffinity
+		}
 
 		sourceBackupName := backup.GetAnnotations()[annotDiffFrom]
 		if partNum != 0 {

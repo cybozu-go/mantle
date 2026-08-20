@@ -368,6 +368,10 @@ func GetPVList(clusterNo int) (*corev1.PersistentVolumeList, error) {
 	return GetObjectList[corev1.PersistentVolumeList](clusterNo, "pv", "")
 }
 
+func GetNodeList(clusterNo int) (*corev1.NodeList, error) {
+	return GetObjectList[corev1.NodeList](clusterNo, "node", "")
+}
+
 func GetEventList(clusterNo int, namespace string) (*corev1.EventList, error) {
 	return GetObjectList[corev1.EventList](clusterNo, "event", namespace)
 }
@@ -1220,15 +1224,15 @@ func GetNumberOfBackupParts(snapshotSize *resource.Quantity) (int, error) {
 }
 
 // changeMantleControllerArg sets the CLI argument named flag (e.g.,
-// "--max-export-data-pvcs") of the mantle-controller in the primary cluster to
+// "--max-export-data-pvcs") of the mantle-controller in the given cluster to
 // value. If value is nil, the argument is removed so that the controller falls
 // back to its default value. It waits until the rollout completes, so the new
 // controller Pod is guaranteed to run with the updated arguments when this
 // function returns.
-func changeMantleControllerArg(flag string, value *string) {
+func changeMantleControllerArg(clusterNo int, flag string, value *string) {
 	GinkgoHelper()
 
-	deployMC, err := GetDeploy(PrimaryK8sCluster, CephCluster1Namespace, MantleControllerDeployName)
+	deployMC, err := GetDeploy(clusterNo, CephCluster1Namespace, MantleControllerDeployName)
 	Expect(err).NotTo(HaveOccurred())
 
 	args := deployMC.Spec.Template.Spec.Containers[0].Args
@@ -1237,40 +1241,49 @@ func changeMantleControllerArg(flag string, value *string) {
 		func(arg string) bool { return strings.HasPrefix(arg, flag+"=") },
 	)
 
-	var patch string
+	// The value may contain characters that must be escaped in JSON, so build
+	// the patch with json.Marshal instead of embedding the value as is.
+	type jsonPatch struct {
+		OP    string `json:"op"`
+		Path  string `json:"path"`
+		Value string `json:"value,omitempty"`
+	}
+	var patch []jsonPatch
+
 	switch {
 	case value == nil && argIndex == -1:
 		return
 	case value == nil:
-		patch = fmt.Sprintf(
-			`[{"op": "remove", "path": "/spec/template/spec/containers/0/args/%d"}]`,
-			argIndex,
-		)
+		patch = append(patch, jsonPatch{
+			OP:   "remove",
+			Path: fmt.Sprintf("/spec/template/spec/containers/0/args/%d", argIndex),
+		})
 	case argIndex == -1:
-		patch = fmt.Sprintf(
-			`[{"op": "add", "path": "/spec/template/spec/containers/0/args/-", `+
-				`"value":"%s=%s"}]`,
-			flag,
-			*value,
-		)
+		patch = append(patch, jsonPatch{
+			OP:    "add",
+			Path:  "/spec/template/spec/containers/0/args/-",
+			Value: fmt.Sprintf("%s=%s", flag, *value),
+		})
 	default:
-		patch = fmt.Sprintf(
-			`[{"op": "replace", "path": "/spec/template/spec/containers/0/args/%d", `+
-				`"value":"%s=%s"}]`,
-			argIndex,
-			flag,
-			*value,
-		)
+		patch = append(patch, jsonPatch{
+			OP:    "replace",
+			Path:  fmt.Sprintf("/spec/template/spec/containers/0/args/%d", argIndex),
+			Value: fmt.Sprintf("%s=%s", flag, *value),
+		})
 	}
 
+	marshalledPatch, err := json.Marshal(patch)
+	Expect(err).NotTo(HaveOccurred())
+
 	_, _, err = Kubectl(
-		PrimaryK8sCluster, nil,
-		"patch", "deploy", "-n", CephCluster1Namespace, MantleControllerDeployName, "--type=json", "-p="+patch,
+		clusterNo, nil,
+		"patch", "deploy", "-n", CephCluster1Namespace, MantleControllerDeployName, "--type=json",
+		fmt.Sprintf("--patch=%s", marshalledPatch),
 	)
 	Expect(err).NotTo(HaveOccurred())
 
 	_, _, err = Kubectl(
-		PrimaryK8sCluster, nil,
+		clusterNo, nil,
 		"rollout", "status", "-n", CephCluster1Namespace,
 		"deploy/"+MantleControllerDeployName, "--timeout=3m",
 	)
@@ -1283,7 +1296,7 @@ func changeMantleControllerArg(flag string, value *string) {
 func ChangeBackupTransferPartSize(size string) {
 	GinkgoHelper()
 
-	changeMantleControllerArg("--backup-transfer-part-size", &size)
+	changeMantleControllerArg(PrimaryK8sCluster, "--backup-transfer-part-size", &size)
 }
 
 // ChangeMaxExportDataPVCs sets --max-export-data-pvcs of the mantle-controller
@@ -1298,7 +1311,24 @@ func ChangeMaxExportDataPVCs(count *int) {
 		v := strconv.Itoa(*count)
 		value = &v
 	}
-	changeMantleControllerArg("--max-export-data-pvcs", value)
+	changeMantleControllerArg(PrimaryK8sCluster, "--max-export-data-pvcs", value)
+}
+
+// ChangeJobAffinity sets the CLI argument named flag (e.g.,
+// "--export-job-affinity") of the mantle-controller in the given cluster to the
+// JSON representation of affinity. If affinity is nil, the argument is removed
+// so that no affinity is set to the Jobs. It waits until the rollout completes.
+func ChangeJobAffinity(clusterNo int, flag string, affinity *corev1.Affinity) {
+	GinkgoHelper()
+
+	var value *string
+	if affinity != nil {
+		marshalled, err := json.Marshal(affinity)
+		Expect(err).NotTo(HaveOccurred())
+		v := string(marshalled)
+		value = &v
+	}
+	changeMantleControllerArg(clusterNo, flag, value)
 }
 
 func ChangeComponentJobScript(
