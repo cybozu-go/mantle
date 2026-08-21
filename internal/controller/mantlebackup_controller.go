@@ -639,10 +639,18 @@ func (r *MantleBackupReconciler) syncPriorityLabelFromMBC(
 
 // shouldWaitForHigherPriorityBackup reports whether backup should wait for a higher
 // priority one to finish syncing to the secondary before starting its own sync.
+// A backup that currently holds export data PVCs never waits: see
+// doesMantleBackupHoldExportDataPVC for the reason.
 func (r *MantleBackupReconciler) shouldWaitForHigherPriorityBackup(
 	ctx context.Context, backup *mantlev1.MantleBackup,
 ) (bool, error) {
 	if isHighPriority(backup) {
+		return false, nil
+	}
+
+	if hold, err := r.doesMantleBackupHoldExportDataPVC(ctx, backup); err != nil {
+		return false, err
+	} else if hold {
 		return false, nil
 	}
 
@@ -1680,6 +1688,19 @@ func (r *MantleBackupReconciler) canNewExportDataPVCBeCreated(
 		return true, nil
 	}
 
+	pvcs, err := r.listExportDataPVCs(ctx)
+	if err != nil {
+		return false, reconcile.Failed("failed to count the existing export data PVCs: %w", err)
+	}
+
+	// Count terminating PVCs because their backing PVs can still consume disk space.
+	return len(pvcs) < r.primarySettings.MaxExportDataPVCs, nil
+}
+
+// listExportDataPVCs lists all of the export data PVCs, including terminating ones.
+func (r *MantleBackupReconciler) listExportDataPVCs(
+	ctx context.Context,
+) ([]corev1.PersistentVolumeClaim, error) {
 	var pvcs corev1.PersistentVolumeClaimList
 	if err := r.List(ctx, &pvcs, &client.ListOptions{
 		Namespace: r.managedCephClusterID,
@@ -1688,11 +1709,37 @@ func (r *MantleBackupReconciler) canNewExportDataPVCBeCreated(
 			"app.kubernetes.io/component": labelComponentExportData,
 		}),
 	}); err != nil {
-		return false, reconcile.Failed("failed to list export data PVCs: %w", err)
+		return nil, fmt.Errorf("failed to list export data PVCs: %w", err)
 	}
 
-	// Count terminating PVCs because their backing PVs can still consume disk space.
-	return len(pvcs.Items) < r.primarySettings.MaxExportDataPVCs, nil
+	return pvcs.Items, nil
+}
+
+// doesMantleBackupHoldExportDataPVC reports whether backup currently has any export
+// data PVC. Such a backup must not be blocked by a higher priority one, because its
+// export data PVCs occupy the PVC slots limited by MaxExportDataPVCs and are only
+// released by the reconciliation of the backup itself. Blocking it would keep the
+// slots occupied forever and deadlock every backup, including the higher priority
+// ones waiting for a free slot.
+//
+// Terminating PVCs count as held, just as they do in canNewExportDataPVCBeCreated,
+// because they still occupy a slot until they are actually gone.
+func (r *MantleBackupReconciler) doesMantleBackupHoldExportDataPVC(
+	ctx context.Context, backup *mantlev1.MantleBackup,
+) (bool, error) {
+	pvcs, err := r.listExportDataPVCs(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	prefix := fmt.Sprintf("%s%s-", MantleExportDataPVCPrefix, string(backup.GetUID()))
+	for _, pvc := range pvcs {
+		if strings.HasPrefix(pvc.GetName(), prefix) {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 func (r *MantleBackupReconciler) canNewImportJobBeCreated(ctx context.Context) (bool, *reconcile.Result) {
