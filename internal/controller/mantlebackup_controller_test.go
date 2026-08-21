@@ -1108,6 +1108,31 @@ func highPriorityLabels(overrides map[string]string) map[string]string {
 	return l
 }
 
+// withUID sets uid to backup and returns it, so that resources derived from the UID,
+// such as export data PVCs, differ between MantleBackups.
+func withUID(backup *mantlev1.MantleBackup, uid string) *mantlev1.MantleBackup {
+	backup.SetUID(types.UID(uid))
+
+	return backup
+}
+
+// createExportDataPVCInClient creates the export data PVC of part 0 belonging to the
+// MantleBackup with backupUID in ctrlClient.
+func createExportDataPVCInClient(ctrlClient client.Client, backupUID string) {
+	GinkgoHelper()
+	var owner mantlev1.MantleBackup
+	owner.SetUID(types.UID(backupUID))
+
+	var pvc corev1.PersistentVolumeClaim
+	pvc.SetName(MakeExportDataPVCName(&owner, 0))
+	pvc.SetNamespace(testManagedCephClusterID)
+	pvc.SetLabels(map[string]string{
+		"app.kubernetes.io/name":      labelAppNameValue,
+		"app.kubernetes.io/component": labelComponentExportData,
+	})
+	Expect(ctrlClient.Create(context.Background(), &pvc)).To(Succeed())
+}
+
 var _ = Describe("listHigherPriorityBackups", func() {
 	doTest := func(others []*mantlev1.MantleBackup, wantNames []string) {
 		ctrlClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
@@ -1159,10 +1184,18 @@ var _ = Describe("listHigherPriorityBackups", func() {
 })
 
 var _ = Describe("shouldWaitForHigherPriorityBackup", func() {
-	doTest := func(target *mantlev1.MantleBackup, others []*mantlev1.MantleBackup, wantWait bool) {
+	doTest := func(
+		target *mantlev1.MantleBackup,
+		others []*mantlev1.MantleBackup,
+		exportDataPVCOwnerUIDs []string,
+		wantWait bool,
+	) {
 		ctrlClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
 		for _, other := range others {
 			createMantleBackupInClient(ctrlClient, other)
+		}
+		for _, uid := range exportDataPVCOwnerUIDs {
+			createExportDataPVCInClient(ctrlClient, uid)
 		}
 
 		mbr := NewMantleBackupReconciler(ctrlClient,
@@ -1185,6 +1218,7 @@ var _ = Describe("shouldWaitForHigherPriorityBackup", func() {
 				newMantleBackup("high1", "other-ns", nil, highPriorityLabels(nil), false, 1,
 					metav1.ConditionTrue, metav1.ConditionFalse),
 			},
+			nil,
 			false,
 		),
 		Entry("waits for a higher priority MantleBackup that has not synced yet",
@@ -1194,6 +1228,27 @@ var _ = Describe("shouldWaitForHigherPriorityBackup", func() {
 				newMantleBackup("high1", "other-ns", nil, highPriorityLabels(nil), false, 1,
 					metav1.ConditionTrue, metav1.ConditionFalse),
 			},
+			nil,
+			true,
+		),
+		Entry("does not wait while holding an export data PVC because it must be released first",
+			withUID(newMantleBackup("target", "target-ns", nil, nil, false, 1,
+				metav1.ConditionTrue, metav1.ConditionFalse), "target-uid"),
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("high1", "other-ns", nil, highPriorityLabels(nil), false, 1,
+					metav1.ConditionTrue, metav1.ConditionFalse),
+			},
+			[]string{"target-uid"},
+			false,
+		),
+		Entry("waits while another MantleBackup holds an export data PVC",
+			withUID(newMantleBackup("target", "target-ns", nil, nil, false, 1,
+				metav1.ConditionTrue, metav1.ConditionFalse), "target-uid"),
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("high1", "other-ns", nil, highPriorityLabels(nil), false, 1,
+					metav1.ConditionTrue, metav1.ConditionFalse),
+			},
+			[]string{"other-uid"},
 			true,
 		),
 		Entry("does not wait for an unsynced high priority MantleBackup that targets the same "+
@@ -1206,6 +1261,7 @@ var _ = Describe("shouldWaitForHigherPriorityBackup", func() {
 					map[string]string{labelLocalBackupTargetPVCUID: "shared-pvc-uid", LabelBackupPriority: labelBackupPriorityHigh, labelClusterID: testManagedCephClusterID},
 					false, 1, metav1.ConditionTrue, metav1.ConditionFalse),
 			},
+			nil,
 			false,
 		),
 		Entry("the same-PVC exemption takes priority even when an unrelated unsynced high "+
@@ -1220,6 +1276,7 @@ var _ = Describe("shouldWaitForHigherPriorityBackup", func() {
 				newMantleBackup("high1", "other-ns", nil, highPriorityLabels(nil), false, 1,
 					metav1.ConditionTrue, metav1.ConditionFalse),
 			},
+			nil,
 			false,
 		),
 		Entry("does not wait once the higher priority MantleBackup has synced",
@@ -1229,6 +1286,7 @@ var _ = Describe("shouldWaitForHigherPriorityBackup", func() {
 				newMantleBackup("high1", "other-ns", nil, highPriorityLabels(nil), false, 1,
 					metav1.ConditionTrue, metav1.ConditionTrue),
 			},
+			nil,
 			false,
 		),
 	)
