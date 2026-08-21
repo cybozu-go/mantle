@@ -1728,6 +1728,15 @@ func (r *MantleBackupReconciler) listExportDataPVCs(
 // It always reports false when the export data PVCs aren't throttled, since then
 // there is no PVC slot to release and thus no deadlock to avoid. Letting a backup
 // skip the wait in that case would only weaken the priority ordering.
+//
+// Note that this exemption makes a higher priority backup wait until the backups
+// holding the PVC slots have finished replicating, not just until they release the
+// slot of their current part. This is because startExport deletes the PVC of a
+// completed part and creates the PVC of the next part in the same reconciliation,
+// so an exempted backup takes the freed slot again and stays exempted as long as
+// it has parts left. Every backup still makes progress, and newly created lower
+// priority backups hold no PVC and so keep waiting, which means the slots do end
+// up going to the higher priority ones.
 func (r *MantleBackupReconciler) doesMantleBackupHoldExportDataPVC(
 	ctx context.Context, backup *mantlev1.MantleBackup,
 ) (bool, error) {
