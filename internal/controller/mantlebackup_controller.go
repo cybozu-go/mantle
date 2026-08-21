@@ -639,8 +639,8 @@ func (r *MantleBackupReconciler) syncPriorityLabelFromMBC(
 
 // shouldWaitForHigherPriorityBackup reports whether backup should wait for a higher
 // priority one to finish syncing to the secondary before starting its own sync.
-// A backup that currently holds export data PVCs never waits: see
-// doesMantleBackupHoldExportDataPVC for the reason.
+// A backup that currently holds export data PVCs never waits while the export data
+// PVCs are throttled: see doesMantleBackupHoldExportDataPVC for the reason.
 func (r *MantleBackupReconciler) shouldWaitForHigherPriorityBackup(
 	ctx context.Context, backup *mantlev1.MantleBackup,
 ) (bool, error) {
@@ -1724,9 +1724,17 @@ func (r *MantleBackupReconciler) listExportDataPVCs(
 //
 // Terminating PVCs count as held, just as they do in canNewExportDataPVCBeCreated,
 // because they still occupy a slot until they are actually gone.
+//
+// It always reports false when the export data PVCs aren't throttled, since then
+// there is no PVC slot to release and thus no deadlock to avoid. Letting a backup
+// skip the wait in that case would only weaken the priority ordering.
 func (r *MantleBackupReconciler) doesMantleBackupHoldExportDataPVC(
 	ctx context.Context, backup *mantlev1.MantleBackup,
 ) (bool, error) {
+	if r.primarySettings == nil || r.primarySettings.MaxExportDataPVCs == 0 {
+		return false, nil
+	}
+
 	pvcs, err := r.listExportDataPVCs(ctx)
 	if err != nil {
 		return false, err

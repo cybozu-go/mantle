@@ -1188,6 +1188,7 @@ var _ = Describe("shouldWaitForHigherPriorityBackup", func() {
 		target *mantlev1.MantleBackup,
 		others []*mantlev1.MantleBackup,
 		exportDataPVCOwnerUIDs []string,
+		primarySettings *PrimarySettings,
 		wantWait bool,
 	) {
 		ctrlClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
@@ -1199,7 +1200,7 @@ var _ = Describe("shouldWaitForHigherPriorityBackup", func() {
 		}
 
 		mbr := NewMantleBackupReconciler(ctrlClient,
-			ctrlClient.Scheme(), testManagedCephClusterID, RolePrimary, nil, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"))
+			ctrlClient.Scheme(), testManagedCephClusterID, RolePrimary, primarySettings, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"))
 
 		wait, err := mbr.shouldWaitForHigherPriorityBackup(context.Background(), target)
 		Expect(err).NotTo(HaveOccurred())
@@ -1219,6 +1220,7 @@ var _ = Describe("shouldWaitForHigherPriorityBackup", func() {
 					metav1.ConditionTrue, metav1.ConditionFalse),
 			},
 			nil,
+			nil,
 			false,
 		),
 		Entry("waits for a higher priority MantleBackup that has not synced yet",
@@ -1228,6 +1230,7 @@ var _ = Describe("shouldWaitForHigherPriorityBackup", func() {
 				newMantleBackup("high1", "other-ns", nil, highPriorityLabels(nil), false, 1,
 					metav1.ConditionTrue, metav1.ConditionFalse),
 			},
+			nil,
 			nil,
 			true,
 		),
@@ -1239,6 +1242,7 @@ var _ = Describe("shouldWaitForHigherPriorityBackup", func() {
 					metav1.ConditionTrue, metav1.ConditionFalse),
 			},
 			[]string{"target-uid"},
+			&PrimarySettings{MaxExportDataPVCs: 1},
 			false,
 		),
 		Entry("waits while another MantleBackup holds an export data PVC",
@@ -1249,6 +1253,30 @@ var _ = Describe("shouldWaitForHigherPriorityBackup", func() {
 					metav1.ConditionTrue, metav1.ConditionFalse),
 			},
 			[]string{"other-uid"},
+			&PrimarySettings{MaxExportDataPVCs: 1},
+			true,
+		),
+		Entry("waits while holding an export data PVC when the PVC throttling is disabled, "+
+			"because no PVC slot has to be released",
+			withUID(newMantleBackup("target", "target-ns", nil, nil, false, 1,
+				metav1.ConditionTrue, metav1.ConditionFalse), "unthrottled-uid"),
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("high1", "other-ns", nil, highPriorityLabels(nil), false, 1,
+					metav1.ConditionTrue, metav1.ConditionFalse),
+			},
+			[]string{"unthrottled-uid"},
+			&PrimarySettings{MaxExportDataPVCs: 0},
+			true,
+		),
+		Entry("waits while holding an export data PVC when there are no primary settings",
+			withUID(newMantleBackup("target", "target-ns", nil, nil, false, 1,
+				metav1.ConditionTrue, metav1.ConditionFalse), "no-settings-uid"),
+			[]*mantlev1.MantleBackup{
+				newMantleBackup("high1", "other-ns", nil, highPriorityLabels(nil), false, 1,
+					metav1.ConditionTrue, metav1.ConditionFalse),
+			},
+			[]string{"no-settings-uid"},
+			nil,
 			true,
 		),
 		Entry("does not wait for an unsynced high priority MantleBackup that targets the same "+
@@ -1261,6 +1289,7 @@ var _ = Describe("shouldWaitForHigherPriorityBackup", func() {
 					map[string]string{labelLocalBackupTargetPVCUID: "shared-pvc-uid", LabelBackupPriority: labelBackupPriorityHigh, labelClusterID: testManagedCephClusterID},
 					false, 1, metav1.ConditionTrue, metav1.ConditionFalse),
 			},
+			nil,
 			nil,
 			false,
 		),
@@ -1277,6 +1306,7 @@ var _ = Describe("shouldWaitForHigherPriorityBackup", func() {
 					metav1.ConditionTrue, metav1.ConditionFalse),
 			},
 			nil,
+			nil,
 			false,
 		),
 		Entry("does not wait once the higher priority MantleBackup has synced",
@@ -1286,6 +1316,7 @@ var _ = Describe("shouldWaitForHigherPriorityBackup", func() {
 				newMantleBackup("high1", "other-ns", nil, highPriorityLabels(nil), false, 1,
 					metav1.ConditionTrue, metav1.ConditionTrue),
 			},
+			nil,
 			nil,
 			false,
 		),
