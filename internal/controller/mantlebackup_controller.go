@@ -281,6 +281,8 @@ func (r *MantleBackupReconciler) checkPVCBound(ctx context.Context, pvc *corev1.
 	logger := log.FromContext(ctx)
 	if pvc.Status.Phase != corev1.ClaimBound {
 		if pvc.Status.Phase == corev1.ClaimPending {
+			logger.Info("waiting for the PVC to be bound", "pvc", pvc.GetName())
+
 			return reconcile.Requeue()
 		} else {
 			logger.Info("PVC phase is neither bound nor pending", "status.phase", pvc.Status.Phase)
@@ -309,6 +311,8 @@ func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *
 	var pvc corev1.PersistentVolumeClaim
 	if err := r.Get(ctx, types.NamespacedName{Namespace: pvcNamespace, Name: pvcName}, &pvc); err != nil {
 		if aerrors.IsNotFound(err) {
+			logger.Info("waiting for the PVC to be created", "pvc", pvcName)
+
 			return nil, reconcile.Requeue()
 		}
 
@@ -477,6 +481,8 @@ func (r *MantleBackupReconciler) checkManagedBackup(ctx context.Context, backup 
 	var pvc corev1.PersistentVolumeClaim
 	if err := r.Get(ctx, types.NamespacedName{Namespace: backup.Namespace, Name: backup.Spec.PVC}, &pvc); err != nil {
 		if aerrors.IsNotFound(err) {
+			log.FromContext(ctx).Info("waiting for the PVC specified in the MantleBackup to be created", "pvc", backup.Spec.PVC)
+
 			return reconcile.Requeue()
 		}
 
@@ -817,6 +823,7 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 		if result := r.verify(ctx, backup); result.ShouldReturn() {
 			return result.WrapIfError("failed to verify backup")
 		}
+		logger.Info("waiting for the backup to be verified")
 
 		return reconcile.Requeue()
 	}
@@ -1101,6 +1108,11 @@ func (r *MantleBackupReconciler) verify(
 	); result.ShouldReturn() {
 		return result.WrapIfError("failed to update MantleBackup condition")
 	}
+	if jobSucceeded {
+		logger.Info("succeeded to verify a backup")
+	} else {
+		logger.Info("the backup did not pass verification", "job", MakeVerifyJobName(backup))
+	}
 
 	return nil
 }
@@ -1281,6 +1293,7 @@ func (r *MantleBackupReconciler) finalizeSecondary(
 
 		return reconcile.Failed("failed to remove finalizer: %w", err)
 	}
+	logger.Info("succeeded to delete a backup")
 
 	return nil
 }
@@ -1607,6 +1620,7 @@ func (r *MantleBackupReconciler) handleCompletedJobsOfComponent(
 			}); err != nil {
 				return -1, reconcile.Failed("failed to delete Job: %s: %w", job.job.GetName(), err)
 			}
+			log.FromContext(ctx).Info("deleted the completed Job", "job", job.job.GetName(), "component", componentLabel)
 		}
 	}
 
@@ -2621,18 +2635,25 @@ func (r *MantleBackupReconciler) startImport(
 		"pvc", fmt.Sprintf("%s/%s", target.pvc.GetNamespace(), target.pvc.GetName()),
 		"pool", target.poolName,
 		"image", target.imageName,
+		"syncMode", backup.GetAnnotations()[annotSyncMode],
+		"diffFrom", backup.GetAnnotations()[annotDiffFrom],
+		"remoteUID", backup.GetAnnotations()[annotRemoteUID],
 	)
 
 	if !r.doesMantleBackupHaveSyncModeAnnot(backup) {
 		// SetSynchronizing is not called yet or the cache is stale.
 		// Note that we should not return a successful reconcile.Result here because we can't proceed to secondaryCleanup.
+		logger.Info("waiting for the primary mantle-controller to start synchronization", "annotation", annotSyncMode)
+
 		return reconcile.Requeue()
 	}
 
 	if uploaded, result := r.isExportDataAlreadyUploaded(ctx, backup, 0); result.ShouldReturn() {
 		return result.WrapIfError("failed to check if export data part 0 is already uploaded")
 	} else if !uploaded {
-		logger.Info("waiting for the export data to be uploaded", "partNum", 0)
+		logger.Info("waiting for the export data to be uploaded", "partNum", 0,
+			"objectName", MakeObjectNameOfExportedData(backup.GetName(), backup.GetAnnotations()[annotRemoteUID], 0,
+				backup.Spec.TransferCompression))
 
 		return reconcile.Requeue()
 	}
@@ -2644,6 +2665,9 @@ func (r *MantleBackupReconciler) startImport(
 
 	// Requeue if the PV is smaller than the PVC. (This may be the case if pvc-autoresizer is used.)
 	if isPVSmallerThanPVC(target.pv, target.pvc) {
+		logger.Info("waiting for the PV to be expanded to the size the PVC requests",
+			"pvSize", target.pv.Spec.Capacity.Storage().String(), "pvcSize", target.pvc.Spec.Resources.Requests.Storage().String())
+
 		return reconcile.Requeue()
 	}
 
@@ -2752,6 +2776,8 @@ func (r *MantleBackupReconciler) prepareObjectStorageClient(ctx context.Context)
 	if err != nil {
 		return reconcile.Failed("failed to create object storage client: %w", err)
 	}
+	log.FromContext(ctx).Info("created the object storage client",
+		"endpoint", r.objectStorageSettings.Endpoint, "bucket", r.objectStorageSettings.BucketName)
 
 	return nil
 }
@@ -2808,6 +2834,7 @@ func (r *MantleBackupReconciler) updateStatusManifests(
 	}); err != nil {
 		return reconcile.Failed("failed to update status manifests: %w", err)
 	}
+	log.FromContext(ctx).Info("stored the PV and PVC manifests in the status")
 
 	return nil
 }
@@ -2926,6 +2953,7 @@ func (r *MantleBackupReconciler) reconcileZeroOutJob(
 	if completed {
 		return nil
 	}
+	log.FromContext(ctx).Info("waiting for the zeroout Job to complete", "job", MakeZeroOutJobName(backup))
 
 	return reconcile.Requeue()
 }
@@ -3009,6 +3037,7 @@ func (r *MantleBackupReconciler) createStaticPVIfNotExists(
 
 		return reconcile.Failed("failed to create PV %s: %w", newPvName, err)
 	}
+	log.FromContext(ctx).Info("created a static PV", "pv", newPvName, "volume", volume)
 
 	return nil
 }
@@ -3057,6 +3086,7 @@ func (r *MantleBackupReconciler) createStaticPVCIfNotExists(
 
 		return reconcile.Failed("failed to create PVC %s: %w", pvcName, err)
 	}
+	log.FromContext(ctx).Info("created a static PVC", "pvc", pvcName, "pv", pvName)
 
 	return nil
 }
@@ -3298,6 +3328,8 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 		return result.WrapIfError("failed to calculate num of export data parts")
 	}
 	if partNum == finalPartNum {
+		logger.Info("all import Jobs have completed", "numParts", finalPartNum)
+
 		return nil
 	}
 
@@ -3307,7 +3339,9 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 		return result.WrapIfError("failed to check if part of export data is not already uploaded: %d", partNum)
 	}
 	if !uploaded {
-		logger.Info("export data for the next part is not yet uploaded", "partNum", partNum)
+		logger.Info("export data for the next part is not yet uploaded", "partNum", partNum, "numParts", finalPartNum,
+			"objectName", MakeObjectNameOfExportedData(backup.GetName(), backup.GetAnnotations()[annotRemoteUID], partNum,
+				backup.Spec.TransferCompression))
 
 		return reconcile.Requeue()
 	}
@@ -3318,6 +3352,8 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 		return result.WrapIfError("failed to check if a new import Job can be created")
 	}
 	if !ok {
+		logger.Info("waiting for a free import Job slot", "maxImportJobs", r.secondarySettings.MaxImportJobs)
+
 		return reconcile.Requeue()
 	}
 
@@ -3325,6 +3361,7 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 	if result := r.createOrUpdateImportJob(ctx, backup, snapshotTarget, partNum); result.ShouldReturn() {
 		return result.WrapIfError("failed to create or update import Job")
 	}
+	logger.Info("waiting for the import Job to complete", "job", MakeImportJobName(backup, partNum), "numParts", finalPartNum)
 
 	return reconcile.Requeue()
 }
@@ -3581,6 +3618,7 @@ func (r *MantleBackupReconciler) markSecondarySnapshotCaptured(
 	}); err != nil {
 		return reconcile.Failed("failed to update MantleBackup status: %w", err)
 	}
+	log.FromContext(ctx).Info("succeeded to import a backup", "snapID", snapshot.Id)
 
 	return nil
 }
