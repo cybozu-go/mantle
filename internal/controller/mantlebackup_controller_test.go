@@ -2099,8 +2099,25 @@ var _ = Describe("SetSynchronizing", func() {
 	)
 })
 
-func createMantleBackupUsingDummyPVC(ctx context.Context, name, ns string) (*mantlev1.MantleBackup, error) {
+type optionDummyMB func(*mantlev1.MantleBackup)
+
+func dummyMBWithLabels(labels map[string]string) optionDummyMB {
+	return func(backup *mantlev1.MantleBackup) {
+		maps.Copy(backup.Labels, labels)
+	}
+}
+
+func createMantleBackupUsingDummyPVC(
+	ctx context.Context, name, ns string, opts ...optionDummyMB,
+) (*mantlev1.MantleBackup, error) {
+	pvcUID := uuid.NewUUID()
+
 	pvc := corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      dummyPVCName,
+			Namespace: ns,
+			UID:       pvcUID,
+		},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			Resources: corev1.VolumeResourceRequirements{
 				Requests: map[corev1.ResourceName]resource.Quantity{
@@ -2135,6 +2152,9 @@ func createMantleBackupUsingDummyPVC(ctx context.Context, name, ns string) (*man
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: ns,
+			Labels: map[string]string{
+				labelLocalBackupTargetPVCUID: string(pvcUID),
+			},
 		},
 		Spec: mantlev1.MantleBackupSpec{
 			PVC:    dummyPVCName,
@@ -2142,6 +2162,9 @@ func createMantleBackupUsingDummyPVC(ctx context.Context, name, ns string) (*man
 		},
 	}
 	controllerutil.AddFinalizer(target, MantleBackupFinalizerName)
+	for _, opt := range opts {
+		opt(target)
+	}
 	if err := k8sClient.Create(ctx, target); err != nil {
 		return nil, err
 	}
@@ -2828,6 +2851,126 @@ var _ = Describe("export and upload", func() {
 			Expect(backup.Status.TransferPartSize).NotTo(BeNil())
 			Expect(backup.Status.TransferPartSize.Equal(origSize)).To(BeTrue())
 		})
+	})
+
+	Context("priority gate and export data PVC throttling", func() {
+		// A regression test for https://github.com/cybozu-go/mantle/pull/341.
+		It("should not deadlock when a low priority backup holds the only export data PVC slot",
+			func(ctx SpecContext) {
+				// Let only the export data PVC limit throttle the backups.
+				mbr.primarySettings.MaxExportJobs = 0
+				mbr.primarySettings.MaxExportDataPVCs = 1
+				// Make every backup single-part, so that the export data PVC of part 0
+				// is the last resource its backup holds. NOTE: this must be set before
+				// the snapshots are created below.
+				mbr.backupTransferPartSize =
+					*resource.NewQuantity(int64(testutil.FakeRBDSnapshotSize), resource.BinarySI)
+
+				nameByPVCUID := map[string]string{}
+
+				createBackup := func(name string, highPriority bool) *mantlev1.MantleBackup {
+					GinkgoHelper()
+
+					newLabels := map[string]string{labelClusterID: nsController}
+					if highPriority {
+						newLabels[LabelBackupPriority] = labelBackupPriorityHigh
+					}
+					backup, err := createMantleBackupUsingDummyPVC(
+						ctx, name, ns, dummyMBWithLabels(newLabels))
+					Expect(err).NotTo(HaveOccurred())
+
+					pvcUID := backup.GetLabels()[labelLocalBackupTargetPVCUID]
+					Expect(pvcUID).NotTo(BeEmpty())
+
+					Expect(createSnapshotForMantleBackupUsingDummyPVC(
+						ctx, mbr.ceph, backup, mbr.backupTransferPartSize)).To(Succeed())
+
+					nameByPVCUID[pvcUID] = name
+
+					return backup
+				}
+
+				runReplicate := func(target *mantlev1.MantleBackup) {
+					GinkgoHelper()
+
+					result := mbr.replicate(ctx, target)
+					Expect(result).To(Equal(reconcile.Requeue()))
+				}
+
+				numOfExportDataPVCs := func() int {
+					GinkgoHelper()
+
+					num, err := getNumOfExportDataPVCs(ctx, nsController)
+					Expect(err).NotTo(HaveOccurred())
+
+					return num
+				}
+
+				grpcClient.EXPECT().SetSynchronizing(gomock.Any(), gomock.Any()).AnyTimes().
+					Return(&proto.SetSynchronizingResponse{}, nil)
+				grpcClient.EXPECT().CreateOrUpdatePVC(gomock.Any(), gomock.Any()).AnyTimes().
+					DoAndReturn(func(_ context.Context, req *proto.CreateOrUpdatePVCRequest,
+						_ ...grpc.CallOption) (*proto.CreateOrUpdatePVCResponse, error) {
+						var pvc corev1.PersistentVolumeClaim
+						Expect(json.Unmarshal(req.GetPvc(), &pvc)).To(Succeed())
+
+						return &proto.CreateOrUpdatePVCResponse{
+							Uid: pvc.GetAnnotations()[annotRemoteUID],
+						}, nil
+					})
+				grpcClient.EXPECT().CreateMantleBackup(gomock.Any(), gomock.Any()).AnyTimes().
+					Return(&proto.CreateMantleBackupResponse{}, nil)
+				// The secondary MantleBackup of the same name must exist and must not
+				// have captured its snapshot yet.
+				grpcClient.EXPECT().ListMantleBackup(gomock.Any(), gomock.Any()).AnyTimes().
+					DoAndReturn(func(_ context.Context, req *proto.ListMantleBackupRequest,
+						_ ...grpc.CallOption) (*proto.ListMantleBackupResponse, error) {
+						name, ok := nameByPVCUID[req.GetPvcUID()]
+						Expect(ok).To(BeTrue())
+						data, err := json.Marshal([]*mantlev1.MantleBackup{
+							newMantleBackup(name, req.GetNamespace(), nil, nil, false, 1,
+								metav1.ConditionFalse, metav1.ConditionFalse),
+						})
+						Expect(err).NotTo(HaveOccurred())
+
+						return &proto.ListMantleBackupResponse{MantleBackupList: data}, nil
+					})
+
+				By("(1) filling the only export data PVC slot with a low priority backup")
+				low := createBackup("low-priority", false)
+				runReplicate(low) // creates the export data PVC and export Job of part 0
+				completeJob(ctx, MakeExportJobName(low, 0))
+				runReplicate(low) // creates the upload Job of part 0
+				// Complete the upload Job WITHOUT reconciling low afterwards: the export
+				// data PVC of part 0 is not released yet and keeps occupying the only slot.
+				completeJob(ctx, MakeUploadJobName(low, 0))
+				pvc, err := getExportDataPVC(ctx, nsController, low, 0)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(pvc.GetDeletionTimestamp().IsZero()).To(BeTrue())
+				Expect(numOfExportDataPVCs()).To(Equal(1))
+
+				By("(2) a high priority backup can't create its export data PVC")
+				high := createBackup("high-priority", true)
+				runReplicate(high)
+				_, err = getExportDataPVC(ctx, nsController, high, 0)
+				Expect(aerrors.IsNotFound(err)).To(BeTrue())
+				Expect(numOfExportDataPVCs()).To(Equal(1))
+
+				By("(3) the low priority backup releases its export data PVC")
+				// Before the fix, the low priority backup waited for the unsynced high
+				// priority one and returned a slow requeue, so it never released its
+				// export data PVC and no backup could make progress, whatever its
+				// priority was: a deadlock.
+				runReplicate(low)
+				waitPVCDeletedAndRemoveFinalizers(ctx, nsController, low, 0)
+
+				By("(4) the high priority backup takes the freed export data PVC slot")
+				runReplicate(high)
+				pvc, err = getExportDataPVC(ctx, nsController, high, 0)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(pvc.GetDeletionTimestamp().IsZero()).To(BeTrue())
+				Expect(numOfExportDataPVCs()).To(Equal(1))
+			})
 	})
 
 	Context("upload", func() {
