@@ -2667,7 +2667,7 @@ func (r *MantleBackupReconciler) startImport(
 		return reconcile.SlowRequeue()
 	}
 
-	succeed, result := r.lockVolume(target.poolName, target.imageName, string(backup.GetUID()))
+	succeed, result := r.lockVolume(ctx, target.poolName, target.imageName, string(backup.GetUID()))
 	if result.ShouldReturn() {
 		return result.WrapIfError("failed to lock the volume")
 	}
@@ -2685,7 +2685,7 @@ func (r *MantleBackupReconciler) startImport(
 		return result.WrapIfError("failed to reconcile import Job")
 	}
 
-	if result := r.unlockVolume(target.poolName, target.imageName, string(backup.GetUID())); result.ShouldReturn() {
+	if result := r.unlockVolume(ctx, target.poolName, target.imageName, string(backup.GetUID())); result.ShouldReturn() {
 		return result.WrapIfError("failed to unlock the volume")
 	}
 
@@ -2824,6 +2824,7 @@ func (r *MantleBackupReconciler) updateStatusManifests(
 // lockVolume adds a lock to the specified RBD volume if the lock is not already held.
 // It returns true if the lock is held by this caller, false if another lock is held.
 func (r *MantleBackupReconciler) lockVolume(
+	ctx context.Context,
 	poolName, imageName, lockID string,
 ) (bool, *reconcile.Result) {
 	// Add a lock.
@@ -2853,12 +2854,15 @@ func (r *MantleBackupReconciler) lockVolume(
 	}
 
 	// Locked
+	log.FromContext(ctx).Info("acquired the volume lock", "pool", poolName, "image", imageName, "lockID", lockID)
+
 	return true, nil
 }
 
 // unlockVolume removes the specified lock from the RBD volume if the lock is held.
 // No action is taken if the lock is not found.
 func (r *MantleBackupReconciler) unlockVolume(
+	ctx context.Context,
 	poolName, imageName, lockID string,
 ) *reconcile.Result {
 	// List up locks to check if the lock is held.
@@ -2877,6 +2881,7 @@ func (r *MantleBackupReconciler) unlockVolume(
 			if err := r.ceph.RBDLockRm(poolName, imageName, lock); err != nil {
 				return reconcile.Failed("failed to remove the lock from the volume %s/%s: %w", poolName, imageName, err)
 			}
+			log.FromContext(ctx).Info("released the volume lock", "pool", poolName, "image", imageName, "lockID", lockID)
 
 			return nil
 		}
