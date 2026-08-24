@@ -315,7 +315,7 @@ func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *
 			return nil, reconcile.Requeue()
 		}
 
-		logger.Error(err, "failed to get PVC", "namespace", pvcNamespace, "name", pvcName)
+		logger.Error(err, "failed to get PVC", "pvc", pvcName)
 
 		return nil, reconcile.Failed("failed to get PVC(%s/%s): %w", pvcNamespace, pvcName, err)
 	}
@@ -332,7 +332,7 @@ func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *
 	pvName := pvc.Spec.VolumeName
 	var pv corev1.PersistentVolume
 	if err := r.Get(ctx, types.NamespacedName{Name: pvName}, &pv); err != nil {
-		logger.Error(err, "failed to get PV", "name", pvName)
+		logger.Error(err, "failed to get PV", "pv", pvName)
 
 		return nil, reconcile.Failed("failed to get PV: %w", err)
 	}
@@ -433,7 +433,7 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if result := r.checkManagedBackup(ctx, &backup); result.ShouldReturn() {
 		return result.ToCtrlResult()
 	}
-	logger.Info("starting reconciliation", "namespace", backup.Namespace, "name", backup.Name, "backupUID", string(backup.GetUID()))
+	logger.Info("starting reconciliation", "backupUID", string(backup.GetUID()))
 
 	var result *reconcile.Result
 
