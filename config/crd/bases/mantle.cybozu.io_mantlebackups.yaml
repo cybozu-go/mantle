@@ -56,10 +56,22 @@ spec:
               pvc:
                 description: '''pvc'' specifies backup target PVC'
                 type: string
+              transferCompression:
+                description: '''transferCompression'' is an experimental field that
+                  specifies the compression format used for data transferred from
+                  the primary to the secondary. This field may be removed or changed
+                  in a future release.'
+                pattern: ^(|zstd)$
+                type: string
             required:
             - expire
             - pvc
             type: object
+            x-kubernetes-validations:
+            - message: spec.transferCompression is immutable
+              rule: '(has(self.transferCompression) ? self.transferCompression : "")
+                == (has(oldSelf.transferCompression) ? oldSelf.transferCompression
+                : "")'
           status:
             description: MantleBackupStatus defines the observed state of MantleBackup
             properties:

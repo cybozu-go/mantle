@@ -57,22 +57,23 @@ EOF
 write_endpoints
 
 # export diff
-if [ -e "/mantle/export-${PART_NUM}.bin" ]; then
+export_file="/mantle/export-${PART_NUM}.bin"
+if [ "${TRANSFER_COMPRESSION}" = "zstd" ]; then
+  export_file="${export_file}.zst"
+fi
+if [ -e "${export_file}" ]; then
     exit
 fi
-# The export-diff output is first saved to a temporary file and then renamed to the final file used for
-# uploading. This makes it easy to detect whether the job was interrupted during export-diff when the
-# export job is restarted after an interruption.
-rm -f /mantle/tmp.bin
-if [ -z "${FROM_SNAP_NAME}" ]; then
+export_diff() {
+  if [ -z "${FROM_SNAP_NAME}" ]; then
     rbd export-diff \
       -p ${POOL_NAME} \
       --read-offset $((${PART_NUM} * ${TRANSFER_PART_SIZE_IN_BYTES})) \
       --read-length ${TRANSFER_PART_SIZE_IN_BYTES} \
       --mid-snap-prefix ${EXPORT_TARGET_MANTLE_BACKUP_UID} \
       ${SRC_IMAGE_NAME}@${SRC_SNAP_NAME} \
-      /mantle/tmp.bin
-else
+      -
+  else
     rbd export-diff \
       -p ${POOL_NAME} \
       --read-offset $((${PART_NUM} * ${TRANSFER_PART_SIZE_IN_BYTES})) \
@@ -80,6 +81,16 @@ else
       --from-snap ${FROM_SNAP_NAME} \
       --mid-snap-prefix ${EXPORT_TARGET_MANTLE_BACKUP_UID} \
       ${SRC_IMAGE_NAME}@${SRC_SNAP_NAME} \
-      /mantle/tmp.bin
+      -
+  fi
+}
+# The export-diff output is first saved to a temporary file and then renamed to the final file used for
+# uploading. This makes it easy to detect whether the job was interrupted during export when the export
+# job is restarted after an interruption.
+rm -f /mantle/tmp.bin
+if [ "${TRANSFER_COMPRESSION}" = "zstd" ]; then
+  export_diff | zstd -q -c > /mantle/tmp.bin
+else
+  export_diff > /mantle/tmp.bin
 fi
-mv /mantle/tmp.bin /mantle/export-${PART_NUM}.bin
+mv /mantle/tmp.bin "${export_file}"

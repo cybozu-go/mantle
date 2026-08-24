@@ -60,9 +60,17 @@ write_endpoints
 rbd_import() {
     echo "start import"
     if [ "${CERT_FILE}" != "" ]; then
-        s5cmd --endpoint-url "${OBJECT_STORAGE_ENDPOINT}" --credentials-file ${CERT_FILE} cat "s3://${BUCKET_NAME}/${OBJ_NAME}" | rbd import-diff -p ${POOL_NAME} - ${DST_IMAGE_NAME}
+        if [ "${TRANSFER_COMPRESSION}" = "zstd" ]; then
+            s5cmd --endpoint-url "${OBJECT_STORAGE_ENDPOINT}" --credentials-file ${CERT_FILE} cat "s3://${BUCKET_NAME}/${OBJ_NAME}" | zstd -d -q -c | rbd import-diff -p ${POOL_NAME} - ${DST_IMAGE_NAME}
+        else
+            s5cmd --endpoint-url "${OBJECT_STORAGE_ENDPOINT}" --credentials-file ${CERT_FILE} cat "s3://${BUCKET_NAME}/${OBJ_NAME}" | rbd import-diff -p ${POOL_NAME} - ${DST_IMAGE_NAME}
+        fi
     else
-        s5cmd --endpoint-url "${OBJECT_STORAGE_ENDPOINT}" cat "s3://${BUCKET_NAME}/${OBJ_NAME}" | rbd import-diff -p ${POOL_NAME} - ${DST_IMAGE_NAME}
+        if [ "${TRANSFER_COMPRESSION}" = "zstd" ]; then
+            s5cmd --endpoint-url "${OBJECT_STORAGE_ENDPOINT}" cat "s3://${BUCKET_NAME}/${OBJ_NAME}" | zstd -d -q -c | rbd import-diff -p ${POOL_NAME} - ${DST_IMAGE_NAME}
+        else
+            s5cmd --endpoint-url "${OBJECT_STORAGE_ENDPOINT}" cat "s3://${BUCKET_NAME}/${OBJ_NAME}" | rbd import-diff -p ${POOL_NAME} - ${DST_IMAGE_NAME}
+        fi
     fi
     echo "finish import"
 }
