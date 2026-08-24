@@ -103,7 +103,7 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, restore *mantlev1
 	var backup mantlev1.MantleBackup
 	err := r.client.Get(ctx, client.ObjectKey{Name: restore.Spec.Backup, Namespace: restore.Namespace}, &backup)
 	if err != nil {
-		logger.Error(err, "failed to get MantleBackup", "name", restore.Spec.Backup, "namespace", restore.Namespace)
+		logger.Error(err, "failed to get MantleBackup", "backup", restore.Spec.Backup)
 
 		return ctrl.Result{}, err
 	}
@@ -111,7 +111,7 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, restore *mantlev1
 	var pvc corev1.PersistentVolumeClaim
 	err = json.Unmarshal([]byte(backup.Status.PVCManifest), &pvc)
 	if err != nil {
-		logger.Error(err, "failed to unmarshal PVC manifest", "backup", backup.Name, "namespace", backup.Namespace)
+		logger.Error(err, "failed to unmarshal PVC manifest", "backup", backup.Name)
 
 		return ctrl.Result{}, err
 	}
@@ -119,12 +119,12 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, restore *mantlev1
 	// check if the PVC is managed by the target Ceph cluster
 	clusterID, err := getCephClusterIDFromPVC(ctx, r.client, &pvc)
 	if err != nil {
-		logger.Error(err, "failed to get Ceph cluster ID", "backup", backup.Name, "namespace", backup.Namespace)
+		logger.Error(err, "failed to get Ceph cluster ID", "backup", backup.Name)
 
 		return ctrl.Result{}, err
 	}
 	if clusterID != r.managedCephClusterID {
-		logger.Info("backup is not managed by the target Ceph cluster", "backup", backup.Name, "namespace", backup.Namespace, "clusterID", clusterID)
+		logger.Info("backup is not managed by the target Ceph cluster", "backup", backup.Name, "clusterID", clusterID)
 
 		return ctrl.Result{}, nil
 	}
@@ -149,21 +149,21 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, restore *mantlev1
 
 	// check if the backup is SnapshotCaptured
 	if !backup.IsSnapshotCaptured() {
-		logger.Info("snapshot is not captured", "backup", backup.Name, "namespace", backup.Namespace)
+		logger.Info("snapshot is not captured", "backup", backup.Name)
 
 		return requeueReconciliation(), nil
 	}
 
 	// check if the backup is verified or verification is skipped
 	if skip, ok := backup.GetAnnotations()[mbAnnotationSkipVerifyKey]; !backup.IsVerifiedTrue() && (!ok || skip != mbAnnotationSkipVerifyValue) {
-		logger.Info("verification is not completed", "backup", backup.Name, "namespace", backup.Namespace)
+		logger.Info("verification is not completed", "backup", backup.Name)
 
 		return requeueReconciliation(), nil
 	}
 
 	// create a clone image from the backup
 	if err := r.cloneImageFromBackup(ctx, restore, &backup); err != nil {
-		logger.Error(err, "failed to clone image from backup", "backup", backup.Name, "namespace", backup.Namespace)
+		logger.Error(err, "failed to clone image from backup", "backup", backup.Name)
 
 		return ctrl.Result{}, err
 	}
