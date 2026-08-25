@@ -431,10 +431,13 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
+	logger = logger.WithValues("backupUID", string(backup.GetUID()))
+	ctx = log.IntoContext(ctx, logger)
+
 	if result := r.checkManagedBackup(ctx, &backup); result.ShouldReturn() {
 		return result.ToCtrlResult()
 	}
-	logger.Info("starting reconciliation", "backupUID", string(backup.GetUID()))
+	logger.Info("starting reconciliation")
 
 	var result *reconcile.Result
 
@@ -1030,7 +1033,7 @@ func (r *MantleBackupReconciler) verify(
 	backup *mantlev1.MantleBackup,
 ) *reconcile.Result {
 	logger := log.FromContext(ctx)
-	logger.Info("starting verification reconciliation", "backupUID", string(backup.GetUID()))
+	logger.Info("starting verification reconciliation")
 
 	var storedPVC corev1.PersistentVolumeClaim
 	if err := json.Unmarshal([]byte(backup.Status.PVCManifest), &storedPVC); err != nil {
@@ -2628,13 +2631,11 @@ func (r *MantleBackupReconciler) startImport(
 	backup *mantlev1.MantleBackup,
 	target *snapshotTarget,
 ) *reconcile.Result {
-	logger := log.FromContext(ctx)
+	logger := log.FromContext(ctx).WithValues("pool", target.poolName, "image", target.imageName)
+	ctx = log.IntoContext(ctx, logger)
 	logger.Info("starting import reconciliation",
-		"backupUID", string(backup.GetUID()),
 		"pv", target.pv.GetName(),
 		"pvc", fmt.Sprintf("%s/%s", target.pvc.GetNamespace(), target.pvc.GetName()),
-		"pool", target.poolName,
-		"image", target.imageName,
 		"syncMode", backup.GetAnnotations()[annotSyncMode],
 		"diffFrom", backup.GetAnnotations()[annotDiffFrom],
 		"remoteUID", backup.GetAnnotations()[annotRemoteUID],
@@ -2872,7 +2873,7 @@ func (r *MantleBackupReconciler) lockVolume(
 	}
 
 	// Locked
-	log.FromContext(ctx).Info("acquired the volume lock", "pool", poolName, "image", imageName, "lockID", lockID)
+	log.FromContext(ctx).Info("acquired the volume lock", "lockID", lockID)
 
 	return true, nil
 }
@@ -2899,7 +2900,7 @@ func (r *MantleBackupReconciler) unlockVolume(
 			if err := r.ceph.RBDLockRm(poolName, imageName, lock); err != nil {
 				return reconcile.Failed("failed to remove the lock from the volume %s/%s: %w", poolName, imageName, err)
 			}
-			log.FromContext(ctx).Info("released the volume lock", "pool", poolName, "image", imageName, "lockID", lockID)
+			log.FromContext(ctx).Info("released the volume lock", "lockID", lockID)
 
 			return nil
 		}
@@ -3316,14 +3317,7 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 	largestCompletedPartNum int,
 ) *reconcile.Result {
 	logger := log.FromContext(ctx)
-	logger.Info("reconciling import job",
-		"backupUID", string(backup.GetUID()),
-		"pv", snapshotTarget.pv.GetName(),
-		"pvc", fmt.Sprintf("%s/%s", snapshotTarget.pvc.GetNamespace(), snapshotTarget.pvc.GetName()),
-		"pool", snapshotTarget.poolName,
-		"image", snapshotTarget.imageName,
-		"largestCompletedPartNum", largestCompletedPartNum,
-	)
+	logger.Info("reconciling import job", "largestCompletedPartNum", largestCompletedPartNum)
 
 	partNum := largestCompletedPartNum + 1
 
@@ -3805,7 +3799,7 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 	deleteExportData bool,
 ) *reconcile.Result {
 	logger := log.FromContext(ctx)
-	logger.Info("starting cleanup in secondary", "backupUID", string(target.GetUID()), "deleteExportData", deleteExportData)
+	logger.Info("starting cleanup in secondary", "deleteExportData", deleteExportData)
 
 	diffFrom, ok := target.GetAnnotations()[annotDiffFrom]
 	if ok {
