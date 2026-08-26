@@ -3735,6 +3735,41 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 		}
 	}
 
+	// Defensively release any RBD lock startImport may still be holding, or
+	// it would be stranded forever once this MantleBackup is deleted. Check
+	// whether the Jobs have reached a terminal state (rather than deleting
+	// them below and checking their absence): Background-propagation
+	// deletes don't wait for Pods to actually stop, so that wouldn't prove
+	// nothing is still writing.
+	if !target.IsSnapshotCaptured() && target.Status.PVManifest != "" {
+		unfinished, result := r.isAnyImportOrZeroOutJobUnfinished(ctx, target)
+		if result.ShouldReturn() {
+			return result.WrapIfError("failed to check if import/zeroout Jobs are still unfinished")
+		}
+		if unfinished {
+			logger.Info("some import/zeroout Jobs are still unfinished; requeueing before releasing the lock")
+
+			return reconcile.Requeue()
+		}
+
+		poolName, imageName, result := r.getPoolAndImageFromStatusPVManifest(target)
+		if result.ShouldReturn() {
+			return result.WrapIfError("failed to get pool and image from status.PVManifest")
+		}
+
+		images, err := r.ceph.RBDLs(poolName)
+		if err != nil {
+			return reconcile.Failed("failed to list RBD images in pool %s: %w", poolName, err)
+		}
+		if slices.Contains(images, imageName) {
+			if result := r.unlockVolume(poolName, imageName, string(target.GetUID())); result.ShouldReturn() {
+				return result.WrapIfError("failed to unlock the volume")
+			}
+		} else {
+			logger.Info("RBD image not found; skipping unlock", "pool", poolName, "image", imageName)
+		}
+	}
+
 	if result := r.deleteAllImportJobs(ctx, target); result.ShouldReturn() {
 		return result.WrapIfError("failed to delete import Jobs")
 	}
@@ -3791,6 +3826,64 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 	}
 
 	return nil
+}
+
+// isAnyImportOrZeroOutJobUnfinished reports whether any zeroout or import
+// Job belonging to backup has not yet reached a terminal state, and so may
+// still write to the volume. It is used to determine whether it's safe to
+// release the RBD lock startImport may still be holding. A Job counts as
+// unfinished until it reaches a terminal state (JobComplete or JobFailed):
+// Status.Active alone isn't enough, since it drops to 0 while a failed Pod
+// is backing off before the next retry, even though the Job will still
+// create more Pods afterward.
+func (r *MantleBackupReconciler) isAnyImportOrZeroOutJobUnfinished(
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
+) (bool, *reconcile.Result) {
+	var zeroOutJob batchv1.Job
+	err := r.Get(ctx, types.NamespacedName{
+		Name:      MakeZeroOutJobName(backup),
+		Namespace: r.managedCephClusterID,
+	}, &zeroOutJob)
+	switch {
+	case err == nil:
+		if !isJobFinished(zeroOutJob.Status.Conditions) {
+			return true, nil
+		}
+	case !aerrors.IsNotFound(err):
+		return false, reconcile.Failed("failed to get zeroout Job: %w", err)
+	}
+
+	numParts, result := r.getNumberOfPartsForResourceDeletion(backup)
+	if result.ShouldReturn() {
+		return false, result.WrapIfError("failed to get the number of the parts of the exported data")
+	}
+
+	for partNum := range numParts {
+		var importJob batchv1.Job
+		err := r.Get(ctx, types.NamespacedName{
+			Name:      MakeImportJobName(backup, partNum),
+			Namespace: r.managedCephClusterID,
+		}, &importJob)
+		switch {
+		case err == nil:
+			if !isJobFinished(importJob.Status.Conditions) {
+				return true, nil
+			}
+		case !aerrors.IsNotFound(err):
+			return false, reconcile.Failed("failed to get import Job: %w", err)
+		}
+	}
+
+	return false, nil
+}
+
+// isJobFinished reports whether the Job has reached a terminal state
+// (JobComplete or JobFailed). A Job that exists but hasn't reached either
+// condition yet may still create more Pods later, even while
+// Status.Active is momentarily 0 (e.g. backing off between retries).
+func isJobFinished(conditions []batchv1.JobCondition) bool {
+	return IsJobConditionTrue(conditions, batchv1.JobComplete) || IsJobConditionTrue(conditions, batchv1.JobFailed)
 }
 
 func (r *MantleBackupReconciler) deleteAllImportJobs(ctx context.Context, backup *mantlev1.MantleBackup) *reconcile.Result {
