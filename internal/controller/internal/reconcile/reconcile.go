@@ -11,13 +11,15 @@ import (
 )
 
 // Result represents the outcome of a reconciliation attempt, holding one
-// of four results: finished, requeueing, slow requeueing, or error. At most one of
-// these is set at a time. A nil Result, or a Result with none of these set, indicates
-// that the reconciliation should continue to the next step.
+// of five results: finished, requeueing, slow requeueing, error, or legacy
+// delegation. At most one of these is set at a time. A nil Result, or a Result
+// with none of these set, indicates that the reconciliation should continue to
+// the next step.
 type Result struct {
 	finished       bool
 	requeueing     bool
 	slowRequeueing bool
+	legacy         bool
 	err            error
 }
 
@@ -38,6 +40,23 @@ func SlowRequeue() *Result {
 
 func Failed(format string, args ...any) *Result {
 	return &Result{err: fmt.Errorf(format, args...)}
+}
+
+// ContinueWithLegacyReconcile returns a Result that tells the caller to continue
+// reconciliation through the legacy MantleBackup controller path. This is temporary
+// and will be removed once the migration to the new reconcilers is complete.
+func ContinueWithLegacyReconcile() *Result {
+	return &Result{legacy: true}
+}
+
+// ShouldContinueWithLegacyReconcile reports whether the caller must run the legacy
+// reconciliation path. Callers have to check this before ToCtrlResult.
+func (r *Result) ShouldContinueWithLegacyReconcile() bool {
+	if r == nil {
+		return false
+	}
+
+	return r.legacy
 }
 
 func (r *Result) ShouldReturn() bool {
