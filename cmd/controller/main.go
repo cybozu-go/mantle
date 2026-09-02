@@ -60,6 +60,7 @@ var (
 	maxImportJobs                int
 	maxUploadJobs                int
 	maxExportDataPVCs            int
+	exportDataPVCSizeMultiplier  float64
 	exportDataStorageClass       string
 	exportJobAffinity            string
 	uploadJobAffinity            string
@@ -112,6 +113,9 @@ func init() {
 		"The maximum number of upload jobs that can run simultaneously. If you set this to 0, there is no limit.")
 	flags.IntVar(&maxExportDataPVCs, "max-export-data-pvcs", 16,
 		"The maximum number of export data PVCs that can be created. If you set this to 0, there is no limit.")
+	flags.Float64Var(&exportDataPVCSizeMultiplier, "export-data-pvc-size-multiplier",
+		controller.DefaultExportDataPVCSizeMultiplier,
+		"The multiplier for the size of PVCs used to store exported data temporarily.")
 	flags.StringVar(&exportDataStorageClass, "export-data-storage-class", "",
 		"The storage class of PVCs used to store exported data temporarily.")
 	flags.StringVar(&exportJobAffinity, "export-job-affinity", "",
@@ -251,6 +255,9 @@ func checkCommandlineArgs() error {
 	}
 	if objectStorageEndpoint == "" {
 		return errors.New("--object-storage-endpoint must be specified if --role is 'primary' or 'secondary'")
+	}
+	if exportDataPVCSizeMultiplier <= 0 {
+		return errors.New("--export-data-pvc-size-multiplier must be greater than 0")
 	}
 
 	return nil
@@ -479,15 +486,16 @@ func setupPrimary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup) 
 	}
 
 	primarySettings := &controller.PrimarySettings{
-		ServiceEndpoint:        mantleServiceEndpoint,
-		Conn:                   conn,
-		Client:                 proto.NewMantleServiceClient(conn),
-		MaxExportJobs:          maxExportJobs,
-		MaxUploadJobs:          maxUploadJobs,
-		MaxExportDataPVCs:      maxExportDataPVCs,
-		ExportDataStorageClass: exportDataStorageClass,
-		ExportJobAffinity:      parsedExportJobAffinity,
-		UploadJobAffinity:      parsedUploadJobAffinity,
+		ServiceEndpoint:             mantleServiceEndpoint,
+		Conn:                        conn,
+		Client:                      proto.NewMantleServiceClient(conn),
+		MaxExportJobs:               maxExportJobs,
+		MaxUploadJobs:               maxUploadJobs,
+		MaxExportDataPVCs:           maxExportDataPVCs,
+		ExportDataPVCSizeMultiplier: exportDataPVCSizeMultiplier,
+		ExportDataStorageClass:      exportDataStorageClass,
+		ExportJobAffinity:           parsedExportJobAffinity,
+		UploadJobAffinity:           parsedUploadJobAffinity,
 	}
 
 	return setupReconcilers(mgr, primarySettings, nil)

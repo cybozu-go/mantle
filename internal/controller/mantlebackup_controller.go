@@ -2078,7 +2078,10 @@ func (r *MantleBackupReconciler) deletePodsOfJob(ctx context.Context, jobName st
 	return nil
 }
 
-func calculateExportDataPVCSize(transferPartSize *resource.Quantity) (*resource.Quantity, error) {
+func calculateExportDataPVCSize(
+	transferPartSize *resource.Quantity,
+	multiplier float64,
+) (*resource.Quantity, error) {
 	if transferPartSize == nil {
 		return nil, errors.New("transferPartSize cannot be nil")
 	}
@@ -2088,13 +2091,12 @@ func calculateExportDataPVCSize(transferPartSize *resource.Quantity) (*resource.
 		return nil, fmt.Errorf("failed to convert status.transferPartSize to int64: %s", transferPartSize.String())
 	}
 
+	const mib = 1024 * 1024
+	pvcSizeI64 = int64(float64(pvcSizeI64)*multiplier/float64(mib)) * mib
 	// The margin of the PVC size accounts for the filesystem metadata overhead required in addition
 	// to the backup data itself. The lower bound prevents the metadata from taking up a disproportionately
 	// large share of the PVC when the backup data size is small.
-	if pvcSizeI64 < 512*1024*1024 {
-		pvcSizeI64 = 512 * 1024 * 1024
-	}
-	pvcSizeI64 = pvcSizeI64 * 2
+	pvcSizeI64 = max(pvcSizeI64, int64(1024*mib))
 
 	pvcSize := resource.NewQuantity(pvcSizeI64, transferPartSize.Format)
 	if pvcSize == nil {
@@ -2114,7 +2116,9 @@ func (r *MantleBackupReconciler) createOrUpdateExportDataPVC(
 		return reconcile.Failed("failed to unmarshal the PVC manifest: %w", err)
 	}
 
-	pvcSize, err := calculateExportDataPVCSize(target.Status.TransferPartSize)
+	pvcSize, err := calculateExportDataPVCSize(
+		target.Status.TransferPartSize, r.primarySettings.ExportDataPVCSizeMultiplier,
+	)
 	if err != nil {
 		return reconcile.Failed("failed to calculate export data PVC size: %s/%s: %w",
 			target.GetNamespace(), target.GetName(), err)
@@ -2135,7 +2139,10 @@ func (r *MantleBackupReconciler) createOrUpdateExportDataPVC(
 		if pvc.Spec.Resources.Requests == nil {
 			pvc.Spec.Resources.Requests = map[corev1.ResourceName]resource.Quantity{}
 		}
-		pvc.Spec.Resources.Requests[corev1.ResourceStorage] = *pvcSize
+		currentSize, exists := pvc.Spec.Resources.Requests[corev1.ResourceStorage]
+		if !exists || pvcSize.Cmp(currentSize) >= 0 {
+			pvc.Spec.Resources.Requests[corev1.ResourceStorage] = *pvcSize
+		}
 
 		if !pvc.CreationTimestamp.IsZero() {
 			return nil

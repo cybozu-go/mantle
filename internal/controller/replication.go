@@ -21,16 +21,19 @@ const (
 	RoleStandalone = "standalone"
 	RolePrimary    = "primary"
 	RoleSecondary  = "secondary"
+
+	DefaultExportDataPVCSizeMultiplier = 2.0
 )
 
 type PrimarySettings struct {
-	ServiceEndpoint        string
-	Conn                   *grpc.ClientConn
-	Client                 proto.MantleServiceClient
-	MaxExportJobs          int
-	MaxUploadJobs          int
-	MaxExportDataPVCs      int
-	ExportDataStorageClass string
+	ServiceEndpoint             string
+	Conn                        *grpc.ClientConn
+	Client                      proto.MantleServiceClient
+	MaxExportJobs               int
+	MaxUploadJobs               int
+	MaxExportDataPVCs           int
+	ExportDataPVCSizeMultiplier float64
+	ExportDataStorageClass      string
 	// ExportJobAffinity is the affinity of the Pods of export Jobs. Nil means no affinity.
 	ExportJobAffinity *corev1.Affinity
 	// UploadJobAffinity is the affinity of the Pods of upload Jobs. Nil means no affinity.

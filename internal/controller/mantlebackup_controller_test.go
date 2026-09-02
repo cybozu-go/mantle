@@ -540,8 +540,9 @@ var _ = Describe("MantleBackup controller", func() {
 				resMgr.ClusterID,
 				RolePrimary,
 				&PrimarySettings{
-					Client:                 grpcClient,
-					ExportDataStorageClass: resMgr.StorageClassName,
+					Client:                      grpcClient,
+					ExportDataPVCSizeMultiplier: DefaultExportDataPVCSizeMultiplier,
+					ExportDataStorageClass:      resMgr.StorageClassName,
 				},
 				nil,
 				"dummy image",
@@ -2505,6 +2506,25 @@ var _ = Describe("export and upload", func() {
 	})
 
 	Context("export", func() {
+		It("should not shrink an existing export data PVC", func(ctx SpecContext) {
+			mbr.primarySettings.ExportDataPVCSizeMultiplier = 2.0
+			target, err := createMantleBackupUsingDummyPVC(ctx, "target-no-shrink", ns)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(createSnapshotForMantleBackupUsingDummyPVC(
+				ctx, mbr.ceph, target, mbr.backupTransferPartSize,
+			)).To(Succeed())
+			_, err = mbr.createOrUpdateExportDataPVC(ctx, target, 0).ToCtrlResult()
+			Expect(err).NotTo(HaveOccurred())
+
+			mbr.primarySettings.ExportDataPVCSizeMultiplier = 0.5
+			_, err = mbr.createOrUpdateExportDataPVC(ctx, target, 0).ToCtrlResult()
+			Expect(err).NotTo(HaveOccurred())
+
+			pvc, err := getExportDataPVC(ctx, nsController, target, 0)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pvc.Spec.Resources.Requests.Storage().String()).To(Equal("2Gi"))
+		})
+
 		It("should set correct annotations after export() is called", func(ctx SpecContext) {
 			// test a full backup
 			target := createAndExportMantleBackup(ctx, mbr, "target", ns, false, false, nil)
@@ -3045,6 +3065,24 @@ var _ = Describe("export and upload", func() {
 			Expect(value).To(Equal(float64(numOfParts * partSize)))
 		})
 	})
+})
+
+var _ = Describe("calculateExportDataPVCSize", func() {
+	DescribeTable("calculates capacity from a transfer part size and multiplier",
+		func(transferPartSize string, multiplier float64, want string) {
+			got, err := calculateExportDataPVCSize(
+				ptr.To(resource.MustParse(transferPartSize)), multiplier)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.String()).To(Equal(want))
+		},
+		Entry("uses the default multiplier", "1Gi", DefaultExportDataPVCSizeMultiplier, "2Gi"),
+		Entry("uses a configured multiplier", "1Gi", 3.0, "3Gi"),
+		Entry("uses a fractional multiplier above the minimum size", "4Gi", 0.5, "2Gi"),
+		Entry("applies the minimum size to a fractional multiplier", "1Gi", 0.5, "1Gi"),
+		Entry("Rounding after multiplying", "2Gi", 0.5001, "1Gi"),
+		Entry("Rounding up small part after multiplying", "256Mi", 3.0, "1Gi"),
+	)
+
 })
 
 var _ = Describe("import", func() {
