@@ -75,14 +75,14 @@ func getEnvValue(envVarAry []corev1.EnvVar, name string) (string, error) {
 	return "", errors.New("name not found")
 }
 
-func setJobCondition(job *batchv1.Job, condition batchv1.JobConditionType, status corev1.ConditionStatus) {
+func setJobCondition(job *batchv1.Job, condition batchv1.JobConditionType) {
 	if job.Status.Conditions == nil {
 		job.Status.Conditions = []batchv1.JobCondition{}
 	}
 	updated := false
 	for i := range job.Status.Conditions {
 		if job.Status.Conditions[i].Type == condition {
-			job.Status.Conditions[i].Status = status
+			job.Status.Conditions[i].Status = corev1.ConditionTrue
 			updated = true
 
 			break
@@ -91,7 +91,7 @@ func setJobCondition(job *batchv1.Job, condition batchv1.JobConditionType, statu
 	if !updated {
 		job.Status.Conditions = append(job.Status.Conditions, batchv1.JobCondition{
 			Type:   condition,
-			Status: status,
+			Status: corev1.ConditionTrue,
 		})
 	}
 }
@@ -108,8 +108,8 @@ func completeJob(ctx SpecContext, jobNamespace, jobName string) {
 	}).Should(Succeed())
 
 	// Make the Job complete
-	setJobCondition(&job, batchv1.JobComplete, corev1.ConditionTrue)
-	setJobCondition(&job, batchv1.JobSuccessCriteriaMet, corev1.ConditionTrue)
+	setJobCondition(&job, batchv1.JobComplete)
+	setJobCondition(&job, batchv1.JobSuccessCriteriaMet)
 	if job.Status.StartTime == nil {
 		job.Status.StartTime = &metav1.Time{
 			Time: time.Now(),
@@ -3547,10 +3547,16 @@ var _ = Describe("import", func() {
 
 	Context("secondaryCleanup", func() {
 		// Utility functions used in the tests for secondaryCleanup.
-		createZeroOutAndImportJobs := func(ctx context.Context, backup *mantlev1.MantleBackup) {
+		createZeroOutAndImportJobs := func(ctx SpecContext, backup *mantlev1.MantleBackup) {
 			GinkgoHelper()
 			for _, name := range []string{MakeZeroOutJobName(backup), MakeImportJobName(backup, 0)} {
 				createJob(ctx, name)
+				// Mark the Job complete: isAnyImportOrZeroOutJobActive now
+				// treats a Job as still in progress until it reaches
+				// JobComplete or JobFailed, so a leftover Job left in an
+				// unfinished state would otherwise block secondaryCleanup
+				// forever in these tests.
+				completeJob(ctx, nsController, name)
 			}
 		}
 		createZeroOutDataPVC := func(ctx context.Context, backup *mantlev1.MantleBackup) {
@@ -3724,6 +3730,181 @@ var _ = Describe("import", func() {
 			})
 			Expect(index).NotTo(Equal(-1))
 		})
+
+		It("should not release the lock while a zeroout/import Job is still in progress "+
+			"(including while it is backing off between retries), "+
+			"and should release it once the Job reaches a terminal state", func(ctx SpecContext) {
+			// Arrange: a backup whose import is still incomplete (SnapshotCaptured
+			// is false) and that is still holding the RBD lock startImport would
+			// have taken.
+			backup := createTargetBackup(ctx, "target", nil, ptr.To("uid"))
+			err := mbr.ceph.RBDLockAdd(dummyPoolName, dummyImageName, string(backup.GetUID()))
+			Expect(err).NotTo(HaveOccurred())
+
+			// Simulate a running import Job for part 0.
+			createJob(ctx, MakeImportJobName(backup, 0))
+			var job batchv1.Job
+			err = k8sClient.Get(
+				ctx,
+				types.NamespacedName{Name: MakeImportJobName(backup, 0), Namespace: nsController},
+				&job,
+			)
+			Expect(err).NotTo(HaveOccurred())
+			job.Status.Active = 1
+			err = k8sClient.Status().Update(ctx, &job)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Act: while the Job is actively running, secondaryCleanup must not
+			// release the lock, and must requeue instead of deleting anything.
+			res, err := mbr.secondaryCleanup(ctx, backup, false).ToCtrlResult()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res).To(Equal(reconcile.RequeueAfter()))
+
+			locks, err := mbr.ceph.RBDLockLs(dummyPoolName, dummyImageName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(locks).To(HaveLen(1))
+			checkJobExists(ctx, MakeImportJobName(backup, 0))
+
+			// Act: simulate a failed Pod attempt backing off before the next
+			// retry -- Status.Active drops to 0, but the Job has not reached
+			// JobComplete or JobFailed yet. secondaryCleanup must still not
+			// release the lock during this gap between retries.
+			err = k8sClient.Get(
+				ctx,
+				types.NamespacedName{Name: MakeImportJobName(backup, 0), Namespace: nsController},
+				&job,
+			)
+			Expect(err).NotTo(HaveOccurred())
+			job.Status.Active = 0
+			err = k8sClient.Status().Update(ctx, &job)
+			Expect(err).NotTo(HaveOccurred())
+
+			res, err = mbr.secondaryCleanup(ctx, backup, false).ToCtrlResult()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res).To(Equal(reconcile.RequeueAfter()))
+
+			locks, err = mbr.ceph.RBDLockLs(dummyPoolName, dummyImageName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(locks).To(HaveLen(1))
+			checkJobExists(ctx, MakeImportJobName(backup, 0))
+
+			// Act: once the Job reaches a terminal state, secondaryCleanup
+			// should release the lock and proceed with cleanup.
+			completeJob(ctx, nsController, MakeImportJobName(backup, 0))
+
+			res, err = mbr.secondaryCleanup(ctx, backup, false).ToCtrlResult()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.IsZero()).To(BeTrue())
+
+			locks, err = mbr.ceph.RBDLockLs(dummyPoolName, dummyImageName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(locks).To(BeEmpty())
+			checkJobDeleted(ctx, MakeImportJobName(backup, 0))
+		})
+
+		It("should complete successfully without erroring when the RBD image no longer exists", func(ctx SpecContext) {
+			// Arrange: a backup whose import is still incomplete, but whose
+			// underlying RBD image is no longer present (e.g. the PVC was
+			// deleted). The snapshot/part-size status fields are set directly,
+			// without going through RBDSnapCreate, so that the image is never
+			// registered in FakeRBD -- simulating that it is already gone.
+			backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
+			Expect(err).NotTo(HaveOccurred())
+			backup.SetAnnotations(map[string]string{annotRemoteUID: "uid"})
+			err = k8sClient.Update(ctx, backup)
+			Expect(err).NotTo(HaveOccurred())
+			err = updateStatus(ctx, k8sClient, backup, func() error {
+				snapID := 123
+				snapSize := int64(testutil.FakeRBDSnapshotSize)
+				backup.Status.SnapID = &snapID
+				backup.Status.SnapSize = &snapSize
+				backup.Status.TransferPartSize = &defaultTransferPartSize
+
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Act
+			res, err := mbr.secondaryCleanup(ctx, backup, false).ToCtrlResult()
+
+			// Assert: cleanup completes successfully; there is nothing to
+			// unlock, and no attempt to contact a non-existent image blocks it.
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.IsZero()).To(BeTrue())
+		})
+	})
+
+	Context("isAnyImportOrZeroOutJobUnfinished", func() {
+		DescribeTable("zeroout Job states",
+			func(
+				ctx SpecContext,
+				setupJob func(ctx SpecContext, backup *mantlev1.MantleBackup),
+				expectUnfinished bool,
+			) {
+				backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
+				Expect(err).NotTo(HaveOccurred())
+
+				if setupJob != nil {
+					setupJob(ctx, backup)
+				}
+
+				unfinished, result := mbr.isAnyImportOrZeroOutJobUnfinished(ctx, backup)
+				_, err = result.ToCtrlResult()
+				Expect(err).NotTo(HaveOccurred())
+				Expect(unfinished).To(Equal(expectUnfinished))
+			},
+			Entry("no zeroout Job exists",
+				nil,
+				false,
+			),
+			Entry("zeroout Job is running (has an active Pod, no Complete/Failed condition yet)",
+				func(ctx SpecContext, backup *mantlev1.MantleBackup) {
+					createJob(ctx, MakeZeroOutJobName(backup))
+					var job batchv1.Job
+					Expect(k8sClient.Get(
+						ctx,
+						types.NamespacedName{Name: MakeZeroOutJobName(backup), Namespace: nsController},
+						&job,
+					)).To(Succeed())
+					job.Status.Active = 1
+					Expect(k8sClient.Status().Update(ctx, &job)).To(Succeed())
+				},
+				true,
+			),
+			Entry("zeroout Job is backing off between retries (no active Pod, but still no Complete/Failed condition)",
+				func(ctx SpecContext, backup *mantlev1.MantleBackup) {
+					createJob(ctx, MakeZeroOutJobName(backup))
+				},
+				true,
+			),
+			Entry("zeroout Job has completed",
+				func(ctx SpecContext, backup *mantlev1.MantleBackup) {
+					createJob(ctx, MakeZeroOutJobName(backup))
+					completeJob(ctx, nsController, MakeZeroOutJobName(backup))
+				},
+				false,
+			),
+			Entry("zeroout Job has failed",
+				func(ctx SpecContext, backup *mantlev1.MantleBackup) {
+					createJob(ctx, MakeZeroOutJobName(backup))
+					var job batchv1.Job
+					Expect(k8sClient.Get(
+						ctx,
+						types.NamespacedName{Name: MakeZeroOutJobName(backup), Namespace: nsController},
+						&job,
+					)).To(Succeed())
+					// A real Job requires FailureTarget=true and a StartTime
+					// before it can be marked Failed=true.
+					if job.Status.StartTime == nil {
+						job.Status.StartTime = &metav1.Time{Time: time.Now()}
+					}
+					setJobCondition(&job, batchv1.JobFailureTarget)
+					setJobCondition(&job, batchv1.JobFailed)
+					Expect(k8sClient.Status().Update(ctx, &job)).To(Succeed())
+				},
+				false,
+			),
+		)
 	})
 
 	Context("finalizeSecondary", func() {
@@ -3746,6 +3927,109 @@ var _ = Describe("import", func() {
 				return snap.Name == backup.Name
 			})
 			Expect(index).To(Equal(-1))
+		})
+
+		It("should release the lock, delete resources, remove the finalizer, "+
+			"and let a subsequent backup take the lock", func(ctx SpecContext) {
+			// Arrange: a previously fully-completed secondary backup ("source"),
+			// used as the diff origin.
+			source, err := createMantleBackupUsingDummyPVC(ctx, "source", ns)
+			Expect(err).NotTo(HaveOccurred())
+			err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, source, defaultTransferPartSize)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Arrange: "target" -- a secondary backup whose import is still
+			// incomplete (SnapshotCaptured is false) and that is still holding
+			// the RBD lock startImport would have taken.
+			target := createTargetBackup(ctx, "target", ptr.To("source"), ptr.To("uid"))
+			err = mbr.ceph.RBDLockAdd(dummyPoolName, dummyImageName, string(target.GetUID()))
+			Expect(err).NotTo(HaveOccurred())
+			// Part 0 has already completed; no Job for any later part exists
+			// yet, simulating a transfer that is genuinely incomplete but has
+			// nothing left actively running at the moment it gets deleted.
+			createJob(ctx, MakeImportJobName(target, 0))
+			completeJob(ctx, nsController, MakeImportJobName(target, 0))
+
+			// Act: delete "target" while its import is still incomplete.
+			err = k8sClient.Delete(ctx, target)
+			Expect(err).NotTo(HaveOccurred())
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: target.GetName(), Namespace: target.GetNamespace()}, target)
+			Expect(err).NotTo(HaveOccurred())
+
+			res, err := mbr.finalizeSecondary(ctx, target).ToCtrlResult()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.IsZero()).To(BeTrue())
+
+			// Assert: the lock is released, the import Job is deleted, and
+			// "target" itself is fully gone (finalizer removed).
+			locks, err := mbr.ceph.RBDLockLs(dummyPoolName, dummyImageName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(locks).To(BeEmpty())
+			checkJobDeleted(ctx, MakeImportJobName(target, 0))
+
+			err = k8sClient.Get(
+				ctx,
+				types.NamespacedName{Name: target.GetName(), Namespace: target.GetNamespace()},
+				&mantlev1.MantleBackup{},
+			)
+			Expect(err).To(HaveOccurred())
+			Expect(aerrors.IsNotFound(err)).To(BeTrue())
+
+			// Assert: a subsequent backup targeting the same volume can now
+			// successfully take the lock -- i.e. it is not permanently stuck
+			// behind the lock "target" would otherwise have stranded forever.
+			next := createTargetBackup(ctx, "next", ptr.To("source"), ptr.To("uid"))
+			locked, rr := mbr.lockVolume(dummyPoolName, dummyImageName, string(next.GetUID()))
+			_, err = rr.ToCtrlResult()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(locked).To(BeTrue())
+		})
+
+		It("should not check for active Jobs or the lock once the backup already finished importing", func(ctx SpecContext) {
+			// Arrange: a backup whose import already completed normally
+			// (SnapshotCaptured=true), meaning startImport already released
+			// the lock on its own. An import Job with Status.Active=1 is
+			// left in place to prove the new Status.Active check is skipped
+			// in this case: if it ran anyway, finalizeSecondary would
+			// requeue instead of completing.
+			backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
+			Expect(err).NotTo(HaveOccurred())
+			err = updateStatus(ctx, k8sClient, backup, func() error {
+				meta.SetStatusCondition(&backup.Status.Conditions, metav1.Condition{
+					Type:   mantlev1.BackupConditionSnapshotCaptured,
+					Status: metav1.ConditionTrue,
+					Reason: mantlev1.ConditionReasonSnapshotCapturedNoProblem,
+				})
+
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			createJob(ctx, MakeImportJobName(backup, 0))
+			var job batchv1.Job
+			err = k8sClient.Get(
+				ctx,
+				types.NamespacedName{Name: MakeImportJobName(backup, 0), Namespace: nsController},
+				&job,
+			)
+			Expect(err).NotTo(HaveOccurred())
+			job.Status.Active = 1
+			err = k8sClient.Status().Update(ctx, &job)
+			Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Delete(ctx, backup)
+			Expect(err).NotTo(HaveOccurred())
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Act
+			res, err := mbr.finalizeSecondary(ctx, backup).ToCtrlResult()
+
+			// Assert: finalize completes normally instead of requeueing,
+			// proving the Status.Active check (and the unlock it would have
+			// gated) never ran.
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.IsZero()).To(BeTrue())
 		})
 	})
 

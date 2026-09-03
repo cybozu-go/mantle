@@ -962,6 +962,51 @@ func WaitUploadJobCreated(ctx SpecContext, cluster int, namespace, backupName st
 	}).Should(Succeed())
 }
 
+func WaitImportJobCreated(ctx SpecContext, cluster int, namespace, backupName string, partNum int) {
+	GinkgoHelper()
+	By("waiting for an import job to be created")
+	Eventually(ctx, func(g Gomega) {
+		mb, err := GetMB(cluster, namespace, backupName)
+		g.Expect(err).NotTo(HaveOccurred())
+		cephNS, err := cephNamespaceOf(mb)
+		g.Expect(err).NotTo(HaveOccurred())
+		jobs, err := GetJobList(cluster, cephNS)
+		g.Expect(err).NotTo(HaveOccurred())
+		exist := slices.ContainsFunc(jobs.Items, func(job batchv1.Job) bool {
+			return job.GetName() == controller.MakeImportJobName(mb, partNum)
+		})
+		g.Expect(exist).To(BeTrue())
+	}).Should(Succeed())
+}
+
+// ExpireMantleBackupNow forces the given MantleBackup to expire on its next
+// reconcile, by backdating status.createdAt far enough into the past that
+// spec.expire has already elapsed.
+func ExpireMantleBackupNow(clusterNo int, namespace, backupName string) {
+	GinkgoHelper()
+	By(fmt.Sprintf("forcing MantleBackup %s/%s to expire", namespace, backupName))
+	_, _, err := Kubectl(clusterNo, nil, "patch", "mantlebackup", backupName,
+		"-n", namespace, "--type=merge", "--subresource=status",
+		"-p", `{"status":{"createdAt":"2000-01-01T00:00:00Z"}}`)
+	Expect(err).NotTo(HaveOccurred())
+}
+
+// WaitMantleBackupDeleted waits until the given MantleBackup no longer
+// exists in the given cluster (e.g. after its finalizer has run to
+// completion).
+func WaitMantleBackupDeleted(ctx SpecContext, cluster int, namespace, backupName string) {
+	GinkgoHelper()
+	By("waiting for the MantleBackup to be deleted")
+	Eventually(ctx, func(g Gomega) {
+		mbs, err := GetMBList(cluster, namespace)
+		g.Expect(err).NotTo(HaveOccurred())
+		exist := slices.ContainsFunc(mbs.Items, func(mb mantlev1.MantleBackup) bool {
+			return mb.GetName() == backupName
+		})
+		g.Expect(exist).To(BeFalse())
+	}).WithTimeout(5 * time.Minute).Should(Succeed())
+}
+
 func CheckJobExist(clusterNo int, namespace, jobName string) bool {
 	GinkgoHelper()
 	jobs, err := GetJobList(clusterNo, namespace)
