@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -2135,6 +2136,15 @@ func (r *MantleBackupReconciler) createOrUpdateExportDataPVC(
 		labels["app.kubernetes.io/name"] = labelAppNameValue
 		labels["app.kubernetes.io/component"] = labelComponentExportData
 		pvc.SetLabels(labels)
+
+		if len(r.primarySettings.ExportDataPVCAnnotations) > 0 {
+			annotations := pvc.GetAnnotations()
+			if annotations == nil {
+				annotations = make(map[string]string, len(r.primarySettings.ExportDataPVCAnnotations))
+			}
+			maps.Copy(annotations, r.primarySettings.ExportDataPVCAnnotations)
+			pvc.SetAnnotations(annotations)
+		}
 
 		if pvc.Spec.Resources.Requests == nil {
 			pvc.Spec.Resources.Requests = map[corev1.ResourceName]resource.Quantity{}

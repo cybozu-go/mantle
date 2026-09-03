@@ -568,6 +568,9 @@ var _ = Describe("MantleBackup controller", func() {
 		It("should be synced to remote", func(ctx SpecContext) {
 			// CSATEST-1491
 			setupExpireQueueSniffer()
+			reconciler.primarySettings.ExportDataPVCAnnotations = map[string]string{
+				"example.com/export-data": "enabled",
+			}
 
 			grpcClient.EXPECT().CreateOrUpdatePVC(gomock.Any(), &customMatcherHelper{
 				// check if the PVC has the capacity equal to the fake RBD snapshot size
@@ -690,6 +693,7 @@ var _ = Describe("MantleBackup controller", func() {
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(pvcExport.GetLabels()["app.kubernetes.io/name"]).To(Equal(labelAppNameValue))
 				g.Expect(pvcExport.GetLabels()["app.kubernetes.io/component"]).To(Equal(labelComponentExportData))
+				g.Expect(pvcExport.GetAnnotations()).To(HaveKeyWithValue("example.com/export-data", "enabled"))
 				g.Expect(pvcExport.Spec.AccessModes[0]).To(Equal(corev1.ReadWriteOnce))
 				g.Expect(*pvcExport.Spec.StorageClassName).To(Equal(resMgr.StorageClassName))
 				g.Expect(pvcExport.Spec.Resources.Requests.Storage().String()).To(Equal("2Gi")) // transferPartSize * 2
