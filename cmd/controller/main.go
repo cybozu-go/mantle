@@ -60,7 +60,9 @@ var (
 	maxImportJobs                int
 	maxUploadJobs                int
 	maxExportDataPVCs            int
+	exportDataPVCSizeMultiplier  float64
 	exportDataStorageClass       string
+	exportDataPVCAnnotations     string
 	exportJobAffinity            string
 	uploadJobAffinity            string
 	importJobAffinity            string
@@ -112,8 +114,13 @@ func init() {
 		"The maximum number of upload jobs that can run simultaneously. If you set this to 0, there is no limit.")
 	flags.IntVar(&maxExportDataPVCs, "max-export-data-pvcs", 16,
 		"The maximum number of export data PVCs that can be created. If you set this to 0, there is no limit.")
+	flags.Float64Var(&exportDataPVCSizeMultiplier, "export-data-pvc-size-multiplier",
+		controller.DefaultExportDataPVCSizeMultiplier,
+		"The multiplier for the size of PVCs used to store exported data temporarily.")
 	flags.StringVar(&exportDataStorageClass, "export-data-storage-class", "",
 		"The storage class of PVCs used to store exported data temporarily.")
+	flags.StringVar(&exportDataPVCAnnotations, "export-data-pvc-annotations", "",
+		"Annotations for PVCs used to store exported data temporarily, specified as a JSON object.")
 	flags.StringVar(&exportJobAffinity, "export-job-affinity", "",
 		"The affinity of the Pods of export Jobs, specified as a JSON representation of corev1.Affinity. "+
 			"If this is empty, no affinity is set. Only used when --role is 'primary'. "+
@@ -252,6 +259,9 @@ func checkCommandlineArgs() error {
 	if objectStorageEndpoint == "" {
 		return errors.New("--object-storage-endpoint must be specified if --role is 'primary' or 'secondary'")
 	}
+	if exportDataPVCSizeMultiplier <= 0 {
+		return errors.New("--export-data-pvc-size-multiplier must be greater than 0")
+	}
 
 	return nil
 }
@@ -269,6 +279,19 @@ func parseAffinity(flagName, value string) (*corev1.Affinity, error) {
 	}
 
 	return &affinity, nil
+}
+
+func parseAnnotations(flagName, value string) (map[string]string, error) {
+	if value == "" {
+		return nil, nil
+	}
+
+	annotations := map[string]string{}
+	if err := json.Unmarshal([]byte(value), &annotations); err != nil {
+		return nil, fmt.Errorf("failed to parse %s: %w", flagName, err)
+	}
+
+	return annotations, nil
 }
 
 func getManagedCephClusterID() (string, error) {
@@ -477,17 +500,27 @@ func setupPrimary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup) 
 
 		return err
 	}
+	parsedExportDataPVCAnnotations, err := parseAnnotations(
+		"--export-data-pvc-annotations", exportDataPVCAnnotations,
+	)
+	if err != nil {
+		setupLog.Error(err, "failed to parse the annotations of export data PVCs")
+
+		return err
+	}
 
 	primarySettings := &controller.PrimarySettings{
-		ServiceEndpoint:        mantleServiceEndpoint,
-		Conn:                   conn,
-		Client:                 proto.NewMantleServiceClient(conn),
-		MaxExportJobs:          maxExportJobs,
-		MaxUploadJobs:          maxUploadJobs,
-		MaxExportDataPVCs:      maxExportDataPVCs,
-		ExportDataStorageClass: exportDataStorageClass,
-		ExportJobAffinity:      parsedExportJobAffinity,
-		UploadJobAffinity:      parsedUploadJobAffinity,
+		ServiceEndpoint:             mantleServiceEndpoint,
+		Conn:                        conn,
+		Client:                      proto.NewMantleServiceClient(conn),
+		MaxExportJobs:               maxExportJobs,
+		MaxUploadJobs:               maxUploadJobs,
+		MaxExportDataPVCs:           maxExportDataPVCs,
+		ExportDataPVCSizeMultiplier: exportDataPVCSizeMultiplier,
+		ExportDataStorageClass:      exportDataStorageClass,
+		ExportDataPVCAnnotations:    parsedExportDataPVCAnnotations,
+		ExportJobAffinity:           parsedExportJobAffinity,
+		UploadJobAffinity:           parsedUploadJobAffinity,
 	}
 
 	return setupReconcilers(mgr, primarySettings, nil)
