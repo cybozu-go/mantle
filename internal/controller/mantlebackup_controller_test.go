@@ -4021,7 +4021,7 @@ var _ = Describe("import", func() {
 			// successfully take the lock -- i.e. it is not permanently stuck
 			// behind the lock "target" would otherwise have stranded forever.
 			next := createTargetBackup(ctx, "next", ptr.To("source"), ptr.To("uid"))
-			locked, rr := mbr.lockVolume(dummyPoolName, dummyImageName, string(next.GetUID()))
+			locked, rr := mbr.lockVolume(ctx, dummyPoolName, dummyImageName, string(next.GetUID()))
 			_, err = rr.ToCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(locked).To(BeTrue())
@@ -4486,11 +4486,11 @@ var _ = Describe("MantleBackupReconciler", func() {
 		var reconciler *MantleBackupReconciler
 		var cephCmd *testutil.FakeRBD
 
-		lock := func(poolName, imageName, lockID string, rbdErr error) (bool, error) {
+		lock := func(ctx context.Context, poolName, imageName, lockID string, rbdErr error) (bool, error) {
 			cephCmd.SetError(rbdErr)
 			defer cephCmd.SetError(nil)
 
-			locked, rr := reconciler.lockVolume(poolName, imageName, lockID)
+			locked, rr := reconciler.lockVolume(ctx, poolName, imageName, lockID)
 			_, err := rr.ToCtrlResult()
 			if err != nil {
 				return locked, err
@@ -4519,28 +4519,28 @@ var _ = Describe("MantleBackupReconciler", func() {
 			reconciler.ceph = cephCmd
 		})
 
-		It("lock a volume successfully", func() {
-			locked, err := lock("pool", "image1", "lock1", nil)
+		It("lock a volume successfully", func(ctx SpecContext) {
+			locked, err := lock(ctx, "pool", "image1", "lock1", nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(locked).To(BeTrue())
 		})
-		It("lock a volume that is already locked by the same lockID", func() {
-			locked, err := lock("pool", "image1", "lock1", nil)
+		It("lock a volume that is already locked by the same lockID", func(ctx SpecContext) {
+			locked, err := lock(ctx, "pool", "image1", "lock1", nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(locked).To(BeTrue())
 		})
-		It("fail to lock a volume that is already locked by a different lockID", func() {
-			locked, err := lock("pool", "image1", "lock2", nil)
+		It("fail to lock a volume that is already locked by a different lockID", func(ctx SpecContext) {
+			locked, err := lock(ctx, "pool", "image1", "lock2", nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(locked).To(BeFalse())
 		})
-		It("lock a different volume successfully", func() {
-			locked, err := lock("pool", "image2", "lock1", nil)
+		It("lock a different volume successfully", func(ctx SpecContext) {
+			locked, err := lock(ctx, "pool", "image2", "lock1", nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(locked).To(BeTrue())
 		})
-		It("error when rbd lock ls fails", func() {
-			locked, err := lock("pool", "image1", "lock1", errors.New("rbd lock ls error"))
+		It("error when rbd lock ls fails", func(ctx SpecContext) {
+			locked, err := lock(ctx, "pool", "image1", "lock1", errors.New("rbd lock ls error"))
 			Expect(err).To(HaveOccurred())
 			Expect(locked).To(BeFalse())
 		})
@@ -4557,7 +4557,7 @@ var _ = Describe("MantleBackupReconciler", func() {
 		})
 
 		It("locks a volume", func(ctx SpecContext) {
-			locked, rr := reconciler.lockVolume("pool", "image", "lock1")
+			locked, rr := reconciler.lockVolume(ctx, "pool", "image", "lock1")
 			_, err := rr.ToCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(locked).To(BeTrue())
@@ -4571,7 +4571,7 @@ var _ = Describe("MantleBackupReconciler", func() {
 			cephCmd.SetError(rbdErr)
 			defer cephCmd.SetError(nil)
 
-			_, err := reconciler.unlockVolume(poolName, imageName, lockID).ToCtrlResult()
+			_, err := reconciler.unlockVolume(ctx, poolName, imageName, lockID).ToCtrlResult()
 			if expectErr {
 				Expect(err).To(HaveOccurred())
 			} else {
