@@ -118,6 +118,73 @@ This process can be stopped by adding `mantle.cybozu.io/retain-if-expired` annot
 
 `MantleBackupConfig` also has an `expire` field. The `CronJob` set the value to the `MantleBackup` resource created by the `MantleBackupConfig`. Therefore, the periodic backups will be deleted automatically.
 
+### The clean snapshot metadata on the secondary cluster
+
+Before an import Job applies an exported diff to the destination RBD image, the head of
+the image must be exactly the same as the source snapshot of the diff. The import Job
+used to run `rbd snap rollback` every time to guarantee this. However, its cost is
+proportional to the image size, even when the image needs no rollback at all.
+
+To skip such unnecessary rollbacks, mantle records the state of the image head in the
+RBD image metadata `mantle.clean-snap` of the destination image. The metadata holds the
+name of the snapshot the image head is identical to. The import Job removes the metadata
+before it modifies the image, and sets it again once the image reaches a known state. If
+the metadata is absent, the state of the image head is unknown, and the Job rolls the
+image back as before.
+
+The zeroout Job also removes this metadata before it modifies the image, and it doesn't
+zero the image unless it is sure that the metadata is gone. This is necessary because
+the full import following the zeroout may never happen, e.g., when the full backup is
+deleted or expires in between; a later incremental import must then roll the image back.
+Full imports still discard the metadata before they use it, for compatibility with older
+zeroout Jobs that didn't invalidate it.
+
+Import and zeroout Jobs use `podReplacementPolicy: Failed` so that normal Pod replacement
+waits for the previous Pod to terminate. Otherwise, overlapping Pods of the same Job could
+modify the image between an import and its clean-snap update. The controller also applies
+this policy when it reconciles existing Jobs, without changing their Pod templates.
+This does not stop Pods that are already overlapping or fence a writer after a forced Pod
+deletion. Before forcing replacement of an unreachable Pod, ensure that the old writer
+can no longer access the image.
+
+> [!IMPORTANT]
+> Only mantle may modify the head of the destination images on the secondary cluster. If
+> another program writes to such an image without removing the metadata, mantle may skip
+> a rollback that is actually necessary, and the imported backup may be corrupted.
+>
+> For the same reason, if you downgrade mantle to a version that doesn't know this
+> metadata, you must remove the metadata from every destination image before you upgrade
+> mantle again:
+>
+> ```console
+> $ rbd image-meta remove <pool>/<image> mantle.clean-snap
+> ```
+
+Note that `rbd clone` copies all the metadata of the parent image to the clone, so the
+images cloned from a destination image, i.e., the images of `MantleRestore` and the
+temporary images used to verify a backup, also have this metadata. It is meaningless
+there and mantle never reads it, because those images are never the destination of an
+import.
+
+### Skipping an import that has already been applied
+
+`rbd import-diff` creates the snapshot at the end of the diff only after it has applied
+the whole diff, and it aborts with `EEXIST` if that snapshot already exists. Therefore,
+if an import Job failed after its `rbd import-diff` had succeeded, e.g., while it was
+recording the clean snapshot metadata, retrying the same Job as it is would fail forever:
+the Job would never complete, and mantle would never release the lock of the volume, which
+blocks the subsequent backups of the same volume as well.
+
+To avoid this, the import Job is told the name of the snapshot its `rbd import-diff`
+creates, and it skips both the rollback and the import if that snapshot already exists.
+The existence of the snapshot tells nothing about the current contents of the image head,
+so the clean snapshot metadata is left untouched on this path.
+
+This assumes that the name of the snapshot identifies the import uniquely. It does,
+because mantle removes the snapshot of a `MantleBackup` from the destination image when
+the `MantleBackup` is deleted, and because the snapshots between the parts of a multipart
+import are named after the UID of the `MantleBackup` on the primary cluster.
+
 ### Sample manifests
 
 A sample manifest of `MantleBackup` is as follows:

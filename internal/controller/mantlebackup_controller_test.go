@@ -3184,6 +3184,60 @@ var _ = Describe("import", func() {
 		Entry("error", false, true, false, true),
 	)
 
+	DescribeTable("Pod replacement policy of import and zeroout Jobs",
+		func(ctx SpecContext, component string, existing bool) {
+			backup, err := createMantleBackupUsingDummyPVC(ctx, "replacement-policy", ns)
+			Expect(err).NotTo(HaveOccurred())
+			transferPartSize := resource.MustParse("1Gi")
+			backup.Status.TransferPartSize = &transferPartSize
+
+			snapshotTarget, err := getSnapshotTargetByDummyMB(backup)
+			Expect(err).NotTo(HaveOccurred())
+
+			jobName := MakeImportJobName(backup, 0)
+			if component == "zeroout" {
+				jobName = MakeZeroOutJobName(backup)
+			}
+			key := types.NamespacedName{Name: jobName, Namespace: nsController}
+			reconcileJob := func() {
+				GinkgoHelper()
+				if component == "zeroout" {
+					_, err = mbr.createOrUpdateZeroOutJob(ctx, backup, snapshotTarget).ToCtrlResult()
+				} else {
+					_, err = mbr.createOrUpdateImportJob(ctx, backup, snapshotTarget, 0, 1).ToCtrlResult()
+				}
+				Expect(err).NotTo(HaveOccurred())
+			}
+
+			var original batchv1.Job
+			if existing {
+				reconcileJob()
+				Expect(k8sClient.Get(ctx, key, &original)).To(Succeed())
+				original.Spec.PodReplacementPolicy = ptr.To(batchv1.TerminatingOrFailed)
+				Expect(k8sClient.Update(ctx, &original)).To(Succeed())
+			}
+
+			reconcileJob()
+			var job batchv1.Job
+			Expect(k8sClient.Get(ctx, key, &job)).To(Succeed())
+			Expect(job.Spec.PodReplacementPolicy).To(Equal(ptr.To(batchv1.Failed)))
+			Expect(job.Spec.Template.Spec.RestartPolicy).To(Equal(corev1.RestartPolicyOnFailure))
+			if existing {
+				Expect(job.UID).To(Equal(original.UID))
+				Expect(job.Spec.Template).To(Equal(original.Spec.Template))
+			}
+
+			reconcileJob()
+			var reconciled batchv1.Job
+			Expect(k8sClient.Get(ctx, key, &reconciled)).To(Succeed())
+			Expect(reconciled.ResourceVersion).To(Equal(job.ResourceVersion))
+		},
+		Entry("new import Job", "import", false),
+		Entry("existing import Job", "import", true),
+		Entry("new zeroout Job", "zeroout", false),
+		Entry("existing zeroout Job", "zeroout", true),
+	)
+
 	Context("affinity of import Jobs", func() {
 		createImportJob := func(ctx SpecContext, name string) *batchv1.Job {
 			GinkgoHelper()
@@ -4349,10 +4403,38 @@ var _ = Describe("import", func() {
 				Command: []string{
 					"/bin/bash",
 					"-c",
-					`
-set -e
-blkdiscard -z /dev/zeroout-rbd
-`,
+					EmbedJobZeroOutScript,
+				},
+				Env: []corev1.EnvVar{
+					{
+						Name: "ROOK_CEPH_USERNAME",
+						ValueFrom: &corev1.EnvVarSource{
+							SecretKeyRef: &corev1.SecretKeySelector{
+								LocalObjectReference: corev1.LocalObjectReference{Name: "rook-ceph-mon"},
+								Key:                  "ceph-username",
+							},
+						},
+					},
+					{
+						Name: "ROOK_CEPH_SECRET",
+						ValueFrom: &corev1.EnvVarSource{
+							SecretKeyRef: &corev1.SecretKeySelector{
+								LocalObjectReference: corev1.LocalObjectReference{Name: "rook-ceph-mon"},
+								Key:                  "ceph-secret",
+							},
+						},
+					},
+					{
+						Name: "MON_ENDPOINTS",
+						ValueFrom: &corev1.EnvVarSource{
+							ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+								LocalObjectReference: corev1.LocalObjectReference{Name: "rook-ceph-mon-endpoints"},
+								Key:                  "data",
+							},
+						},
+					},
+					{Name: "POOL_NAME", Value: snapshotTarget.poolName},
+					{Name: "DST_IMAGE_NAME", Value: snapshotTarget.imageName},
 				},
 				Image:           mbr.podImage,
 				ImagePullPolicy: corev1.PullIfNotPresent,
