@@ -44,6 +44,11 @@ var _ = Describe("incremental backup", Label("incr-backup"), func() {
 		Expect(err).NotTo(HaveOccurred())
 		WaitTemporaryResourcesDeleted(ctx, primaryMB1, secondaryMB1)
 
+		// The import Job of M1' records the imported snapshot in the RBD image
+		// metadata, so that the import Job of the next MantleBackup can skip
+		// its rollback.
+		EnsurePVCImageIsCleanForSnapshot(SecondaryK8sCluster, namespace, pvcName, backupName1)
+
 		// Make sure verification step has completed in both clusters.
 		WaitMantleBackupVerified(PrimaryK8sCluster, namespace, backupName0)
 		WaitMantleBackupVerified(SecondaryK8sCluster, namespace, backupName0)

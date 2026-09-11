@@ -936,6 +936,52 @@ func EnsurePVCHasNoSnapshot(cluster int, namespace, pvcName, snapName string) {
 	}).Should(Succeed())
 }
 
+// GetRBDImageMetaInPVC returns the RBD image metadata of the image backing the
+// given PVC.
+func GetRBDImageMetaInPVC(cluster int, namespace, pvcName string) (map[string]string, error) {
+	pvc, err := GetPVC(cluster, namespace, pvcName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get PVC: %w", err)
+	}
+	pv, err := GetPV(cluster, pvc.Spec.VolumeName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get PV: %w", err)
+	}
+
+	image := "rook-ceph-block/" + pv.Spec.CSI.VolumeAttributes["imageName"]
+	stdout, stderr, err := Kubectl(cluster, nil,
+		"exec", "-n", CephCluster1Namespace, "deploy/rook-ceph-tools", "--",
+		"rbd", "image-meta", "list", "--format", "json", image)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list the image metadata: %s: %s: %w", image, string(stderr), err)
+	}
+
+	// rbd prints nothing if the image has no metadata at all.
+	if len(bytes.TrimSpace(stdout)) == 0 {
+		return map[string]string{}, nil
+	}
+
+	var meta map[string]string
+	if err := json.Unmarshal(stdout, &meta); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal the image metadata: %s: %w", string(stdout), err)
+	}
+
+	return meta, nil
+}
+
+// EnsurePVCImageIsCleanForSnapshot makes sure that the image backing the given
+// PVC is recorded as identical to the given snapshot, so that the next import
+// Job can skip its rollback.
+func EnsurePVCImageIsCleanForSnapshot(cluster int, namespace, pvcName, snapName string) {
+	GinkgoHelper()
+	By("checking the image head is recorded as identical to the snapshot")
+	Eventually(func(g Gomega) {
+		meta, err := GetRBDImageMetaInPVC(cluster, namespace, pvcName)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(meta).To(HaveKeyWithValue("mantle.clean-snap", snapName))
+	}).Should(Succeed())
+}
+
 func createCephCmd(cluster int) ceph.CephCmd {
 	kubectl, err := getKubectlInvocation(cluster)
 	if err != nil {

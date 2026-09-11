@@ -110,6 +110,8 @@ var (
 	EmbedJobUploadScript string
 	//go:embed script/job-import.sh
 	EmbedJobImportScript string
+	//go:embed script/job-zeroout.sh
+	EmbedJobZeroOutScript string
 )
 
 type ObjectStorageSettings struct {
@@ -2197,6 +2199,18 @@ func MakeMiddleSnapshotName(backup *mantlev1.MantleBackup, offset int) string {
 	return fmt.Sprintf("%s-offset-%d", backup.GetAnnotations()[annotRemoteUID], offset)
 }
 
+// MakeImportJobToSnapName returns the name of the snapshot that the import of
+// the given part creates on the destination image. The last part creates the
+// snapshot of the backup itself, and the others create a middle snapshot,
+// which is the source snapshot of the next part.
+func MakeImportJobToSnapName(backup *mantlev1.MantleBackup, partNum, numParts int, transferPartSize int64) string {
+	if partNum == numParts-1 {
+		return backup.GetName()
+	}
+
+	return MakeMiddleSnapshotName(backup, (partNum+1)*int(transferPartSize))
+}
+
 func MakeVerifyImageName(target *mantlev1.MantleBackup) string {
 	return mantleVerifyImagePrefix + string(target.GetUID())
 }
@@ -2915,7 +2929,7 @@ func (r *MantleBackupReconciler) reconcileZeroOutJob(
 		return result.WrapIfError("failed to create a static PVC for zeroout")
 	}
 
-	if result := r.createOrUpdateZeroOutJob(ctx, backup); result.ShouldReturn() {
+	if result := r.createOrUpdateZeroOutJob(ctx, backup, snapshotTarget); result.ShouldReturn() {
 		return result.WrapIfError("failed to create or update zeroout Job")
 	}
 
@@ -3075,6 +3089,7 @@ func (r *MantleBackupReconciler) createStaticPVCIfNotExists(
 func (r *MantleBackupReconciler) createOrUpdateZeroOutJob(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
+	snapshotTarget *snapshotTarget,
 ) *reconcile.Result {
 	var job batchv1.Job
 	job.SetName(MakeZeroOutJobName(backup))
@@ -3089,6 +3104,8 @@ func (r *MantleBackupReconciler) createOrUpdateZeroOutJob(
 		job.SetLabels(labels)
 
 		job.Spec.BackoffLimit = ptr.To(int32(65535))
+		// Wait for terminating Pods to stop before another Pod can modify the image.
+		job.Spec.PodReplacementPolicy = ptr.To(batchv1.Failed)
 
 		if !job.CreationTimestamp.IsZero() {
 			return nil
@@ -3102,10 +3119,38 @@ func (r *MantleBackupReconciler) createOrUpdateZeroOutJob(
 				Command: []string{
 					"/bin/bash",
 					"-c",
-					`
-set -e
-blkdiscard -z /dev/zeroout-rbd
-`,
+					EmbedJobZeroOutScript,
+				},
+				Env: []corev1.EnvVar{
+					{
+						Name: "ROOK_CEPH_USERNAME",
+						ValueFrom: &corev1.EnvVarSource{
+							SecretKeyRef: &corev1.SecretKeySelector{
+								LocalObjectReference: corev1.LocalObjectReference{Name: "rook-ceph-mon"},
+								Key:                  "ceph-username",
+							},
+						},
+					},
+					{
+						Name: "ROOK_CEPH_SECRET",
+						ValueFrom: &corev1.EnvVarSource{
+							SecretKeyRef: &corev1.SecretKeySelector{
+								LocalObjectReference: corev1.LocalObjectReference{Name: "rook-ceph-mon"},
+								Key:                  "ceph-secret",
+							},
+						},
+					},
+					{
+						Name: "MON_ENDPOINTS",
+						ValueFrom: &corev1.EnvVarSource{
+							ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+								LocalObjectReference: corev1.LocalObjectReference{Name: "rook-ceph-mon-endpoints"},
+								Key:                  "data",
+							},
+						},
+					},
+					{Name: "POOL_NAME", Value: snapshotTarget.poolName},
+					{Name: "DST_IMAGE_NAME", Value: snapshotTarget.imageName},
 				},
 				SecurityContext: &corev1.SecurityContext{
 					Privileged: ptr.To(true),
@@ -3293,11 +3338,11 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 	partNum := largestCompletedPartNum + 1
 
 	// Check that all import Jobs are completed
-	finalPartNum, result := r.getNumberOfParts(backup)
+	numParts, result := r.getNumberOfParts(backup)
 	if result.ShouldReturn() {
 		return result.WrapIfError("failed to calculate num of export data parts")
 	}
-	if partNum == finalPartNum {
+	if partNum == numParts {
 		return nil
 	}
 
@@ -3322,7 +3367,7 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 	}
 
 	// create or update an import Job
-	if result := r.createOrUpdateImportJob(ctx, backup, snapshotTarget, partNum); result.ShouldReturn() {
+	if result := r.createOrUpdateImportJob(ctx, backup, snapshotTarget, partNum, numParts); result.ShouldReturn() {
 		return result.WrapIfError("failed to create or update import Job")
 	}
 
@@ -3333,7 +3378,7 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
 	snapshotTarget *snapshotTarget,
-	partNum int,
+	partNum, numParts int,
 ) *reconcile.Result {
 	if backup.Status.TransferPartSize == nil {
 		return reconcile.Failed("status.transferPartSize is nil")
@@ -3363,6 +3408,8 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 		job.SetLabels(labels)
 
 		job.Spec.BackoffLimit = ptr.To(int32(65535))
+		// Wait for terminating Pods to stop before another Pod can modify the image.
+		job.Spec.PodReplacementPolicy = ptr.To(batchv1.Failed)
 
 		if !job.CreationTimestamp.IsZero() {
 			return nil
@@ -3410,6 +3457,10 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 				{
 					Name:  "FROM_SNAP_NAME",
 					Value: sourceBackupName,
+				},
+				{
+					Name:  "TO_SNAP_NAME",
+					Value: MakeImportJobToSnapName(backup, partNum, numParts, transferPartSize),
 				},
 				{
 					Name:  "OBJ_NAME",
