@@ -115,6 +115,15 @@ func (r *MBCPrimaryReconciler) Provision(mbc *mantlev1.MantleBackupConfig, sc *s
 		"mantlebackupconfig":    mbc.Name,
 	}).Set(1)
 
+	suspend := 0
+	if mbc.Spec.Suspend {
+		suspend = 1
+	}
+	metrics.BackupConfigSuspend.With(prometheus.Labels{
+		"resource_namespace": mbc.Namespace,
+		"mantlebackupconfig": mbc.Name,
+	}).Set(float64(suspend))
+
 	r.createOrUpdateCronJob(mbc)
 
 	return nil
@@ -143,6 +152,11 @@ func (r *MBCPrimaryReconciler) Finalize(mbc *mantlev1.MantleBackupConfig, cronJo
 		"persistentvolumeclaim": mbc.Spec.PVC,
 		"resource_namespace":    mbc.Namespace,
 		"mantlebackupconfig":    mbc.Name,
+	})
+
+	_ = metrics.BackupConfigSuspend.Delete(prometheus.Labels{
+		"resource_namespace": mbc.Namespace,
+		"mantlebackupconfig": mbc.Name,
 	})
 
 	if cronJob != nil {

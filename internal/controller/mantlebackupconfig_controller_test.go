@@ -282,15 +282,51 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cronJob.Spec.Schedule).To(Equal(schedule))
 		Expect(*cronJob.Spec.Suspend).To(Equal(suspend))
+		metricLabels := map[string]string{
+			"resource_namespace": mbc.Namespace,
+			"mantlebackupconfig": mbc.Name,
+		}
+		infoMetricLabels := map[string]string{
+			"persistentvolumeclaim": pvc.Name,
+			"resource_namespace":    mbc.Namespace,
+			"mantlebackupconfig":    mbc.Name,
+		}
+		Eventually(ctx, func() bool {
+			suspendValue, suspendFound := gatherGaugeValue("mantle_mantlebackupconfig_suspend", metricLabels)
+			infoValue, infoFound := gatherGaugeValue("mantle_mantlebackupconfig_info", infoMetricLabels)
+
+			return suspendFound && suspendValue == 0 && infoFound && infoValue == 1
+		}).Should(BeTrue())
 		Expect(cronJob.Spec.ConcurrencyPolicy).To(Equal(batchv1.ForbidConcurrent))
 		var expectedStartingDeadlineSeconds int64 = 3600
 		Expect(cronJob.Spec.StartingDeadlineSeconds).To(Equal(&expectedStartingDeadlineSeconds))
+
+		mbc.Spec.Suspend = true
+		err = k8sClient.Update(ctx, &mbc)
+		Expect(err).NotTo(HaveOccurred())
+
+		Eventually(ctx, func(g Gomega, ctx SpecContext) {
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: cronJobName, Namespace: controllerNs}, &cronJob)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(*cronJob.Spec.Suspend).To(BeTrue())
+		}).Should(Succeed())
+		Eventually(ctx, func() bool {
+			value, found := gatherGaugeValue("mantle_mantlebackupconfig_suspend", metricLabels)
+
+			return found && value == 1
+		}).Should(BeTrue())
 
 		err = k8sClient.Delete(ctx, &mbc)
 		Expect(err).NotTo(HaveOccurred())
 
 		testutil.CheckDeletedEventually[batchv1.CronJob](ctx, k8sClient, cronJobName, controllerNs)
 		testutil.CheckDeletedEventually[mantlev1.MantleBackupConfig](ctx, k8sClient, mbcName, mbcNamespace)
+		Eventually(ctx, func() bool {
+			_, suspendFound := gatherGaugeValue("mantle_mantlebackupconfig_suspend", metricLabels)
+			_, infoFound := gatherGaugeValue("mantle_mantlebackupconfig_info", infoMetricLabels)
+
+			return !suspendFound && !infoFound
+		}).Should(BeTrue())
 	})
 
 	It("should re-create the CronJob when someone deleted it", func(ctx SpecContext) {
