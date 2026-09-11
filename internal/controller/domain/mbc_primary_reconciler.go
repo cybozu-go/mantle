@@ -119,6 +119,7 @@ func (r *MBCPrimaryReconciler) Provision(mbc *mantlev1.MantleBackupConfig, sc *s
 	if mbc.Spec.Suspend {
 		suspend = 1
 	}
+
 	metrics.BackupConfigSuspend.With(prometheus.Labels{
 		"resource_namespace": mbc.Namespace,
 		"mantlebackupconfig": mbc.Name,

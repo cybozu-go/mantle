@@ -286,18 +286,29 @@ var _ = Describe("MantleBackupConfig controller", func() {
 			"resource_namespace": mbc.Namespace,
 			"mantlebackupconfig": mbc.Name,
 		}
+		infoMetricLabels := map[string]string{
+			"persistentvolumeclaim": pvc.Name,
+			"resource_namespace":    mbc.Namespace,
+			"mantlebackupconfig":    mbc.Name,
+		}
 		Eventually(ctx, func() bool {
-			value, found := gatherGaugeValue("mantle_mantlebackupconfig_suspend", metricLabels)
+			suspendValue, suspendFound := gatherGaugeValue("mantle_mantlebackupconfig_suspend", metricLabels)
+			infoValue, infoFound := gatherGaugeValue("mantle_mantlebackupconfig_info", infoMetricLabels)
 
-			return found && value == 0
+			return suspendFound && suspendValue == 0 && infoFound && infoValue == 1
 		}).Should(BeTrue())
 		Expect(cronJob.Spec.ConcurrencyPolicy).To(Equal(batchv1.ForbidConcurrent))
 		var expectedStartingDeadlineSeconds int64 = 3600
 		Expect(cronJob.Spec.StartingDeadlineSeconds).To(Equal(&expectedStartingDeadlineSeconds))
 
-		mbc.Spec.Suspend = true
-		err = k8sClient.Update(ctx, &mbc)
-		Expect(err).NotTo(HaveOccurred())
+		Eventually(ctx, func(g Gomega, ctx SpecContext) {
+			var mbc mantlev1.MantleBackupConfig
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: mbcName, Namespace: mbcNamespace}, &mbc)
+			g.Expect(err).NotTo(HaveOccurred())
+			mbc.Spec.Suspend = true
+			err = k8sClient.Update(ctx, &mbc)
+			g.Expect(err).NotTo(HaveOccurred())
+		}).Should(Succeed())
 
 		Eventually(ctx, func(g Gomega, ctx SpecContext) {
 			err := k8sClient.Get(ctx, types.NamespacedName{Name: cronJobName, Namespace: controllerNs}, &cronJob)
@@ -316,9 +327,10 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		testutil.CheckDeletedEventually[batchv1.CronJob](ctx, k8sClient, cronJobName, controllerNs)
 		testutil.CheckDeletedEventually[mantlev1.MantleBackupConfig](ctx, k8sClient, mbcName, mbcNamespace)
 		Eventually(ctx, func() bool {
-			_, found := gatherGaugeValue("mantle_mantlebackupconfig_suspend", metricLabels)
+			_, suspendFound := gatherGaugeValue("mantle_mantlebackupconfig_suspend", metricLabels)
+			_, infoFound := gatherGaugeValue("mantle_mantlebackupconfig_info", infoMetricLabels)
 
-			return !found
+			return !suspendFound && !infoFound
 		}).Should(BeTrue())
 	})
 
