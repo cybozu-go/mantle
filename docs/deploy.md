@@ -38,6 +38,25 @@ Finally, check that Mantle is running:
 kubectl get pod -n rook-ceph
 ```
 
+## Downgrading Mantle
+
+> [!IMPORTANT]
+> Mantle records the state of the destination RBD images on the secondary cluster in the
+> image metadata `mantle.clean-snap`. A version of Mantle that doesn't know this metadata
+> leaves it behind while it modifies the images, so the metadata becomes stale.
+>
+> If you downgrade Mantle to a version older than the one that introduced this metadata,
+> you must remove the metadata from every destination image on the secondary cluster
+> before you upgrade Mantle again:
+>
+> ```console
+> $ rbd image-meta remove <pool>/<image> mantle.clean-snap
+> ```
+>
+> Otherwise Mantle may skip a rollback that is actually necessary, and the imported backup
+> may be corrupted. See [the design notes](./design.md#the-clean-snapshot-metadata-on-the-secondary-cluster)
+> for the details.
+
 ## See also
 
 `e2e/Makefile` may help you install Mantle, because the e2e tests use the Helm charts to set up the testing environment. 
