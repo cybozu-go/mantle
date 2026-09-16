@@ -26,6 +26,15 @@ var (
 		[]string{"persistentvolumeclaim", "resource_namespace", "mantlebackupconfig"},
 	)
 
+	BackupConfigSuspend = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Name:      "mantlebackupconfig_suspend",
+			Help:      "Indicates whether the backup configuration is suspended.",
+		},
+		[]string{"resource_namespace", "mantlebackupconfig"},
+	)
+
 	BackupDurationSeconds = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
@@ -40,5 +49,6 @@ var (
 func init() {
 	runtimemetrics.Registry.MustRegister(BackupExportedDiffSizeBytes)
 	runtimemetrics.Registry.MustRegister(BackupConfigInfo)
+	runtimemetrics.Registry.MustRegister(BackupConfigSuspend)
 	runtimemetrics.Registry.MustRegister(BackupDurationSeconds)
 }
