@@ -3268,6 +3268,8 @@ var _ = Describe("import", func() {
 			}, &importJob)
 			Expect(err).NotTo(HaveOccurred())
 
+			Expect(importJob.Spec.PodReplacementPolicy).To(Equal(ptr.To(batchv1.Failed)))
+
 			// The successive calls should return ctrl.Result{Requeue: true} until the import Job is completed.
 			res, err = mbr.reconcileImportJob(ctx, backup, snapshotTarget, -1).ToCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
