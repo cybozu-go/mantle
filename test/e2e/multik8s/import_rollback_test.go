@@ -25,6 +25,17 @@ const (
 	rollbackTestMinHoleSize = 64 << 20
 )
 
+// The constants for the test of the diff of a round-tripped area. It writes
+// the patterns directly to the RBD image, without a file system, so that the
+// area the backups differ in is exactly [0, roundTripTestAreaSize).
+const (
+	roundTripTestPVCSize         = "16Mi"
+	roundTripTestAreaSize        = "4M"
+	roundTripTestAreaSizeInBytes = 4 << 20
+	roundTripTestPatternA        = 0xa5
+	roundTripTestPatternB        = 0x5a
+)
+
 var _ = Describe("import job rollback", Label("import-rollback"), func() {
 	// An import Job for an incremental backup must not corrupt the
 	// destination RBD image when it's dirty, e.g., after interruption of
@@ -156,5 +167,86 @@ rbd(){
 		EnsurePVCHasNoSnapshot(SecondaryK8sCluster, namespace, pvcName, "initialsnap")
 		EnsureBackupContentIdentical(namespace, pvcName, backupName)
 		EnsureRBDImageCleanSince(SecondaryK8sCluster, namespace, pvcName, backupName)
+	})
+	// Deleting a MantleBackup only in the primary cluster leaves its snapshot
+	// in the secondary cluster. The incremental data of the next backup is
+	// then based on an older snapshot than the latest one of the destination
+	// image, so the image doesn't match the base snapshot when the import Job
+	// starts.
+	//
+	// This case alone doesn't corrupt the destination image even without the
+	// rollback, because RBD builds a diff from the areas written after the
+	// base snapshot, not from the contents of the two snapshots. This test
+	// makes sure of it: an area whose contents go A -> B -> A over M0, M1 and
+	// M2 is still in the diff between M0 and M2, so the import Job overwrites
+	// the data of M1 left in the destination image.
+	It("should leave the write of a round-tripped area in the diff", func(ctx SpecContext) {
+		namespace := util.GetUniqueName("ns-")
+		pvcName := util.GetUniqueName("pvc-")
+		backupName0 := util.GetUniqueName("mb-")
+		backupName1 := util.GetUniqueName("mb-")
+		backupName2 := util.GetUniqueName("mb-")
+
+		SetupNamespaces(namespace)
+		CreatePVCWithSize(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1, roundTripTestPVCSize)
+		WaitPVCBound(ctx, PrimaryK8sCluster, namespace, pvcName)
+
+		// create M0, in which the area has the pattern A.
+		WritePatternToRBDImageOfPVC(PrimaryK8sCluster, namespace, pvcName,
+			roundTripTestPatternA, roundTripTestAreaSize)
+		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName0)
+		WaitMantleBackupSynced(namespace, backupName0)
+
+		primaryMB0, err := GetMB(PrimaryK8sCluster, namespace, backupName0)
+		Expect(err).NotTo(HaveOccurred())
+		secondaryMB0, err := GetMB(SecondaryK8sCluster, namespace, backupName0)
+		Expect(err).NotTo(HaveOccurred())
+		WaitTemporaryResourcesDeleted(ctx, primaryMB0, secondaryMB0)
+
+		// create M1, in which the area has the pattern B.
+		WritePatternToRBDImageOfPVC(PrimaryK8sCluster, namespace, pvcName,
+			roundTripTestPatternB, roundTripTestAreaSize)
+		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName1)
+		WaitMantleBackupSynced(namespace, backupName1)
+
+		primaryMB1, err := GetMB(PrimaryK8sCluster, namespace, backupName1)
+		Expect(err).NotTo(HaveOccurred())
+		secondaryMB1, err := GetMB(SecondaryK8sCluster, namespace, backupName1)
+		Expect(err).NotTo(HaveOccurred())
+		WaitTemporaryResourcesDeleted(ctx, primaryMB1, secondaryMB1)
+
+		// remember the contents of M1 before its snapshot in the primary
+		// cluster has gone.
+		hash1, err := GetRBDSnapshotHash(PrimaryK8sCluster, namespace, pvcName, backupName1)
+		Expect(err).NotTo(HaveOccurred())
+
+		// delete M1 only in the primary cluster, so that the incremental data
+		// of M2 is based on the snapshot of M0.
+		DeleteMantleBackup(PrimaryK8sCluster, namespace, backupName1)
+		WaitMantleBackupDeleted(ctx, PrimaryK8sCluster, namespace, backupName1)
+
+		// create M2, in which the area has the pattern A again.
+		WritePatternToRBDImageOfPVC(PrimaryK8sCluster, namespace, pvcName,
+			roundTripTestPatternA, roundTripTestAreaSize)
+		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName2)
+		WaitMantleBackupSynced(namespace, backupName2)
+
+		primaryMB2, err := GetMB(PrimaryK8sCluster, namespace, backupName2)
+		Expect(err).NotTo(HaveOccurred())
+		secondaryMB2, err := GetMB(SecondaryK8sCluster, namespace, backupName2)
+		Expect(err).NotTo(HaveOccurred())
+		WaitTemporaryResourcesDeleted(ctx, primaryMB2, secondaryMB2)
+
+		// M0 and M2 have the same contents, but the diff between them still
+		// covers the whole area written in M1 and M2.
+		EnsureRBDSnapshotContentsIdentical(PrimaryK8sCluster, namespace, pvcName, backupName0, backupName2)
+		EnsureRBDDiffCovers(PrimaryK8sCluster, namespace, pvcName, backupName2, backupName0,
+			0, roundTripTestAreaSizeInBytes)
+
+		// every backup kept in the secondary cluster has the correct contents.
+		EnsureBackupContentIdentical(namespace, pvcName, backupName2)
+		EnsureBackupContentIdentical(namespace, pvcName, backupName0)
+		EnsureRBDSnapshotHashEquals(SecondaryK8sCluster, namespace, pvcName, backupName1, hash1)
+		EnsureRBDImageCleanSince(SecondaryK8sCluster, namespace, pvcName, backupName2)
 	})
 })

@@ -1108,6 +1108,17 @@ func WaitTemporaryJobsDeleted(ctx SpecContext, primaryMB, secondaryMB *mantlev1.
 	WaitTemporarySecondaryJobsDeleted(ctx, secondaryMB)
 }
 
+// WaitPVCBound waits until the given PVC is bound to a PV.
+func WaitPVCBound(ctx SpecContext, cluster int, namespace, pvcName string) {
+	GinkgoHelper()
+	By(fmt.Sprintf("waiting for the PVC to be bound @%d:%s/%s", cluster, namespace, pvcName))
+	Eventually(ctx, func(g Gomega) {
+		pvc, err := GetPVC(cluster, namespace, pvcName)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(pvc.Status.Phase).To(Equal(corev1.ClaimBound))
+	}).Should(Succeed())
+}
+
 func WaitPVCDeleted(ctx SpecContext, cluster int, namespace, pvcName string) {
 	GinkgoHelper()
 	By("waiting for a PVC to be deleted")
@@ -1763,6 +1774,77 @@ func GetRBDSnapshotHash(cluster int, namespace, pvcName, snapName string) (strin
 	}
 
 	return fields[0], nil
+}
+
+// WritePatternToRBDImageOfPVC writes the given byte pattern to [0, size) of
+// the RBD image backing the given PVC. Note that writing the same pattern
+// twice restores the contents of the area, though RBD still regards the area
+// as modified.
+func WritePatternToRBDImageOfPVC(cluster int, namespace, pvcName string, patternByte int, size string) {
+	GinkgoHelper()
+	By(fmt.Sprintf("writing the pattern byte %d to [0, %s) of the RBD image of %s",
+		patternByte, size, pvcName))
+
+	poolName, imageName, err := GetRBDPoolAndImageOfPVC(cluster, namespace, pvcName)
+	Expect(err).NotTo(HaveOccurred())
+
+	_, stderr, err := Kubectl(cluster, nil,
+		"exec", "-n", CephCluster1Namespace, "deploy/rook-ceph-tools", "--",
+		"rbd", "bench", "--io-type", "write", "--io-pattern", "full-seq",
+		"--io-size", size, "--io-total", size, "--pattern-byte", strconv.Itoa(patternByte),
+		poolName+"/"+imageName)
+	Expect(err).NotTo(HaveOccurred(), "stderr: %s", string(stderr))
+}
+
+// EnsureRBDDiffCovers makes sure the diff of the given snapshot of the RBD
+// image backing the given PVC, taken from the snapshot fromSnapName, covers
+// the whole area of [offset, offset+length).
+func EnsureRBDDiffCovers(
+	cluster int,
+	namespace, pvcName, snapName, fromSnapName string,
+	offset, length uint64,
+) {
+	GinkgoHelper()
+	By(fmt.Sprintf("checking the diff of %s from %s covers [%d, %d)",
+		snapName, fromSnapName, offset, offset+length))
+
+	diffs, err := getRBDDiff(cluster, namespace, pvcName, snapName, fromSnapName)
+	Expect(err).NotTo(HaveOccurred())
+
+	// the extents rbd diff reports never overlap with each other.
+	var covered uint64
+	for _, diff := range diffs {
+		begin := max(diff.Offset, offset)
+		end := min(diff.Offset+diff.Length, offset+length)
+		if begin < end {
+			covered += end - begin
+		}
+	}
+	Expect(covered).To(Equal(length), "the diff doesn't cover the whole area: diffs: %+v", diffs)
+}
+
+// EnsureRBDSnapshotContentsIdentical makes sure the two snapshots of the RBD
+// image backing the given PVC have exactly the same contents.
+func EnsureRBDSnapshotContentsIdentical(cluster int, namespace, pvcName, snapName1, snapName2 string) {
+	GinkgoHelper()
+	By(fmt.Sprintf("checking the contents of %s and %s are identical", snapName1, snapName2))
+
+	hash1, err := GetRBDSnapshotHash(cluster, namespace, pvcName, snapName1)
+	Expect(err).NotTo(HaveOccurred())
+	hash2, err := GetRBDSnapshotHash(cluster, namespace, pvcName, snapName2)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(hash2).To(Equal(hash1))
+}
+
+// EnsureRBDSnapshotHashEquals makes sure the given snapshot of the RBD image
+// backing the given PVC has the expected contents.
+func EnsureRBDSnapshotHashEquals(cluster int, namespace, pvcName, snapName, expected string) {
+	GinkgoHelper()
+	By(fmt.Sprintf("checking the contents of the snapshot %s @%d", snapName, cluster))
+
+	hash, err := GetRBDSnapshotHash(cluster, namespace, pvcName, snapName)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(hash).To(Equal(expected))
 }
 
 // EnsureBackupContentIdentical makes sure the RBD snapshot of the given backup
