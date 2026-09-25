@@ -870,18 +870,13 @@ func PauseObjectStorage(ctx SpecContext) {
 }
 
 func ListRBDSnapshotsInPVC(cluster int, namespace, pvcName string) ([]ceph.RBDSnapshot, error) {
-	pvc, err := GetPVC(cluster, namespace, pvcName)
+	poolName, imageName, err := GetRBDPoolAndImageOfPVC(cluster, namespace, pvcName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get PVC: %w", err)
+		return nil, err
 	}
-	pv, err := GetPV(cluster, pvc.Spec.VolumeName)
+	snaps, err := createCephCmd(cluster).RBDSnapLs(poolName, imageName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get PV: %w", err)
-	}
-	cmd := createCephCmd(cluster)
-	snaps, err := cmd.RBDSnapLs("rook-ceph-block", pv.Spec.CSI.VolumeAttributes["imageName"])
-	if err != nil {
-		return nil, fmt.Errorf("failed to create ceph cmd: %w", err)
+		return nil, fmt.Errorf("failed to list RBD snapshots: %s/%s: %w", poolName, imageName, err)
 	}
 
 	return snaps, nil
@@ -1554,4 +1549,39 @@ func RestartWorkload(cluster int, kind, ns, name string) {
 	GinkgoHelper()
 	_, stderr, err := Kubectl(cluster, nil, "rollout", "restart", kind, "-n", ns, name)
 	Expect(err).NotTo(HaveOccurred(), "failed to restart %s(%s/%s) stderr: %s", kind, ns, name, string(stderr))
+}
+
+// GetRBDPoolAndImageOfPVC returns the pool and the name of the RBD image
+// backing the given PVC.
+func GetRBDPoolAndImageOfPVC(cluster int, namespace, pvcName string) (string, string, error) {
+	pvc, err := GetPVC(cluster, namespace, pvcName)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get PVC: %w", err)
+	}
+	pv, err := GetPV(cluster, pvc.Spec.VolumeName)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get PV: %w", err)
+	}
+	if pv.Spec.CSI == nil {
+		return "", "", fmt.Errorf("PV %s is not a CSI volume", pv.GetName())
+	}
+
+	return pv.Spec.CSI.VolumeAttributes["pool"], pv.Spec.CSI.VolumeAttributes["imageName"], nil
+}
+
+// DirtyRBDImageHeadOfPVC writes data directly to the head of the RBD image
+// backing the given PVC, without taking a snapshot. It simulates an import Job
+// that was interrupted after it had partially applied a diff to the head.
+func DirtyRBDImageHeadOfPVC(cluster int, namespace, pvcName string) {
+	GinkgoHelper()
+	By("dirtying the head of the RBD image of " + pvcName)
+
+	poolName, imageName, err := GetRBDPoolAndImageOfPVC(cluster, namespace, pvcName)
+	Expect(err).NotTo(HaveOccurred())
+
+	_, stderr, err := Kubectl(cluster, nil,
+		"exec", "-n", CephCluster1Namespace, "deploy/rook-ceph-tools", "--",
+		"rbd", "bench", "--io-type", "write", "--io-pattern", "seq",
+		"--io-size", "4M", "--io-total", "8M", poolName+"/"+imageName)
+	Expect(err).NotTo(HaveOccurred(), "stderr: %s", string(stderr))
 }
