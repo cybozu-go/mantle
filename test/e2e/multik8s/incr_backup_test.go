@@ -21,6 +21,7 @@ var _ = Describe("incremental backup", Label("incr-backup"), func() {
 
 		SetupNamespaces(namespace)
 		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
+		EnableImportJobLogRecording(ctx)
 
 		// create M0.
 		writtenDataHash0 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
@@ -29,6 +30,10 @@ var _ = Describe("incremental backup", Label("incr-backup"), func() {
 		// create M1.
 		writtenDataHash1 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 		CreateMantleBackupAndWaitSynced(ctx, namespace, pvcName, backupName1)
+
+		// Nothing has touched the destination image since M0 was imported, so
+		// all the import Jobs of M1 must skip the rollback.
+		EnsureImportJobsSkippedRollback(namespace, pvcName, backupName1)
 
 		// Make sure verification step has completed in both clusters.
 		WaitMantleBackupVerified(PrimaryK8sCluster, namespace, backupName0)
@@ -114,6 +119,7 @@ var _ = Describe("incremental backup", Label("incr-backup"), func() {
 
 		SetupNamespaces(namespace)
 		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
+		EnableImportJobLogRecording(ctx)
 
 		// create M0.
 		writtenDataHash0 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
@@ -131,6 +137,10 @@ var _ = Describe("incremental backup", Label("incr-backup"), func() {
 		// create M2.
 		writtenDataHash2 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 		CreateMantleBackupAndWaitSynced(ctx, namespace, pvcName, backupName2)
+
+		// The first part of the import Job of M2 must roll back the image to M0.
+		// The other parts can skip the rollback.
+		EnsureImportJobsRolledBackOnlyFirstPart(namespace, pvcName, backupName2)
 
 		// Make sure verification step has completed in both clusters.
 		WaitMantleBackupVerified(PrimaryK8sCluster, namespace, backupName0)
