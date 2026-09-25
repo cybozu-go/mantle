@@ -93,16 +93,23 @@ if [ -z "${FROM_SNAP_NAME}" ]; then
         rbd snap create ${POOL_NAME}/${DST_IMAGE_NAME}@initialsnap
         echo "finish initialsnap creation"
     else
+        # DO NOT MERGE: the rollback is disabled here on purpose, to make sure
+        # the e2e tests labelled "import-rollback" detect its absence.
+        #
         # Roll back here to guarantee that the import target is exactly
         # the expected state, so that the subsequent import-diff applies correctly.
-        rbd_snap_rollback "${POOL_NAME}/${DST_IMAGE_NAME}@initialsnap"
+        # rbd_snap_rollback "${POOL_NAME}/${DST_IMAGE_NAME}@initialsnap"
+        :
     fi
     rbd_import
     echo "start initialsnap deletion"
     rbd snap rm ${POOL_NAME}/${DST_IMAGE_NAME}@initialsnap
     echo "finish initialsnap deletion"
 else
+    # DO NOT MERGE: the rollback is disabled here on purpose, to make sure
+    # the e2e tests labelled "import-rollback" detect its absence.
+    #
     # See the comment above for why we roll back here.
-    rbd_snap_rollback "${POOL_NAME}/${DST_IMAGE_NAME}@${FROM_SNAP_NAME}"
+    # rbd_snap_rollback "${POOL_NAME}/${DST_IMAGE_NAME}@${FROM_SNAP_NAME}"
     rbd_import
 fi
