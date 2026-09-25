@@ -3364,6 +3364,10 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 
 		job.Spec.BackoffLimit = ptr.To(int32(65535))
 
+		// create replacement Pods only when the terminating Pod is fully terminal
+		// because import Jobs assume there are no other concurrent processes to the same data.
+		job.Spec.PodReplacementPolicy = ptr.To(batchv1.Failed)
+
 		if !job.CreationTimestamp.IsZero() {
 			return nil
 		}
