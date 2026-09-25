@@ -45,6 +45,11 @@ const (
 	SCName2                    = "rook-ceph-block2"
 	RgwDeployName              = "rook-ceph-rgw-ceph-object-store-a"
 	MantleControllerDeployName = "mantle-controller"
+
+	// DefaultPVCSize is the size of the PVCs created by CreatePVC. Note that
+	// WriteRandomDataToPV writes data of almost the same size, so the RBD
+	// image of such a PVC has few holes, i.e. unallocated areas.
+	DefaultPVCSize = "10Mi"
 )
 
 var (
@@ -227,8 +232,8 @@ func applyPodMountVolumeTemplate(clusterNo int, namespace, podName, pvcName stri
 	return nil
 }
 
-func applyPVCTemplate(clusterNo int, namespace, name, sc string) error {
-	manifest := fmt.Sprintf(testPVCTemplate, name, sc)
+func applyPVCTemplate(clusterNo int, namespace, name, sc, size string) error {
+	manifest := fmt.Sprintf(testPVCTemplate, name, size, sc)
 	_, _, err := Kubectl(clusterNo, []byte(manifest), "apply", "-n", namespace, "-f", "-")
 	if err != nil {
 		return fmt.Errorf("kubectl apply pvc failed. err: %w", err)
@@ -557,8 +562,14 @@ func CreatePod(cluster int, namespace, podName, pvcName string) {
 
 func CreatePVC(ctx SpecContext, cluster int, namespace, name, scName string) {
 	GinkgoHelper()
+	CreatePVCWithSize(ctx, cluster, namespace, name, scName, DefaultPVCSize)
+}
+
+// CreatePVCWithSize creates a PVC of the given size.
+func CreatePVCWithSize(ctx SpecContext, cluster int, namespace, name, scName, size string) {
+	GinkgoHelper()
 	Eventually(ctx, func() error {
-		return applyPVCTemplate(cluster, namespace, name, scName)
+		return applyPVCTemplate(cluster, namespace, name, scName, size)
 	}).Should(Succeed())
 }
 
@@ -632,7 +643,7 @@ func WaitStorageClassProvisionable(cluster int, namespace, scName string) {
 	pvcName := util.GetUniqueName("probe-pvc-")
 	By(fmt.Sprintf("probing StorageClass %s is provisionable @%d:%s/%s", scName, cluster, namespace, pvcName))
 	Eventually(func() error {
-		return applyPVCTemplate(cluster, namespace, pvcName, scName)
+		return applyPVCTemplate(cluster, namespace, pvcName, scName, DefaultPVCSize)
 	}, "10m", "5s").Should(Succeed())
 	Eventually(func(g Gomega) {
 		pvc, err := GetPVC(cluster, namespace, pvcName)
@@ -870,18 +881,13 @@ func PauseObjectStorage(ctx SpecContext) {
 }
 
 func ListRBDSnapshotsInPVC(cluster int, namespace, pvcName string) ([]ceph.RBDSnapshot, error) {
-	pvc, err := GetPVC(cluster, namespace, pvcName)
+	poolName, imageName, err := GetRBDPoolAndImageOfPVC(cluster, namespace, pvcName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get PVC: %w", err)
+		return nil, err
 	}
-	pv, err := GetPV(cluster, pvc.Spec.VolumeName)
+	snaps, err := createCephCmd(cluster).RBDSnapLs(poolName, imageName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get PV: %w", err)
-	}
-	cmd := createCephCmd(cluster)
-	snaps, err := cmd.RBDSnapLs("rook-ceph-block", pv.Spec.CSI.VolumeAttributes["imageName"])
-	if err != nil {
-		return nil, fmt.Errorf("failed to create ceph cmd: %w", err)
+		return nil, fmt.Errorf("failed to list RBD snapshots: %s/%s: %w", poolName, imageName, err)
 	}
 
 	return snaps, nil
@@ -1554,4 +1560,220 @@ func RestartWorkload(cluster int, kind, ns, name string) {
 	GinkgoHelper()
 	_, stderr, err := Kubectl(cluster, nil, "rollout", "restart", kind, "-n", ns, name)
 	Expect(err).NotTo(HaveOccurred(), "failed to restart %s(%s/%s) stderr: %s", kind, ns, name, string(stderr))
+}
+
+// GetRBDPoolAndImageOfPVC returns the pool and the name of the RBD image
+// backing the given PVC.
+func GetRBDPoolAndImageOfPVC(cluster int, namespace, pvcName string) (string, string, error) {
+	pvc, err := GetPVC(cluster, namespace, pvcName)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get PVC: %w", err)
+	}
+	pv, err := GetPV(cluster, pvc.Spec.VolumeName)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get PV: %w", err)
+	}
+	if pv.Spec.CSI == nil {
+		return "", "", fmt.Errorf("PV %s is not a CSI volume", pv.GetName())
+	}
+
+	return pv.Spec.CSI.VolumeAttributes["pool"], pv.Spec.CSI.VolumeAttributes["imageName"], nil
+}
+
+// GetRBDImageSizeOfPVC returns the size, in bytes, of the RBD image backing
+// the given PVC.
+func GetRBDImageSizeOfPVC(cluster int, namespace, pvcName string) (uint64, error) {
+	poolName, imageName, err := GetRBDPoolAndImageOfPVC(cluster, namespace, pvcName)
+	if err != nil {
+		return 0, err
+	}
+
+	stdout, stderr, err := Kubectl(cluster, nil,
+		"exec", "-n", CephCluster1Namespace, "deploy/rook-ceph-tools", "--",
+		"rbd", "info", "--format", "json", poolName+"/"+imageName)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get the info of the RBD image: %s/%s: %s: %w",
+			poolName, imageName, string(stderr), err)
+	}
+
+	var info struct {
+		Size uint64 `json:"size"`
+	}
+	if err := json.Unmarshal(stdout, &info); err != nil {
+		return 0, fmt.Errorf("failed to unmarshal the info of the RBD image: %s/%s: %w",
+			poolName, imageName, err)
+	}
+
+	return info.Size, nil
+}
+
+// DirtyWholeRBDImageOfPVC writes dummy data to the whole RBD image backing the
+// given PVC, to simulate, e.g., an interrupted import Job. It covers the holes
+// of the image as well, which is essential for the tests of the rollback: an
+// import Job never overwrites the holes of its source image because
+// export-diff outputs nothing for them, so the dummy data written to them
+// survives unless the Job rolls the image back beforehand.
+func DirtyWholeRBDImageOfPVC(cluster int, namespace, pvcName string) {
+	GinkgoHelper()
+	By("dirtying the whole RBD image of " + pvcName)
+
+	poolName, imageName, err := GetRBDPoolAndImageOfPVC(cluster, namespace, pvcName)
+	Expect(err).NotTo(HaveOccurred())
+	size, err := GetRBDImageSizeOfPVC(cluster, namespace, pvcName)
+	Expect(err).NotTo(HaveOccurred())
+
+	_, stderr, err := Kubectl(cluster, nil,
+		"exec", "-n", CephCluster1Namespace, "deploy/rook-ceph-tools", "--",
+		"rbd", "bench", "--io-type", "write", "--io-pattern", "full-seq",
+		"--io-size", "4M", "--io-total", strconv.FormatUint(size, 10), poolName+"/"+imageName)
+	Expect(err).NotTo(HaveOccurred(), "stderr: %s", string(stderr))
+}
+
+type rbdDiffEntry struct {
+	Offset uint64 `json:"offset"`
+	Length uint64 `json:"length"`
+	Exists string `json:"exists"`
+}
+
+// getRBDDiff returns the extents of the RBD image backing the given PVC that
+// have data. If snapName isn't empty, the snapshot of the image is examined
+// instead of its head. If fromSnapName isn't empty, only the extents written
+// after the given snapshot was taken are returned.
+func getRBDDiff(cluster int, namespace, pvcName, snapName, fromSnapName string) ([]rbdDiffEntry, error) {
+	poolName, imageName, err := GetRBDPoolAndImageOfPVC(cluster, namespace, pvcName)
+	if err != nil {
+		return nil, err
+	}
+
+	imageSpec := poolName + "/" + imageName
+	if snapName != "" {
+		imageSpec += "@" + snapName
+	}
+	args := []string{
+		"exec", "-n", CephCluster1Namespace, "deploy/rook-ceph-tools", "--",
+		"rbd", "diff", "--format", "json",
+	}
+	if fromSnapName != "" {
+		args = append(args, "--from-snap", fromSnapName)
+	}
+	args = append(args, imageSpec)
+
+	stdout, stderr, err := Kubectl(cluster, nil, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get the diff of the RBD image: %s: %s: %w",
+			imageSpec, string(stderr), err)
+	}
+
+	var diffs []rbdDiffEntry
+	if err := json.Unmarshal(stdout, &diffs); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal the diff of the RBD image: %s: %w",
+			imageSpec, err)
+	}
+
+	return diffs, nil
+}
+
+// IsRBDImageDirtySince returns true if the RBD image backing the given PVC has
+// data written after the given snapshot was taken.
+func IsRBDImageDirtySince(cluster int, namespace, pvcName, snapName string) (bool, error) {
+	diffs, err := getRBDDiff(cluster, namespace, pvcName, "", snapName)
+	if err != nil {
+		return false, err
+	}
+
+	return len(diffs) != 0, nil
+}
+
+// EnsureRBDImageDirtySince makes sure the RBD image backing the given PVC has
+// at least minDirtySize bytes of data written after the given snapshot was
+// taken. The size matters for the tests of the rollback: the dummy data must
+// cover the holes of the source image, not only the area the subsequent
+// import-diff overwrites anyway.
+func EnsureRBDImageDirtySince(cluster int, namespace, pvcName, snapName string, minDirtySize uint64) {
+	GinkgoHelper()
+	By(fmt.Sprintf("checking the RBD image of %s is dirty since %s", pvcName, snapName))
+
+	diffs, err := getRBDDiff(cluster, namespace, pvcName, "", snapName)
+	Expect(err).NotTo(HaveOccurred())
+
+	var dirty uint64
+	for _, diff := range diffs {
+		dirty += diff.Length
+	}
+	Expect(dirty).To(BeNumerically(">=", minDirtySize),
+		"the image isn't dirtied enough: dirty: %d", dirty)
+}
+
+// EnsureRBDImageCleanSince makes sure the RBD image backing the given PVC has
+// no data written after the given snapshot was taken.
+func EnsureRBDImageCleanSince(cluster int, namespace, pvcName, snapName string) {
+	GinkgoHelper()
+	By(fmt.Sprintf("checking the RBD image of %s is clean since %s", pvcName, snapName))
+	dirty, err := IsRBDImageDirtySince(cluster, namespace, pvcName, snapName)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(dirty).To(BeFalse())
+}
+
+// EnsureRBDSnapshotHasHoles makes sure the given snapshot of the RBD image
+// backing the given PVC has holes, i.e. unallocated areas, of at least
+// minHoleSize bytes in total. The tests that dirty a destination image depend
+// on the holes of its source image; see DirtyWholeRBDImageOfPVC for details.
+func EnsureRBDSnapshotHasHoles(cluster int, namespace, pvcName, snapName string, minHoleSize uint64) {
+	GinkgoHelper()
+	By(fmt.Sprintf("checking the snapshot %s of the RBD image of %s has holes", snapName, pvcName))
+
+	size, err := GetRBDImageSizeOfPVC(cluster, namespace, pvcName)
+	Expect(err).NotTo(HaveOccurred())
+	diffs, err := getRBDDiff(cluster, namespace, pvcName, snapName, "")
+	Expect(err).NotTo(HaveOccurred())
+
+	var allocated uint64
+	for _, diff := range diffs {
+		allocated += diff.Length
+	}
+	Expect(allocated).To(BeNumerically("<=", size))
+	Expect(size-allocated).To(BeNumerically(">=", minHoleSize),
+		"the image is too small or too full to have enough holes: size: %d, allocated: %d", size, allocated)
+}
+
+// GetRBDSnapshotHash returns the SHA-256 hash of the contents of the given
+// snapshot of the RBD image backing the given PVC. The hash covers the whole
+// image because rbd export writes the holes to its stdout as zeros.
+func GetRBDSnapshotHash(cluster int, namespace, pvcName, snapName string) (string, error) {
+	poolName, imageName, err := GetRBDPoolAndImageOfPVC(cluster, namespace, pvcName)
+	if err != nil {
+		return "", err
+	}
+
+	stdout, stderr, err := Kubectl(cluster, nil,
+		"exec", "-n", CephCluster1Namespace, "deploy/rook-ceph-tools", "--",
+		"bash", "-c", fmt.Sprintf(
+			"set -o pipefail; rbd export --no-progress %s/%s@%s - | sha256sum",
+			poolName, imageName, snapName))
+	if err != nil {
+		return "", fmt.Errorf("failed to export the RBD snapshot: %s/%s@%s: %s: %w",
+			poolName, imageName, snapName, string(stderr), err)
+	}
+
+	// the output of sha256sum is like "<hash>  -".
+	fields := strings.Fields(string(stdout))
+	if len(fields) == 0 {
+		return "", fmt.Errorf("failed to parse the hash of the RBD snapshot: %s/%s@%s: %q",
+			poolName, imageName, snapName, string(stdout))
+	}
+
+	return fields[0], nil
+}
+
+// EnsureBackupContentIdentical makes sure the RBD snapshot of the given backup
+// has exactly the same contents in both clusters.
+func EnsureBackupContentIdentical(namespace, pvcName, backupName string) {
+	GinkgoHelper()
+	By(fmt.Sprintf("checking the contents of the snapshot %s are identical in both clusters", backupName))
+
+	primaryHash, err := GetRBDSnapshotHash(PrimaryK8sCluster, namespace, pvcName, backupName)
+	Expect(err).NotTo(HaveOccurred())
+	secondaryHash, err := GetRBDSnapshotHash(SecondaryK8sCluster, namespace, pvcName, backupName)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(secondaryHash).To(Equal(primaryHash))
 }
