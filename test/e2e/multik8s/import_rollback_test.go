@@ -24,11 +24,11 @@ func rbdSnapshotNames(snaps []ceph.RBDSnapshot) []string {
 }
 
 var _ = Describe("import job rollback", Label("import-rollback"), func() {
-	// An import Job can be interrupted after it has partially applied
-	// incremental data to the head of the destination image. The head of the
-	// destination image then differs from the snapshot the incremental data is
-	// based on, so it has to be rolled back before the data is applied again.
-	// Otherwise the image would be silently corrupted.
+	// The import Job skips "rbd snap rollback" when the head of the
+	// destination image is already identical to the snapshot the incremental
+	// data is based on. If that check were wrong, applying the incremental
+	// data on top of a dirty head would silently corrupt the image, so make
+	// sure a dirty head is detected and rolled back.
 	It("should not corrupt the destination image whose head was dirtied", func(ctx SpecContext) {
 		namespace := util.GetUniqueName("ns-")
 		pvcName := util.GetUniqueName("pvc-")
@@ -71,6 +71,198 @@ var _ = Describe("import job rollback", Label("import-rollback"), func() {
 		EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName1, restoreName1, writtenDataHash1)
 		EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName0, restoreName0, writtenDataHash0)
 	})
+
+	// The whole point of the check is to avoid the expensive rollback in the
+	// normal case, so make sure it is really skipped against a real Ceph
+	// cluster, where "rbd diff" is answered by the OSDs holding the objects
+	// of the destination image.
+	It("should skip the rollback while the destination image is untouched", func(ctx SpecContext) {
+		namespace := util.GetUniqueName("ns-")
+		pvcName := util.GetUniqueName("pvc-")
+		backupName0 := util.GetUniqueName("mb-")
+		backupName1 := util.GetUniqueName("mb-")
+		restoreName1 := util.GetUniqueName("mr-")
+
+		SetupNamespaces(namespace)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
+
+		// create M0 and wait until its import Job has gone, so that only the
+		// import Job Pods of M1 are left below.
+		WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
+		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName0)
+		WaitMantleBackupSynced(namespace, backupName0)
+
+		primaryMB0, err := GetMB(PrimaryK8sCluster, namespace, backupName0)
+		Expect(err).NotTo(HaveOccurred())
+		secondaryMB0, err := GetMB(SecondaryK8sCluster, namespace, backupName0)
+		Expect(err).NotTo(HaveOccurred())
+		WaitTemporaryResourcesDeleted(ctx, primaryMB0, secondaryMB0)
+
+		// create M1. Nothing has touched the destination image since M0 was
+		// imported, so every import Job of M1 must skip the rollback.
+		writtenDataHash1 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
+		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName1)
+
+		// The import Job Pods are deleted once M1 is synced, so read their
+		// logs while the transfer is still in progress.
+		Eventually(ctx, func(g Gomega) {
+			secondaryMB1, err := GetMB(SecondaryK8sCluster, namespace, backupName1)
+			g.Expect(err).NotTo(HaveOccurred())
+			logs, err := GetImportJobPodLogs(SecondaryK8sCluster, secondaryMB1)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(logs).To(ContainSubstring("skip rollback"))
+			g.Expect(logs).NotTo(ContainSubstring("rollback needed"))
+		}).Should(Succeed())
+
+		WaitMantleBackupSynced(namespace, backupName1)
+
+		primaryMB1, err := GetMB(PrimaryK8sCluster, namespace, backupName1)
+		Expect(err).NotTo(HaveOccurred())
+		secondaryMB1, err := GetMB(SecondaryK8sCluster, namespace, backupName1)
+		Expect(err).NotTo(HaveOccurred())
+		WaitTemporaryResourcesDeleted(ctx, primaryMB1, secondaryMB1)
+
+		// Skipping the rollback must not have damaged the imported data.
+		EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName1, restoreName1, writtenDataHash1)
+	})
+
+	// The import Job of the very next MantleBackup must be able to skip the
+	// rollback again once a rollback has been performed. "rbd import-diff"
+	// creates the snapshot of the incremental data after its last write, so
+	// "rbd diff" from that snapshot reports no extent even though the HEAD was
+	// rolled back and rewritten just before. Note that the diff from the
+	// *base* snapshot is not empty after a rollback, because "rbd diff" is
+	// computed from the recorded history of the objects, not from their
+	// contents.
+	It("should skip the rollback in the import Job right after one that rolled back", func(ctx SpecContext) {
+		namespace := util.GetUniqueName("ns-")
+		pvcName := util.GetUniqueName("pvc-")
+		backupName0 := util.GetUniqueName("mb-")
+		backupName1 := util.GetUniqueName("mb-")
+		backupName2 := util.GetUniqueName("mb-")
+		restoreName2 := util.GetUniqueName("mr-")
+
+		SetupNamespaces(namespace)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
+
+		// create M0 and wait until its import Job has gone.
+		WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
+		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName0)
+		WaitMantleBackupSynced(namespace, backupName0)
+
+		primaryMB0, err := GetMB(PrimaryK8sCluster, namespace, backupName0)
+		Expect(err).NotTo(HaveOccurred())
+		secondaryMB0, err := GetMB(SecondaryK8sCluster, namespace, backupName0)
+		Expect(err).NotTo(HaveOccurred())
+		WaitTemporaryResourcesDeleted(ctx, primaryMB0, secondaryMB0)
+
+		// Simulate an interrupted import Job, so that the import Job of M1 has
+		// to roll the head back.
+		DirtyRBDImageHeadOfPVC(SecondaryK8sCluster, namespace, pvcName)
+
+		// create M1 and confirm that its import Job really rolls back.
+		WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
+		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName1)
+
+		// The import Job Pods are deleted once M1 is synced, so read their
+		// logs while the transfer is still in progress.
+		Eventually(ctx, func(g Gomega) {
+			secondaryMB1, err := GetMB(SecondaryK8sCluster, namespace, backupName1)
+			g.Expect(err).NotTo(HaveOccurred())
+			logs, err := GetImportJobPodLogs(SecondaryK8sCluster, secondaryMB1)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(logs).To(ContainSubstring("rollback needed"))
+		}).Should(Succeed())
+
+		WaitMantleBackupSynced(namespace, backupName1)
+
+		primaryMB1, err := GetMB(PrimaryK8sCluster, namespace, backupName1)
+		Expect(err).NotTo(HaveOccurred())
+		secondaryMB1, err := GetMB(SecondaryK8sCluster, namespace, backupName1)
+		Expect(err).NotTo(HaveOccurred())
+		WaitTemporaryResourcesDeleted(ctx, primaryMB1, secondaryMB1)
+
+		// create M2, the very next MantleBackup after the one that rolled
+		// back. Nothing has touched the destination image since M1 was
+		// imported, so its import Job must skip the rollback.
+		writtenDataHash2 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
+		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName2)
+
+		Eventually(ctx, func(g Gomega) {
+			secondaryMB2, err := GetMB(SecondaryK8sCluster, namespace, backupName2)
+			g.Expect(err).NotTo(HaveOccurred())
+			logs, err := GetImportJobPodLogs(SecondaryK8sCluster, secondaryMB2)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(logs).To(ContainSubstring("skip rollback"))
+			g.Expect(logs).NotTo(ContainSubstring("rollback needed"))
+		}).Should(Succeed())
+
+		WaitMantleBackupSynced(namespace, backupName2)
+
+		primaryMB2, err := GetMB(PrimaryK8sCluster, namespace, backupName2)
+		Expect(err).NotTo(HaveOccurred())
+		secondaryMB2, err := GetMB(SecondaryK8sCluster, namespace, backupName2)
+		Expect(err).NotTo(HaveOccurred())
+		WaitTemporaryResourcesDeleted(ctx, primaryMB2, secondaryMB2)
+
+		EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName2, restoreName2, writtenDataHash2)
+	})
+
+	// Skipping the rollback must leave the destination image completely
+	// untouched, which the logs of the import Job alone can't prove. RADOS
+	// creates a clone of an object as soon as it is written after a snapshot
+	// was taken, so a rollback, which rewrites every object of the image,
+	// would show up as new clones. Applying empty incremental data must not
+	// create any. Note that the clones can only be compared in that one
+	// direction: the OSDs trim the clones of a deleted snapshot, e.g. the one
+	// initialsnap left behind, asynchronously, so a clone can disappear
+	// without anything writing to the image.
+	It("should not write to the destination image while applying empty incremental data",
+		func(ctx SpecContext) {
+			namespace := util.GetUniqueName("ns-")
+			pvcName := util.GetUniqueName("pvc-")
+			backupName0 := util.GetUniqueName("mb-")
+			backupName1 := util.GetUniqueName("mb-")
+			restoreName1 := util.GetUniqueName("mr-")
+
+			SetupNamespaces(namespace)
+			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
+
+			// create M0 and wait until its import Job has gone.
+			writtenDataHash0 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
+			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName0)
+			WaitMantleBackupSynced(namespace, backupName0)
+
+			primaryMB0, err := GetMB(PrimaryK8sCluster, namespace, backupName0)
+			Expect(err).NotTo(HaveOccurred())
+			secondaryMB0, err := GetMB(SecondaryK8sCluster, namespace, backupName0)
+			Expect(err).NotTo(HaveOccurred())
+			WaitTemporaryResourcesDeleted(ctx, primaryMB0, secondaryMB0)
+
+			clonesBefore, err := ListRBDObjectClones(SecondaryK8sCluster, namespace, pvcName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(clonesBefore).NotTo(BeEmpty())
+
+			// create M1 without writing anything to the PV, so that its
+			// incremental data is empty.
+			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName1)
+			WaitMantleBackupSynced(namespace, backupName1)
+
+			primaryMB1, err := GetMB(PrimaryK8sCluster, namespace, backupName1)
+			Expect(err).NotTo(HaveOccurred())
+			secondaryMB1, err := GetMB(SecondaryK8sCluster, namespace, backupName1)
+			Expect(err).NotTo(HaveOccurred())
+			WaitTemporaryResourcesDeleted(ctx, primaryMB1, secondaryMB1)
+
+			// No object of the destination image may have been written, i.e.
+			// no new clone may have appeared.
+			clonesAfter, err := ListRBDObjectClones(SecondaryK8sCluster, namespace, pvcName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(AddedRBDObjectClones(clonesBefore, clonesAfter)).To(BeEmpty())
+
+			// The data of M0 must still be there under the snapshot of M1.
+			EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName1, restoreName1, writtenDataHash0)
+		})
 
 	// Deleting a MantleBackup only in the primary cluster leaves its snapshot
 	// in the secondary cluster. The next incremental data is then based on an

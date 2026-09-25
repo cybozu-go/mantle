@@ -1585,3 +1585,147 @@ func DirtyRBDImageHeadOfPVC(cluster int, namespace, pvcName string) {
 		"--io-size", "4M", "--io-total", "8M", poolName+"/"+imageName)
 	Expect(err).NotTo(HaveOccurred(), "stderr: %s", string(stderr))
 }
+
+// GetImportJobPodLogs returns the concatenated logs of the Pods of the import
+// Jobs of the given MantleBackup. The Pods of a completed part are kept until
+// the MantleBackup is synced, so polling this function while the backup is in
+// progress eventually observes the logs of every part. Pods whose logs are not
+// available yet are skipped.
+func GetImportJobPodLogs(cluster int, backup *mantlev1.MantleBackup) (string, error) {
+	pods, err := GetPodList(cluster, CephCluster1Namespace)
+	if err != nil {
+		return "", fmt.Errorf("failed to list Pods: %w", err)
+	}
+
+	// The Pods of a Job are named after the Job, and the name of an import Job
+	// contains the UID of its MantleBackup.
+	prefix := controller.MantleImportJobPrefix + string(backup.GetUID())
+	var logs strings.Builder
+	for _, pod := range pods.Items {
+		if !strings.HasPrefix(pod.GetName(), prefix) {
+			continue
+		}
+		stdout, _, err := Kubectl(cluster, nil, "logs", "-n", CephCluster1Namespace, pod.GetName())
+		if err != nil {
+			continue
+		}
+		logs.Write(stdout)
+	}
+
+	return logs.String(), nil
+}
+
+// RBDCloneInfo is a clone of a RADOS object, i.e. an element of the "clones"
+// array "rados listsnaps --format json" prints.
+type RBDCloneInfo struct {
+	// ID is the id of the clone, which is the id of the newest self-managed
+	// snapshot it belongs to, or the string "head" for the object itself.
+	ID json.RawMessage `json:"id"`
+	// Snapshots are the self-managed snapshots this clone is shared by.
+	Snapshots []struct {
+		ID uint64 `json:"id"`
+	} `json:"snapshots"`
+}
+
+// ListRBDObjectClones returns, for every data object of the RBD image backing
+// the given PVC, the ids of the snapshots RADOS keeps a clone for. A clone
+// appears as soon as an object is written after a snapshot was taken, so a new
+// clone means that the contents of the image were updated, whether by "rbd
+// import-diff" or by "rbd snap rollback". Creating a snapshot alone doesn't
+// create a clone.
+//
+// A clone can also disappear on its own: the OSDs trim the clones of a deleted
+// snapshot asynchronously, so a clone can still be listed for a while after
+// its snapshot has been removed. Use AddedRBDObjectClones to compare two
+// results instead of comparing them directly.
+func ListRBDObjectClones(cluster int, namespace, pvcName string) (map[string][]uint64, error) {
+	poolName, imageName, err := GetRBDPoolAndImageOfPVC(cluster, namespace, pvcName)
+	if err != nil {
+		return nil, err
+	}
+
+	stdout, stderr, err := Kubectl(cluster, nil,
+		"exec", "-n", CephCluster1Namespace, "deploy/rook-ceph-tools", "--",
+		"rbd", "info", "--format", "json", poolName+"/"+imageName)
+	if err != nil {
+		return nil, fmt.Errorf("rbd info failed. stderr: %s, err: %w", string(stderr), err)
+	}
+	var info struct {
+		BlockNamePrefix string `json:"block_name_prefix"`
+	}
+	if err := json.Unmarshal(stdout, &info); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal rbd info: %w", err)
+	}
+	if info.BlockNamePrefix == "" {
+		return nil, fmt.Errorf("rbd info printed no block_name_prefix: %s/%s", poolName, imageName)
+	}
+
+	stdout, stderr, err = Kubectl(cluster, nil,
+		"exec", "-n", CephCluster1Namespace, "deploy/rook-ceph-tools", "--",
+		"rados", "-p", poolName, "ls")
+	if err != nil {
+		return nil, fmt.Errorf("rados ls failed. stderr: %s, err: %w", string(stderr), err)
+	}
+
+	clones := map[string][]uint64{}
+	for objName := range strings.SplitSeq(string(stdout), "\n") {
+		objName = strings.TrimSpace(objName)
+		if !strings.HasPrefix(objName, info.BlockNamePrefix+".") {
+			continue
+		}
+
+		stdout, stderr, err := Kubectl(cluster, nil,
+			"exec", "-n", CephCluster1Namespace, "deploy/rook-ceph-tools", "--",
+			"rados", "-p", poolName, "listsnaps", "--format", "json", objName)
+		if err != nil {
+			return nil, fmt.Errorf("rados listsnaps failed. stderr: %s, err: %w", string(stderr), err)
+		}
+		var snapSet struct {
+			Clones []RBDCloneInfo `json:"clones"`
+		}
+		if err := json.Unmarshal(stdout, &snapSet); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal rados listsnaps: %w", err)
+		}
+
+		snapIDs := []uint64{}
+		for _, clone := range snapSet.Clones {
+			// Skip the object itself, which is not a clone of a snapshot.
+			if string(clone.ID) == `"head"` {
+				continue
+			}
+			for _, snap := range clone.Snapshots {
+				snapIDs = append(snapIDs, snap.ID)
+			}
+		}
+		slices.Sort(snapIDs)
+		clones[objName] = snapIDs
+	}
+
+	return clones, nil
+}
+
+// AddedRBDObjectClones returns, for every object, the ids of the snapshots
+// that have a clone in after but not in before, i.e. the clones that appeared
+// between the two calls of ListRBDObjectClones. Objects without such a clone
+// are left out, so an empty result means that no object was written.
+//
+// A clone that disappeared is not reported. The OSDs trim the clones of a
+// deleted snapshot asynchronously, so a clone listed before, e.g. the one
+// initialsnap left behind, can be gone afterwards without anything writing to
+// the image.
+func AddedRBDObjectClones(before, after map[string][]uint64) map[string][]uint64 {
+	added := map[string][]uint64{}
+	for objName, afterIDs := range after {
+		var addedIDs []uint64
+		for _, id := range afterIDs {
+			if !slices.Contains(before[objName], id) {
+				addedIDs = append(addedIDs, id)
+			}
+		}
+		if len(addedIDs) > 0 {
+			added[objName] = addedIDs
+		}
+	}
+
+	return added
+}
