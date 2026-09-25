@@ -23,20 +23,21 @@
 set -e
 set -o pipefail
 
-CEPH_CONFIG="/etc/ceph/ceph.conf"
-MON_CONFIG="/etc/rook/mon-endpoints"
-KEYRING_FILE="/etc/ceph/keyring"
+CEPH_CONFIG="${CEPH_CONFIG:-/etc/ceph/ceph.conf}"
+MON_CONFIG="${MON_CONFIG:-/etc/rook/mon-endpoints}"
+KEYRING_FILE="${KEYRING_FILE:-/etc/ceph/keyring}"
+
 # create a ceph config file in its default location so ceph/rados tools can be used
 # without specifying any arguments
 write_endpoints() {
-  endpoints=$(cat ${MON_CONFIG})
+  endpoints=$(cat "${MON_CONFIG}")
   # filter out the mon names
   # external cluster can have numbers or hyphens in mon names, handling them in regex
   # shellcheck disable=SC2001
   mon_endpoints=$(echo "${endpoints}"| sed 's/[a-z0-9_-]\+=//g')
   DATE=$(date)
   echo "$DATE writing mon endpoints to ${CEPH_CONFIG}: ${endpoints}"
-    cat <<EOF > ${CEPH_CONFIG}
+    cat <<EOF > "${CEPH_CONFIG}"
 [global]
 mon_host = ${mon_endpoints}
 [client.admin]
@@ -49,7 +50,7 @@ if [[ "$ceph_secret" == "" ]]; then
   ceph_secret=$(cat /var/lib/rook-ceph-mon/secret.keyring)
 fi
 # create the keyring file
-cat <<EOF > ${KEYRING_FILE}
+cat <<EOF > "${KEYRING_FILE}"
 [${ROOK_CEPH_USERNAME}]
 key = ${ceph_secret}
 EOF
