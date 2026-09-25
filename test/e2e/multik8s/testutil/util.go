@@ -1224,6 +1224,21 @@ func WaitTemporaryResourcesDeleted(ctx SpecContext, primaryMB, secondaryMB *mant
 	WaitTemporaryS3ObjectsDeleted(ctx, primaryMB)
 }
 
+// CreateMantleBackupAndWaitSynced creates a MantleBackup in the primary
+// cluster, and waits until it's synced to the secondary cluster and its
+// temporary resources are deleted.
+func CreateMantleBackupAndWaitSynced(ctx SpecContext, namespace, pvcName, backupName string) {
+	GinkgoHelper()
+	CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
+	WaitMantleBackupSynced(namespace, backupName)
+
+	primaryMB, err := GetMB(PrimaryK8sCluster, namespace, backupName)
+	Expect(err).NotTo(HaveOccurred())
+	secondaryMB, err := GetMB(SecondaryK8sCluster, namespace, backupName)
+	Expect(err).NotTo(HaveOccurred())
+	WaitTemporaryResourcesDeleted(ctx, primaryMB, secondaryMB)
+}
+
 func DeleteMantleBackup(cluster int, namespace, backupName string) {
 	GinkgoHelper()
 	By("deleting MantleBackup")
@@ -1773,4 +1788,145 @@ func EnsureBackupContentIdentical(namespace, pvcName, backupName string) {
 	secondaryHash, err := GetRBDSnapshotHash(SecondaryK8sCluster, namespace, pvcName, backupName)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(secondaryHash).To(Equal(primaryHash))
+}
+
+// ListRBDObjectCloneIDs returns the ids of the clones "rados listsnaps" prints
+// for each data object of the RBD image backing the given PVC. The id of the
+// object itself, i.e. its head, is "head". RADOS creates a clone with a new id
+// when the object is written after a snapshot was taken, e.g. by "rbd snap
+// rollback".
+func ListRBDObjectCloneIDs(cluster int, namespace, pvcName string) (map[string][]string, error) {
+	poolName, imageName, err := GetRBDPoolAndImageOfPVC(cluster, namespace, pvcName)
+	if err != nil {
+		return nil, err
+	}
+
+	stdout, stderr, err := Kubectl(cluster, nil,
+		"exec", "-n", CephCluster1Namespace, "deploy/rook-ceph-tools", "--",
+		"rbd", "info", "--format", "json", poolName+"/"+imageName)
+	if err != nil {
+		return nil, fmt.Errorf("rbd info failed. stderr: %s, err: %w", string(stderr), err)
+	}
+	var info struct {
+		BlockNamePrefix string `json:"block_name_prefix"`
+	}
+	if err := json.Unmarshal(stdout, &info); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal rbd info: %w", err)
+	}
+	if info.BlockNamePrefix == "" {
+		return nil, fmt.Errorf("rbd info printed no block_name_prefix: %s/%s: %s",
+			poolName, imageName, string(stdout))
+	}
+
+	stdout, stderr, err = Kubectl(cluster, nil,
+		"exec", "-n", CephCluster1Namespace, "deploy/rook-ceph-tools", "--",
+		"rados", "-p", poolName, "ls")
+	if err != nil {
+		return nil, fmt.Errorf("rados ls failed. stderr: %s, err: %w", string(stderr), err)
+	}
+
+	cloneIDs := map[string][]string{}
+	for objName := range strings.SplitSeq(string(stdout), "\n") {
+		objName = strings.TrimSpace(objName)
+		if !strings.HasPrefix(objName, info.BlockNamePrefix+".") {
+			continue
+		}
+
+		stdout, stderr, err := Kubectl(cluster, nil,
+			"exec", "-n", CephCluster1Namespace, "deploy/rook-ceph-tools", "--",
+			"rados", "-p", poolName, "listsnaps", "--format", "json", objName)
+		if err != nil {
+			return nil, fmt.Errorf("rados listsnaps failed. stderr: %s, err: %w", string(stderr), err)
+		}
+		var snapSet struct {
+			Clones []struct {
+				// ID is a number, or "head" for the head.
+				ID json.RawMessage `json:"id"`
+			} `json:"clones"`
+		}
+		if err := json.Unmarshal(stdout, &snapSet); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal rados listsnaps: %w", err)
+		}
+		for _, clone := range snapSet.Clones {
+			cloneIDs[objName] = append(cloneIDs[objName], strings.Trim(string(clone.ID), `"`))
+		}
+	}
+
+	return cloneIDs, nil
+}
+
+// WrittenRBDObjects returns the sorted names of the objects that have a clone
+// id in after returned by ListRBDObjectCloneIDs but not in before. A clone
+// that disappeared is not taken for a write, because the OSDs trim the clones
+// of a deleted snapshot asynchronously.
+func WrittenRBDObjects(before, after map[string][]string) []string {
+	var written []string
+	for objName, afterIDs := range after {
+		if slices.ContainsFunc(afterIDs, func(id string) bool {
+			return !slices.Contains(before[objName], id)
+		}) {
+			written = append(written, objName)
+		}
+	}
+	slices.Sort(written)
+
+	return written
+}
+
+const importJobLogMetaKeyPrefix = "mantle-e2e-import-log."
+
+// EnableImportJobLogRecording makes the import Jobs in the secondary cluster
+// record their logs in the image metadata of the destination RBD image until
+// the end of the current spec, so that GetImportJobLogs can read them after
+// the controller deletes the Jobs.
+func EnableImportJobLogRecording(ctx SpecContext) {
+	GinkgoHelper()
+
+	script := `#!/bin/bash
+IFS= read -r -d '' script <<'MANTLE_E2E_EOF' || true
+` + controller.EmbedJobImportScript + `
+MANTLE_E2E_EOF
+log=$(bash -c "${script}" 2>&1) && status=0 || status=$?
+printf '%s\n' "${log}"
+rbd image-meta set "${POOL_NAME}/${DST_IMAGE_NAME}" "` + importJobLogMetaKeyPrefix + `${OBJ_NAME}" "${log}" || true
+exit "${status}"
+`
+	ChangeComponentJobScript(ctx, SecondaryK8sCluster, controller.EnvImportJobScript, "", "", 0, &script)
+	DeferCleanup(func(ctx SpecContext) {
+		ChangeComponentJobScript(ctx, SecondaryK8sCluster, controller.EnvImportJobScript, "", "", 0, nil)
+	})
+}
+
+// GetImportJobLogs returns the logs of the import Jobs of the given
+// MantleBackup recorded by the script EnableImportJobLogRecording sets. It
+// fails unless the logs of all the parts are recorded.
+func GetImportJobLogs(namespace, pvcName, backupName string) []string {
+	GinkgoHelper()
+
+	poolName, imageName, err := GetRBDPoolAndImageOfPVC(SecondaryK8sCluster, namespace, pvcName)
+	Expect(err).NotTo(HaveOccurred())
+	stdout, stderr, err := Kubectl(SecondaryK8sCluster, nil,
+		"exec", "-n", CephCluster1Namespace, "deploy/rook-ceph-tools", "--",
+		"rbd", "image-meta", "list", "--format", "json", poolName+"/"+imageName)
+	Expect(err).NotTo(HaveOccurred(), "stderr: %s", string(stderr))
+	var meta map[string]string
+	Expect(json.Unmarshal(stdout, &meta)).To(Succeed())
+
+	// The keys end with the object names of the exported data, which start
+	// with the name of the MantleBackup.
+	var logs []string
+	for key, value := range meta {
+		if strings.HasPrefix(key, importJobLogMetaKeyPrefix+backupName+"-") {
+			logs = append(logs, value)
+		}
+	}
+
+	mb, err := GetMB(SecondaryK8sCluster, namespace, backupName)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(mb.Status.SnapSize).NotTo(BeNil())
+	numParts, err := GetNumberOfBackupParts(resource.NewQuantity(*mb.Status.SnapSize, resource.BinarySI))
+	Expect(err).NotTo(HaveOccurred())
+	Expect(logs).To(HaveLen(numParts))
+
+	return logs
 }

@@ -31,14 +31,7 @@ var _ = Describe("import job rollback", Label("import-rollback"), func() {
 
 		// create M0 and wait until its import Job has gone.
 		WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
-		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName0)
-		WaitMantleBackupSynced(namespace, backupName0)
-
-		primaryMB0, err := GetMB(PrimaryK8sCluster, namespace, backupName0)
-		Expect(err).NotTo(HaveOccurred())
-		secondaryMB0, err := GetMB(SecondaryK8sCluster, namespace, backupName0)
-		Expect(err).NotTo(HaveOccurred())
-		WaitTemporaryResourcesDeleted(ctx, primaryMB0, secondaryMB0)
+		CreateMantleBackupAndWaitSynced(ctx, namespace, pvcName, backupName0)
 
 		// Dirty the whole destination RBD image in the secondary cluster to
 		// simulate, e.g., an interrupted import Job.
@@ -53,25 +46,94 @@ var _ = Describe("import job rollback", Label("import-rollback"), func() {
 		// the dummy data written to the other areas is removed only by the
 		// rollback.
 		WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
-		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName1)
+		CreateMantleBackupAndWaitSynced(ctx, namespace, pvcName, backupName1)
 
 		// Make sure the incremental data doesn't cover the whole image.
 		// Otherwise, the test could silently stop detecting a missing
 		// rollback.
 		EnsureRBDSnapshotNotFullyChangedSince(ctx, PrimaryK8sCluster, namespace, pvcName, backupName1, backupName0)
 
-		WaitMantleBackupSynced(namespace, backupName1)
-
-		primaryMB1, err := GetMB(PrimaryK8sCluster, namespace, backupName1)
-		Expect(err).NotTo(HaveOccurred())
-		secondaryMB1, err := GetMB(SecondaryK8sCluster, namespace, backupName1)
-		Expect(err).NotTo(HaveOccurred())
-		WaitTemporaryResourcesDeleted(ctx, primaryMB1, secondaryMB1)
-
 		// Make sure the dummy data has gone, i.e., the backup has exactly the
 		// same contents as the one in the primary cluster.
 		EnsureBackupContentIdentical(namespace, pvcName, backupName1)
 	})
+
+	// The import Job of the very next MantleBackup must be able to skip the
+	// rollback again once a rollback has been performed. "rbd import-diff"
+	// creates the snapshot of the incremental data after its last write, so
+	// the HEAD is identical to that snapshot even though it was rolled back
+	// and rewritten just before.
+	It("should skip the rollback in the import Job right after one that rolled back", func(ctx SpecContext) {
+		namespace := util.GetUniqueName("ns-")
+		pvcName := util.GetUniqueName("pvc-")
+		backupName0 := util.GetUniqueName("mb-")
+		backupName1 := util.GetUniqueName("mb-")
+		backupName2 := util.GetUniqueName("mb-")
+
+		SetupNamespaces(namespace)
+		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
+		EnableImportJobLogRecording(ctx)
+
+		// create M0 and wait until its import Job has gone.
+		WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
+		CreateMantleBackupAndWaitSynced(ctx, namespace, pvcName, backupName0)
+
+		// Simulate an interrupted import Job, so that the import Job of M1 has
+		// to roll the HEAD back.
+		DirtyWholeRBDImageOfPVC(SecondaryK8sCluster, namespace, pvcName)
+
+		// create M1. The incremental data overwrites only the areas changed
+		// after M0, so the dummy data written to the other areas is removed
+		// only by the rollback.
+		WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
+		CreateMantleBackupAndWaitSynced(ctx, namespace, pvcName, backupName1)
+
+		// Make sure the import Job of M1 really rolled back, i.e. the dummy
+		// data has gone.
+		Expect(GetImportJobLogs(namespace, pvcName, backupName1)).To(ContainElement(ContainSubstring("start rollback")))
+		EnsureBackupContentIdentical(namespace, pvcName, backupName1)
+
+		// create M2, the very next MantleBackup after the one that rolled
+		// back. Nothing has touched the destination image since M1 was
+		// imported, so its import Jobs must skip the rollback.
+		WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
+		CreateMantleBackupAndWaitSynced(ctx, namespace, pvcName, backupName2)
+
+		Expect(GetImportJobLogs(namespace, pvcName, backupName2)).To(HaveEach(ContainSubstring("skip rollback")))
+	})
+
+	// The whole point of the check is to avoid the expensive rollback in the
+	// normal case. Skipping the rollback must leave the destination image
+	// completely untouched while applying empty incremental data.
+	It("should not write to the destination image while applying empty incremental data",
+		func(ctx SpecContext) {
+			namespace := util.GetUniqueName("ns-")
+			pvcName := util.GetUniqueName("pvc-")
+			backupName0 := util.GetUniqueName("mb-")
+			backupName1 := util.GetUniqueName("mb-")
+
+			SetupNamespaces(namespace)
+			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
+			EnableImportJobLogRecording(ctx)
+
+			// create M0 and wait until its import Job has gone.
+			WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
+			CreateMantleBackupAndWaitSynced(ctx, namespace, pvcName, backupName0)
+
+			cloneIDsBefore, err := ListRBDObjectCloneIDs(SecondaryK8sCluster, namespace, pvcName)
+			Expect(err).NotTo(HaveOccurred())
+
+			// create M1 without writing anything to the PV, so that its
+			// incremental data is empty.
+			CreateMantleBackupAndWaitSynced(ctx, namespace, pvcName, backupName1)
+
+			Expect(GetImportJobLogs(namespace, pvcName, backupName1)).To(HaveEach(ContainSubstring("skip rollback")))
+
+			// No object of the destination image may have been written.
+			cloneIDsAfter, err := ListRBDObjectCloneIDs(SecondaryK8sCluster, namespace, pvcName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(WrittenRBDObjects(cloneIDsBefore, cloneIDsAfter)).To(BeEmpty())
+		})
 
 	// An import Job for a full backup must not corrupt the destination RBD
 	// image when it's dirty, e.g., after interruption of the Job.

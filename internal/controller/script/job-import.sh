@@ -82,6 +82,28 @@ rbd_snap_rollback() {
     echo "finish rollback"
 }
 
+rbd_snap_rollback_if_needed() {
+    local snap_name=$1
+    local head_size snap_size
+    local diff="not compared"
+
+    head_size=$(rbd info --format json "${POOL_NAME}/${DST_IMAGE_NAME}" | jq -r '.size')
+    snap_size=$(rbd info --format json "${POOL_NAME}/${DST_IMAGE_NAME}@${snap_name}" | jq -r '.size')
+
+    if [ "${head_size}" -eq "${snap_size}" ]; then
+        diff=$(rbd diff --format json --from-snap "${snap_name}" \
+            "${POOL_NAME}/${DST_IMAGE_NAME}" | jq -c .)
+        if [ "${diff}" = "[]" ]; then
+            echo "skip rollback: ${POOL_NAME}/${DST_IMAGE_NAME} is already identical to ${snap_name}"
+            return
+        fi
+    fi
+
+    echo "rollback needed: ${POOL_NAME}/${DST_IMAGE_NAME} differs from ${snap_name}:" \
+        "head_size=${head_size} snap_size=${snap_size} diff=${diff:0:200}"
+    rbd_snap_rollback "${POOL_NAME}/${DST_IMAGE_NAME}@${snap_name}"
+}
+
 if [ -z "${FROM_SNAP_NAME}" ]; then
     set +o pipefail
     set +e
@@ -93,8 +115,9 @@ if [ -z "${FROM_SNAP_NAME}" ]; then
         rbd snap create ${POOL_NAME}/${DST_IMAGE_NAME}@initialsnap
         echo "finish initialsnap creation"
     else
-        # Roll back here to guarantee that the import target is exactly
-        # the expected state, so that the subsequent import-diff applies correctly.
+        # initialsnap remains only when the previous import Job was
+        # interrupted, so the HEAD almost always differs from it. Roll back
+        # without checking it, which would scan every object of the image.
         rbd_snap_rollback "${POOL_NAME}/${DST_IMAGE_NAME}@initialsnap"
     fi
     rbd_import
@@ -102,7 +125,6 @@ if [ -z "${FROM_SNAP_NAME}" ]; then
     rbd snap rm ${POOL_NAME}/${DST_IMAGE_NAME}@initialsnap
     echo "finish initialsnap deletion"
 else
-    # See the comment above for why we roll back here.
-    rbd_snap_rollback "${POOL_NAME}/${DST_IMAGE_NAME}@${FROM_SNAP_NAME}"
+    rbd_snap_rollback_if_needed "${FROM_SNAP_NAME}"
     rbd_import
 fi
