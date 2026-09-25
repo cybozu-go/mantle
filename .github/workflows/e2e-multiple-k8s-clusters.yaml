@@ -39,6 +39,7 @@ jobs:
           - lock
           - multi-controller
           - compression
+          - import-rollback
           - "!//" # select unlabelled tests
         include:
           # testing various backup-transfer-part-size
