@@ -78,7 +78,7 @@ rbd_import() {
 
 rbd_snap_rollback() {
     echo "start rollback"
-    rbd snap rollback "$@"
+    # rbd snap rollback "$@"
     echo "finish rollback"
 }
 
