@@ -78,7 +78,8 @@ rbd_import() {
 
 rbd_snap_rollback() {
     echo "start rollback"
-    rbd snap rollback "$@"
+    # DO NOT MERGE: rollback is disabled to check that the e2e tests fail.
+    # rbd snap rollback "$@"
     echo "finish rollback"
 }
 
