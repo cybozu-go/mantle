@@ -95,6 +95,9 @@ rbd_snap_rollback_if_needed() {
             "${POOL_NAME}/${DST_IMAGE_NAME}" | jq -c .)
         if [ "${diff}" = "[]" ]; then
             echo "skip rollback: ${POOL_NAME}/${DST_IMAGE_NAME} is already identical to ${snap_name}"
+            # DO NOT MERGE: roll back anyway while pretending to skip it, to
+            # make sure the e2e tests detect the rollback by the RADOS clones.
+            rbd_snap_rollback "${POOL_NAME}/${DST_IMAGE_NAME}@${snap_name}"
             return
         fi
     fi
