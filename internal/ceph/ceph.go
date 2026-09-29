@@ -7,6 +7,7 @@ import (
 
 type RBDImageInfo struct {
 	ID     string              `json:"id"`
+	Size   uint64              `json:"size"`
 	Parent *RBDImageInfoParent `json:"parent,omitempty"`
 }
 

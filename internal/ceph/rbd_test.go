@@ -98,6 +98,7 @@ var _ = Describe("CephCmd.RBDInfo", func() {
 		cmd := mockedCephCmd(m)
 		info, err := cmd.RBDInfo("pool", "image")
 		Expect(err).ToNot(HaveOccurred())
+		Expect(info.Size).To(Equal(uint64(5368709120)))
 		Expect(info.Parent).NotTo(BeNil())
 		Expect(info.Parent.Pool).To(Equal("pool"))
 		Expect(info.Parent.Image).To(Equal("csi-vol-39ca122a-88e1-44b6-aa2b-cae64fb383db"))
