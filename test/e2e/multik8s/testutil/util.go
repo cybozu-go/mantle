@@ -1789,3 +1789,195 @@ func EnsureBackupContentIdentical(namespace, pvcName, backupName string) {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(secondaryHash).To(Equal(primaryHash))
 }
+
+// ListRBDObjectCloneIDs returns the ids of the clones "rados listsnaps" prints
+// for each data object of the RBD image backing the given PVC.
+func ListRBDObjectCloneIDs(cluster int, namespace, pvcName string) (map[string][]string, error) {
+	poolName, imageName, err := GetRBDPoolAndImageOfPVC(cluster, namespace, pvcName)
+	if err != nil {
+		return nil, err
+	}
+
+	stdout, stderr, err := Kubectl(cluster, nil,
+		"exec", "-n", CephCluster1Namespace, "deploy/rook-ceph-tools", "--",
+		"rbd", "info", "--format", "json", poolName+"/"+imageName)
+	if err != nil {
+		return nil, fmt.Errorf("rbd info failed. stderr: %s, err: %w", string(stderr), err)
+	}
+	var info struct {
+		BlockNamePrefix string `json:"block_name_prefix"` // e.g., "rbd_data.fc2f69879b83eb"
+	}
+	if err := json.Unmarshal(stdout, &info); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal rbd info: %w", err)
+	}
+	if info.BlockNamePrefix == "" {
+		return nil, fmt.Errorf("rbd info printed no block_name_prefix: %s/%s: %s",
+			poolName, imageName, string(stdout))
+	}
+
+	stdout, stderr, err = Kubectl(cluster, nil,
+		"exec", "-n", CephCluster1Namespace, "deploy/rook-ceph-tools", "--",
+		"rados", "-p", poolName, "ls")
+	if err != nil {
+		return nil, fmt.Errorf("rados ls failed. stderr: %s, err: %w", string(stderr), err)
+	}
+	// stdout should be something like:
+	// 	rbd_data.fc2f69879b83eb.000000000000c9f0
+	// 	rbd_data.cc74b7ecfddece.000000000000418d
+	// 	...
+
+	cloneIDs := map[string][]string{}
+	for objName := range strings.SplitSeq(string(stdout), "\n") {
+		objName = strings.TrimSpace(objName)
+		if !strings.HasPrefix(objName, info.BlockNamePrefix+".") {
+			continue
+		}
+
+		stdout, stderr, err := Kubectl(cluster, nil,
+			"exec", "-n", CephCluster1Namespace, "deploy/rook-ceph-tools", "--",
+			"rados", "-p", poolName, "listsnaps", "--format", "json", objName)
+		if err != nil {
+			return nil, fmt.Errorf("rados listsnaps failed. stderr: %s, err: %w", string(stderr), err)
+		}
+		// stdout should be something like:
+		// 	{
+		// 	  "name": "rbd_data.fc2f69879b83eb.000000000000c9f0",
+		// 	  "seq": 13923,
+		// 	  "clones": [
+		// 	    {
+		// 	      "id": 13579,
+		// 	      "snapshots": [
+		// 	        { "id": 13415 },
+		// 	        { "id": 13455 },
+		// 	        ...
+		// 	        { "id": 13579 }
+		// 	      ],
+		// 	      "size": 4194304,
+		// 	      "overlaps": [
+		// 	        {
+		// 	          "start": 1429504,
+		// 	          "length": 2764800
+		// 	        }
+		// 	      ]
+		// 	    },
+		// 	    ...
+		// 	    {
+		// 	      "id": "head",
+		// 	      "snapshots": [],
+		// 	      "size": 4194304
+		// 	    }
+		// 	  ]
+		// 	}
+
+		var snapSet struct {
+			Clones []struct {
+				// ID is a number, or "head" for the head.
+				ID json.RawMessage `json:"id"`
+			} `json:"clones"`
+		}
+		if err := json.Unmarshal(stdout, &snapSet); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal rados listsnaps: %w", err)
+		}
+		for _, clone := range snapSet.Clones {
+			cloneIDs[objName] = append(cloneIDs[objName], strings.Trim(string(clone.ID), `"`))
+		}
+	}
+
+	return cloneIDs, nil
+}
+
+// WrittenRBDObjects returns the sorted names of the objects that have a clone
+// id in after returned by ListRBDObjectCloneIDs but not in before. A clone
+// that disappeared is not taken for a write, because the OSDs trim the clones
+// of a deleted snapshot asynchronously.
+func WrittenRBDObjects(before, after map[string][]string) []string {
+	var written []string
+	for objName, afterIDs := range after {
+		if slices.ContainsFunc(afterIDs, func(id string) bool {
+			return !slices.Contains(before[objName], id)
+		}) {
+			written = append(written, objName)
+		}
+	}
+	slices.Sort(written)
+
+	return written
+}
+
+const importJobLogMetaKeyPrefix = "mantle-e2e-import-log."
+
+// EnableImportJobLogRecording makes the import Jobs in the secondary cluster
+// record their logs in the image metadata of the destination RBD image until
+// the end of the current spec, so that GetImportJobLogs can read them after
+// the controller deletes the Jobs.
+func EnableImportJobLogRecording(ctx SpecContext) {
+	GinkgoHelper()
+
+	script := `#!/bin/bash
+IFS= read -r -d '' script <<'MANTLE_E2E_EOF' || true
+` + controller.EmbedJobImportScript + `
+MANTLE_E2E_EOF
+log=$(bash -c "${script}" 2>&1) && status=0 || status=$?
+printf '%s\n' "${log}"
+rbd image-meta set "${POOL_NAME}/${DST_IMAGE_NAME}" "` + importJobLogMetaKeyPrefix + `${OBJ_NAME}" "${log}" || true
+exit "${status}"
+`
+	ChangeComponentJobScript(ctx, SecondaryK8sCluster, controller.EnvImportJobScript, "", "", 0, &script)
+	DeferCleanup(func(ctx SpecContext) {
+		ChangeComponentJobScript(ctx, SecondaryK8sCluster, controller.EnvImportJobScript, "", "", 0, nil)
+	})
+}
+
+// GetImportJobLogs returns the logs of the import Jobs of the given
+// MantleBackup recorded by the script EnableImportJobLogRecording sets. The
+// i-th element is the log of the import Job of part i.
+func GetImportJobLogs(namespace, pvcName, backupName string) []string {
+	GinkgoHelper()
+
+	poolName, imageName, err := GetRBDPoolAndImageOfPVC(SecondaryK8sCluster, namespace, pvcName)
+	Expect(err).NotTo(HaveOccurred())
+	stdout, stderr, err := Kubectl(SecondaryK8sCluster, nil,
+		"exec", "-n", CephCluster1Namespace, "deploy/rook-ceph-tools", "--",
+		"rbd", "image-meta", "list", "--format", "json", poolName+"/"+imageName)
+	Expect(err).NotTo(HaveOccurred(), "stderr: %s", string(stderr))
+	var meta map[string]string
+	Expect(json.Unmarshal(stdout, &meta)).To(Succeed())
+
+	mb, err := GetMB(SecondaryK8sCluster, namespace, backupName)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(mb.Status.SnapSize).NotTo(BeNil())
+	numParts, err := GetNumberOfBackupParts(resource.NewQuantity(*mb.Status.SnapSize, resource.BinarySI))
+	Expect(err).NotTo(HaveOccurred())
+
+	// The keys end with the object names of the exported data, which the
+	// import Jobs receive as OBJ_NAME.
+	logs := make([]string, 0, numParts)
+	for i := range numParts {
+		key := importJobLogMetaKeyPrefix + controller.MakeObjectNameOfExportedData(
+			backupName, mb.GetAnnotations()["mantle.cybozu.io/remote-uid"], i, mb.Spec.TransferCompression)
+		log, ok := meta[key]
+		Expect(ok).To(BeTrue(), "no log is recorded for part %d: %s", i, key)
+		logs = append(logs, log)
+	}
+
+	return logs
+}
+
+// EnsureImportJobsRolledBackOnlyFirstPart makes sure that only the import Job
+// of the first part of the given MantleBackup rolled the destination image
+// back, and the others skipped the rollback. Each part except the first starts
+// from the snapshot "rbd import-diff" of the previous part has just created,
+// so it never has to roll back.
+func EnsureImportJobsRolledBackOnlyFirstPart(namespace, pvcName, backupName string) {
+	GinkgoHelper()
+	logs := GetImportJobLogs(namespace, pvcName, backupName)
+	Expect(logs[0]).To(ContainSubstring("start rollback"))
+	Expect(logs[1:]).To(HaveEach(ContainSubstring("skip rollback")))
+}
+
+// EnsureImportJobsSkippedRollback makes sure that the import Jobs of all the
+// parts of the given MantleBackup skipped the rollback.
+func EnsureImportJobsSkippedRollback(namespace, pvcName, backupName string) {
+	GinkgoHelper()
+	Expect(GetImportJobLogs(namespace, pvcName, backupName)).To(HaveEach(ContainSubstring("skip rollback")))
+}
