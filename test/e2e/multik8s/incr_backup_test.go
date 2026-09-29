@@ -24,25 +24,11 @@ var _ = Describe("incremental backup", Label("incr-backup"), func() {
 
 		// create M0.
 		writtenDataHash0 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
-		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName0)
-		WaitMantleBackupSynced(namespace, backupName0)
-
-		primaryMB0, err := GetMB(PrimaryK8sCluster, namespace, backupName0)
-		Expect(err).NotTo(HaveOccurred())
-		secondaryMB0, err := GetMB(SecondaryK8sCluster, namespace, backupName0)
-		Expect(err).NotTo(HaveOccurred())
-		WaitTemporaryResourcesDeleted(ctx, primaryMB0, secondaryMB0)
+		CreateMantleBackupAndWaitSynced(ctx, namespace, pvcName, backupName0)
 
 		// create M1.
 		writtenDataHash1 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
-		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName1)
-		WaitMantleBackupSynced(namespace, backupName1)
-
-		primaryMB1, err := GetMB(PrimaryK8sCluster, namespace, backupName1)
-		Expect(err).NotTo(HaveOccurred())
-		secondaryMB1, err := GetMB(SecondaryK8sCluster, namespace, backupName1)
-		Expect(err).NotTo(HaveOccurred())
-		WaitTemporaryResourcesDeleted(ctx, primaryMB1, secondaryMB1)
+		CreateMantleBackupAndWaitSynced(ctx, namespace, pvcName, backupName1)
 
 		// Make sure verification step has completed in both clusters.
 		WaitMantleBackupVerified(PrimaryK8sCluster, namespace, backupName0)
@@ -88,14 +74,7 @@ var _ = Describe("incremental backup", Label("incr-backup"), func() {
 
 		// create M2.
 		writtenDataHash2 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
-		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName2)
-		WaitMantleBackupSynced(namespace, backupName2)
-
-		primaryMB2, err := GetMB(PrimaryK8sCluster, namespace, backupName2)
-		Expect(err).NotTo(HaveOccurred())
-		secondaryMB2, err := GetMB(SecondaryK8sCluster, namespace, backupName2)
-		Expect(err).NotTo(HaveOccurred())
-		WaitTemporaryResourcesDeleted(ctx, primaryMB2, secondaryMB2)
+		CreateMantleBackupAndWaitSynced(ctx, namespace, pvcName, backupName2)
 
 		// Make sure verification step has completed in both clusters.
 		WaitMantleBackupVerified(PrimaryK8sCluster, namespace, backupName0)
@@ -143,8 +122,7 @@ var _ = Describe("incremental backup", Label("incr-backup"), func() {
 
 		// create M1.
 		writtenDataHash1 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
-		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName1)
-		WaitMantleBackupSynced(namespace, backupName1)
+		CreateMantleBackupAndWaitSynced(ctx, namespace, pvcName, backupName1)
 
 		// remove M1.
 		_, _, err := Kubectl(PrimaryK8sCluster, nil, "delete", "mb", "-n", namespace, backupName1)
@@ -152,14 +130,7 @@ var _ = Describe("incremental backup", Label("incr-backup"), func() {
 
 		// create M2.
 		writtenDataHash2 := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
-		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName2)
-		WaitMantleBackupSynced(namespace, backupName2)
-
-		primaryMB2, err := GetMB(PrimaryK8sCluster, namespace, backupName2)
-		Expect(err).NotTo(HaveOccurred())
-		secondaryMB2, err := GetMB(SecondaryK8sCluster, namespace, backupName2)
-		Expect(err).NotTo(HaveOccurred())
-		WaitTemporaryResourcesDeleted(ctx, primaryMB2, secondaryMB2)
+		CreateMantleBackupAndWaitSynced(ctx, namespace, pvcName, backupName2)
 
 		// Make sure verification step has completed in both clusters.
 		WaitMantleBackupVerified(PrimaryK8sCluster, namespace, backupName0)

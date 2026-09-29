@@ -1224,6 +1224,21 @@ func WaitTemporaryResourcesDeleted(ctx SpecContext, primaryMB, secondaryMB *mant
 	WaitTemporaryS3ObjectsDeleted(ctx, primaryMB)
 }
 
+// CreateMantleBackupAndWaitSynced creates a MantleBackup in the primary
+// cluster, and waits until it's synced to the secondary cluster and its
+// temporary resources are deleted.
+func CreateMantleBackupAndWaitSynced(ctx SpecContext, namespace, pvcName, backupName string) {
+	GinkgoHelper()
+	CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
+	WaitMantleBackupSynced(namespace, backupName)
+
+	primaryMB, err := GetMB(PrimaryK8sCluster, namespace, backupName)
+	Expect(err).NotTo(HaveOccurred())
+	secondaryMB, err := GetMB(SecondaryK8sCluster, namespace, backupName)
+	Expect(err).NotTo(HaveOccurred())
+	WaitTemporaryResourcesDeleted(ctx, primaryMB, secondaryMB)
+}
+
 func DeleteMantleBackup(cluster int, namespace, backupName string) {
 	GinkgoHelper()
 	By("deleting MantleBackup")
