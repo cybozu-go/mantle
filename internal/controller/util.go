@@ -107,7 +107,7 @@ func getCephClusterIDFromPVC(ctx context.Context, k8sClient client.Client, pvc *
 
 	storageClassName := pvc.Spec.StorageClassName
 	if storageClassName == nil {
-		logger.Info("not managed storage class", "namespace", pvc.Namespace, "pvc", pvc.Name)
+		logger.Info("not managed storage class", "pvcNamespace", pvc.Namespace, "pvc", pvc.Name)
 
 		return "", nil
 	}
@@ -115,7 +115,7 @@ func getCephClusterIDFromPVC(ctx context.Context, k8sClient client.Client, pvc *
 	clusterID, err := getCephClusterIDFromSCName(ctx, k8sClient, *storageClassName)
 	if err != nil {
 		logger.Info("failed to get ceph cluster ID from StorageClass name",
-			"error", err, "namespace", pvc.Namespace, "pvc", pvc.Name, "storageClassName", *storageClassName)
+			"error", err, "pvcNamespace", pvc.Namespace, "pvc", pvc.Name, "storageClassName", *storageClassName)
 		if errors.Is(err, errEmptyClusterID) {
 			return "", nil
 		}
