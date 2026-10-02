@@ -213,6 +213,7 @@ do-minikube-start:
 				$(MINIKUBE) start \
 					--kubernetes-version="v$(KUBERNETES_VERSION)" \
 					--driver=kvm2 \
+					--container-runtime=docker \
 					--memory 6g \
 					--cpus=2 \
 					--extra-config=kubeadm.node-name=$(NODE_NAME) \

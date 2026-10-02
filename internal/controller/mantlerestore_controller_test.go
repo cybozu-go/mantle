@@ -17,7 +17,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
@@ -285,7 +284,7 @@ func (test *mantleRestoreControllerUnitTest) testCreateRestoringPVC() {
 					corev1.ResourceStorage: resource.MustParse(strconv.Itoa(testutil.FakeRBDSnapshotSize)),
 				},
 			},
-			StorageClassName: ptr.To(""),
+			StorageClassName: new(""),
 			VolumeMode:       test.srcPVC.Spec.VolumeMode,
 			VolumeName:       fmt.Sprintf("mr-%s-%s", test.tenantNamespace, restore.Name),
 		}))

@@ -23,12 +23,12 @@ To change the versions, edit the following files.
 
 We should also update go.mod. According to [the Kubebuilder documentation](https://book.kubebuilder.io/versions_compatibility_supportability), we should use versions compatible with Kubebuilder, so refer to the samples in the latest Kubebuilder testdata directory (e.g., https://github.com/kubernetes-sigs/kubebuilder/blob/v4.1.1/testdata/project-v4/go.mod#L8-L11 and https://github.com/kubernetes-sigs/kubebuilder/blob/v4.1.1/testdata/project-v4/Makefile#L162) to see which versions should be used.
 
-First, update `k8s.io/*` libraries. Please note that `k8s.io/api`, `k8s.io/apimachinery`, and `k8s.io/client-go` use `v0.x.x` tags (e.g., v1.35.4 → v0.35.4), while `k8s.io/kubernetes` uses `v1.x.x` tags directly.
+First, update `k8s.io/*` libraries. Please note that `k8s.io/api`, `k8s.io/apimachinery`, and `k8s.io/client-go` use `v0.x.x` tags (e.g., v1.36.2 → v0.36.2), while `k8s.io/kubernetes` uses `v1.x.x` tags directly.
 
 ```bash
-$ VERSION=0.<minor>.<patch>  # e.g. 0.35.4 for Kubernetes 1.35.4
+$ VERSION=0.<minor>.<patch>  # e.g. 0.36.2 for Kubernetes 1.36.2
 $ go get k8s.io/api@v${VERSION} k8s.io/apimachinery@v${VERSION} k8s.io/client-go@v${VERSION}
-$ go get k8s.io/kubernetes@v1.<minor>.<patch>  # e.g. v1.35.4
+$ go get k8s.io/kubernetes@v1.<minor>.<patch>  # e.g. v1.36.2
 ```
 
 Next, update controller-runtime by the following command. Before updating it, please read the [`controller-runtime`'s release note](https://github.com/kubernetes-sigs/controller-runtime/releases). If there are breaking changes, we should decide how to manage these changes.
