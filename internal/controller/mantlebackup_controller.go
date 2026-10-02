@@ -36,7 +36,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/kube-openapi/pkg/validation/strfmt"
-	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -1619,7 +1618,7 @@ func (r *MantleBackupReconciler) handleCompletedJobsOfComponent(
 					UID:             &job.job.UID,
 					ResourceVersion: &job.job.ResourceVersion,
 				},
-				PropagationPolicy: ptr.To(metav1.DeletePropagationBackground),
+				PropagationPolicy: new(metav1.DeletePropagationBackground),
 			}); err != nil {
 				return -1, reconcile.Failed("failed to delete Job: %s: %w", job.job.GetName(), err)
 			}
@@ -2308,16 +2307,16 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(
 		labels["app.kubernetes.io/component"] = labelComponentExportJob
 		job.SetLabels(labels)
 
-		job.Spec.BackoffLimit = ptr.To(int32(65535))
+		job.Spec.BackoffLimit = new(int32(65535))
 
 		if !job.CreationTimestamp.IsZero() {
 			return nil
 		}
 		job.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
-			FSGroup:      ptr.To(nonRootFSGroup),
-			RunAsGroup:   ptr.To(nonRootGroupID),
-			RunAsNonRoot: ptr.To(true),
-			RunAsUser:    ptr.To(nonRootUserID),
+			FSGroup:      new(nonRootFSGroup),
+			RunAsGroup:   new(nonRootGroupID),
+			RunAsNonRoot: new(true),
+			RunAsUser:    new(nonRootUserID),
 		}
 
 		job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
@@ -2413,7 +2412,7 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(
 				VolumeSource: corev1.VolumeSource{
 					Secret: &corev1.SecretVolumeSource{
 						SecretName: "rook-ceph-mon",
-						Optional:   ptr.To(false),
+						Optional:   new(false),
 						Items: []corev1.KeyToPath{{
 							Key:  "ceph-secret",
 							Path: "secret.keyring",
@@ -2487,16 +2486,16 @@ func (r *MantleBackupReconciler) createOrUpdateUploadJobs(
 			labels["app.kubernetes.io/component"] = labelComponentUploadJob
 			job.SetLabels(labels)
 
-			job.Spec.BackoffLimit = ptr.To(int32(65535))
+			job.Spec.BackoffLimit = new(int32(65535))
 
 			if !job.CreationTimestamp.IsZero() {
 				return nil
 			}
 			job.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
-				FSGroup:      ptr.To(nonRootFSGroup),
-				RunAsGroup:   ptr.To(nonRootGroupID),
-				RunAsNonRoot: ptr.To(true),
-				RunAsUser:    ptr.To(nonRootUserID),
+				FSGroup:      new(nonRootFSGroup),
+				RunAsGroup:   new(nonRootGroupID),
+				RunAsNonRoot: new(true),
+				RunAsUser:    new(nonRootUserID),
 			}
 
 			job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
@@ -3016,7 +3015,7 @@ func (r *MantleBackupReconciler) createStaticPVIfNotExists(
 			PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimRetain,
 			// No StorageClass to indicate static provisioning.
 			StorageClassName: "",
-			VolumeMode:       ptr.To(corev1.PersistentVolumeBlock),
+			VolumeMode:       new(corev1.PersistentVolumeBlock),
 
 			PersistentVolumeSource: corev1.PersistentVolumeSource{
 				CSI: &corev1.CSIPersistentVolumeSource{
@@ -3078,9 +3077,9 @@ func (r *MantleBackupReconciler) createStaticPVCIfNotExists(
 			Resources:   resources,
 			// No StorageClass to indicate static provisioning.
 			// and ensure this PVC statically binds to the specific PV.
-			StorageClassName: ptr.To(""),
+			StorageClassName: new(""),
 			VolumeName:       pvName,
-			VolumeMode:       ptr.To(corev1.PersistentVolumeBlock),
+			VolumeMode:       new(corev1.PersistentVolumeBlock),
 		},
 	})
 
@@ -3124,7 +3123,7 @@ func (r *MantleBackupReconciler) createOrUpdateZeroOutJob(
 		labels["app.kubernetes.io/component"] = labelComponentZeroOutJob
 		job.SetLabels(labels)
 
-		job.Spec.BackoffLimit = ptr.To(int32(65535))
+		job.Spec.BackoffLimit = new(int32(65535))
 
 		if !job.CreationTimestamp.IsZero() {
 			return nil
@@ -3144,9 +3143,9 @@ blkdiscard -z /dev/zeroout-rbd
 `,
 				},
 				SecurityContext: &corev1.SecurityContext{
-					Privileged: ptr.To(true),
-					RunAsGroup: ptr.To(int64(0)),
-					RunAsUser:  ptr.To(int64(0)),
+					Privileged: new(true),
+					RunAsGroup: new(int64(0)),
+					RunAsUser:  new(int64(0)),
 				},
 				VolumeDevices: []corev1.VolumeDevice{
 					{
@@ -3190,7 +3189,7 @@ func (r *MantleBackupReconciler) createOrUpdateVerifyJob(ctx context.Context, jo
 		labels["app.kubernetes.io/component"] = labelComponentVerifyJob
 		job.SetLabels(labels)
 
-		job.Spec.BackoffLimit = ptr.To(int32(65535))
+		job.Spec.BackoffLimit = new(int32(65535))
 
 		if !job.CreationTimestamp.IsZero() {
 			return nil
@@ -3225,7 +3224,7 @@ func (r *MantleBackupReconciler) createOrUpdateVerifyJob(ctx context.Context, jo
 				{
 					Action: batchv1.PodFailurePolicyActionFailJob,
 					OnExitCodes: &batchv1.PodFailurePolicyOnExitCodesRequirement{
-						ContainerName: ptr.To("verify"),
+						ContainerName: new("verify"),
 						Operator:      batchv1.PodFailurePolicyOnExitCodesOpIn,
 						Values:        expectedFailureExitCodes,
 					},
@@ -3250,9 +3249,9 @@ set -eux -o pipefail
 `,
 				},
 				SecurityContext: &corev1.SecurityContext{
-					Privileged: ptr.To(true),
-					RunAsGroup: ptr.To(int64(0)),
-					RunAsUser:  ptr.To(int64(0)),
+					Privileged: new(true),
+					RunAsGroup: new(int64(0)),
+					RunAsUser:  new(int64(0)),
 				},
 				VolumeDevices: []corev1.VolumeDevice{
 					{
@@ -3398,19 +3397,19 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 		labels["app.kubernetes.io/component"] = labelComponentImportJob
 		job.SetLabels(labels)
 
-		job.Spec.BackoffLimit = ptr.To(int32(65535))
+		job.Spec.BackoffLimit = new(int32(65535))
 
 		// create replacement Pods only when the terminating Pod is fully terminal
 		// because import Jobs assume there are no other concurrent processes to the same data.
-		job.Spec.PodReplacementPolicy = ptr.To(batchv1.Failed)
+		job.Spec.PodReplacementPolicy = new(batchv1.Failed)
 
 		if !job.CreationTimestamp.IsZero() {
 			return nil
 		}
 		job.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
-			RunAsGroup:   ptr.To(nonRootGroupID),
-			RunAsNonRoot: ptr.To(true),
-			RunAsUser:    ptr.To(nonRootUserID),
+			RunAsGroup:   new(nonRootGroupID),
+			RunAsNonRoot: new(true),
+			RunAsUser:    new(nonRootUserID),
 		}
 
 		job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
@@ -3538,7 +3537,7 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 				VolumeSource: corev1.VolumeSource{
 					Secret: &corev1.SecretVolumeSource{
 						SecretName: "rook-ceph-mon",
-						Optional:   ptr.To(false),
+						Optional:   new(false),
 						Items: []corev1.KeyToPath{{
 							Key:  "ceph-secret",
 							Path: "secret.keyring",
@@ -3703,7 +3702,7 @@ func (r *MantleBackupReconciler) deleteAllJobsOfComponent(
 		job.SetName(makeJobName(backup, partNum))
 		job.SetNamespace(r.managedCephClusterID)
 		if err := r.Delete(ctx, &job, &client.DeleteOptions{
-			PropagationPolicy: ptr.To(metav1.DeletePropagationBackground),
+			PropagationPolicy: new(metav1.DeletePropagationBackground),
 		}); err != nil && !aerrors.IsNotFound(err) {
 			return reconcile.Failed("failed to delete Job: %s/%s: %w", job.GetNamespace(), job.GetName(), err)
 		}
@@ -3731,7 +3730,7 @@ func (r *MantleBackupReconciler) deleteAllExportDataPVCs(ctx context.Context, ba
 		pvc.SetName(MakeExportDataPVCName(backup, partNum))
 		pvc.SetNamespace(r.managedCephClusterID)
 		if err := r.Delete(ctx, &pvc, &client.DeleteOptions{
-			PropagationPolicy: ptr.To(metav1.DeletePropagationBackground),
+			PropagationPolicy: new(metav1.DeletePropagationBackground),
 		}); err != nil && !aerrors.IsNotFound(err) {
 			return reconcile.Failed("failed to delete PVC: %s/%s: %w", pvc.GetNamespace(), pvc.GetName(), err)
 		}
@@ -3745,7 +3744,7 @@ func (r *MantleBackupReconciler) deleteVerifyJob(ctx context.Context, backup *ma
 	job.SetName(MakeVerifyJobName(backup))
 	job.SetNamespace(r.managedCephClusterID)
 	if err := r.Delete(ctx, &job, &client.DeleteOptions{
-		PropagationPolicy: ptr.To(metav1.DeletePropagationBackground),
+		PropagationPolicy: new(metav1.DeletePropagationBackground),
 	}); err != nil && !aerrors.IsNotFound(err) {
 		return reconcile.Failed("failed to delete verify Job: %s/%s: %w", job.GetNamespace(), job.GetName(), err)
 	}
@@ -3864,7 +3863,7 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 	zeroOutJob.SetName(MakeZeroOutJobName(target))
 	zeroOutJob.SetNamespace(r.managedCephClusterID)
 	if err := r.Delete(ctx, &zeroOutJob, &client.DeleteOptions{
-		PropagationPolicy: ptr.To(metav1.DeletePropagationBackground),
+		PropagationPolicy: new(metav1.DeletePropagationBackground),
 	}); err != nil && !aerrors.IsNotFound(err) {
 		return reconcile.Failed("failed to delete zeroout Job: %w", err)
 	}
