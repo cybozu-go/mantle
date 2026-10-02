@@ -87,8 +87,8 @@ func (r *PersistentVolumeReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, nil
 	}
 
-	// Wait until the PV's status becomes Released.
-	if pv.Status.Phase != corev1.VolumeReleased {
+	// Wait until the PV is no longer used by the PVC.
+	if !isRestoringPVReleased(&pv) {
 		return ctrl.Result{}, nil
 	}
 
@@ -121,6 +121,22 @@ func (r *PersistentVolumeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			},
 		}).
 		Complete(r)
+}
+
+// isRestoringPVReleased checks if the PV being deleted is no longer used by the PVC.
+func isRestoringPVReleased(pv *corev1.PersistentVolume) bool {
+	if pv.Status.Phase == corev1.VolumeReleased {
+		return true
+	}
+
+	// If the PVC is deleted before it is bound to the PV, the PV stays
+	// Available and never becomes Released. Such a PV can't be bound to any
+	// PVCs because it has a deletionTimestamp.
+	if pv.Status.Phase == corev1.VolumeAvailable && pv.Spec.ClaimRef != nil && pv.Spec.ClaimRef.UID == "" {
+		return true
+	}
+
+	return false
 }
 
 func (r *PersistentVolumeReconciler) removeRBDImage(ctx context.Context, pv *corev1.PersistentVolume) error {
