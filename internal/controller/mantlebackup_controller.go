@@ -1240,6 +1240,9 @@ func (r *MantleBackupReconciler) finalizeStandalone(
 		return nil
 	}
 
+	// We don't wait for the data transfer to finish because there is no reason
+	// to keep consuming resources on the data transfer when deletion has been commanded.
+
 	// primaryClean() is called in finalizeStandalone() to delete resources for
 	// exported and uploaded snapshots in both standalone and primary Mantle.
 	if result := r.primaryCleanup(ctx, backup); result.ShouldReturn() {
@@ -1282,6 +1285,8 @@ func (r *MantleBackupReconciler) finalizeSecondary(
 		return nil
 	}
 
+	// We don't wait for the data transfer to finish because there is no reason
+	// to keep consuming resources on the data transfer when deletion has been commanded.
 	if result := r.secondaryCleanup(ctx, backup, false); result.ShouldReturn() {
 		return result.WrapIfError("failed to cleanup resources for exported and uploaded snapshots")
 	}
