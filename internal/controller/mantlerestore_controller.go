@@ -15,7 +15,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -291,7 +290,7 @@ func (r *MantleRestoreReconciler) createRestoringPVIfNotExists(ctx context.Conte
 	newPV.Spec.CSI.VolumeAttributes = map[string]string{
 		"clusterID":     srcPV.Spec.CSI.VolumeAttributes["clusterID"],
 		"pool":          srcPV.Spec.CSI.VolumeAttributes["pool"],
-		"staticVolume":  "true",
+		"staticVolume":  staticVolumeValue,
 		"imageFeatures": srcPV.Spec.CSI.VolumeAttributes["imageFeatures"] + ",deep-flatten",
 	}
 	newPV.Spec.CSI.VolumeHandle = r.restoringRBDImageName(restore)
@@ -366,7 +365,7 @@ func (r *MantleRestoreReconciler) createRestoringPVCIfNotExists(ctx context.Cont
 	}
 	// No StorageClass to indicate static provisioning.
 	// and ensure this PVC statically binds to the specific PV.
-	newPVC.Spec.StorageClassName = ptr.To("")
+	newPVC.Spec.StorageClassName = new("")
 	newPVC.Spec.VolumeName = pvName
 
 	if err := controllerutil.SetControllerReference(restore, newPVC, r.Scheme); err != nil {

@@ -7,6 +7,14 @@ import (
 
 const namespace = "mantle"
 
+// Label names of the metrics. Callers must use them as the keys of prometheus.Labels.
+const (
+	LabelPersistentVolumeClaim = "persistentvolumeclaim"
+	LabelResourceNamespace     = "resource_namespace"
+	LabelMantleBackup          = "mantlebackup"
+	LabelMantleBackupConfig    = "mantlebackupconfig"
+)
+
 var (
 	BackupExportedDiffSizeBytes = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -14,7 +22,7 @@ var (
 			Name:      "backup_exported_diff_size_bytes",
 			Help:      "The size of the uploaded backup diff data",
 		},
-		[]string{"persistentvolumeclaim", "resource_namespace", "mantlebackup"},
+		[]string{LabelPersistentVolumeClaim, LabelResourceNamespace, LabelMantleBackup},
 	)
 
 	BackupConfigInfo = prometheus.NewGaugeVec(
@@ -23,7 +31,7 @@ var (
 			Name:      "mantlebackupconfig_info",
 			Help:      "Information about the backup configuration.",
 		},
-		[]string{"persistentvolumeclaim", "resource_namespace", "mantlebackupconfig"},
+		[]string{LabelPersistentVolumeClaim, LabelResourceNamespace, LabelMantleBackupConfig},
 	)
 
 	BackupConfigSuspend = prometheus.NewGaugeVec(
@@ -32,7 +40,7 @@ var (
 			Name:      "mantlebackupconfig_suspend",
 			Help:      "Indicates whether the backup configuration is suspended.",
 		},
-		[]string{"resource_namespace", "mantlebackupconfig"},
+		[]string{LabelResourceNamespace, LabelMantleBackupConfig},
 	)
 
 	BackupDurationSeconds = prometheus.NewHistogramVec(
@@ -42,7 +50,7 @@ var (
 			Help:      "The time from the creationTimestamp to the completion of the backup.",
 			Buckets:   []float64{100, 200, 400, 800, 1600, 3200, 9600, 28800, 86400, 259200},
 		},
-		[]string{"persistentvolumeclaim", "resource_namespace"},
+		[]string{LabelPersistentVolumeClaim, LabelResourceNamespace},
 	)
 )
 

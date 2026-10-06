@@ -20,7 +20,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/utils/ptr"
 )
 
 const (
@@ -101,7 +100,7 @@ func (test *replicationUnitTest) newRequestPVC() *corev1.PersistentVolumeClaim {
 					corev1.ResourceStorage: resource.MustParse("1Gi"),
 				},
 			},
-			StorageClassName: ptr.To(resMgr.StorageClassName),
+			StorageClassName: new(resMgr.StorageClassName),
 		},
 	}
 }
@@ -168,7 +167,7 @@ func (test *replicationUnitTest) testCreateUpdatePVC() {
 			pvc.Spec.StorageClassName = nil
 		}),
 		Entry("when the cluster-id(StorageClass) is different from the managed one", func(pvc *corev1.PersistentVolumeClaim) {
-			pvc.Spec.StorageClassName = ptr.To(resMgr.StorageClassNameAnother)
+			pvc.Spec.StorageClassName = new(resMgr.StorageClassNameAnother)
 		}),
 	)
 
@@ -217,8 +216,8 @@ func (test *replicationUnitTest) newMantleBackup() *mantlev1.MantleBackup {
 		},
 		Status: mantlev1.MantleBackupStatus{
 			CreatedAt:        metav1.Time(snapshot.Timestamp),
-			SnapSize:         ptr.To(snapshot.Size),
-			TransferPartSize: ptr.To(resource.MustParse("1Gi")),
+			SnapSize:         new(snapshot.Size),
+			TransferPartSize: new(resource.MustParse("1Gi")),
 		},
 	}
 }
@@ -294,7 +293,7 @@ func (test *replicationUnitTest) testCreateMantleBackup() {
 
 		// Modify the MantleBackup object
 		origMB := mb.DeepCopy()
-		mb.Status.TransferPartSize = ptr.To(resource.MustParse("2Gi"))
+		mb.Status.TransferPartSize = new(resource.MustParse("2Gi"))
 		Expect(mb.Status.TransferPartSize).NotTo(Equal(origMB.Status.TransferPartSize))
 		mbJson, err = json.Marshal(mb)
 		Expect(err).NotTo(HaveOccurred())

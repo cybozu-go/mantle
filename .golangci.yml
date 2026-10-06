@@ -16,6 +16,7 @@ linters:
     - embeddedstructfieldcheck
     - err113
     - exhaustruct
+    - exhaustruct_v5
     - forbidigo
     - forcetypeassert
     - funcorder
@@ -61,6 +62,11 @@ linters:
           - dupl
           - lll
         path: internal/*
+
+      # Repeated literals are intentional in table-driven tests.
+      - linters:
+          - goconst
+        path: _test\.go
 
       # exclude staticcheck SA1019 for Result.Requeue.
       - linters:

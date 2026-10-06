@@ -67,8 +67,7 @@ func (b *S3Bucket) Exists(ctx context.Context, key string) (bool, error) {
 		Bucket: &b.bucketName,
 		Key:    &key,
 	}); err != nil {
-		var notFound *types.NotFound
-		if errors.As(err, &notFound) {
+		if _, ok := errors.AsType[*types.NotFound](err); ok {
 			return false, nil
 		}
 
@@ -98,8 +97,7 @@ func (b *S3Bucket) Delete(ctx context.Context, key string) error {
 		Bucket: &b.bucketName,
 		Key:    &key,
 	}); err != nil {
-		var notFound *types.NotFound
-		if errors.As(err, &notFound) {
+		if _, ok := errors.AsType[*types.NotFound](err); ok {
 			return nil
 		}
 
