@@ -184,6 +184,19 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, restore *mantlev1
 		return ctrl.Result{}, err
 	}
 
+	// wait for the restore PV and PVC to be bound
+	bound, err := r.areRestoringPVAndPVCBound(ctx, restore)
+	if err != nil {
+		logger.Error(err, "failed to check if PV and PVC are bound")
+
+		return ctrl.Result{}, err
+	}
+	if !bound {
+		logger.Info("PV and PVC are not bound yet")
+
+		return requeueReconciliation(), nil
+	}
+
 	// update the status of this MantleRestore to ReadyToUse
 	meta.SetStatusCondition(&restore.Status.Conditions, metav1.Condition{
 		Type:   mantlev1.RestoreConditionReadyToUse,
@@ -378,6 +391,28 @@ func (r *MantleRestoreReconciler) createRestoringPVCIfNotExists(ctx context.Cont
 	}
 
 	return nil
+}
+
+func (r *MantleRestoreReconciler) areRestoringPVAndPVCBound(ctx context.Context, restore *mantlev1.MantleRestore) (bool, error) {
+	var pv corev1.PersistentVolume
+	err := r.client.Get(ctx, client.ObjectKey{Name: r.restoringPVName(restore)}, &pv)
+	if aerrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to get PV: %w", err)
+	}
+
+	var pvc corev1.PersistentVolumeClaim
+	err = r.client.Get(ctx, client.ObjectKey{Name: restore.Name, Namespace: restore.Namespace}, &pvc)
+	if aerrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to get PVC: %w", err)
+	}
+
+	return pv.Status.Phase == corev1.VolumeBound && pvc.Status.Phase == corev1.ClaimBound, nil
 }
 
 func (r *MantleRestoreReconciler) cleanup(ctx context.Context, restore *mantlev1.MantleRestore) (ctrl.Result, error) {

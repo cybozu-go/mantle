@@ -18,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/utils/ptr"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
@@ -41,6 +42,7 @@ var _ = Describe("MantleRestoreReconciler unit test", func() {
 	Describe("test createRestoringPVC", test.testCreateRestoringPVC)
 	Describe("test deleteRestoringPVC", test.testDeleteRestoringPVC)
 	Describe("test deleteRestoringPV", test.testDeleteRestoringPV)
+	Describe("test Reconcile waits for PV and PVC to be bound", test.testReconcileWaitsForBound)
 	Describe("tearDown environment", test.tearDownEnv)
 })
 
@@ -446,6 +448,89 @@ func (test *mantleRestoreControllerUnitTest) testDeleteRestoringPV() {
 		// cleanup
 		err = test.reconciler.deleteRestoringPV(ctx, restore)
 		Expect(err).NotTo(HaveOccurred())
+	})
+}
+
+func (test *mantleRestoreControllerUnitTest) testReconcileWaitsForBound() {
+	var reconciler *MantleRestoreReconciler
+	var backup *mantlev1.MantleBackup
+	var restore *mantlev1.MantleRestore
+	var pvKey, pvcKey client.ObjectKey
+
+	reconcileAndGetRestore := func(ctx context.Context, g Gomega) (ctrl.Result, *mantlev1.MantleRestore) {
+		result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(restore)})
+		g.Expect(err).NotTo(HaveOccurred())
+
+		var current mantlev1.MantleRestore
+		g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(restore), &current)).To(Succeed())
+
+		return result, &current
+	}
+
+	setStatus := func(ctx context.Context, key client.ObjectKey, obj client.Object, mutate func()) {
+		GinkgoHelper()
+		Eventually(ctx, func(g Gomega) {
+			g.Expect(k8sClient.Get(ctx, key, obj)).To(Succeed())
+			mutate()
+			g.Expect(k8sClient.Status().Update(ctx, obj)).To(Succeed())
+		}).Should(Succeed())
+	}
+
+	It("should prepare resources", func(ctx SpecContext) {
+		reconciler = NewMantleRestoreReconciler(
+			test.mgrUtil.GetManager().GetClient(),
+			test.mgrUtil.GetManager().GetScheme(),
+			resMgr.ClusterID,
+			RoleStandalone,
+		)
+		reconciler.ceph = testutil.NewFakeRBD()
+
+		var err error
+		backup, err = resMgr.CreateUniqueBackupFor(ctx, test.srcPVC, func(b *mantlev1.MantleBackup) {
+			b.Annotations = map[string]string{mbAnnotationSkipVerifyKey: mbAnnotationSkipVerifyValue}
+		})
+		Expect(err).NotTo(HaveOccurred())
+		resMgr.WaitForBackupSnapshotCaptured(ctx, backup)
+
+		restore = &mantlev1.MantleRestore{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      util.GetUniqueName("restore-"),
+				Namespace: test.tenantNamespace,
+			},
+			Spec: mantlev1.MantleRestoreSpec{
+				Backup: backup.Name,
+			},
+		}
+		Expect(k8sClient.Create(ctx, restore)).To(Succeed())
+
+		pvKey = client.ObjectKey{Name: reconciler.restoringPVName(restore)}
+		pvcKey = client.ObjectKey{Name: restore.Name, Namespace: restore.Namespace}
+	})
+
+	It("should create the PV and PVC but not set ReadyToUse before they are bound", func(ctx SpecContext) {
+		Eventually(ctx, func(g Gomega) {
+			_, _ = reconcileAndGetRestore(ctx, g)
+			g.Expect(k8sClient.Get(ctx, pvKey, &corev1.PersistentVolume{})).To(Succeed())
+			g.Expect(k8sClient.Get(ctx, pvcKey, &corev1.PersistentVolumeClaim{})).To(Succeed())
+		}).Should(Succeed())
+
+		Consistently(ctx, func(g Gomega) {
+			result, current := reconcileAndGetRestore(ctx, g)
+			g.Expect(result.RequeueAfter).NotTo(BeZero())
+			g.Expect(current.IsReady()).To(BeFalse())
+		}, 1*time.Second).Should(Succeed())
+	})
+
+	It("should set ReadyToUse after both the PV and PVC are bound", func(ctx SpecContext) {
+		var pvc corev1.PersistentVolumeClaim
+		setStatus(ctx, pvcKey, &pvc, func() { pvc.Status.Phase = corev1.ClaimBound })
+		var pv corev1.PersistentVolume
+		setStatus(ctx, pvKey, &pv, func() { pv.Status.Phase = corev1.VolumeBound })
+
+		Eventually(ctx, func(g Gomega) {
+			_, current := reconcileAndGetRestore(ctx, g)
+			g.Expect(current.IsReady()).To(BeTrue())
+		}).Should(Succeed())
 	})
 }
 
