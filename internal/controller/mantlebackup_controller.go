@@ -36,7 +36,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/kube-openapi/pkg/validation/strfmt"
-	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -63,6 +62,8 @@ const (
 	LabelBackupPriority           = "mantle.cybozu.io/backup-priority"
 	labelBackupPriorityHigh       = "high"
 	MantleBackupConfigUID         = "mantle.cybozu.io/mbc-uid"
+	labelAppNameKey               = "app.kubernetes.io/name"
+	labelComponentKey             = "app.kubernetes.io/component"
 	labelAppNameValue             = "mantle"
 	labelComponentExportData      = "export-data"
 	labelComponentExportJob       = "export-job"
@@ -76,6 +77,7 @@ const (
 	annotDiffFrom                 = "mantle.cybozu.io/diff-from"
 	annotDiffTo                   = "mantle.cybozu.io/diff-to"
 	annotRetainIfExpired          = "mantle.cybozu.io/retain-if-expired"
+	annotRetainIfExpiredValue     = "true"
 	annotSyncMode                 = "mantle.cybozu.io/sync-mode"
 
 	MantleExportJobPrefix     = "mantle-export-"
@@ -101,6 +103,22 @@ const (
 	nonRootFSGroup = int64(10000)
 	nonRootGroupID = int64(10000)
 	nonRootUserID  = int64(10000)
+)
+
+// Names reused in the Pod specs and the PV attributes.
+const (
+	bashPath               = "/bin/bash"
+	rookCephMonName        = "rook-ceph-mon"
+	envPartNum             = "PART_NUM"
+	envTransferCompression = "TRANSFER_COMPRESSION"
+	envAWSAccessKeyID      = "AWS_ACCESS_KEY_ID"
+	envAWSSecretAccessKey  = "AWS_SECRET_ACCESS_KEY"
+	volumeCephConfig       = "ceph-config"
+	volumeMonEndpoint      = "mon-endpoint-volume"
+	volumeCephAdminSecret  = "ceph-admin-secret"
+	volumeToStore          = "volume-to-store"
+	volumeCACert           = "ca-cert"
+	staticVolumeValue      = "true"
 )
 
 var (
@@ -363,7 +381,7 @@ func (r *MantleBackupReconciler) expire(ctx context.Context, backup *mantlev1.Ma
 		return nil
 	}
 
-	if v, ok := backup.Annotations[annotRetainIfExpired]; ok && v == "true" {
+	if v, ok := backup.Annotations[annotRetainIfExpired]; ok && v == annotRetainIfExpiredValue {
 		// retain this backup.
 		// If the annotation is deleted, reconciliation will run, so no need to schedule.
 		return nil
@@ -863,8 +881,8 @@ func newMantleBackupReconcilerRateLimiter[T comparable]() workqueue.TypedRateLim
 func (r *MantleBackupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Ensure a zero-value metric is exported even if no MantleBackup exists.
 	metrics.BackupDurationSeconds.With(prometheus.Labels{
-		"persistentvolumeclaim": "",
-		"resource_namespace":    "",
+		metrics.LabelPersistentVolumeClaim: "",
+		metrics.LabelResourceNamespace:     "",
 	})
 
 	return ctrl.NewControllerManagedBy(mgr).
@@ -905,8 +923,8 @@ func (r *MantleBackupReconciler) replicate(
 
 		duration := time.Since(backup.GetCreationTimestamp().Time).Seconds()
 		metrics.BackupDurationSeconds.With(prometheus.Labels{
-			"persistentvolumeclaim": backup.Spec.PVC,
-			"resource_namespace":    backup.GetNamespace(),
+			metrics.LabelPersistentVolumeClaim: backup.Spec.PVC,
+			metrics.LabelResourceNamespace:     backup.GetNamespace(),
 		}).Observe(duration)
 
 		return reconcile.Requeue()
@@ -1251,9 +1269,9 @@ func (r *MantleBackupReconciler) finalizeStandalone(
 	}
 
 	_ = metrics.BackupExportedDiffSizeBytes.Delete(prometheus.Labels{
-		"persistentvolumeclaim": backup.Spec.PVC,
-		"resource_namespace":    backup.GetNamespace(),
-		"mantlebackup":          backup.GetName(),
+		metrics.LabelPersistentVolumeClaim: backup.Spec.PVC,
+		metrics.LabelResourceNamespace:     backup.GetNamespace(),
+		metrics.LabelMantleBackup:          backup.GetName(),
 	})
 
 	delete(r.exportedDiffSizeCache, backup.GetUID())
@@ -1619,7 +1637,7 @@ func (r *MantleBackupReconciler) handleCompletedJobsOfComponent(
 					UID:             &job.job.UID,
 					ResourceVersion: &job.job.ResourceVersion,
 				},
-				PropagationPolicy: ptr.To(metav1.DeletePropagationBackground),
+				PropagationPolicy: new(metav1.DeletePropagationBackground),
 			}); err != nil {
 				return -1, reconcile.Failed("failed to delete Job: %s: %w", job.job.GetName(), err)
 			}
@@ -1648,8 +1666,8 @@ func (r *MantleBackupReconciler) listCompletedJobsOfComponent(
 	if err := r.List(ctx, &jobList, &client.ListOptions{
 		Namespace: r.managedCephClusterID,
 		LabelSelector: labels.SelectorFromSet(map[string]string{
-			"app.kubernetes.io/name":      labelAppNameValue,
-			"app.kubernetes.io/component": componentLabel,
+			labelAppNameKey:   labelAppNameValue,
+			labelComponentKey: componentLabel,
 		}),
 	}); err != nil {
 		return nil, -1, reconcile.Failed("failed to list Jobs: %w", err)
@@ -1687,8 +1705,8 @@ func (r *MantleBackupReconciler) canNewJobBeCreated(ctx context.Context, maxJobs
 	if err := r.List(ctx, &jobs, &client.ListOptions{
 		Namespace: r.managedCephClusterID,
 		LabelSelector: labels.SelectorFromSet(map[string]string{
-			"app.kubernetes.io/name":      labelAppNameValue,
-			"app.kubernetes.io/component": component,
+			labelAppNameKey:   labelAppNameValue,
+			labelComponentKey: component,
 		}),
 	}); err != nil {
 		return false, reconcile.Failed("failed to list %s Jobs: %w", component, err)
@@ -1752,8 +1770,8 @@ func (r *MantleBackupReconciler) listExportDataPVCs(
 	if err := r.List(ctx, &pvcs, &client.ListOptions{
 		Namespace: r.managedCephClusterID,
 		LabelSelector: labels.SelectorFromSet(map[string]string{
-			"app.kubernetes.io/name":      labelAppNameValue,
-			"app.kubernetes.io/component": labelComponentExportData,
+			labelAppNameKey:   labelAppNameValue,
+			labelComponentKey: labelComponentExportData,
 		}),
 	}); err != nil {
 		return nil, fmt.Errorf("failed to list export data PVCs: %w", err)
@@ -1811,8 +1829,8 @@ func (r *MantleBackupReconciler) getPartNumRangeOfExpectedRunningUploadJobs(
 	if err := r.List(ctx, &jobs, &client.ListOptions{
 		Namespace: r.managedCephClusterID,
 		LabelSelector: labels.SelectorFromSet(map[string]string{
-			"app.kubernetes.io/name":      labelAppNameValue,
-			"app.kubernetes.io/component": labelComponentUploadJob,
+			labelAppNameKey:   labelAppNameValue,
+			labelComponentKey: labelComponentUploadJob,
 		}),
 	}); err != nil {
 		return 0, 0, reconcile.Failed("failed to list upload Jobs: %w", err)
@@ -1944,9 +1962,9 @@ func (r *MantleBackupReconciler) setExportedDiffSizeMetric(
 	}
 
 	metrics.BackupExportedDiffSizeBytes.With(prometheus.Labels{
-		"persistentvolumeclaim": backup.Spec.PVC,
-		"resource_namespace":    backup.GetNamespace(),
-		"mantlebackup":          backup.GetName(),
+		metrics.LabelPersistentVolumeClaim: backup.Spec.PVC,
+		metrics.LabelResourceNamespace:     backup.GetNamespace(),
+		metrics.LabelMantleBackup:          backup.GetName(),
 	}).Set(float64(totalSize))
 
 	return nil
@@ -2150,8 +2168,8 @@ func (r *MantleBackupReconciler) createOrUpdateExportDataPVC(
 		if labels == nil {
 			labels = make(map[string]string)
 		}
-		labels["app.kubernetes.io/name"] = labelAppNameValue
-		labels["app.kubernetes.io/component"] = labelComponentExportData
+		labels[labelAppNameKey] = labelAppNameValue
+		labels[labelComponentKey] = labelComponentExportData
 		pvc.SetLabels(labels)
 
 		if len(r.primarySettings.ExportDataPVCAnnotations) > 0 {
@@ -2304,20 +2322,20 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(
 		if labels == nil {
 			labels = map[string]string{}
 		}
-		labels["app.kubernetes.io/name"] = labelAppNameValue
-		labels["app.kubernetes.io/component"] = labelComponentExportJob
+		labels[labelAppNameKey] = labelAppNameValue
+		labels[labelComponentKey] = labelComponentExportJob
 		job.SetLabels(labels)
 
-		job.Spec.BackoffLimit = ptr.To(int32(65535))
+		job.Spec.BackoffLimit = new(int32(65535))
 
 		if !job.CreationTimestamp.IsZero() {
 			return nil
 		}
 		job.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
-			FSGroup:      ptr.To(nonRootFSGroup),
-			RunAsGroup:   ptr.To(nonRootGroupID),
-			RunAsNonRoot: ptr.To(true),
-			RunAsUser:    ptr.To(nonRootUserID),
+			FSGroup:      new(nonRootFSGroup),
+			RunAsGroup:   new(nonRootGroupID),
+			RunAsNonRoot: new(true),
+			RunAsUser:    new(nonRootUserID),
 		}
 
 		job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
@@ -2329,7 +2347,7 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(
 		job.Spec.Template.Spec.Containers = []corev1.Container{
 			{
 				Name:    "export",
-				Command: []string{"/bin/bash", "-c", script},
+				Command: []string{bashPath, "-c", script},
 				Env: []corev1.EnvVar{
 					{
 						Name: "ROOK_CEPH_USERNAME",
@@ -2337,7 +2355,7 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(
 							SecretKeyRef: &corev1.SecretKeySelector{
 								Key: "ceph-username",
 								LocalObjectReference: corev1.LocalObjectReference{
-									Name: "rook-ceph-mon",
+									Name: rookCephMonName,
 								},
 							},
 						},
@@ -2359,11 +2377,11 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(
 						Value: target.GetName(),
 					},
 					{
-						Name:  "PART_NUM",
+						Name:  envPartNum,
 						Value: strconv.Itoa(partNum),
 					},
 					{
-						Name:  "TRANSFER_COMPRESSION",
+						Name:  envTransferCompression,
 						Value: target.Spec.TransferCompression,
 					},
 					{
@@ -2380,20 +2398,20 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(
 				VolumeMounts: []corev1.VolumeMount{
 					{
 						MountPath: "/etc/ceph",
-						Name:      "ceph-config",
+						Name:      volumeCephConfig,
 					},
 					{
 						MountPath: "/etc/rook",
-						Name:      "mon-endpoint-volume",
+						Name:      volumeMonEndpoint,
 					},
 					{
 						MountPath: "/var/lib/rook-ceph-mon",
-						Name:      "ceph-admin-secret",
+						Name:      volumeCephAdminSecret,
 						ReadOnly:  true,
 					},
 					{
 						MountPath: "/mantle",
-						Name:      "volume-to-store",
+						Name:      volumeToStore,
 					},
 				},
 			},
@@ -2401,7 +2419,7 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(
 
 		job.Spec.Template.Spec.Volumes = []corev1.Volume{
 			{
-				Name: "volume-to-store",
+				Name: volumeToStore,
 				VolumeSource: corev1.VolumeSource{
 					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
 						ClaimName: MakeExportDataPVCName(target, partNum),
@@ -2409,11 +2427,11 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(
 				},
 			},
 			{
-				Name: "ceph-admin-secret",
+				Name: volumeCephAdminSecret,
 				VolumeSource: corev1.VolumeSource{
 					Secret: &corev1.SecretVolumeSource{
-						SecretName: "rook-ceph-mon",
-						Optional:   ptr.To(false),
+						SecretName: rookCephMonName,
+						Optional:   new(false),
 						Items: []corev1.KeyToPath{{
 							Key:  "ceph-secret",
 							Path: "secret.keyring",
@@ -2422,7 +2440,7 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(
 				},
 			},
 			{
-				Name: "mon-endpoint-volume",
+				Name: volumeMonEndpoint,
 				VolumeSource: corev1.VolumeSource{
 					ConfigMap: &corev1.ConfigMapVolumeSource{
 						Items: []corev1.KeyToPath{
@@ -2438,7 +2456,7 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(
 				},
 			},
 			{
-				Name: "ceph-config",
+				Name: volumeCephConfig,
 				VolumeSource: corev1.VolumeSource{
 					EmptyDir: &corev1.EmptyDirVolumeSource{},
 				},
@@ -2483,20 +2501,20 @@ func (r *MantleBackupReconciler) createOrUpdateUploadJobs(
 			if labels == nil {
 				labels = map[string]string{}
 			}
-			labels["app.kubernetes.io/name"] = labelAppNameValue
-			labels["app.kubernetes.io/component"] = labelComponentUploadJob
+			labels[labelAppNameKey] = labelAppNameValue
+			labels[labelComponentKey] = labelComponentUploadJob
 			job.SetLabels(labels)
 
-			job.Spec.BackoffLimit = ptr.To(int32(65535))
+			job.Spec.BackoffLimit = new(int32(65535))
 
 			if !job.CreationTimestamp.IsZero() {
 				return nil
 			}
 			job.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
-				FSGroup:      ptr.To(nonRootFSGroup),
-				RunAsGroup:   ptr.To(nonRootGroupID),
-				RunAsNonRoot: ptr.To(true),
-				RunAsUser:    ptr.To(nonRootUserID),
+				FSGroup:      new(nonRootFSGroup),
+				RunAsGroup:   new(nonRootGroupID),
+				RunAsNonRoot: new(true),
+				RunAsUser:    new(nonRootUserID),
 			}
 
 			job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
@@ -2508,7 +2526,7 @@ func (r *MantleBackupReconciler) createOrUpdateUploadJobs(
 			job.Spec.Template.Spec.Containers = []corev1.Container{
 				{
 					Name:    "upload",
-					Command: []string{"/bin/bash", "-c", script},
+					Command: []string{bashPath, "-c", script},
 					Env: []corev1.EnvVar{
 						{
 							Name:  "OBJ_NAME",
@@ -2523,24 +2541,24 @@ func (r *MantleBackupReconciler) createOrUpdateUploadJobs(
 							Value: r.objectStorageSettings.Endpoint,
 						},
 						{
-							Name: "AWS_ACCESS_KEY_ID",
+							Name: envAWSAccessKeyID,
 							ValueFrom: &corev1.EnvVarSource{
 								SecretKeyRef: &corev1.SecretKeySelector{
 									LocalObjectReference: corev1.LocalObjectReference{
 										Name: r.envSecret,
 									},
-									Key: "AWS_ACCESS_KEY_ID",
+									Key: envAWSAccessKeyID,
 								},
 							},
 						},
 						{
-							Name: "AWS_SECRET_ACCESS_KEY",
+							Name: envAWSSecretAccessKey,
 							ValueFrom: &corev1.EnvVarSource{
 								SecretKeyRef: &corev1.SecretKeySelector{
 									LocalObjectReference: corev1.LocalObjectReference{
 										Name: r.envSecret,
 									},
-									Key: "AWS_SECRET_ACCESS_KEY",
+									Key: envAWSSecretAccessKey,
 								},
 							},
 						},
@@ -2557,11 +2575,11 @@ func (r *MantleBackupReconciler) createOrUpdateUploadJobs(
 							Value: r.proxySettings.NoProxy,
 						},
 						{
-							Name:  "PART_NUM",
+							Name:  envPartNum,
 							Value: strconv.Itoa(partNum),
 						},
 						{
-							Name:  "TRANSFER_COMPRESSION",
+							Name:  envTransferCompression,
 							Value: target.Spec.TransferCompression,
 						},
 					},
@@ -2570,7 +2588,7 @@ func (r *MantleBackupReconciler) createOrUpdateUploadJobs(
 					VolumeMounts: []corev1.VolumeMount{
 						{
 							MountPath: "/mantle",
-							Name:      "volume-to-store",
+							Name:      volumeToStore,
 						},
 					},
 				},
@@ -2578,7 +2596,7 @@ func (r *MantleBackupReconciler) createOrUpdateUploadJobs(
 
 			job.Spec.Template.Spec.Volumes = []corev1.Volume{
 				{
-					Name: "volume-to-store",
+					Name: volumeToStore,
 					VolumeSource: corev1.VolumeSource{
 						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
 							ClaimName: MakeExportDataPVCName(target, partNum),
@@ -2600,12 +2618,12 @@ func (r *MantleBackupReconciler) createOrUpdateUploadJobs(
 					container.VolumeMounts,
 					corev1.VolumeMount{
 						MountPath: "/mantle_ca_cert",
-						Name:      "ca-cert",
+						Name:      volumeCACert,
 					},
 				)
 				job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes,
 					corev1.Volume{
-						Name: "ca-cert",
+						Name: volumeCACert,
 						VolumeSource: corev1.VolumeSource{
 							ConfigMap: &corev1.ConfigMapVolumeSource{
 								LocalObjectReference: corev1.LocalObjectReference{
@@ -2756,11 +2774,11 @@ func (r *MantleBackupReconciler) prepareObjectStorageClient(ctx context.Context)
 	); err != nil {
 		return reconcile.Failed("failed to get env-secret: %w", err)
 	}
-	accessKeyID, ok := envSecret.Data["AWS_ACCESS_KEY_ID"]
+	accessKeyID, ok := envSecret.Data[envAWSAccessKeyID]
 	if !ok {
 		return reconcile.Failed("failed to find AWS_ACCESS_KEY_ID in env-secret")
 	}
-	secretAccessKey, ok := envSecret.Data["AWS_SECRET_ACCESS_KEY"]
+	secretAccessKey, ok := envSecret.Data[envAWSSecretAccessKey]
 	if !ok {
 		return reconcile.Failed("failed to find AWS_SECRET_ACCESS_KEY in env-secret")
 	}
@@ -3001,8 +3019,8 @@ func (r *MantleBackupReconciler) createStaticPVIfNotExists(
 		ObjectMeta: metav1.ObjectMeta{
 			Name: newPvName,
 			Labels: map[string]string{
-				"app.kubernetes.io/name":      labelAppNameValue,
-				"app.kubernetes.io/component": componentName,
+				labelAppNameKey:   labelAppNameValue,
+				labelComponentKey: componentName,
 			},
 		},
 		Spec: corev1.PersistentVolumeSpec{
@@ -3016,7 +3034,7 @@ func (r *MantleBackupReconciler) createStaticPVIfNotExists(
 			PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimRetain,
 			// No StorageClass to indicate static provisioning.
 			StorageClassName: "",
-			VolumeMode:       ptr.To(corev1.PersistentVolumeBlock),
+			VolumeMode:       new(corev1.PersistentVolumeBlock),
 
 			PersistentVolumeSource: corev1.PersistentVolumeSource{
 				CSI: &corev1.CSIPersistentVolumeSource{
@@ -3027,7 +3045,7 @@ func (r *MantleBackupReconciler) createStaticPVIfNotExists(
 						"imageFeatures": feature,
 						"imageFormat":   basePV.Spec.CSI.VolumeAttributes["imageFormat"],
 						"pool":          basePV.Spec.CSI.VolumeAttributes["pool"],
-						"staticVolume":  "true",
+						"staticVolume":  staticVolumeValue,
 					},
 					VolumeHandle: volume,
 				},
@@ -3069,8 +3087,8 @@ func (r *MantleBackupReconciler) createStaticPVCIfNotExists(
 			Namespace: r.managedCephClusterID,
 			Name:      pvcName,
 			Labels: map[string]string{
-				"app.kubernetes.io/name":      labelAppNameValue,
-				"app.kubernetes.io/component": componentName,
+				labelAppNameKey:   labelAppNameValue,
+				labelComponentKey: componentName,
 			},
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
@@ -3078,9 +3096,9 @@ func (r *MantleBackupReconciler) createStaticPVCIfNotExists(
 			Resources:   resources,
 			// No StorageClass to indicate static provisioning.
 			// and ensure this PVC statically binds to the specific PV.
-			StorageClassName: ptr.To(""),
+			StorageClassName: new(""),
 			VolumeName:       pvName,
-			VolumeMode:       ptr.To(corev1.PersistentVolumeBlock),
+			VolumeMode:       new(corev1.PersistentVolumeBlock),
 		},
 	})
 
@@ -3120,11 +3138,11 @@ func (r *MantleBackupReconciler) createOrUpdateZeroOutJob(
 		if labels == nil {
 			labels = map[string]string{}
 		}
-		labels["app.kubernetes.io/name"] = labelAppNameValue
-		labels["app.kubernetes.io/component"] = labelComponentZeroOutJob
+		labels[labelAppNameKey] = labelAppNameValue
+		labels[labelComponentKey] = labelComponentZeroOutJob
 		job.SetLabels(labels)
 
-		job.Spec.BackoffLimit = ptr.To(int32(65535))
+		job.Spec.BackoffLimit = new(int32(65535))
 
 		if !job.CreationTimestamp.IsZero() {
 			return nil
@@ -3136,7 +3154,7 @@ func (r *MantleBackupReconciler) createOrUpdateZeroOutJob(
 				Name:  "zeroout",
 				Image: r.podImage,
 				Command: []string{
-					"/bin/bash",
+					bashPath,
 					"-c",
 					`
 set -e
@@ -3144,9 +3162,9 @@ blkdiscard -z /dev/zeroout-rbd
 `,
 				},
 				SecurityContext: &corev1.SecurityContext{
-					Privileged: ptr.To(true),
-					RunAsGroup: ptr.To(int64(0)),
-					RunAsUser:  ptr.To(int64(0)),
+					Privileged: new(true),
+					RunAsGroup: new(int64(0)),
+					RunAsUser:  new(int64(0)),
 				},
 				VolumeDevices: []corev1.VolumeDevice{
 					{
@@ -3186,11 +3204,11 @@ func (r *MantleBackupReconciler) createOrUpdateVerifyJob(ctx context.Context, jo
 		if labels == nil {
 			labels = map[string]string{}
 		}
-		labels["app.kubernetes.io/name"] = labelAppNameValue
-		labels["app.kubernetes.io/component"] = labelComponentVerifyJob
+		labels[labelAppNameKey] = labelAppNameValue
+		labels[labelComponentKey] = labelComponentVerifyJob
 		job.SetLabels(labels)
 
-		job.Spec.BackoffLimit = ptr.To(int32(65535))
+		job.Spec.BackoffLimit = new(int32(65535))
 
 		if !job.CreationTimestamp.IsZero() {
 			return nil
@@ -3225,7 +3243,7 @@ func (r *MantleBackupReconciler) createOrUpdateVerifyJob(ctx context.Context, jo
 				{
 					Action: batchv1.PodFailurePolicyActionFailJob,
 					OnExitCodes: &batchv1.PodFailurePolicyOnExitCodesRequirement{
-						ContainerName: ptr.To("verify"),
+						ContainerName: new("verify"),
 						Operator:      batchv1.PodFailurePolicyOnExitCodesOpIn,
 						Values:        expectedFailureExitCodes,
 					},
@@ -3238,7 +3256,7 @@ func (r *MantleBackupReconciler) createOrUpdateVerifyJob(ctx context.Context, jo
 				Name:  "verify",
 				Image: r.podImage,
 				Command: []string{
-					"/bin/bash",
+					bashPath,
 					"-c",
 					// The first e2fsck with -E journal_only is to replay the
 					// journal and it may return non zero if there are errors
@@ -3250,9 +3268,9 @@ set -eux -o pipefail
 `,
 				},
 				SecurityContext: &corev1.SecurityContext{
-					Privileged: ptr.To(true),
-					RunAsGroup: ptr.To(int64(0)),
-					RunAsUser:  ptr.To(int64(0)),
+					Privileged: new(true),
+					RunAsGroup: new(int64(0)),
+					RunAsUser:  new(int64(0)),
 				},
 				VolumeDevices: []corev1.VolumeDevice{
 					{
@@ -3394,23 +3412,23 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 		if labels == nil {
 			labels = map[string]string{}
 		}
-		labels["app.kubernetes.io/name"] = labelAppNameValue
-		labels["app.kubernetes.io/component"] = labelComponentImportJob
+		labels[labelAppNameKey] = labelAppNameValue
+		labels[labelComponentKey] = labelComponentImportJob
 		job.SetLabels(labels)
 
-		job.Spec.BackoffLimit = ptr.To(int32(65535))
+		job.Spec.BackoffLimit = new(int32(65535))
 
 		// create replacement Pods only when the terminating Pod is fully terminal
 		// because import Jobs assume there are no other concurrent processes to the same data.
-		job.Spec.PodReplacementPolicy = ptr.To(batchv1.Failed)
+		job.Spec.PodReplacementPolicy = new(batchv1.Failed)
 
 		if !job.CreationTimestamp.IsZero() {
 			return nil
 		}
 		job.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
-			RunAsGroup:   ptr.To(nonRootGroupID),
-			RunAsNonRoot: ptr.To(true),
-			RunAsUser:    ptr.To(nonRootUserID),
+			RunAsGroup:   new(nonRootGroupID),
+			RunAsNonRoot: new(true),
+			RunAsUser:    new(nonRootUserID),
 		}
 
 		job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
@@ -3426,7 +3444,7 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 
 		container := corev1.Container{
 			Name:    "import",
-			Command: []string{"/bin/bash", "-c", script},
+			Command: []string{bashPath, "-c", script},
 			Env: []corev1.EnvVar{
 				{
 					Name: "ROOK_CEPH_USERNAME",
@@ -3434,7 +3452,7 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 						SecretKeyRef: &corev1.SecretKeySelector{
 							Key: "ceph-username",
 							LocalObjectReference: corev1.LocalObjectReference{
-								Name: "rook-ceph-mon",
+								Name: rookCephMonName,
 							},
 						},
 					},
@@ -3464,33 +3482,33 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 					Value: r.objectStorageSettings.Endpoint,
 				},
 				{
-					Name: "AWS_ACCESS_KEY_ID",
+					Name: envAWSAccessKeyID,
 					ValueFrom: &corev1.EnvVarSource{
 						SecretKeyRef: &corev1.SecretKeySelector{
 							LocalObjectReference: corev1.LocalObjectReference{
 								Name: r.envSecret,
 							},
-							Key: "AWS_ACCESS_KEY_ID",
+							Key: envAWSAccessKeyID,
 						},
 					},
 				},
 				{
-					Name: "AWS_SECRET_ACCESS_KEY",
+					Name: envAWSSecretAccessKey,
 					ValueFrom: &corev1.EnvVarSource{
 						SecretKeyRef: &corev1.SecretKeySelector{
 							LocalObjectReference: corev1.LocalObjectReference{
 								Name: r.envSecret,
 							},
-							Key: "AWS_SECRET_ACCESS_KEY",
+							Key: envAWSSecretAccessKey,
 						},
 					},
 				},
 				{
-					Name:  "PART_NUM",
+					Name:  envPartNum,
 					Value: strconv.Itoa(partNum),
 				},
 				{
-					Name:  "TRANSFER_COMPRESSION",
+					Name:  envTransferCompression,
 					Value: backup.Spec.TransferCompression,
 				},
 			},
@@ -3499,15 +3517,15 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 			VolumeMounts: []corev1.VolumeMount{
 				{
 					MountPath: "/etc/ceph",
-					Name:      "ceph-config",
+					Name:      volumeCephConfig,
 				},
 				{
 					MountPath: "/etc/rook",
-					Name:      "mon-endpoint-volume",
+					Name:      volumeMonEndpoint,
 				},
 				{
 					MountPath: "/var/lib/rook-ceph-mon",
-					Name:      "ceph-admin-secret",
+					Name:      volumeCephAdminSecret,
 					ReadOnly:  true,
 				},
 			},
@@ -3525,7 +3543,7 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 				container.VolumeMounts,
 				corev1.VolumeMount{
 					MountPath: "/mantle_ca_cert",
-					Name:      "ca-cert",
+					Name:      volumeCACert,
 				},
 			)
 		}
@@ -3534,11 +3552,11 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 
 		job.Spec.Template.Spec.Volumes = []corev1.Volume{
 			{
-				Name: "ceph-admin-secret",
+				Name: volumeCephAdminSecret,
 				VolumeSource: corev1.VolumeSource{
 					Secret: &corev1.SecretVolumeSource{
-						SecretName: "rook-ceph-mon",
-						Optional:   ptr.To(false),
+						SecretName: rookCephMonName,
+						Optional:   new(false),
 						Items: []corev1.KeyToPath{{
 							Key:  "ceph-secret",
 							Path: "secret.keyring",
@@ -3547,7 +3565,7 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 				},
 			},
 			{
-				Name: "mon-endpoint-volume",
+				Name: volumeMonEndpoint,
 				VolumeSource: corev1.VolumeSource{
 					ConfigMap: &corev1.ConfigMapVolumeSource{
 						Items: []corev1.KeyToPath{
@@ -3563,7 +3581,7 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 				},
 			},
 			{
-				Name: "ceph-config",
+				Name: volumeCephConfig,
 				VolumeSource: corev1.VolumeSource{
 					EmptyDir: &corev1.EmptyDirVolumeSource{},
 				},
@@ -3572,7 +3590,7 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 
 		if r.objectStorageSettings.CACertConfigMap != nil {
 			job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, corev1.Volume{
-				Name: "ca-cert",
+				Name: volumeCACert,
 				VolumeSource: corev1.VolumeSource{
 					ConfigMap: &corev1.ConfigMapVolumeSource{
 						LocalObjectReference: corev1.LocalObjectReference{
@@ -3703,7 +3721,7 @@ func (r *MantleBackupReconciler) deleteAllJobsOfComponent(
 		job.SetName(makeJobName(backup, partNum))
 		job.SetNamespace(r.managedCephClusterID)
 		if err := r.Delete(ctx, &job, &client.DeleteOptions{
-			PropagationPolicy: ptr.To(metav1.DeletePropagationBackground),
+			PropagationPolicy: new(metav1.DeletePropagationBackground),
 		}); err != nil && !aerrors.IsNotFound(err) {
 			return reconcile.Failed("failed to delete Job: %s/%s: %w", job.GetNamespace(), job.GetName(), err)
 		}
@@ -3731,7 +3749,7 @@ func (r *MantleBackupReconciler) deleteAllExportDataPVCs(ctx context.Context, ba
 		pvc.SetName(MakeExportDataPVCName(backup, partNum))
 		pvc.SetNamespace(r.managedCephClusterID)
 		if err := r.Delete(ctx, &pvc, &client.DeleteOptions{
-			PropagationPolicy: ptr.To(metav1.DeletePropagationBackground),
+			PropagationPolicy: new(metav1.DeletePropagationBackground),
 		}); err != nil && !aerrors.IsNotFound(err) {
 			return reconcile.Failed("failed to delete PVC: %s/%s: %w", pvc.GetNamespace(), pvc.GetName(), err)
 		}
@@ -3745,7 +3763,7 @@ func (r *MantleBackupReconciler) deleteVerifyJob(ctx context.Context, backup *ma
 	job.SetName(MakeVerifyJobName(backup))
 	job.SetNamespace(r.managedCephClusterID)
 	if err := r.Delete(ctx, &job, &client.DeleteOptions{
-		PropagationPolicy: ptr.To(metav1.DeletePropagationBackground),
+		PropagationPolicy: new(metav1.DeletePropagationBackground),
 	}); err != nil && !aerrors.IsNotFound(err) {
 		return reconcile.Failed("failed to delete verify Job: %s/%s: %w", job.GetNamespace(), job.GetName(), err)
 	}
@@ -3864,7 +3882,7 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 	zeroOutJob.SetName(MakeZeroOutJobName(target))
 	zeroOutJob.SetNamespace(r.managedCephClusterID)
 	if err := r.Delete(ctx, &zeroOutJob, &client.DeleteOptions{
-		PropagationPolicy: ptr.To(metav1.DeletePropagationBackground),
+		PropagationPolicy: new(metav1.DeletePropagationBackground),
 	}); err != nil && !aerrors.IsNotFound(err) {
 		return reconcile.Failed("failed to delete zeroout Job: %w", err)
 	}

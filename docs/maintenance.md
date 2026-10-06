@@ -21,14 +21,14 @@ To change the versions, edit the following files.
 - `README.md`
 - `versions.mk`
 
-We should also update go.mod. According to [the Kubebuilder documentation](https://book.kubebuilder.io/versions_compatibility_supportability), we should use versions compatible with Kubebuilder, so refer to the samples in the latest Kubebuilder testdata directory (e.g., https://github.com/kubernetes-sigs/kubebuilder/blob/v4.1.1/testdata/project-v4/go.mod#L8-L11 and https://github.com/kubernetes-sigs/kubebuilder/blob/v4.1.1/testdata/project-v4/Makefile#L162) to see which versions should be used.
+We should also update go.mod. According to [the Kubebuilder documentation](https://book.kubebuilder.io/versions_compatibility_supportability), we should use versions compatible with Kubebuilder, so refer to the samples in the latest Kubebuilder testdata directory (e.g., https://github.com/kubernetes-sigs/kubebuilder/blob/v4.15.0/testdata/project-v4/go.mod#L8-L11 and https://github.com/kubernetes-sigs/kubebuilder/blob/v4.15.0/testdata/project-v4/Makefile#L162) to see which versions should be used.
 
-First, update `k8s.io/*` libraries. Please note that `k8s.io/api`, `k8s.io/apimachinery`, and `k8s.io/client-go` use `v0.x.x` tags (e.g., v1.35.4 → v0.35.4), while `k8s.io/kubernetes` uses `v1.x.x` tags directly.
+First, update `k8s.io/*` libraries. Please note that `k8s.io/api`, `k8s.io/apimachinery`, and `k8s.io/client-go` use `v0.x.x` tags (e.g., v1.36.5 → v0.36.5), while `k8s.io/kubernetes` uses `v1.x.x` tags directly.
 
 ```bash
-$ VERSION=0.<minor>.<patch>  # e.g. 0.35.4 for Kubernetes 1.35.4
+$ VERSION=0.<minor>.<patch>  # e.g. 0.36.5 for Kubernetes 1.36.5
 $ go get k8s.io/api@v${VERSION} k8s.io/apimachinery@v${VERSION} k8s.io/client-go@v${VERSION}
-$ go get k8s.io/kubernetes@v1.<minor>.<patch>  # e.g. v1.35.4
+$ go get k8s.io/kubernetes@v1.<minor>.<patch>  # e.g. v1.36.5
 ```
 
 Next, update controller-runtime by the following command. Before updating it, please read the [`controller-runtime`'s release note](https://github.com/kubernetes-sigs/controller-runtime/releases). If there are breaking changes, we should decide how to manage these changes.
@@ -43,7 +43,7 @@ To change the version, edit `versions.mk`.
 
 #### Go
 
-Choose the version compatible with Kubebuilder (e.g., https://github.com/kubernetes-sigs/kubebuilder/blob/v4.1.1/testdata/project-v4/go.mod#L3).
+Choose the version compatible with Kubebuilder (e.g., https://github.com/kubernetes-sigs/kubebuilder/blob/v4.15.0/testdata/project-v4/go.mod#L3).
 
 Edit the following files.
 
@@ -61,7 +61,7 @@ To change their versions, edit `versions.mk`.
 - [minikube](https://github.com/kubernetes/minikube/releases)
 - [protoc](https://github.com/protocolbuffers/protobuf/releases)
 - [Rook](https://github.com/rook/rook/releases)
-- [golanci-lint](https://github.com/golangci/golangci-lint/releases)
+- [golangci-lint](https://github.com/golangci/golangci-lint/releases)
 - [cert-manager](https://github.com/cert-manager/cert-manager/releases)
 
 Update the following versions in Dockerfile, if necessary, too:

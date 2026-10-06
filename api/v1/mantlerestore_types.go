@@ -62,7 +62,3 @@ type MantleRestoreList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []MantleRestore `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&MantleRestore{}, &MantleRestoreList{})
-}

@@ -213,6 +213,7 @@ do-minikube-start:
 				$(MINIKUBE) start \
 					--kubernetes-version="v$(KUBERNETES_VERSION)" \
 					--driver=kvm2 \
+					--container-runtime=docker \
 					--memory 6g \
 					--cpus=2 \
 					--extra-config=kubeadm.node-name=$(NODE_NAME) \
@@ -244,6 +245,12 @@ install-rook-ceph-operator:
 		--create-namespace --namespace $(CEPH_CLUSTER1_NAMESPACE) -f testdata/values.yaml --wait \
 		rook-ceph rook-ceph)
 	$(KUBECTL) wait --timeout=60s --for=condition=available -n $(CEPH_CLUSTER1_NAMESPACE) deployment/rook-ceph-operator
+	$(CURL) -o $(BINDIR)/ceph-csi-drivers-values.yaml \
+		https://raw.githubusercontent.com/rook/rook/$(ROOK_CHART_VERSION)/deploy/charts/ceph-csi-drivers/values.yaml
+	$(call retry,$(HELM) upgrade --install --version $(CEPH_CSI_DRIVERS_CHART_VERSION) \
+		--repo https://ceph.github.io/ceph-csi-operator/ \
+		--namespace $(CEPH_CLUSTER1_NAMESPACE) -f $(BINDIR)/ceph-csi-drivers-values.yaml \
+		--set drivers.cephfs.enabled=false --wait ceph-csi-drivers ceph-csi-drivers)
 
 .PHONY: install-rook-ceph-cluster1
 install-rook-ceph-cluster1:
@@ -251,6 +258,10 @@ install-rook-ceph-cluster1:
 		--namespace $(CEPH_CLUSTER1_NAMESPACE) -f testdata/values-cluster.yaml \
 		--wait --force-conflicts rook-ceph-cluster rook-ceph-cluster)
 	$(MAKE) wait-ceph-ready NAMESPACE=$(CEPH_CLUSTER1_NAMESPACE)
+	$(KUBECTL) -n $(CEPH_CLUSTER1_NAMESPACE) wait --timeout=$(TIMEOUT_SECS)s \
+		--for=condition=available deployment/rook-ceph.rbd.csi.ceph.com-ctrlplugin
+	$(KUBECTL) -n $(CEPH_CLUSTER1_NAMESPACE) rollout status --timeout=$(TIMEOUT_SECS)s \
+		daemonset/rook-ceph.rbd.csi.ceph.com-nodeplugin
 
 .PHONY: install-rook-ceph-cluster2
 install-rook-ceph-cluster2:

@@ -110,9 +110,9 @@ func (r *MBCPrimaryReconciler) Provision(mbc *mantlev1.MantleBackupConfig, sc *s
 	}
 
 	metrics.BackupConfigInfo.With(prometheus.Labels{
-		"persistentvolumeclaim": mbc.Spec.PVC,
-		"resource_namespace":    mbc.Namespace,
-		"mantlebackupconfig":    mbc.Name,
+		"persistentvolumeclaim":         mbc.Spec.PVC,
+		metrics.LabelResourceNamespace:  mbc.Namespace,
+		metrics.LabelMantleBackupConfig: mbc.Name,
 	}).Set(1)
 
 	suspend := 0
@@ -121,8 +121,8 @@ func (r *MBCPrimaryReconciler) Provision(mbc *mantlev1.MantleBackupConfig, sc *s
 	}
 
 	metrics.BackupConfigSuspend.With(prometheus.Labels{
-		"resource_namespace": mbc.Namespace,
-		"mantlebackupconfig": mbc.Name,
+		metrics.LabelResourceNamespace:  mbc.Namespace,
+		metrics.LabelMantleBackupConfig: mbc.Name,
 	}).Set(float64(suspend))
 
 	r.createOrUpdateCronJob(mbc)
@@ -150,14 +150,14 @@ func (r *MBCPrimaryReconciler) Finalize(mbc *mantlev1.MantleBackupConfig, cronJo
 	}
 
 	_ = metrics.BackupConfigInfo.Delete(prometheus.Labels{
-		"persistentvolumeclaim": mbc.Spec.PVC,
-		"resource_namespace":    mbc.Namespace,
-		"mantlebackupconfig":    mbc.Name,
+		"persistentvolumeclaim":         mbc.Spec.PVC,
+		metrics.LabelResourceNamespace:  mbc.Namespace,
+		metrics.LabelMantleBackupConfig: mbc.Name,
 	})
 
 	_ = metrics.BackupConfigSuspend.Delete(prometheus.Labels{
-		"resource_namespace": mbc.Namespace,
-		"mantlebackupconfig": mbc.Name,
+		metrics.LabelResourceNamespace:  mbc.Namespace,
+		metrics.LabelMantleBackupConfig: mbc.Name,
 	})
 
 	if cronJob != nil {
