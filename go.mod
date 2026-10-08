@@ -1,6 +1,6 @@
 module github.com/cybozu-go/mantle
 
-go 1.26.0
+go 1.25.7
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.47.0
@@ -14,7 +14,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
 	go.uber.org/mock v0.6.0
-	golang.org/x/time v0.16.0
+	golang.org/x/time v0.15.0
 	google.golang.org/grpc v1.84.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.6.2
 	google.golang.org/protobuf v1.36.12
