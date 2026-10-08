@@ -191,6 +191,9 @@ func (r *MBCPrimaryReconciler) addFinalizerAndAnnotation(mbc *mantlev1.MantleBac
 		mbc.Annotations = make(map[string]string)
 	}
 
+	// Record the managed CephCluster ID in an annotation so that Finalize can
+	// verify which controller is responsible for this MBC and avoid finalizing
+	// MBCs that belong to a different CephCluster.
 	mbc.Annotations[MantleBackupConfigAnnotationManagedClusterID] = r.managedCephClusterID
 	controllerutil.AddFinalizer(mbc, MantleBackupConfigFinalizerName)
 }

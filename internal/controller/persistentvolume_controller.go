@@ -48,6 +48,14 @@ func NewPersistentVolumeReconciler(
 // perform operations to make the cluster state reflect the state specified by
 // the user.
 //
+// The RBD clone image for restore is deleted here, rather than
+// in the MantleRestore cleanup. The MantleRestore cleanup may skip PV deletion
+// when the PV is absent from the client cache; if we deleted the RBD image
+// there and the skip occurred, the Ceph volume would be left orphaned with no
+// Kubernetes resource to track it. By deleting the RBD image here — triggered
+// by the PV deletion event — a cache-induced skip only leaves behind an
+// orphaned PV, which can be cleaned up manually or by GarbageCollectorRunner.
+//
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.16.3/pkg/reconcile
 func (r *PersistentVolumeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -92,7 +100,6 @@ func (r *PersistentVolumeReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, nil
 	}
 
-	// Delete the RBD clone image.
 	if err := r.removeRBDImage(ctx, &pv); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to remove RBD image: %s: %w", pv.Name, err)
 	}
