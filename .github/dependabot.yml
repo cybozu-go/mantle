@@ -26,4 +26,4 @@ updates:
       default-days: 14
     ignore:
       - dependency-name: "k8s.io/*"
-      - dependency-name: "sigs.k8s.io/*"
+      - dependency-name: "sigs.k8s.io/controller-runtime"
