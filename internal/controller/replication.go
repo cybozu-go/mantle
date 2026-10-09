@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
+	"github.com/cybozu-go/mantle/internal/controller/domain"
 	"github.com/cybozu-go/mantle/pkg/controller/proto"
 	"google.golang.org/grpc"
 	corev1 "k8s.io/api/core/v1"
@@ -76,10 +77,10 @@ func (s *SecondaryServer) CreateOrUpdatePVC(
 	}
 
 	// Get the remote-uid of the PVC in the request.
-	remoteUIDReceived, ok := pvcReceived.Annotations[annotRemoteUID]
+	remoteUIDReceived, ok := pvcReceived.Annotations[domain.AnnotRemoteUID]
 	if !ok {
 		return nil, fmt.Errorf("annotation not found in the received PVC: %s: %s: %s",
-			annotRemoteUID, pvcReceived.GetName(), pvcReceived.GetNamespace())
+			domain.AnnotRemoteUID, pvcReceived.GetName(), pvcReceived.GetNamespace())
 	}
 
 	// Check cluster-id of the PVC in the request.
@@ -111,7 +112,7 @@ func (s *SecondaryServer) CreateOrUpdatePVC(
 			if pvc.Annotations == nil {
 				errMsg = "annotations field is nil in pvc"
 			} else {
-				remoteUID, ok := pvc.Annotations[annotRemoteUID]
+				remoteUID, ok := pvc.Annotations[domain.AnnotRemoteUID]
 				if !ok {
 					errMsg = "annotation not found in pvc"
 				} else if remoteUID != remoteUIDReceived {
@@ -120,7 +121,7 @@ func (s *SecondaryServer) CreateOrUpdatePVC(
 			}
 			if errMsg != "" {
 				return fmt.Errorf("%s: %s: %s: %s",
-					errMsg, annotRemoteUID, pvcReceived.GetName(), pvcReceived.GetNamespace())
+					errMsg, domain.AnnotRemoteUID, pvcReceived.GetName(), pvcReceived.GetNamespace())
 			}
 		}
 
@@ -176,10 +177,10 @@ func (s *SecondaryServer) CreateMantleBackup(
 		return nil, fmt.Errorf("label not found in the received MantleBackup: %s: %s: %s",
 			labelLocalBackupTargetPVCUID, backupReceived.GetName(), backupReceived.GetNamespace())
 	}
-	remoteUIDReceived, ok := backupReceived.Annotations[annotRemoteUID]
+	remoteUIDReceived, ok := backupReceived.Annotations[domain.AnnotRemoteUID]
 	if !ok {
 		return nil, fmt.Errorf("annotation not found in the received MantleBackup: %s: %s: %s",
-			annotRemoteUID, backupReceived.GetName(), backupReceived.GetNamespace())
+			domain.AnnotRemoteUID, backupReceived.GetName(), backupReceived.GetNamespace())
 	}
 
 	var backupExists mantlev1.MantleBackup
@@ -218,12 +219,12 @@ func (s *SecondaryServer) CreateMantleBackup(
 			labelLocalBackupTargetPVCUID, backupReceived.GetNamespace(), backupReceived.GetName())
 	}
 
-	if remoteUID, ok := backupExists.Annotations[annotRemoteUID]; !ok {
+	if remoteUID, ok := backupExists.Annotations[domain.AnnotRemoteUID]; !ok {
 		return nil, fmt.Errorf("annotation %s not found in the existing MantleBackup: %s/%s",
-			annotRemoteUID, backupReceived.GetNamespace(), backupReceived.GetName())
+			domain.AnnotRemoteUID, backupReceived.GetNamespace(), backupReceived.GetName())
 	} else if remoteUID != remoteUIDReceived {
 		return nil, fmt.Errorf("annotation %s not matched in the existing MantleBackup: %s/%s",
-			annotRemoteUID, backupReceived.GetNamespace(), backupReceived.GetName())
+			domain.AnnotRemoteUID, backupReceived.GetNamespace(), backupReceived.GetName())
 	}
 
 	// Update status if not set.

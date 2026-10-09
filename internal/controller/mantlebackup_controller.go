@@ -17,6 +17,7 @@ import (
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/ceph"
+	"github.com/cybozu-go/mantle/internal/controller/domain"
 	"github.com/cybozu-go/mantle/internal/controller/infra"
 	"github.com/cybozu-go/mantle/internal/controller/internal/objectstorage"
 	"github.com/cybozu-go/mantle/internal/controller/internal/reconcile"
@@ -72,7 +73,6 @@ const (
 	labelComponentVerifyVolume    = "verify-volume"
 	labelComponentZeroOutJob      = "zeroout-job"
 	labelComponentZeroOutVolume   = "zeroout-volume"
-	annotRemoteUID                = "mantle.cybozu.io/remote-uid"
 	annotDiffFrom                 = "mantle.cybozu.io/diff-from"
 	annotDiffTo                   = "mantle.cybozu.io/diff-to"
 	annotRetainIfExpired          = "mantle.cybozu.io/retain-if-expired"
@@ -509,14 +509,6 @@ func (r *MantleBackupReconciler) checkManagedBackup(ctx context.Context, backup 
 func (r *MantleBackupReconciler) reconcileLocalBackup(ctx context.Context, backup *mantlev1.MantleBackup) *reconcile.Result {
 	logger := log.FromContext(ctx)
 
-	if isCreatedWhenMantleControllerWasSecondary(backup) {
-		logger.Info(
-			"skipping to reconcile the MantleBackup created by a remote mantle-controller to prevent accidental data loss",
-		)
-
-		return reconcile.Succeeded()
-	}
-
 	if result := r.expire(ctx, backup); result.ShouldReturn() {
 		return result.WrapIfError("failed to expire backup")
 	}
@@ -795,14 +787,6 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 		return result.WrapIfError("failed to prepare object storage client")
 	}
 
-	if !isCreatedWhenMantleControllerWasSecondary(backup) {
-		logger.Info(
-			"skipping to reconcile the MantleBackup created by a different mantle-controller to prevent accidental data loss",
-		)
-
-		return reconcile.Succeeded()
-	}
-
 	if result := r.expire(ctx, backup); result.ShouldReturn() {
 		return result.WrapIfError("failed to expire backup")
 	}
@@ -960,7 +944,7 @@ func (r *MantleBackupReconciler) replicateManifests(
 	pvcSent.SetName(pvc.GetName())
 	pvcSent.SetNamespace(pvc.GetNamespace())
 	pvcSent.SetAnnotations(map[string]string{
-		annotRemoteUID: string(pvc.GetUID()),
+		domain.AnnotRemoteUID: string(pvc.GetUID()),
 	})
 	pvcSent.Spec = *pvc.Spec.DeepCopy()
 	capacity, err := resource.ParseQuantity(strconv.FormatInt(*backup.Status.SnapSize, 10))
@@ -994,7 +978,7 @@ func (r *MantleBackupReconciler) replicateManifests(
 	backupSent.SetName(backup.GetName())
 	backupSent.SetNamespace(backup.GetNamespace())
 	backupSent.SetAnnotations(map[string]string{
-		annotRemoteUID: string(backup.GetUID()),
+		domain.AnnotRemoteUID: string(backup.GetUID()),
 	})
 	backupSentLabels := map[string]string{
 		labelClusterID:                r.managedCephClusterID,
@@ -1217,14 +1201,6 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 	logger.Info("succeeded to create a backup")
 
 	return nil
-}
-
-// isCreatedWhenMantleControllerWasSecondary returns true iff the MantleBackup
-// is created by the secondary mantle.
-func isCreatedWhenMantleControllerWasSecondary(backup *mantlev1.MantleBackup) bool {
-	_, ok := backup.Annotations[annotRemoteUID]
-
-	return ok
 }
 
 func (r *MantleBackupReconciler) finalizeStandalone(
@@ -2216,7 +2192,7 @@ func MakeImportJobName(target *mantlev1.MantleBackup, index int) string {
 }
 
 func MakeMiddleSnapshotName(backup *mantlev1.MantleBackup, offset int) string {
-	return fmt.Sprintf("%s-offset-%d", backup.GetAnnotations()[annotRemoteUID], offset)
+	return fmt.Sprintf("%s-offset-%d", backup.GetAnnotations()[domain.AnnotRemoteUID], offset)
 }
 
 func MakeVerifyImageName(target *mantlev1.MantleBackup) string {
@@ -2643,7 +2619,7 @@ func (r *MantleBackupReconciler) startImport(
 		"pvc", fmt.Sprintf("%s/%s", target.pvc.GetNamespace(), target.pvc.GetName()),
 		"syncMode", backup.GetAnnotations()[annotSyncMode],
 		"diffFrom", backup.GetAnnotations()[annotDiffFrom],
-		"remoteUID", backup.GetAnnotations()[annotRemoteUID],
+		"remoteUID", backup.GetAnnotations()[domain.AnnotRemoteUID],
 	)
 
 	if !r.doesMantleBackupHaveSyncModeAnnot(backup) {
@@ -2658,7 +2634,7 @@ func (r *MantleBackupReconciler) startImport(
 		return result.WrapIfError("failed to check if export data part 0 is already uploaded")
 	} else if !uploaded {
 		logger.Info("waiting for the export data to be uploaded", "partNum", 0,
-			"objectName", MakeObjectNameOfExportedData(backup.GetName(), backup.GetAnnotations()[annotRemoteUID], 0,
+			"objectName", MakeObjectNameOfExportedData(backup.GetName(), backup.GetAnnotations()[domain.AnnotRemoteUID], 0,
 				backup.Spec.TransferCompression))
 
 		return reconcile.Requeue()
@@ -2793,7 +2769,7 @@ func (r *MantleBackupReconciler) isExportDataAlreadyUploaded(
 	target *mantlev1.MantleBackup,
 	index int,
 ) (bool, *reconcile.Result) {
-	key := MakeObjectNameOfExportedData(target.GetName(), target.GetAnnotations()[annotRemoteUID], index, target.Spec.TransferCompression)
+	key := MakeObjectNameOfExportedData(target.GetName(), target.GetAnnotations()[domain.AnnotRemoteUID], index, target.Spec.TransferCompression)
 	uploaded, err := r.objectStorageClient.Exists(ctx, key)
 	if err != nil {
 		return false, reconcile.Failed("failed to check if an object exists in the object storage: %s: %w", key, err)
@@ -3344,7 +3320,7 @@ func (r *MantleBackupReconciler) reconcileImportJob(
 	}
 	if !uploaded {
 		logger.Info("export data for the next part is not yet uploaded", "partNum", partNum, "numParts", finalPartNum,
-			"objectName", MakeObjectNameOfExportedData(backup.GetName(), backup.GetAnnotations()[annotRemoteUID], partNum,
+			"objectName", MakeObjectNameOfExportedData(backup.GetName(), backup.GetAnnotations()[domain.AnnotRemoteUID], partNum,
 				backup.Spec.TransferCompression))
 
 		return reconcile.Requeue()
@@ -3458,7 +3434,7 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 				},
 				{
 					Name:  "OBJ_NAME",
-					Value: MakeObjectNameOfExportedData(backup.GetName(), backup.GetAnnotations()[annotRemoteUID], partNum, backup.Spec.TransferCompression),
+					Value: MakeObjectNameOfExportedData(backup.GetName(), backup.GetAnnotations()[domain.AnnotRemoteUID], partNum, backup.Spec.TransferCompression),
 				},
 				{
 					Name:  "BUCKET_NAME",
@@ -3988,7 +3964,7 @@ func (r *MantleBackupReconciler) deleteAllExportedData(ctx context.Context, back
 	}
 
 	for partNum := range numParts {
-		key := MakeObjectNameOfExportedData(backup.GetName(), backup.GetAnnotations()[annotRemoteUID], partNum, backup.Spec.TransferCompression)
+		key := MakeObjectNameOfExportedData(backup.GetName(), backup.GetAnnotations()[domain.AnnotRemoteUID], partNum, backup.Spec.TransferCompression)
 		if err := r.objectStorageClient.Delete(ctx, key); err != nil {
 			return reconcile.Failed("failed to delete exported data in the object storage: %s: %w", key, err)
 		}
@@ -3999,7 +3975,7 @@ func (r *MantleBackupReconciler) deleteAllExportedData(ctx context.Context, back
 
 func (r *MantleBackupReconciler) deleteMiddleSnapshots(backup *mantlev1.MantleBackup) *reconcile.Result {
 	// Check that middle snapshots can exist
-	_, ok := backup.GetAnnotations()[annotRemoteUID]
+	_, ok := backup.GetAnnotations()[domain.AnnotRemoteUID]
 	if !ok {
 		return nil
 	}
