@@ -65,33 +65,17 @@ Update the following versions in Dockerfile, if necessary, too:
 
 #### Depending modules
 
-Read Kubernetes's `go.mod`(https://github.com/kubernetes/kubernetes/blob/<upgrading Kubernetes release version\>/go.mod), and update the `prometheus/*` modules. Here is the example to update `prometheus/client_golang`.
+Read Kubernetes's `go.mod` at https://github.com/kubernetes/kubernetes/blob/main/go.mod (replace `main` with the target release branch, such as `release-1.36`) and update the `prometheus/*` modules to the versions listed there. Here is the example to update `prometheus/client_golang`.
 
 ```
 $ VERSION=<upgrading prometheus-related libraries release version>
 $ go get github.com/prometheus/client_golang@v${VERSION}
 ```
 
-The following modules don't depend on other softwares, so use their latest versions:
+Update `k8s.io/kube-openapi` and `k8s.io/utils` to the versions in Kubernetes's `go.mod`.
 
 ```
-go get \
-    github.com/aws/aws-sdk-go-v2@latest \
-    github.com/aws/aws-sdk-go-v2/config@latest \
-    github.com/aws/aws-sdk-go-v2/service/s3@latest \
-    github.com/grpc-ecosystem/go-grpc-middleware/v2@latest \
-    github.com/onsi/ginkgo/v2@latest \
-    github.com/onsi/gomega@latest \
-    github.com/pseudomuto/protoc-gen-doc@latest \
-    github.com/spf13/cobra@latest \
-    go.uber.org/mock@latest \
-    golang.org/x/time@latest \
-    google.golang.org/grpc@latest \
-    google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest \
-    google.golang.org/protobuf@latest \
-    k8s.io/kube-openapi@latest \
-    k8s.io/utils@latest \
-    sigs.k8s.io/yaml@latest
+$ go get k8s.io/kube-openapi@<kube-openapi version in Kubernetes go.mod> k8s.io/utils@<k8s.io/utils version in Kubernetes go.mod>
 ```
 
 Then, please tidy up the dependencies.
