@@ -401,7 +401,7 @@ func (r *MantleBackupReconciler) expire(ctx context.Context, backup *mantlev1.Ma
 //+kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlebackups/finalizers,verbs=update
 //+kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch
 //+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
-//+kubebuilder:rbac:groups=core,resources=pods,verbs=deletecollection
+//+kubebuilder:rbac:groups=core,resources=pods,verbs=delete
 //+kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch
 //+kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get;list;watch
 //+kubebuilder:rbac:groups=storage.k8s.io,resources=storageclasses,verbs=get;list;watch
@@ -2075,8 +2075,8 @@ func (r *MantleBackupReconciler) deleteExportDataPVC(
 }
 
 func (r *MantleBackupReconciler) deletePodsOfJob(ctx context.Context, jobName string) error {
-	// List the Pods first to avoid sending an unnecessary DeleteAllOf write
-	// request to kube-apiserver when there are no Pods to delete.
+	// Delete the Pods one by one instead of using DeleteAllOf, because the
+	// client with read-your-writes consistency doesn't support DeleteAllOf.
 	listOptions := []client.ListOption{
 		client.InNamespace(r.managedCephClusterID),
 		client.MatchingLabels{batchv1.JobNameLabel: jobName},
@@ -2085,17 +2085,12 @@ func (r *MantleBackupReconciler) deletePodsOfJob(ctx context.Context, jobName st
 	if err := r.List(ctx, &pods, listOptions...); err != nil {
 		return fmt.Errorf("failed to list Pods of Job: %s: %w", jobName, err)
 	}
-	if len(pods.Items) == 0 {
-		return nil
-	}
 
-	if err := r.DeleteAllOf(
-		ctx,
-		&corev1.Pod{},
-		client.InNamespace(r.managedCephClusterID),
-		client.MatchingLabels{batchv1.JobNameLabel: jobName},
-	); err != nil {
-		return fmt.Errorf("failed to delete Pods of Job: %s: %w", jobName, err)
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		if err := r.Delete(ctx, pod, client.Preconditions{UID: &pod.UID}); err != nil && !aerrors.IsNotFound(err) {
+			return fmt.Errorf("failed to delete Pod of Job: %s: %s: %w", jobName, pod.GetName(), err)
+		}
 	}
 
 	return nil
