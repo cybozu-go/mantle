@@ -48,16 +48,10 @@ Edit the following files.
 
 #### Depending tools
 
-The following tools don't depend on other software, so use the latest versions.
+Update all the tools in `versions.mk` to their latest versions, except Rook.
 To change their versions, edit `versions.mk`.
 
-- [helm](https://github.com/helm/helm/releases)
-- [kustomize](https://github.com/kubernetes-sigs/kustomize/releases)
-- [minikube](https://github.com/kubernetes/minikube/releases)
-  - After choosing a Minikube version, check the Kubernetes versions it supports in `https://github.com/kubernetes/minikube/blob/<minikube-release-tag>/pkg/minikube/constants/constants_kubernetes_versions.go`. For each target Kubernetes minor, set its newest stable patch version in the `kubernetes-version` matrix in `.github/workflows/e2e.yaml` and `.github/workflows/e2e-multiple-k8s-clusters.yaml`. Also set `KUBERNETES_VERSION` in `versions.mk`.
-- [protoc](https://github.com/protocolbuffers/protobuf/releases)
-- [golanci-lint](https://github.com/golangci/golangci-lint/releases)
-- [cert-manager](https://github.com/cert-manager/cert-manager/releases)
+For minikube, after choosing a Minikube version, check the Kubernetes versions it supports in `https://github.com/kubernetes/minikube/blob/<minikube-release-tag>/pkg/minikube/constants/constants_kubernetes_versions.go`. For each target Kubernetes minor, set its newest stable patch version in the `kubernetes-version` matrix in `.github/workflows/e2e.yaml` and `.github/workflows/e2e-multiple-k8s-clusters.yaml`. Also set `KUBERNETES_VERSION` in `versions.mk`.
 
 Update the following versions in Dockerfile, if necessary, too:
 
