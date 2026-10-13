@@ -1,5 +1,5 @@
 # Build the manager binary
-FROM golang:1.25 AS builder
+FROM golang:1.26 AS builder
 
 ARG GOPROXY
 
@@ -29,7 +29,7 @@ RUN --mount=type=secret,id=netrc,target=/root/.netrc,required=false \
     CGO_ENABLED=0 go build -o manager main.go
 
 # Build s5cmd
-FROM golang:1.25 AS s5cmd-builder
+FROM golang:1.26 AS s5cmd-builder
 ARG GOPROXY
 WORKDIR /workspace
 ## https://github.com/peak/s5cmd/releases
