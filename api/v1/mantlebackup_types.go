@@ -121,6 +121,7 @@ func (m *MantleBackup) IsVerifiedFalse() bool {
 func init() {
 	SchemeBuilder.Register(func(s *runtime.Scheme) error {
 		s.AddKnownTypes(GroupVersion, &MantleBackup{}, &MantleBackupList{})
+
 		return nil
 	})
 }

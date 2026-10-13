@@ -67,6 +67,7 @@ type MantleRestoreList struct {
 func init() {
 	SchemeBuilder.Register(func(s *runtime.Scheme) error {
 		s.AddKnownTypes(GroupVersion, &MantleRestore{}, &MantleRestoreList{})
+
 		return nil
 	})
 }

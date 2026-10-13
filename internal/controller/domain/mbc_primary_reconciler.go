@@ -22,6 +22,10 @@ const (
 	MantleBackupConfigAnnotationManagedClusterID = "mantlebackupconfig.mantle.cybozu.io/managed-cluster-id"
 	// MantleBackupConfigCronJobNamePrefix is the prefix for CronJob names created for MantleBackupConfig.
 	MantleBackupConfigCronJobNamePrefix = "mbc-"
+
+	// labelResourceNamespace and labelMantleBackupConfig are the metric label names.
+	labelResourceNamespace  = "resource_namespace"
+	labelMantleBackupConfig = "mantlebackupconfig"
 )
 
 // DeleteMBCCronJobOperation represents an operation to delete a CronJob associated with a MantleBackupConfig.
@@ -111,8 +115,8 @@ func (r *MBCPrimaryReconciler) Provision(mbc *mantlev1.MantleBackupConfig, sc *s
 
 	metrics.BackupConfigInfo.With(prometheus.Labels{
 		"persistentvolumeclaim": mbc.Spec.PVC,
-		"resource_namespace":    mbc.Namespace,
-		"mantlebackupconfig":    mbc.Name,
+		labelResourceNamespace:  mbc.Namespace,
+		labelMantleBackupConfig: mbc.Name,
 	}).Set(1)
 
 	suspend := 0
@@ -121,8 +125,8 @@ func (r *MBCPrimaryReconciler) Provision(mbc *mantlev1.MantleBackupConfig, sc *s
 	}
 
 	metrics.BackupConfigSuspend.With(prometheus.Labels{
-		"resource_namespace": mbc.Namespace,
-		"mantlebackupconfig": mbc.Name,
+		labelResourceNamespace:  mbc.Namespace,
+		labelMantleBackupConfig: mbc.Name,
 	}).Set(float64(suspend))
 
 	r.createOrUpdateCronJob(mbc)
@@ -151,13 +155,13 @@ func (r *MBCPrimaryReconciler) Finalize(mbc *mantlev1.MantleBackupConfig, cronJo
 
 	_ = metrics.BackupConfigInfo.Delete(prometheus.Labels{
 		"persistentvolumeclaim": mbc.Spec.PVC,
-		"resource_namespace":    mbc.Namespace,
-		"mantlebackupconfig":    mbc.Name,
+		labelResourceNamespace:  mbc.Namespace,
+		labelMantleBackupConfig: mbc.Name,
 	})
 
 	_ = metrics.BackupConfigSuspend.Delete(prometheus.Labels{
-		"resource_namespace": mbc.Namespace,
-		"mantlebackupconfig": mbc.Name,
+		labelResourceNamespace:  mbc.Namespace,
+		labelMantleBackupConfig: mbc.Name,
 	})
 
 	if cronJob != nil {

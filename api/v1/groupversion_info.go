@@ -16,6 +16,7 @@ var (
 	// SchemeBuilder is used to add go types to the GroupVersionKind scheme
 	SchemeBuilder = runtime.NewSchemeBuilder(func(s *runtime.Scheme) error {
 		metav1.AddToGroupVersion(s, GroupVersion)
+
 		return nil
 	})
 

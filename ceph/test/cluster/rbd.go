@@ -129,7 +129,7 @@ func zeroOutVolume(namespace, pvcName string) error {
 			Namespace: namespace,
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
-			StorageClassName: ptr.To(""),
+			StorageClassName: new(""),
 			AccessModes: []corev1.PersistentVolumeAccessMode{
 				corev1.ReadWriteOnce,
 			},
