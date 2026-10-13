@@ -15,6 +15,10 @@ inputs:
   takumi-guard-bot-id:
     description: "The Takumi Guard bot ID."
     required: true
+  takumi-guard-expires-in:
+    description: "The Takumi Guard access token lifetime, in seconds. The token isn't refreshed, so it must be longer than the job's runtime."
+    required: false
+    default: "1800"
 runs:
   using: "composite"
   steps:
@@ -30,6 +34,7 @@ runs:
       uses: flatt-security/setup-takumi-guard-golang@1c8aa7498f7f635fbd6ad6a0f436d03092b3502d # v1.1.0
       with:
         bot-id: ${{ inputs.takumi-guard-bot-id }}
+        expires-in: ${{ inputs.takumi-guard-expires-in }}
     - name: "Set up Takumi Guard without authentication for forked pull requests"
       if: >-
         github.event_name == 'pull_request' &&
