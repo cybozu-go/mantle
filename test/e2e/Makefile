@@ -219,6 +219,7 @@ do-minikube-start:
 					--extra-config=kubelet.hostname-override=$(NODE_NAME) \
 					--network mantle-test \
 					--disk-size=30g \
+					--container-runtime=docker \
 					-p $(MINIKUBE_PROFILE) ; \
 				if [ "$$?" -eq 0 ]; then \
 					ok=1; \

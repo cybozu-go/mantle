@@ -30,7 +30,7 @@ var k8sClient client.Client //nolint:gochecknoglobals
 func TestMain(m *testing.M) {
 	kubernetesVersion := os.Getenv("ENVTEST_KUBERNETES_VERSION")
 	if kubernetesVersion == "" {
-		kubernetesVersion = "1.34.0" // Set default value to make VSCode's Go extension work.
+		kubernetesVersion = "1.36.0" // Set default value to make VSCode's Go extension work.
 	}
 
 	binaryAssetsDirectory := os.Getenv("ENVTEST_BIN_DIR")
