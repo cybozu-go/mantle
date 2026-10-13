@@ -17,15 +17,8 @@ assignees: ''
 
 Must update Kubernetes with each new version of Kubernetes.
 
-- [ ] sigs.k8s.io/controller-runtime
-  - https://github.com/kubernetes-sigs/controller-runtime/releases
-- [ ] sigs.k8s.io/controller-tools
-  - https://github.com/kubernetes-sigs/controller-tools/releases
 - [ ] minikube
   - https://github.com/kubernetes/minikube/releases
-- [ ] rook
-  - https://github.com/rook/rook/releases
-  - Only need to confirm that upstream Rook has released a version that supports the target Kubernetes version.
 - [ ] kubebuilder
   - https://github.com/kubernetes-sigs/kubebuilder/releases
 
