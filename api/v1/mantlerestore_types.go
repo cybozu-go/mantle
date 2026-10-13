@@ -3,6 +3,7 @@ package v1
 import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
@@ -64,5 +65,8 @@ type MantleRestoreList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&MantleRestore{}, &MantleRestoreList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(GroupVersion, &MantleRestore{}, &MantleRestoreList{})
+		return nil
+	})
 }
