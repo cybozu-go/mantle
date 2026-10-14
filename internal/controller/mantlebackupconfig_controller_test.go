@@ -192,6 +192,8 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		newSchedule := "0 10 * * *"
 		oldSuspend := false
 		newSuspend := true
+		oldExpire := "2w"
+		newExpire := "1w"
 
 		_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
@@ -204,25 +206,23 @@ var _ = Describe("MantleBackupConfig controller", func() {
 			Spec: mantlev1.MantleBackupConfigSpec{
 				PVC:      pvc.Name,
 				Schedule: oldSchedule,
-				Expire:   "2w",
+				Expire:   oldExpire,
 				Suspend:  oldSuspend,
 			},
 		}
 		err = k8sClient.Create(ctx, &mbc)
 		Expect(err).NotTo(HaveOccurred())
 
-		// schedule and suspend fields are mutable.
+		// schedule, suspend and expire fields are mutable.
 		mbc.Spec.Schedule = newSchedule
 		mbc.Spec.Suspend = newSuspend
+		mbc.Spec.Expire = newExpire
 		err = k8sClient.Update(ctx, &mbc)
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("should reject MantleBackupConfigs with modified immutable fields", func(ctx SpecContext) {
+	It("should reject MantleBackupConfigs with modified spec.pvc", func(ctx SpecContext) {
 		ns := resMgr.CreateNamespace()
-
-		oldExpire := "2w"
-		newExpire := "1w"
 
 		_, oldPVC, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 		Expect(err).NotTo(HaveOccurred())
@@ -237,7 +237,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 			Spec: mantlev1.MantleBackupConfigSpec{
 				PVC:      oldPVC.Name,
 				Schedule: "0 0 * * *",
-				Expire:   oldExpire,
+				Expire:   "2w",
 				Suspend:  false,
 			},
 		}
@@ -247,11 +247,6 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		mbc1 := mbc.DeepCopy()
 		mbc1.Spec.PVC = newPVC.Name
 		err = k8sClient.Update(ctx, mbc1)
-		Expect(err).To(HaveOccurred())
-
-		mbc2 := mbc.DeepCopy()
-		mbc2.Spec.Expire = newExpire
-		err = k8sClient.Update(ctx, mbc2)
 		Expect(err).To(HaveOccurred())
 	})
 

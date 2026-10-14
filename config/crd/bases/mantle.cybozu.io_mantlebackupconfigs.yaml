@@ -50,8 +50,6 @@ spec:
                   rule: self >= duration('24h')
                 - message: expire must be <= 15d
                   rule: self <= duration('360h')
-                - message: spec.expire is immutable
-                  rule: self == oldSelf
               pvc:
                 type: string
                 x-kubernetes-validations:

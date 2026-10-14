@@ -24,7 +24,6 @@ type MantleBackupConfigSpec struct {
 	//+kubebuilder:validation:Format:="duration"
 	//+kubebuilder:validation:XValidation:message="expire must be >= 1d",rule="self >= duration('24h')"
 	//+kubebuilder:validation:XValidation:message="expire must be <= 15d",rule="self <= duration('360h')"
-	//+kubebuilder:validation:XValidation:message="spec.expire is immutable",rule="self == oldSelf"
 	Expire string `json:"expire"`
 
 	// 'transferCompression' is an experimental field that specifies the compression format used for data transferred from the primary to the secondary. This field may be removed or changed in a future release.

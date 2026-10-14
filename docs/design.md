@@ -113,10 +113,10 @@ If a `MantleBackupConfig` is deleted, the associated `MantleBackup`s won't be re
 
 ### Backup expiration flow
 
-`MantleBackup` resource has an `expire` field. If time will pass the `expire` duration, the controller will delete the `MantleBackup` resource.
+`MantleBackup` resource has an **immutable** `expire` field. If time will pass the `expire` duration, the controller will delete the `MantleBackup` resource.
 This process can be stopped by adding `mantle.cybozu.io/retain-if-expired` annotation to the `MantleBackup` resource.
 
-`MantleBackupConfig` also has an `expire` field. The `CronJob` set the value to the `MantleBackup` resource created by the `MantleBackupConfig`. Therefore, the periodic backups will be deleted automatically.
+`MantleBackupConfig` also has a **mutable** `expire` field. The `CronJob` set the value to the `MantleBackup` resource created by the `MantleBackupConfig`. Therefore, the periodic backups will be deleted automatically.
 
 ### Sample manifests
 
