@@ -25,7 +25,7 @@ ACTIONLINT_VERSION := v1.7.12
 # https://github.com/suzuki-shunsuke/ghalint/releases
 GHALINT_VERSION := v1.5.6
 # https://github.com/golangci/golangci-lint/releases
-GOLANGCI_LINT_VERSION := v2.11.4
+GOLANGCI_LINT_VERSION := v2.14.0
 # https://github.com/cert-manager/cert-manager/releases
 CERT_MANAGER_VERSION := v1.20.2
 
