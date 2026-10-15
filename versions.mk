@@ -4,11 +4,11 @@ CONTROLLER_TOOLS_VERSION := v0.21.0
 HELM_VERSION := 4.2.0
 # Use a Kubernetes version supported by the minikube version below.
 # The patch version may differ from the k8s patch version in go.mod.
-KUBERNETES_VERSION := 1.35.1
+KUBERNETES_VERSION := 1.36.5
 # https://github.com/kubernetes-sigs/kustomize/releases
 KUSTOMIZE_VERSION := v5.8.1
 # https://github.com/kubernetes/minikube/releases
-MINIKUBE_VERSION := v1.38.1
+MINIKUBE_VERSION := v1.39.0
 # https://github.com/protocolbuffers/protobuf/releases
 PROTOC_VERSION := 34.1
 # https://github.com/rook/rook/releases
