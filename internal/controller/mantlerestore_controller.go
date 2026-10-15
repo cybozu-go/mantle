@@ -303,7 +303,7 @@ func (r *MantleRestoreReconciler) createRestoringPVIfNotExists(ctx context.Conte
 	newPV.Spec.CSI.VolumeAttributes = map[string]string{
 		"clusterID":     srcPV.Spec.CSI.VolumeAttributes["clusterID"],
 		"pool":          srcPV.Spec.CSI.VolumeAttributes["pool"],
-		"staticVolume":  "true",
+		"staticVolume":  staticVolumeValue,
 		"imageFeatures": srcPV.Spec.CSI.VolumeAttributes["imageFeatures"] + ",deep-flatten",
 	}
 	newPV.Spec.CSI.VolumeHandle = r.restoringRBDImageName(restore)
