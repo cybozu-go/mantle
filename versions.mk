@@ -12,7 +12,10 @@ MINIKUBE_VERSION := v1.39.0
 # https://github.com/protocolbuffers/protobuf/releases
 PROTOC_VERSION := 34.1
 # https://github.com/rook/rook/releases
-ROOK_CHART_VERSION := v1.19.5
+ROOK_CHART_VERSION := v1.20.8
+# https://github.com/ceph/ceph-csi-operator/releases
+# Use the version of the ceph-csi-operator subchart in deploy/charts/rook-ceph/Chart.yaml of the Rook release above.
+CEPH_CSI_DRIVERS_CHART_VERSION := 1.0.4
 # https://github.com/zizmorcore/zizmor/releases
 ZIZMOR_VERSION := v1.26.1
 # SHA256 checksum of the zizmor's release tarball for verification
