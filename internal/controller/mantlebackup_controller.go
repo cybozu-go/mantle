@@ -586,6 +586,8 @@ func (r *MantleBackupReconciler) reconcileLocalBackup(ctx context.Context, backu
 }
 
 func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, backup *mantlev1.MantleBackup) *reconcile.Result {
+	defer r.updateBackupTimestampMetrics(ctx, backup)
+
 	if result := r.reconcileLocalBackup(ctx, backup); result.ShouldReturn() {
 		return result.WrapIfError("failed to reconcile local backup")
 	}
@@ -606,6 +608,8 @@ func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, back
 }
 
 func (r *MantleBackupReconciler) reconcileAsPrimary(ctx context.Context, backup *mantlev1.MantleBackup) *reconcile.Result {
+	defer r.updateBackupTimestampMetrics(ctx, backup)
+
 	if result := r.reconcileLocalBackup(ctx, backup); result.ShouldReturn() {
 		return result.WrapIfError("failed to reconcile local backup")
 	}
@@ -778,6 +782,71 @@ func (r *MantleBackupReconciler) listMantleBackupsByPVCUID(
 	}
 
 	return backupList.Items, nil
+}
+
+// updateBackupTimestampMetrics recomputes the timestamp metrics of backup's PVC from
+// all of its MantleBackups, so that they converge after stale cache reads and restarts.
+func (r *MantleBackupReconciler) updateBackupTimestampMetrics(ctx context.Context, backup *mantlev1.MantleBackup) {
+	pvcUID, ok := backup.GetLabels()[labelLocalBackupTargetPVCUID]
+	if !ok {
+		return
+	}
+
+	// Keep old MantleBackups from reverting the values after the PVC is re-created or deleted.
+	var pvc corev1.PersistentVolumeClaim
+	if err := r.Get(ctx, types.NamespacedName{Namespace: backup.GetNamespace(), Name: backup.Spec.PVC}, &pvc); err != nil {
+		if !aerrors.IsNotFound(err) {
+			log.FromContext(ctx).Error(err, "failed to update backup timestamp metrics")
+		}
+
+		return
+	}
+	if string(pvc.GetUID()) != pvcUID {
+		return
+	}
+
+	backups, err := r.listMantleBackupsByPVCUID(ctx, pvcUID)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to update backup timestamp metrics")
+
+		return
+	}
+
+	// MantleBackups received as secondary are skipped, as they are never synced from here.
+	// The oldest unsynced one uses the creation time, as mantle_backup_duration_seconds does.
+	var lastCreatedAt, lastSnapshotAt, oldestUnsyncedCreatedAt time.Time
+	for _, b := range backups {
+		if isCreatedWhenMantleControllerWasSecondary(&b) || !b.DeletionTimestamp.IsZero() {
+			continue
+		}
+
+		creationTime := b.CreationTimestamp.Time
+		if creationTime.After(lastCreatedAt) {
+			lastCreatedAt = creationTime
+		}
+
+		if !b.IsSnapshotCaptured() {
+			continue
+		}
+
+		if snapshotTime := b.Status.CreatedAt.Time; snapshotTime.After(lastSnapshotAt) {
+			lastSnapshotAt = snapshotTime
+		}
+
+		if r.role == RolePrimary && !b.IsSynced() {
+			if oldestUnsyncedCreatedAt.IsZero() || creationTime.Before(oldestUnsyncedCreatedAt) {
+				oldestUnsyncedCreatedAt = creationTime
+			}
+		}
+	}
+
+	metricLabels := prometheus.Labels{
+		metrics.LabelPersistentVolumeClaim: backup.Spec.PVC,
+		metrics.LabelResourceNamespace:     backup.GetNamespace(),
+	}
+	metrics.SetOrDeleteTimestamp(metrics.BackupLastCreationTimestampSeconds, metricLabels, lastCreatedAt)
+	metrics.SetOrDeleteTimestamp(metrics.BackupLastSnapshotTimestampSeconds, metricLabels, lastSnapshotAt)
+	metrics.SetOrDeleteTimestamp(metrics.BackupOldestUnsyncedCreationTimestampSeconds, metricLabels, oldestUnsyncedCreatedAt)
 }
 
 // listHigherPriorityBackups returns the high priority MantleBackups. MantleBackups
