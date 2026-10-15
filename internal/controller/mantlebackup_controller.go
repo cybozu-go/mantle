@@ -941,7 +941,18 @@ func (r *MantleBackupReconciler) replicateManifests(
 		return reconcile.Failed("backup.Status.SnapID should not be nil: %s: %s", backup.GetName(), backup.GetNamespace())
 	}
 
-	// Make sure all of the preceding backups for the same PVC have already been replicated.
+	// Primary mantle sends backup data to secondary mantle in ascending snapID order
+	// for the following reasons:
+	//   - rbd export-diff's --from-snap option requires the source snapshot ID to be
+	//     smaller than the destination snapshot ID.
+	//   - Sending in order improves data transfer efficiency.
+	//   - Keeping the order consistent simplifies the program structure.
+	//
+	// Requeue if any of the following conditions is met, so that
+	// backups are replicated in snapID order:
+	// - A preceding backup with a smaller snapID has not been replicated yet.
+	// - A backup has no snapID yet (i.e., its snapID is not yet visible
+	//   to the controller).
 	backupsByPVCUID, err := r.listMantleBackupsByPVCUID(ctx, string(pvc.GetUID()))
 	if err != nil {
 		return reconcile.Failed("failed to list MantleBackups for the same PVC: %w", err)
