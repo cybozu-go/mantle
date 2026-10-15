@@ -100,6 +100,35 @@ make undeploy
 | `persistentvolumeclaim` | The PVC name.           |
 | `resource_namespace`    | The resource namespace. |
 
+### `mantle_backup_last_creation_timestamp_seconds`
+
+`mantle_backup_last_creation_timestamp_seconds` is a Gauge that indicates the creationTimestamp of the newest MantleBackup. MantleBackups are counted only after the controller confirms their PVC is bound and resolves the snapshot target.
+
+| Label                   | Description             |
+| ----------------------- | ----------------------- |
+| `persistentvolumeclaim` | The PVC name.           |
+| `resource_namespace`    | The resource namespace. |
+
+### `mantle_backup_last_snapshot_creation_timestamp_seconds`
+
+`mantle_backup_last_snapshot_creation_timestamp_seconds` is a Gauge that indicates the time of the last snapshot creation (`.status.createdAt`).
+
+| Label                   | Description             |
+| ----------------------- | ----------------------- |
+| `persistentvolumeclaim` | The PVC name.           |
+| `resource_namespace`    | The resource namespace. |
+
+### `mantle_backup_oldest_unsynced_creation_timestamp_seconds`
+
+`mantle_backup_oldest_unsynced_creation_timestamp_seconds` is a Gauge that indicates the creationTimestamp of the oldest MantleBackup whose snapshot has been captured but not synced yet. It is exported only by the primary.
+
+| Label                   | Description             |
+| ----------------------- | ----------------------- |
+| `persistentvolumeclaim` | The PVC name.           |
+| `resource_namespace`    | The resource namespace. |
+
+These timestamp metrics are not exported by the secondary. A series is absent when no MantleBackup matches, and keeps its last value while the PVC is missing or re-created.
+
 ## Development
 
 The following tools should be installed manually.

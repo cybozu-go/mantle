@@ -1,6 +1,8 @@
 package metrics
 
 import (
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus"
 	runtimemetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 )
@@ -62,6 +64,33 @@ var (
 		},
 		[]string{LabelPersistentVolumeClaim, LabelResourceNamespace},
 	)
+
+	BackupLastSnapshotCreationTimestampSeconds = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Name:      "backup_last_snapshot_creation_timestamp_seconds",
+			Help:      "The time of the last snapshot creation (.status.createdAt).",
+		},
+		[]string{LabelPersistentVolumeClaim, LabelResourceNamespace},
+	)
+
+	BackupOldestUnsyncedCreationTimestampSeconds = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Name:      "backup_oldest_unsynced_creation_timestamp_seconds",
+			Help:      "The creationTimestamp of the oldest MantleBackup whose snapshot is captured but not synced yet.",
+		},
+		[]string{LabelPersistentVolumeClaim, LabelResourceNamespace},
+	)
+
+	BackupLastCreationTimestampSeconds = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Name:      "backup_last_creation_timestamp_seconds",
+			Help:      "The creationTimestamp of the newest MantleBackup.",
+		},
+		[]string{LabelPersistentVolumeClaim, LabelResourceNamespace},
+	)
 )
 
 func init() {
@@ -70,4 +99,18 @@ func init() {
 	runtimemetrics.Registry.MustRegister(BackupConfigSuspend)
 	runtimemetrics.Registry.MustRegister(BackupDurationSeconds)
 	runtimemetrics.Registry.MustRegister(BackupSnapshotDurationSeconds)
+	runtimemetrics.Registry.MustRegister(BackupLastSnapshotCreationTimestampSeconds)
+	runtimemetrics.Registry.MustRegister(BackupOldestUnsyncedCreationTimestampSeconds)
+	runtimemetrics.Registry.MustRegister(BackupLastCreationTimestampSeconds)
+}
+
+// SetOrDeleteTimestamp sets the series of gauge identified by labels to t in
+// Unix time. It deletes the series instead of setting 0 when t is zero.
+func SetOrDeleteTimestamp(gauge *prometheus.GaugeVec, labels prometheus.Labels, t time.Time) {
+	if t.IsZero() {
+		_ = gauge.Delete(labels)
+
+		return
+	}
+	gauge.With(labels).Set(float64(t.Unix()))
 }
