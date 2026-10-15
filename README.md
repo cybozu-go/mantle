@@ -91,6 +91,33 @@ make undeploy
 | `persistentvolumeclaim` | The PVC name.           |
 | `resource_namespace`    | The resource namespace. |
 
+### `mantle_backup_last_snapshot_timestamp_seconds`
+
+`mantle_backup_last_snapshot_timestamp_seconds` is a Gauge that indicates the creation time, in Unix seconds, of the newest snapshot captured for the PVC. The value is taken from `.status.createdAt` of the MantleBackup. It is exported only when the role is `standalone` or `primary`.
+
+| Label                   | Description             |
+| ----------------------- | ----------------------- |
+| `persistentvolumeclaim` | The PVC name.           |
+| `resource_namespace`    | The resource namespace. |
+
+### `mantle_backup_oldest_unsynced_creation_timestamp_seconds`
+
+`mantle_backup_oldest_unsynced_creation_timestamp_seconds` is a Gauge that indicates the creation time, in Unix seconds, of the oldest MantleBackup of the PVC whose snapshot is captured but not synced to the secondary yet. The value is taken from `.metadata.creationTimestamp` of the MantleBackup, so it is neither the time of the snapshot nor the time of synchronization. MantleBackups whose snapshot is not captured yet are not counted. The series is absent when no such MantleBackup exists. It is exported only when the role is `primary`.
+
+| Label                   | Description             |
+| ----------------------- | ----------------------- |
+| `persistentvolumeclaim` | The PVC name.           |
+| `resource_namespace`    | The resource namespace. |
+
+### `mantle_backup_last_creation_timestamp_seconds`
+
+`mantle_backup_last_creation_timestamp_seconds` is a Gauge that indicates the creation time, in Unix seconds, of the newest MantleBackup of the PVC, whether or not its snapshot is captured. The value is taken from `.metadata.creationTimestamp` of the MantleBackup. A MantleBackup is counted only after mantle-controller has found its PVC bound, so a MantleBackup stuck before that, for example because the PVC does not exist, is not counted. It is exported only when the role is `standalone` or `primary`.
+
+| Label                   | Description             |
+| ----------------------- | ----------------------- |
+| `persistentvolumeclaim` | The PVC name.           |
+| `resource_namespace`    | The resource namespace. |
+
 ## Development
 
 The following tools should be installed manually.

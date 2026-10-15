@@ -1,6 +1,8 @@
 package metrics
 
 import (
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus"
 	runtimemetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 )
@@ -44,6 +46,33 @@ var (
 		},
 		[]string{"persistentvolumeclaim", "resource_namespace"},
 	)
+
+	BackupLastSnapshotTimestampSeconds = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Name:      "backup_last_snapshot_timestamp_seconds",
+			Help:      "The .status.createdAt of the newest MantleBackup whose snapshot is captured.",
+		},
+		[]string{"persistentvolumeclaim", "resource_namespace"},
+	)
+
+	BackupOldestUnsyncedCreationTimestampSeconds = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Name:      "backup_oldest_unsynced_creation_timestamp_seconds",
+			Help:      "The creationTimestamp of the oldest MantleBackup whose snapshot is captured but not synced yet.",
+		},
+		[]string{"persistentvolumeclaim", "resource_namespace"},
+	)
+
+	BackupLastCreationTimestampSeconds = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Name:      "backup_last_creation_timestamp_seconds",
+			Help:      "The creationTimestamp of the newest MantleBackup.",
+		},
+		[]string{"persistentvolumeclaim", "resource_namespace"},
+	)
 )
 
 func init() {
@@ -51,4 +80,18 @@ func init() {
 	runtimemetrics.Registry.MustRegister(BackupConfigInfo)
 	runtimemetrics.Registry.MustRegister(BackupConfigSuspend)
 	runtimemetrics.Registry.MustRegister(BackupDurationSeconds)
+	runtimemetrics.Registry.MustRegister(BackupLastSnapshotTimestampSeconds)
+	runtimemetrics.Registry.MustRegister(BackupOldestUnsyncedCreationTimestampSeconds)
+	runtimemetrics.Registry.MustRegister(BackupLastCreationTimestampSeconds)
+}
+
+// SetOrDeleteTimestamp sets the series of gauge identified by labels to t in
+// Unix seconds. It deletes the series instead of setting 0 when t is zero.
+func SetOrDeleteTimestamp(gauge *prometheus.GaugeVec, labels prometheus.Labels, t time.Time) {
+	if t.IsZero() {
+		_ = gauge.Delete(labels)
+
+		return
+	}
+	gauge.With(labels).Set(float64(t.Unix()))
 }
