@@ -1,5 +1,5 @@
 # https://github.com/kubernetes-sigs/controller-tools/releases
-CONTROLLER_TOOLS_VERSION := v0.20.1
+CONTROLLER_TOOLS_VERSION := v0.21.0
 # https://github.com/helm/helm/releases
 HELM_VERSION := 4.2.0
 # Use a Kubernetes version supported by the minikube version below.
