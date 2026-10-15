@@ -1,0 +1,55 @@
+name: "diagnose Takumi Guard token (idle)"
+# Temporary workflow to find out whether a Takumi Guard access token that is
+# not used for a long time is still accepted. Do not merge.
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/diagnose-takumi-guard-token-idle.yaml"
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        idle-seconds:
+          - 3600
+          - 7200
+          - 8100
+          - 10800
+    env:
+      PROBE_URL: https://golang.flatt.tech/github.com/peak/s5cmd/v2/@v/v2.3.0.info
+      IDLE_SECONDS: ${{ matrix.idle-seconds }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go
+        with:
+          go-version-file: "go.mod"
+          takumi-guard-bot-id: ${{ vars.TAKUMI_GUARD_BOT_ID }}
+          # Same lifetime as the ceph export-diff test.
+          takumi-guard-expires-in: "14400"
+      - name: Show the token claims without using the token
+        run: |
+          echo "TOKEN_START=$(date +%s)" >> "$GITHUB_ENV"
+          date -u
+          python3 - <<'PY'
+          import base64, json, os, re
+          netrc = open(os.path.expanduser("~/.netrc")).read()
+          token = re.search(r"machine golang\.flatt\.tech login \S+ password (\S+)", netrc).group(1)
+          payload = token.split(".")[1]
+          payload += "=" * (-len(payload) % 4)
+          claims = json.loads(base64.urlsafe_b64decode(payload))
+          print("iat:", claims.get("iat"), "exp:", claims.get("exp"), "exp - iat:", claims["exp"] - claims["iat"])
+          PY
+      - name: Do not use the token for a while
+        run: sleep "$IDLE_SECONDS"
+      - name: Probe the proxy once with the token
+        run: |
+          code=$(curl --netrc-file "$HOME/.netrc" -sS -o "$RUNNER_TEMP/body" -w '%{http_code}' "$PROBE_URL" || true)
+          age=$(( $(date +%s) - TOKEN_START ))
+          echo "$(date -u +%H:%M:%S) idle=${IDLE_SECONDS}s age=${age}s status=${code} body=$(head -c 200 "$RUNNER_TEMP/body" | tr '\n' ' ')"
