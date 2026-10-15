@@ -63,6 +63,11 @@ linters:
           - lll
         path: internal/*
 
+      # Repeated literals are intentional in table-driven tests.
+      - linters:
+          - goconst
+        path: _test\.go
+
       # exclude staticcheck SA1019 for Result.Requeue.
       - linters:
           - staticcheck
