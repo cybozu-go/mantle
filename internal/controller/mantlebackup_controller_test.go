@@ -33,7 +33,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/kube-openapi/pkg/validation/strfmt"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -3075,7 +3074,7 @@ var _ = Describe("calculateExportDataPVCSize", func() {
 	DescribeTable("calculates capacity from a transfer part size and multiplier",
 		func(transferPartSize string, multiplier float64, want string) {
 			got, err := calculateExportDataPVCSize(
-				ptr.To(resource.MustParse(transferPartSize)), multiplier)
+				new(resource.MustParse(transferPartSize)), multiplier)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(got.String()).To(Equal(want))
 		},
@@ -3138,7 +3137,7 @@ var _ = Describe("import", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		err = updateStatus(ctx, k8sClient, target, func() error {
-			target.Status.SnapSize = ptr.To(int64(testutil.FakeRBDSnapshotSize))
+			target.Status.SnapSize = new(int64(testutil.FakeRBDSnapshotSize))
 			transferPartSize := resource.MustParse("1Gi")
 			target.Status.TransferPartSize = &transferPartSize
 
@@ -3192,7 +3191,7 @@ var _ = Describe("import", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			err = updateStatus(ctx, k8sClient, backup, func() error {
-				backup.Status.SnapSize = ptr.To(int64(testutil.FakeRBDSnapshotSize))
+				backup.Status.SnapSize = new(int64(testutil.FakeRBDSnapshotSize))
 				transferPartSize := resource.MustParse("1Gi")
 				backup.Status.TransferPartSize = &transferPartSize
 
@@ -3240,7 +3239,7 @@ var _ = Describe("import", func() {
 
 			// set .status.snapSize and .status.transferPartSize
 			err = updateStatus(ctx, k8sClient, backup, func() error {
-				backup.Status.SnapSize = ptr.To(int64(testutil.FakeRBDSnapshotSize))
+				backup.Status.SnapSize = new(int64(testutil.FakeRBDSnapshotSize))
 				transferPartSize := resource.MustParse("1Gi")
 				backup.Status.TransferPartSize = &transferPartSize
 
@@ -3268,7 +3267,7 @@ var _ = Describe("import", func() {
 			}, &importJob)
 			Expect(err).NotTo(HaveOccurred())
 
-			Expect(importJob.Spec.PodReplacementPolicy).To(Equal(ptr.To(batchv1.Failed)))
+			Expect(importJob.Spec.PodReplacementPolicy).To(Equal(new(batchv1.Failed)))
 
 			// The successive calls should return ctrl.Result{Requeue: true} until the import Job is completed.
 			res, err = mbr.reconcileImportJob(ctx, backup, snapshotTarget, -1).ToCtrlResult()
@@ -3508,7 +3507,7 @@ var _ = Describe("import", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Create target MantleBackup
-			backup := createTargetBackup(ctx, "target", ptr.To("source"), nil)
+			backup := createTargetBackup(ctx, "target", new("source"), nil)
 
 			// Create export and upload Jobs
 			createExportAndUploadJobs(ctx, backup)
@@ -3660,7 +3659,7 @@ var _ = Describe("import", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Create target MantleBackup
-			backup := createTargetBackup(ctx, "target", ptr.To("source"), ptr.To("uid"))
+			backup := createTargetBackup(ctx, "target", new("source"), new("uid"))
 
 			// Create necessary resources
 			createZeroOutAndImportJobs(ctx, backup)
@@ -3728,12 +3727,12 @@ var _ = Describe("import", func() {
 
 		It("should not delete unrelated resources", func(ctx SpecContext) {
 			// Arrange
-			backup1 := createTargetBackup(ctx, "backup1", nil, ptr.To("uid"))
+			backup1 := createTargetBackup(ctx, "backup1", nil, new("uid"))
 			createZeroOutAndImportJobs(ctx, backup1)
 			createZeroOutDataPVC(ctx, backup1)
 			createZeroOutDataPV(ctx, backup1)
 			expectAccessToObjectStorage(backup1)
-			backup2 := createTargetBackup(ctx, "backup2", nil, ptr.To("uid"))
+			backup2 := createTargetBackup(ctx, "backup2", nil, new("uid"))
 			createZeroOutAndImportJobs(ctx, backup2)
 			createZeroOutDataPVC(ctx, backup2)
 			createZeroOutDataPV(ctx, backup2)
@@ -3781,7 +3780,7 @@ var _ = Describe("import", func() {
 			// Arrange: a backup whose import is still incomplete (SnapshotCaptured
 			// is false) and that is still holding the RBD lock startImport would
 			// have taken.
-			backup := createTargetBackup(ctx, "target", nil, ptr.To("uid"))
+			backup := createTargetBackup(ctx, "target", nil, new("uid"))
 			err := mbr.ceph.RBDLockAdd(dummyPoolName, dummyImageName, string(backup.GetUID()))
 			Expect(err).NotTo(HaveOccurred())
 
@@ -3985,7 +3984,7 @@ var _ = Describe("import", func() {
 			// Arrange: "target" -- a secondary backup whose import is still
 			// incomplete (SnapshotCaptured is false) and that is still holding
 			// the RBD lock startImport would have taken.
-			target := createTargetBackup(ctx, "target", ptr.To("source"), ptr.To("uid"))
+			target := createTargetBackup(ctx, "target", new("source"), new("uid"))
 			err = mbr.ceph.RBDLockAdd(dummyPoolName, dummyImageName, string(target.GetUID()))
 			Expect(err).NotTo(HaveOccurred())
 			// Part 0 has already completed; no Job for any later part exists
@@ -4022,7 +4021,7 @@ var _ = Describe("import", func() {
 			// Assert: a subsequent backup targeting the same volume can now
 			// successfully take the lock -- i.e. it is not permanently stuck
 			// behind the lock "target" would otherwise have stranded forever.
-			next := createTargetBackup(ctx, "next", ptr.To("source"), ptr.To("uid"))
+			next := createTargetBackup(ctx, "next", new("source"), new("uid"))
 			locked, rr := mbr.lockVolume(ctx, dummyPoolName, dummyImageName, string(next.GetUID()))
 			_, err = rr.ToCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
@@ -4319,7 +4318,7 @@ var _ = Describe("import", func() {
 				},
 				PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimRetain,
 				StorageClassName:              "",
-				VolumeMode:                    ptr.To(corev1.PersistentVolumeBlock),
+				VolumeMode:                    new(corev1.PersistentVolumeBlock),
 			}))
 
 			var pvc corev1.PersistentVolumeClaim
@@ -4330,8 +4329,8 @@ var _ = Describe("import", func() {
 			Expect(pvc.Spec).To(Equal(corev1.PersistentVolumeClaimSpec{
 				AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 				Resources:        pvcResources,
-				StorageClassName: ptr.To(""),
-				VolumeMode:       ptr.To(corev1.PersistentVolumeBlock),
+				StorageClassName: new(""),
+				VolumeMode:       new(corev1.PersistentVolumeBlock),
 				VolumeName:       MakeZeroOutPVName(backup),
 			}))
 
@@ -4340,7 +4339,7 @@ var _ = Describe("import", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(job.GetLabels()["app.kubernetes.io/name"]).To(Equal(labelAppNameValue))
 			Expect(job.GetLabels()["app.kubernetes.io/component"]).To(Equal(labelComponentZeroOutJob))
-			Expect(job.Spec.BackoffLimit).To(Equal(ptr.To(int32(65535))))
+			Expect(job.Spec.BackoffLimit).To(Equal(new(int32(65535))))
 			Expect(job.Spec.Template.Spec.Containers).To(HaveLen(1))
 			// ignore fields set by the system
 			container := job.Spec.Template.Spec.Containers[0].DeepCopy()
@@ -4359,9 +4358,9 @@ blkdiscard -z /dev/zeroout-rbd
 				Image:           mbr.podImage,
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				SecurityContext: &corev1.SecurityContext{
-					Privileged: ptr.To(true),
-					RunAsGroup: ptr.To(int64(0)),
-					RunAsUser:  ptr.To(int64(0)),
+					Privileged: new(true),
+					RunAsGroup: new(int64(0)),
+					RunAsUser:  new(int64(0)),
 				},
 				VolumeDevices: []corev1.VolumeDevice{
 					{
@@ -4645,7 +4644,7 @@ var _ = Describe("MantleBackupReconciler", func() {
 					},
 				},
 				PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimRetain,
-				VolumeMode:                    ptr.To(corev1.PersistentVolumeBlock),
+				VolumeMode:                    new(corev1.PersistentVolumeBlock),
 				StorageClassName:              "",
 			}))
 		}
@@ -4664,8 +4663,8 @@ var _ = Describe("MantleBackupReconciler", func() {
 			Expect(pvc.Spec).To(Equal(corev1.PersistentVolumeClaimSpec{
 				AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 				Resources:        pvcSrc.Spec.Resources,
-				StorageClassName: ptr.To(""),
-				VolumeMode:       ptr.To(corev1.PersistentVolumeBlock),
+				StorageClassName: new(""),
+				VolumeMode:       new(corev1.PersistentVolumeBlock),
 				VolumeName:       MakeVerifyPVName(backup),
 			}))
 		}
@@ -4681,7 +4680,7 @@ var _ = Describe("MantleBackupReconciler", func() {
 
 			Expect(job.GetLabels()["app.kubernetes.io/name"]).To(Equal(labelAppNameValue))
 			Expect(job.GetLabels()["app.kubernetes.io/component"]).To(Equal(labelComponentVerifyJob))
-			Expect(job.Spec.BackoffLimit).To(Equal(ptr.To(int32(65535))))
+			Expect(job.Spec.BackoffLimit).To(Equal(new(int32(65535))))
 			Expect(job.Spec.Template.Spec.Containers).To(HaveLen(1))
 			// ignore fields set by the system
 			container := job.Spec.Template.Spec.Containers[0].DeepCopy()
@@ -4701,9 +4700,9 @@ set -eux -o pipefail
 				Image:           podImage,
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				SecurityContext: &corev1.SecurityContext{
-					Privileged: ptr.To(true),
-					RunAsGroup: ptr.To(int64(0)),
-					RunAsUser:  ptr.To(int64(0)),
+					Privileged: new(true),
+					RunAsGroup: new(int64(0)),
+					RunAsUser:  new(int64(0)),
 				},
 				VolumeDevices: []corev1.VolumeDevice{
 					{
@@ -4727,7 +4726,7 @@ set -eux -o pipefail
 					{
 						Action: batchv1.PodFailurePolicyActionFailJob,
 						OnExitCodes: &batchv1.PodFailurePolicyOnExitCodesRequirement{
-							ContainerName: ptr.To("verify"),
+							ContainerName: new("verify"),
 							Operator:      batchv1.PodFailurePolicyOnExitCodesOpIn,
 							Values: []int32{
 								1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
@@ -4842,8 +4841,8 @@ set -eux -o pipefail
 
 			updatedJob := currentJob.DeepCopy()
 			// To avoid validation error
-			updatedJob.Status.StartTime = ptr.To(metav1.NewTime(time.Now()))
-			updatedJob.Status.CompletionTime = ptr.To(metav1.NewTime(time.Now()))
+			updatedJob.Status.StartTime = new(metav1.NewTime(time.Now()))
+			updatedJob.Status.CompletionTime = new(metav1.NewTime(time.Now()))
 			if updatedJob.Status.Conditions == nil {
 				updatedJob.Status.Conditions = []batchv1.JobCondition{}
 			}
@@ -4890,7 +4889,7 @@ set -eux -o pipefail
 
 			updatedJob := currentJob.DeepCopy()
 			// To avoid validation error
-			updatedJob.Status.StartTime = ptr.To(metav1.NewTime(time.Now()))
+			updatedJob.Status.StartTime = new(metav1.NewTime(time.Now()))
 			if updatedJob.Status.Conditions == nil {
 				updatedJob.Status.Conditions = []batchv1.JobCondition{}
 			}
