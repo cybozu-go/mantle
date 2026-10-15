@@ -116,7 +116,3 @@ func (m *MantleBackup) IsVerifiedTrue() bool {
 func (m *MantleBackup) IsVerifiedFalse() bool {
 	return meta.IsStatusConditionFalse(m.Status.Conditions, BackupConditionVerified)
 }
-
-func init() {
-	SchemeBuilder.Register(&MantleBackup{}, &MantleBackupList{})
-}
