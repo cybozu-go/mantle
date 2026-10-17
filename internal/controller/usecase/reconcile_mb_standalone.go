@@ -41,8 +41,8 @@ func (r *ReconcileMBStandalone) Run(
 	}
 
 	if backup.DeletionTimestamp.IsZero() {
-		return r.reconciler.Provision(backup)
+		return r.reconciler.Provision(ctx, backup)
 	}
 
-	return r.reconciler.Finalize(backup)
+	return r.reconciler.Finalize(ctx, backup)
 }

@@ -7,6 +7,7 @@ import (
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/ceph"
+	"github.com/cybozu-go/mantle/internal/controller/domain"
 	"github.com/cybozu-go/mantle/internal/testutil"
 	"github.com/cybozu-go/mantle/pkg/controller/proto"
 	"github.com/cybozu-go/mantle/test/util"
@@ -91,7 +92,7 @@ func (test *replicationUnitTest) newRequestPVC() *corev1.PersistentVolumeClaim {
 			Name:      util.GetUniqueName("test-pvc-"),
 			Namespace: test.ns,
 			Annotations: map[string]string{
-				annotRemoteUID: util.GetUniqueName("test-remote-uid-"),
+				domain.AnnotRemoteUID: util.GetUniqueName("test-remote-uid-"),
 			},
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
@@ -162,7 +163,7 @@ func (test *replicationUnitTest) testCreateUpdatePVC() {
 			Expect(err).To(HaveOccurred())
 		},
 		Entry("when the remote-uid annotation is missing", func(pvc *corev1.PersistentVolumeClaim) {
-			delete(pvc.Annotations, annotRemoteUID)
+			delete(pvc.Annotations, domain.AnnotRemoteUID)
 		}),
 		Entry("when the cluster-id derived from the StorageClass is not set", func(pvc *corev1.PersistentVolumeClaim) {
 			pvc.Spec.StorageClassName = nil
@@ -180,7 +181,7 @@ func (test *replicationUnitTest) testCreateUpdatePVC() {
 		Expect(err).NotTo(HaveOccurred())
 
 		// Update the same PVC with a different remote-uid.
-		pvc.Annotations[annotRemoteUID] = util.GetUniqueName("test-different-uid-")
+		pvc.Annotations[domain.AnnotRemoteUID] = util.GetUniqueName("test-different-uid-")
 		pvcRaw, err = json.Marshal(pvc)
 		Expect(err).NotTo(HaveOccurred())
 		_, err = test.client.CreateOrUpdatePVC(ctx, &proto.CreateOrUpdatePVCRequest{Pvc: pvcRaw})
@@ -207,7 +208,7 @@ func (test *replicationUnitTest) newMantleBackup() *mantlev1.MantleBackup {
 				labelLocalBackupTargetPVCUID:  util.GetUniqueName("test-local-pvc-uid-"),
 			},
 			Annotations: map[string]string{
-				annotRemoteUID: util.GetUniqueName("test-remote-uid-"),
+				domain.AnnotRemoteUID: util.GetUniqueName("test-remote-uid-"),
 			},
 		},
 		Spec: mantlev1.MantleBackupSpec{
@@ -438,7 +439,7 @@ func (test *replicationUnitTest) testCreateMantleBackup() {
 			func(mb *mantlev1.MantleBackup) {
 				// Keep the annotations map non-nil (a nil map would be rejected by the
 				// nil check instead of the dedicated annotation check) by replacing it
-				// with one that lacks annotRemoteUID.
+				// with one that lacks domain.AnnotRemoteUID.
 				mb.Annotations = map[string]string{"mantle.cybozu.io/dummy": "x"}
 			}),
 	)
@@ -470,7 +471,7 @@ func (test *replicationUnitTest) testCreateMantleBackup() {
 			}),
 		Entry("with a different remote UID annotation",
 			func(mb *mantlev1.MantleBackup) {
-				mb.Annotations[annotRemoteUID] = util.GetUniqueName("test-different-uid-")
+				mb.Annotations[domain.AnnotRemoteUID] = util.GetUniqueName("test-different-uid-")
 			}),
 	)
 }
