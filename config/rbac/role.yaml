@@ -45,7 +45,7 @@ rules:
   resources:
   - pods
   verbs:
-  - deletecollection
+  - delete
   - get
   - list
   - watch

@@ -3089,6 +3089,83 @@ var _ = Describe("calculateExportDataPVCSize", func() {
 
 })
 
+var _ = Describe("deletePodsOfJob", func() {
+	var mgrUtil testutil.ManagerUtil
+	var mbr *MantleBackupReconciler
+	var nsController string
+
+	BeforeEach(func() {
+		nsController = resMgr.CreateNamespace()
+
+		// Use the client of a manager so that the reconciler uses the same
+		// client as in production, i.e., one with read-your-writes consistency.
+		mgrUtil = testutil.NewManagerUtil(context.Background(), cfg, scheme.Scheme)
+		mbr = NewMantleBackupReconciler(
+			mgrUtil.GetManager().GetClient(),
+			mgrUtil.GetManager().GetScheme(),
+			nsController,
+			RolePrimary,
+			nil,
+			nil,
+			"dummy image",
+			"",
+			nil,
+			nil,
+			resource.MustParse("1Gi"),
+		)
+		mgrUtil.Start()
+	})
+
+	AfterEach(func() {
+		mgrUtil.Stop()
+	})
+
+	It("should delete only the Pods of the specified Job", func(ctx SpecContext) {
+		createPodOfJob := func(name, jobName string) {
+			GinkgoHelper()
+
+			pod := corev1.Pod{}
+			pod.SetName(name)
+			pod.SetNamespace(nsController)
+			pod.SetLabels(map[string]string{batchv1.JobNameLabel: jobName})
+			pod.Spec.Containers = []corev1.Container{{Name: "dummy", Image: "dummy"}}
+			Expect(k8sClient.Create(ctx, &pod)).To(Succeed())
+		}
+		listPodsOfJob := func(g Gomega, jobName string) []corev1.Pod {
+			var pods corev1.PodList
+			g.Expect(k8sClient.List(ctx, &pods,
+				client.InNamespace(nsController),
+				client.MatchingLabels{batchv1.JobNameLabel: jobName},
+			)).To(Succeed())
+
+			return pods.Items
+		}
+
+		// Arrange
+		createPodOfJob("target-0", "target-job")
+		createPodOfJob("target-1", "target-job")
+		createPodOfJob("other", "other-job")
+
+		// Act
+		// deletePodsOfJob lists the Pods from the cache, so retry it until
+		// the cache observes the Pods created above.
+		Eventually(ctx, func(g Gomega) {
+			g.Expect(mbr.deletePodsOfJob(ctx, "target-job")).To(Succeed())
+			g.Expect(listPodsOfJob(g, "target-job")).To(BeEmpty())
+		}).Should(Succeed())
+
+		// Assert
+		Consistently(ctx, func(g Gomega) {
+			g.Expect(listPodsOfJob(g, "other-job")).To(HaveLen(1))
+		}, "1s").Should(Succeed())
+	})
+
+	It("should succeed when the Job has no Pods", func(ctx SpecContext) {
+		// Act & Assert
+		Expect(mbr.deletePodsOfJob(ctx, "no-such-job")).To(Succeed())
+	})
+})
+
 var _ = Describe("import", func() {
 	var mockCtrl *gomock.Controller
 	var mbr *MantleBackupReconciler

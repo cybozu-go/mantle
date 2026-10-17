@@ -95,7 +95,7 @@ make undeploy
 
 The following tools should be installed manually.
 
-- go: v1.25.0+
+- go: v1.26.0+
 - docker: 20.10+
 - kubebuilder: 3.14.0+
   - required if you want to add new CRs or webhooks.

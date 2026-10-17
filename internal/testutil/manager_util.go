@@ -7,6 +7,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
@@ -29,6 +30,11 @@ type managerUtilImpl struct {
 func NewManagerUtil(ctxRoot context.Context, restConfig *rest.Config, schema *runtime.Scheme) ManagerUtil {
 	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme: schema,
+		Client: client.Options{
+			Cache: &client.CacheOptions{
+				EnableReadYourWritesConsistency: ptr.To(true),
+			},
+		},
 		Controller: config.Controller{
 			SkipNameValidation: ptr.To(true),
 		},
