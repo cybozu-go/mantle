@@ -20,10 +20,15 @@ jobs:
         with:
           go-version-file: "go.mod"
           takumi-guard-bot-id: ${{ vars.TAKUMI_GUARD_BOT_ID }}
-          # The default 1800s token lifetime expires during the build below,
-          # which takes over an hour. Cover the whole 240-minute job.
-          takumi-guard-expires-in: "14400"
       - uses: ./.github/actions/set-up-kvm-for-e2e-tests
       - run: make -C ceph setup
       - run: make -C ceph build
+      # A Takumi Guard token stops being accepted about 90 minutes after it is
+      # issued, even though its exp claim is later, and the build above takes
+      # about two hours. Get a new token just before the first module download.
+      - uses: ./.github/actions/setup-go
+        with:
+          go-version-file: "go.mod"
+          cache: false
+          takumi-guard-bot-id: ${{ vars.TAKUMI_GUARD_BOT_ID }}
       - run: make -C ceph test
