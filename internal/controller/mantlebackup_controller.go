@@ -527,14 +527,6 @@ func (r *MantleBackupReconciler) checkManagedBackup(ctx context.Context, backup 
 func (r *MantleBackupReconciler) reconcileLocalBackup(ctx context.Context, backup *mantlev1.MantleBackup) *reconcile.Result {
 	logger := log.FromContext(ctx)
 
-	if isCreatedWhenMantleControllerWasSecondary(backup) {
-		logger.Info(
-			"skipping to reconcile the MantleBackup created by a remote mantle-controller to prevent accidental data loss",
-		)
-
-		return reconcile.Succeeded()
-	}
-
 	if result := r.expire(ctx, backup); result.ShouldReturn() {
 		return result.WrapIfError("failed to expire backup")
 	}
@@ -811,14 +803,6 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 
 	if result := r.prepareObjectStorageClient(ctx); result.ShouldReturn() {
 		return result.WrapIfError("failed to prepare object storage client")
-	}
-
-	if !isCreatedWhenMantleControllerWasSecondary(backup) {
-		logger.Info(
-			"skipping to reconcile the MantleBackup created by a different mantle-controller to prevent accidental data loss",
-		)
-
-		return reconcile.Succeeded()
 	}
 
 	if result := r.expire(ctx, backup); result.ShouldReturn() {
@@ -1246,14 +1230,6 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 	logger.Info("succeeded to create a backup")
 
 	return nil
-}
-
-// isCreatedWhenMantleControllerWasSecondary returns true iff the MantleBackup
-// is created by the secondary mantle.
-func isCreatedWhenMantleControllerWasSecondary(backup *mantlev1.MantleBackup) bool {
-	_, ok := backup.Annotations[domain.AnnotRemoteUID]
-
-	return ok
 }
 
 func (r *MantleBackupReconciler) finalizeStandalone(

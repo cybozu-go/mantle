@@ -18,16 +18,24 @@ func NewMBPrimaryReconciler() *MBPrimaryReconciler {
 
 // Provision handles the provisioning logic for a MantleBackup resource.
 func (r *MBPrimaryReconciler) Provision(
-	_ context.Context,
-	_ *mantlev1.MantleBackup,
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
 ) *reconcile.Result {
+	if isCreatedWhenMantleControllerWasSecondary(backup) {
+		return skipBackupCreatedAsSecondary(ctx)
+	}
+
 	return reconcile.ContinueWithLegacyReconcile()
 }
 
 // Finalize handles the finalization logic for a MantleBackup resource.
 func (r *MBPrimaryReconciler) Finalize(
-	_ context.Context,
-	_ *mantlev1.MantleBackup,
+	ctx context.Context,
+	backup *mantlev1.MantleBackup,
 ) *reconcile.Result {
+	if isCreatedWhenMantleControllerWasSecondary(backup) {
+		return skipBackupCreatedAsSecondary(ctx)
+	}
+
 	return reconcile.ContinueWithLegacyReconcile()
 }
