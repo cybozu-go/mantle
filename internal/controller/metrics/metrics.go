@@ -47,7 +47,17 @@ var (
 		prometheus.HistogramOpts{
 			Namespace: namespace,
 			Name:      "backup_duration_seconds",
-			Help:      "The time from the creationTimestamp to the completion of the backup.",
+			Help:      "The time from the creationTimestamp of the MantleBackup until it is synced to the secondary.",
+			Buckets:   []float64{100, 200, 400, 800, 1600, 3200, 9600, 28800, 86400, 259200},
+		},
+		[]string{LabelPersistentVolumeClaim, LabelResourceNamespace},
+	)
+
+	BackupSnapshotDurationSeconds = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Name:      "backup_snapshot_duration_seconds",
+			Help:      "The time from the creationTimestamp of the MantleBackup until its snapshot is captured.",
 			Buckets:   []float64{100, 200, 400, 800, 1600, 3200, 9600, 28800, 86400, 259200},
 		},
 		[]string{LabelPersistentVolumeClaim, LabelResourceNamespace},
@@ -59,4 +69,5 @@ func init() {
 	runtimemetrics.Registry.MustRegister(BackupConfigInfo)
 	runtimemetrics.Registry.MustRegister(BackupConfigSuspend)
 	runtimemetrics.Registry.MustRegister(BackupDurationSeconds)
+	runtimemetrics.Registry.MustRegister(BackupSnapshotDurationSeconds)
 }

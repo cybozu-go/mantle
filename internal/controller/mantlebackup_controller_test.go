@@ -20,6 +20,7 @@ import (
 	"github.com/cybozu-go/mantle/test/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	dto "github.com/prometheus/client_model/go"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 	batchv1 "k8s.io/api/batch/v1"
@@ -126,6 +127,18 @@ func completeJob(ctx SpecContext, jobNamespace, jobName string) {
 func gatherGaugeValue(name string, labels map[string]string) (float64, bool) {
 	GinkgoHelper()
 
+	m := gatherMetric(name, labels)
+	if m == nil {
+		return 0, false
+	}
+
+	return m.GetGauge().GetValue(), true
+}
+
+// gatherMetric returns the series matching name and labels, or nil if it does not exist.
+func gatherMetric(name string, labels map[string]string) *dto.Metric {
+	GinkgoHelper()
+
 	mfs, err := runtimemetrics.Registry.Gather()
 	Expect(err).NotTo(HaveOccurred())
 	for _, mf := range mfs {
@@ -146,12 +159,12 @@ func gatherGaugeValue(name string, labels map[string]string) (float64, bool) {
 				}
 			}
 			if match {
-				return m.GetGauge().GetValue(), true
+				return m
 			}
 		}
 	}
 
-	return 0, false
+	return nil
 }
 
 var _ = Describe("MantleBackup controller", func() {
@@ -320,6 +333,33 @@ var _ = Describe("MantleBackup controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			testutil.CheckDeletedEventually[mantlev1.MantleBackup](ctx, k8sClient, backup.Name, backup.Namespace)
+		})
+
+		It("should observe the snapshot duration once per MantleBackup", func(ctx SpecContext) {
+			_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+
+			backup, err := resMgr.CreateUniqueBackupFor(ctx, pvc)
+			Expect(err).NotTo(HaveOccurred())
+
+			resMgr.WaitForBackupSnapshotCaptured(ctx, backup)
+
+			metricLabels := map[string]string{
+				"persistentvolumeclaim": pvc.Name,
+				"resource_namespace":    pvc.Namespace,
+			}
+			Eventually(func() uint64 {
+				return gatherMetric("mantle_backup_snapshot_duration_seconds", metricLabels).GetHistogram().GetSampleCount()
+			}).Should(Equal(uint64(1)))
+
+			// Provision the captured MantleBackup again, as a reconciliation from a stale cache does.
+			target, result := reconciler.getSnapshotTarget(ctx, backup)
+			Expect(result).To(BeNil())
+			Eventually(func() *reconcile.Result {
+				return reconciler.provisionRBDSnapshot(ctx, backup.DeepCopy(), target)
+			}).Should(BeNil())
+
+			Expect(gatherMetric("mantle_backup_snapshot_duration_seconds", metricLabels).GetHistogram().GetSampleCount()).To(Equal(uint64(1)))
 		})
 
 		It("should still have snapshot even if the PVC lost", func(ctx SpecContext) {
@@ -865,35 +905,20 @@ var _ = Describe("MantleBackup controller", func() {
 			testutil.CheckDeletedEventually[mantlev1.MantleBackup](ctx, k8sClient, backup.Name, backup.Namespace)
 		})
 
-		It("should export BackupDurationSeconds even if no MantleBackup exists", func(ctx SpecContext) {
-			// SetupWithManager (called in BeforeEach) pre-registers the metric with empty
-			// labels. Verify it is exported without any MantleBackup existing.
-			mgrUtil.Start()
+		DescribeTable("should export the duration histogram even if no MantleBackup exists",
+			func(ctx SpecContext, name string) {
+				// SetupWithManager (called in BeforeEach) pre-registers the metric with empty
+				// labels. Verify it is exported without any MantleBackup existing.
+				mgrUtil.Start()
 
-			mfs, err := runtimemetrics.Registry.Gather()
-			Expect(err).NotTo(HaveOccurred())
-			found := false
-			for _, mf := range mfs {
-				if mf.GetName() != "mantle_backup_duration_seconds" {
-					continue
-				}
-				for _, m := range mf.GetMetric() {
-					var pvcVal, nsVal string
-					for _, l := range m.GetLabel() {
-						switch l.GetName() {
-						case "persistentvolumeclaim":
-							pvcVal = l.GetValue()
-						case "resource_namespace":
-							nsVal = l.GetValue()
-						}
-					}
-					if pvcVal == "" && nsVal == "" {
-						found = true
-					}
-				}
-			}
-			Expect(found).To(BeTrue())
-		})
+				Expect(gatherMetric(name, map[string]string{
+					"persistentvolumeclaim": "",
+					"resource_namespace":    "",
+				})).NotTo(BeNil())
+			},
+			Entry("mantle_backup_duration_seconds", "mantle_backup_duration_seconds"),
+			Entry("mantle_backup_snapshot_duration_seconds", "mantle_backup_snapshot_duration_seconds"),
+		)
 
 	})
 })
