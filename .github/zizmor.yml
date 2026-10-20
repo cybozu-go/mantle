@@ -1,0 +1,5 @@
+rules:
+  # actionlint (as of v1.7.12) rejects the self-repository syntax ("$/...")
+  # as an invalid action format, so keep the workspace-relative form for now.
+  self-repository:
+    disable: true

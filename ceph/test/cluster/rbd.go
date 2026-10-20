@@ -9,7 +9,6 @@ import (
 	"github.com/cybozu-go/mantle/test/util"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
 )
 
 func Rbd(args ...string) ([]byte, error) {
@@ -97,7 +96,7 @@ func zeroOutVolume(namespace, pvcName string) error {
 			},
 			Capacity:                      origPV.Spec.Capacity,
 			PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimRetain,
-			VolumeMode:                    ptr.To(corev1.PersistentVolumeBlock),
+			VolumeMode:                    new(corev1.PersistentVolumeBlock),
 			StorageClassName:              "",
 		},
 	}
@@ -129,12 +128,12 @@ func zeroOutVolume(namespace, pvcName string) error {
 			Namespace: namespace,
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
-			StorageClassName: ptr.To(""),
+			StorageClassName: new(""),
 			AccessModes: []corev1.PersistentVolumeAccessMode{
 				corev1.ReadWriteOnce,
 			},
 			Resources:  origPVC.Spec.Resources,
-			VolumeMode: ptr.To(corev1.PersistentVolumeBlock),
+			VolumeMode: new(corev1.PersistentVolumeBlock),
 			VolumeName: zeroOutPVName,
 		},
 	}
