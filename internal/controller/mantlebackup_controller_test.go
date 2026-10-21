@@ -322,6 +322,42 @@ var _ = Describe("MantleBackup controller", func() {
 			testutil.CheckDeletedEventually[mantlev1.MantleBackup](ctx, k8sClient, backup.Name, backup.Namespace)
 		})
 
+		It("exports the timestamps of the PVC and removes them after the backup is deleted", func(ctx SpecContext) {
+			_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+
+			backup, err := resMgr.CreateUniqueBackupFor(ctx, pvc)
+			Expect(err).NotTo(HaveOccurred())
+
+			resMgr.WaitForBackupSnapshotCaptured(ctx, backup)
+
+			metricLabels := map[string]string{
+				"persistentvolumeclaim": pvc.GetName(),
+				"resource_namespace":    ns,
+			}
+			Eventually(func(g Gomega) {
+				v, ok := gatherGaugeValue("mantle_backup_last_snapshot_timestamp_seconds", metricLabels)
+				g.Expect(ok).To(BeTrue())
+				g.Expect(v).To(Equal(float64(backup.Status.CreatedAt.Unix())))
+				v, ok = gatherGaugeValue("mantle_backup_last_creation_timestamp_seconds", metricLabels)
+				g.Expect(ok).To(BeTrue())
+				g.Expect(v).To(Equal(float64(backup.CreationTimestamp.Unix())))
+			}).WithContext(ctx).Should(Succeed())
+			_, ok := gatherGaugeValue("mantle_backup_oldest_unsynced_creation_timestamp_seconds", metricLabels)
+			Expect(ok).To(BeFalse())
+
+			err = k8sClient.Delete(ctx, backup)
+			Expect(err).NotTo(HaveOccurred())
+			testutil.CheckDeletedEventually[mantlev1.MantleBackup](ctx, k8sClient, backup.Name, backup.Namespace)
+
+			Eventually(func(g Gomega) {
+				_, ok := gatherGaugeValue("mantle_backup_last_snapshot_timestamp_seconds", metricLabels)
+				g.Expect(ok).To(BeFalse())
+				_, ok = gatherGaugeValue("mantle_backup_last_creation_timestamp_seconds", metricLabels)
+				g.Expect(ok).To(BeFalse())
+			}).WithContext(ctx).Should(Succeed())
+		})
+
 		It("should still have snapshot even if the PVC lost", func(ctx SpecContext) {
 			_, pvc, err := resMgr.CreateUniquePVAndPVC(ctx, ns)
 			Expect(err).NotTo(HaveOccurred())
@@ -726,6 +762,17 @@ var _ = Describe("MantleBackup controller", func() {
 				g.Expect(isFromSnapNameFound).To(BeTrue())
 			}).WithContext(ctx).Should(Succeed())
 
+			metricLabels := map[string]string{"persistentvolumeclaim": pvc.GetName(), "resource_namespace": ns}
+			expectOldestUnsyncedCreation := func(want *mantlev1.MantleBackup) {
+				GinkgoHelper()
+				Eventually(func(g Gomega) {
+					v, ok := gatherGaugeValue("mantle_backup_oldest_unsynced_creation_timestamp_seconds", metricLabels)
+					g.Expect(ok).To(BeTrue())
+					g.Expect(v).To(Equal(float64(want.CreationTimestamp.Unix())))
+				}).WithContext(ctx).Should(Succeed())
+			}
+			expectOldestUnsyncedCreation(backup)
+
 			// Make sure an upload Jobs has not yet been created.
 			Consistently(ctx, func(g Gomega) error {
 				var jobUpload batchv1.Job
@@ -856,6 +903,9 @@ var _ = Describe("MantleBackup controller", func() {
 				}
 				g.Expect(isFromSnapNameFound).To(BeTrue())
 			}).WithContext(ctx).Should(Succeed())
+
+			// backup is synced, so the oldest unsynced one moves to backup2.
+			expectOldestUnsyncedCreation(backup2)
 
 			err = k8sClient.Delete(ctx, backup)
 			Expect(err).NotTo(HaveOccurred())
@@ -1464,6 +1514,223 @@ var _ = Describe("replicateManifests", func() {
 		Entry("the primary MantleBackup does not have the priority label",
 			map[string]string{}, false, ""),
 	)
+})
+
+var _ = Describe("updateBackupTimestampMetrics", func() {
+	const (
+		lastCreationMetric           = "mantle_backup_last_creation_timestamp_seconds"
+		lastSnapshotMetric           = "mantle_backup_last_snapshot_timestamp_seconds"
+		oldestUnsyncedCreationMetric = "mantle_backup_oldest_unsynced_creation_timestamp_seconds"
+		pvcName                      = "pvc"
+		pvcUID                       = "pvc-uid"
+	)
+	baseTime := time.Unix(1700000000, 0)
+	// Differs from the creation time, so that the tests tell which time a gauge uses.
+	const snapshotDelay = 10 * time.Minute
+	creationTime := func(hours int) time.Time {
+		return baseTime.Add(time.Duration(hours) * time.Hour)
+	}
+	snapshotTime := func(hours int) time.Time {
+		return creationTime(hours).Add(snapshotDelay)
+	}
+
+	var (
+		namespace    string
+		metricLabels map[string]string
+		ctrlClient   client.Client
+	)
+	BeforeEach(func() {
+		namespace = "ns-" + string(uuid.NewUUID())
+		metricLabels = map[string]string{"persistentvolumeclaim": pvcName, "resource_namespace": namespace}
+		ctrlClient = fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+		// The metrics are registered globally, so drop the series a test leaves behind.
+		DeferCleanup(func() {
+			metrics.BackupLastCreationTimestampSeconds.Delete(metricLabels)
+			metrics.BackupLastSnapshotTimestampSeconds.Delete(metricLabels)
+			metrics.BackupOldestUnsyncedCreationTimestampSeconds.Delete(metricLabels)
+		})
+	})
+
+	type backupSpec struct {
+		hoursAfterBase int
+		captured       bool
+		synced         bool
+		fromSecondary  bool
+		deleting       bool
+		otherPVC       bool
+	}
+
+	createBackup := func(i int, spec backupSpec) *mantlev1.MantleBackup {
+		GinkgoHelper()
+		var annotations map[string]string
+		if spec.fromSecondary {
+			annotations = map[string]string{annotRemoteUID: "remote-uid"}
+		}
+		uid := pvcUID
+		if spec.otherPVC {
+			uid = "other-pvc-uid"
+		}
+		captured, synced := metav1.ConditionFalse, metav1.ConditionFalse
+		if spec.captured {
+			captured = metav1.ConditionTrue
+		}
+		if spec.synced {
+			synced = metav1.ConditionTrue
+		}
+		b := newMantleBackup(fmt.Sprintf("mb%d", i), namespace, annotations,
+			map[string]string{labelLocalBackupTargetPVCUID: uid}, spec.deleting, i, captured, synced)
+		b.Spec.PVC = pvcName
+		b.CreationTimestamp = metav1.NewTime(creationTime(spec.hoursAfterBase))
+		if spec.captured {
+			b.Status.CreatedAt = metav1.NewTime(snapshotTime(spec.hoursAfterBase))
+		}
+		createMantleBackupInClient(ctrlClient, b)
+
+		return b
+	}
+
+	createPVC := func(uid string) {
+		GinkgoHelper()
+		Expect(ctrlClient.Create(context.Background(), &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: pvcName, Namespace: namespace, UID: types.UID(uid)},
+		})).To(Succeed())
+	}
+
+	update := func(role string, backup *mantlev1.MantleBackup) {
+		mbr := NewMantleBackupReconciler(ctrlClient,
+			ctrlClient.Scheme(), testManagedCephClusterID, role, nil, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"))
+		mbr.updateBackupTimestampMetrics(context.Background(), backup)
+	}
+
+	// A nil want means the series is absent.
+	expectGauge := func(name string, want *time.Time) {
+		GinkgoHelper()
+		v, ok := gatherGaugeValue(name, metricLabels)
+		if want == nil {
+			Expect(ok).To(BeFalse())
+
+			return
+		}
+		Expect(ok).To(BeTrue())
+		Expect(v).To(Equal(float64(want.Unix())))
+	}
+
+	Context("when the PVC exists", func() {
+		BeforeEach(func() {
+			createPVC(pvcUID)
+		})
+
+		DescribeTable("computes the gauges from all MantleBackups of the PVC",
+			func(role string, specs []backupSpec, wantLastCreation, wantLastSnapshot, wantOldestUnsynced *time.Time) {
+				// Stale values that must be overwritten or deleted.
+				metrics.BackupLastCreationTimestampSeconds.With(metricLabels).Set(1)
+				metrics.BackupLastSnapshotTimestampSeconds.With(metricLabels).Set(1)
+				metrics.BackupOldestUnsyncedCreationTimestampSeconds.With(metricLabels).Set(1)
+
+				var first *mantlev1.MantleBackup
+				for i, spec := range specs {
+					b := createBackup(i, spec)
+					if i == 0 {
+						first = b
+					}
+				}
+				update(role, first)
+
+				expectGauge(lastCreationMetric, wantLastCreation)
+				expectGauge(lastSnapshotMetric, wantLastSnapshot)
+				expectGauge(oldestUnsyncedCreationMetric, wantOldestUnsynced)
+			},
+			// For each metric, the expected MantleBackup is neither the first nor the last
+			// eligible one, so selecting by listing order instead of timestamp fails.
+			Entry("primary: newest creation, newest snapshot, and oldest unsynced creation",
+				RolePrimary,
+				[]backupSpec{
+					{hoursAfterBase: 0, captured: true, synced: true},
+					{hoursAfterBase: 3, captured: true},
+					{hoursAfterBase: 5},
+					{hoursAfterBase: 1, captured: true},
+					{hoursAfterBase: 2, captured: true},
+				},
+				new(creationTime(5)), new(snapshotTime(3)), new(creationTime(1)),
+			),
+			Entry("primary: oldest unsynced is deleted when every captured MantleBackup is synced",
+				RolePrimary,
+				[]backupSpec{
+					{hoursAfterBase: 0, captured: true, synced: true},
+					{hoursAfterBase: 1, captured: true, synced: true},
+					{hoursAfterBase: 2},
+				},
+				new(creationTime(2)), new(snapshotTime(1)), nil,
+			),
+			Entry("primary: MantleBackups received as secondary, being deleted, or of another PVC are excluded",
+				RolePrimary,
+				[]backupSpec{
+					{hoursAfterBase: 2, captured: true},
+					// Each would change a value if it were counted.
+					{hoursAfterBase: 0, captured: true, fromSecondary: true},
+					{hoursAfterBase: 3, captured: true, deleting: true},
+					{hoursAfterBase: 4, captured: true, otherPVC: true},
+				},
+				new(creationTime(2)), new(snapshotTime(2)), new(creationTime(2)),
+			),
+			Entry("primary: only last creation is set when no MantleBackup is captured",
+				RolePrimary,
+				[]backupSpec{
+					{hoursAfterBase: 0},
+				},
+				new(creationTime(0)), nil, nil,
+			),
+			Entry("standalone: oldest unsynced is not exported",
+				RoleStandalone,
+				[]backupSpec{
+					{hoursAfterBase: 0, captured: true},
+					{hoursAfterBase: 1, captured: true},
+					{hoursAfterBase: 2},
+				},
+				new(creationTime(2)), new(snapshotTime(1)), nil,
+			),
+		)
+	})
+
+	Context("when the PVC is deleted or re-created", func() {
+		It("does not update the series once the PVC is deleted", func() {
+			// Values from before the PVC was deleted, which must stay as they are.
+			metrics.BackupLastCreationTimestampSeconds.With(metricLabels).Set(1)
+			metrics.BackupLastSnapshotTimestampSeconds.With(metricLabels).Set(1)
+
+			update(RolePrimary, createBackup(0, backupSpec{hoursAfterBase: 2, captured: true}))
+
+			expectGauge(lastCreationMetric, new(time.Unix(1, 0)))
+			expectGauge(lastSnapshotMetric, new(time.Unix(1, 0)))
+			expectGauge(oldestUnsyncedCreationMetric, nil)
+		})
+
+		DescribeTable("leaves the series to the current PVC after the PVC is re-created under the same name",
+			func(oldSpec backupSpec) {
+				const currentPVCUID = "current-pvc-uid"
+				createPVC(currentPVCUID)
+
+				// Newer than the old PVC's one, so that an overwrite with the old values shows.
+				current := createBackup(0, backupSpec{hoursAfterBase: 2, captured: true, synced: true})
+				current.Labels[labelLocalBackupTargetPVCUID] = currentPVCUID
+				Expect(ctrlClient.Update(context.Background(), current)).To(Succeed())
+				old := createBackup(1, oldSpec)
+
+				update(RolePrimary, current)
+				update(RolePrimary, old)
+
+				expectGauge(lastCreationMetric, new(creationTime(2)))
+				expectGauge(lastSnapshotMetric, new(snapshotTime(2)))
+				expectGauge(oldestUnsyncedCreationMetric, nil)
+			},
+			Entry("a MantleBackup of the old PVC does not overwrite the series with its older values",
+				backupSpec{hoursAfterBase: 0, captured: true},
+			),
+			Entry("the last MantleBackup of the old PVC does not delete the series when it is being deleted",
+				backupSpec{hoursAfterBase: 0, captured: true, deleting: true},
+			),
+		)
+	})
 })
 
 var _ = Describe("isHighPriority", func() {
