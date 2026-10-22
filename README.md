@@ -84,7 +84,16 @@ make undeploy
 
 ### `mantle_backup_duration_seconds`
 
-`mantle_backup_duration_seconds` is a Histogram that indicates the time from the creationTimestamp to the completion of the backup.
+`mantle_backup_duration_seconds` is a Histogram that indicates the time from the creationTimestamp of a MantleBackup until it is synced to the secondary (`SyncedToRemote`). It is observed only by the primary.
+
+| Label                   | Description             |
+| ----------------------- | ----------------------- |
+| `persistentvolumeclaim` | The PVC name.           |
+| `resource_namespace`    | The resource namespace. |
+
+### `mantle_backup_snapshot_duration_seconds`
+
+`mantle_backup_snapshot_duration_seconds` is a Histogram that indicates the time from the creationTimestamp of a MantleBackup until its snapshot is captured (`SnapshotCaptured`). It is observed by the standalone and the primary.
 
 | Label                   | Description             |
 | ----------------------- | ----------------------- |

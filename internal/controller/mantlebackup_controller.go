@@ -879,8 +879,12 @@ func newMantleBackupReconcilerRateLimiter[T comparable]() workqueue.TypedRateLim
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *MantleBackupReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// Ensure a zero-value metric is exported even if no MantleBackup exists.
+	// Ensure zero-value metrics are exported even if no MantleBackup exists.
 	metrics.BackupDurationSeconds.With(prometheus.Labels{
+		metrics.LabelPersistentVolumeClaim: "",
+		metrics.LabelResourceNamespace:     "",
+	})
+	metrics.BackupSnapshotDurationSeconds.With(prometheus.Labels{
 		metrics.LabelPersistentVolumeClaim: "",
 		metrics.LabelResourceNamespace:     "",
 	})
@@ -1222,7 +1226,9 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 		return result.WrapIfError("failed to create RBD snapshot")
 	}
 
+	alreadyCaptured := false
 	if err := updateStatus(ctx, r.Client, backup, func() error {
+		alreadyCaptured = backup.IsSnapshotCaptured()
 		backup.Status.SnapID = &snapshot.Id
 		backup.Status.CreatedAt = metav1.NewTime(snapshot.Timestamp.Time)
 		backup.Status.SnapSize = &snapshot.Size
@@ -1244,6 +1250,17 @@ func (r *MantleBackupReconciler) provisionRBDSnapshot(
 		return reconcile.Failed("failed to update MantleBackup status: %w", err)
 	}
 	logger.Info("succeeded to create a backup")
+
+	// Not observed unconditionally because a reconciliation from a stale cache
+	// can run this again for a MantleBackup whose snapshot is already captured.
+	// A stale resourceVersion causes the update to fail before reaching this point.
+	if !alreadyCaptured {
+		duration := time.Since(backup.GetCreationTimestamp().Time).Seconds()
+		metrics.BackupSnapshotDurationSeconds.With(prometheus.Labels{
+			metrics.LabelPersistentVolumeClaim: backup.Spec.PVC,
+			metrics.LabelResourceNamespace:     backup.GetNamespace(),
+		}).Observe(duration)
+	}
 
 	return nil
 }
