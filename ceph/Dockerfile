@@ -1,4 +1,4 @@
-FROM ghcr.io/cybozu/ubuntu:22.04 AS build-ceph
+FROM ghcr.io/cybozu/ubuntu:24.04 AS build-ceph
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
@@ -36,9 +36,12 @@ RUN sed -i -e 's/WITH_CEPHFS_JAVA=ON/WITH_CEPHFS_JAVA=OFF/' debian/rules && \
     sed -i -e 's@usr/share/java/libcephfs-test.jar@@' debian/ceph-test.install
 RUN rm debian/libcephfs-java.jlibs debian/libcephfs-jni.install debian/ceph-mgr-dashboard*
 RUN dpkg-buildpackage --build=binary -uc -us -j10
-RUN rm ${WORKSPACE}/*-dbg_*.deb ${WORKSPACE}/ceph-test_*.deb
+RUN rm ${WORKSPACE}/*-dbg_*.deb ${WORKSPACE}/ceph-test_*.deb \
+       # The ceph-resource-agents is uninstallable due to its broken dependency on Ubuntu 24.04.
+       # It integrates Ceph with cluster resource managers such as Pacemaker and is not needed for rbd export-diff.
+       ${WORKSPACE}/ceph-resource-agents_*.deb
 
-FROM ghcr.io/cybozu/ubuntu:22.04
+FROM ghcr.io/cybozu/ubuntu:24.04
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
