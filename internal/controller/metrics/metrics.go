@@ -43,10 +43,10 @@ var (
 		[]string{LabelResourceNamespace, LabelMantleBackupConfig},
 	)
 
-	BackupDurationSeconds = prometheus.NewHistogramVec(
+	BackupSyncDurationSeconds = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
-			Name:      "backup_duration_seconds",
+			Name:      "backup_sync_duration_seconds",
 			Help:      "The time from the creationTimestamp of the MantleBackup until it is synced to the secondary.",
 			Buckets:   []float64{100, 200, 400, 800, 1600, 3200, 9600, 28800, 86400, 259200},
 		},
@@ -68,6 +68,6 @@ func init() {
 	runtimemetrics.Registry.MustRegister(BackupExportedDiffSizeBytes)
 	runtimemetrics.Registry.MustRegister(BackupConfigInfo)
 	runtimemetrics.Registry.MustRegister(BackupConfigSuspend)
-	runtimemetrics.Registry.MustRegister(BackupDurationSeconds)
+	runtimemetrics.Registry.MustRegister(BackupSyncDurationSeconds)
 	runtimemetrics.Registry.MustRegister(BackupSnapshotDurationSeconds)
 }

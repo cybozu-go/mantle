@@ -82,9 +82,9 @@ make undeploy
 | `persistentvolumeclaim` | The PVC name.           |
 | `resource_namespace`    | The resource namespace. |
 
-### `mantle_backup_duration_seconds`
+### `mantle_backup_sync_duration_seconds`
 
-`mantle_backup_duration_seconds` is a Histogram that indicates the time from the creationTimestamp of a MantleBackup until it is synced to the secondary (`SyncedToRemote`). It is observed only by the primary.
+`mantle_backup_sync_duration_seconds` is a Histogram that indicates the time from the creationTimestamp of a MantleBackup until it is synced to the secondary (`SyncedToRemote`). It is observed only by the primary. It was previously named `mantle_backup_duration_seconds`.
 
 | Label                   | Description             |
 | ----------------------- | ----------------------- |

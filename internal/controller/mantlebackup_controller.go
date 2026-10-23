@@ -880,7 +880,7 @@ func newMantleBackupReconcilerRateLimiter[T comparable]() workqueue.TypedRateLim
 // SetupWithManager sets up the controller with the Manager.
 func (r *MantleBackupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Ensure zero-value metrics are exported even if no MantleBackup exists.
-	metrics.BackupDurationSeconds.With(prometheus.Labels{
+	metrics.BackupSyncDurationSeconds.With(prometheus.Labels{
 		metrics.LabelPersistentVolumeClaim: "",
 		metrics.LabelResourceNamespace:     "",
 	})
@@ -926,7 +926,7 @@ func (r *MantleBackupReconciler) replicate(
 		logger.Info("succeeded to sync a backup to the remote ceph cluster")
 
 		duration := time.Since(backup.GetCreationTimestamp().Time).Seconds()
-		metrics.BackupDurationSeconds.With(prometheus.Labels{
+		metrics.BackupSyncDurationSeconds.With(prometheus.Labels{
 			metrics.LabelPersistentVolumeClaim: backup.Spec.PVC,
 			metrics.LabelResourceNamespace:     backup.GetNamespace(),
 		}).Observe(duration)
