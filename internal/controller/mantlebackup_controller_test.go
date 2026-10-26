@@ -12,6 +12,7 @@ import (
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/ceph"
+	"github.com/cybozu-go/mantle/internal/controller/domain"
 	"github.com/cybozu-go/mantle/internal/controller/internal/objectstorage"
 	"github.com/cybozu-go/mantle/internal/controller/internal/reconcile"
 	"github.com/cybozu-go/mantle/internal/controller/metrics"
@@ -2963,7 +2964,7 @@ var _ = Describe("export and upload", func() {
 						Expect(json.Unmarshal(req.GetPvc(), &pvc)).To(Succeed())
 
 						return &proto.CreateOrUpdatePVCResponse{
-							Uid: pvc.GetAnnotations()[annotRemoteUID],
+							Uid: pvc.GetAnnotations()[domain.AnnotRemoteUID],
 						}, nil
 					})
 				grpcClient.EXPECT().CreateMantleBackup(gomock.Any(), gomock.Any()).AnyTimes().
@@ -3191,7 +3192,7 @@ var _ = Describe("import", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "name",
 					Annotations: map[string]string{
-						annotRemoteUID: "uid",
+						domain.AnnotRemoteUID: "uid",
 					},
 				},
 			}, 0)
@@ -3429,7 +3430,7 @@ var _ = Describe("import", func() {
 			m[annotDiffFrom] = *diffFrom
 		}
 		if remoteUID != nil {
-			m[annotRemoteUID] = *remoteUID
+			m[domain.AnnotRemoteUID] = *remoteUID
 		}
 		backup.SetAnnotations(m)
 		err = k8sClient.Update(ctx, backup)
@@ -3645,7 +3646,7 @@ var _ = Describe("import", func() {
 			Expect(err).NotTo(HaveOccurred())
 		}
 		expectAccessToObjectStorage := func(backup *mantlev1.MantleBackup) {
-			prefix := fmt.Sprintf("%s-%s-", backup.GetName(), backup.GetAnnotations()[annotRemoteUID])
+			prefix := fmt.Sprintf("%s-%s-", backup.GetName(), backup.GetAnnotations()[domain.AnnotRemoteUID])
 			mockObjectStorage.EXPECT().Delete(gomock.Any(), gomock.Eq(prefix+"0.bin")).Return(nil)
 			mockObjectStorage.EXPECT().Delete(gomock.Any(), gomock.Eq(prefix+"1.bin")).Return(nil)
 			mockObjectStorage.EXPECT().Delete(gomock.Any(), gomock.Eq(prefix+"2.bin")).Return(nil)
@@ -3731,7 +3732,7 @@ var _ = Describe("import", func() {
 			backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
 			Expect(err).NotTo(HaveOccurred())
 			backup.SetAnnotations(map[string]string{
-				annotRemoteUID: "uid",
+				domain.AnnotRemoteUID: "uid",
 			})
 			err = k8sClient.Update(ctx, backup)
 			Expect(err).NotTo(HaveOccurred())
@@ -3878,7 +3879,7 @@ var _ = Describe("import", func() {
 			// registered in FakeRBD -- simulating that it is already gone.
 			backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
 			Expect(err).NotTo(HaveOccurred())
-			backup.SetAnnotations(map[string]string{annotRemoteUID: "uid"})
+			backup.SetAnnotations(map[string]string{domain.AnnotRemoteUID: "uid"})
 			err = k8sClient.Update(ctx, backup)
 			Expect(err).NotTo(HaveOccurred())
 			err = updateStatus(ctx, k8sClient, backup, func() error {
@@ -4228,9 +4229,9 @@ var _ = Describe("import", func() {
 			backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
 			Expect(err).NotTo(HaveOccurred())
 			backup.SetAnnotations(map[string]string{
-				annotDiffFrom:  "source",
-				annotSyncMode:  syncModeIncremental,
-				annotRemoteUID: "uid",
+				annotDiffFrom:         "source",
+				annotSyncMode:         syncModeIncremental,
+				domain.AnnotRemoteUID: "uid",
 			})
 			err = k8sClient.Update(ctx, backup)
 			Expect(err).NotTo(HaveOccurred())
