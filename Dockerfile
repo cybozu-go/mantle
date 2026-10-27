@@ -39,9 +39,9 @@ RUN --mount=type=secret,id=netrc,target=/root/.netrc,required=false \
 
 # Download and install custom RBD command
 # cf. https://github.com/cybozu/neco-containers/blob/a504569e337e41d3a9c7e0b6c0fc0482c2a31008/ceph/Dockerfile
-FROM ubuntu:22.04 AS custom-ceph
+FROM ubuntu:24.04 AS custom-ceph
 
-ARG EXPORT_DIFF_VERSION=20.2.1.0
+ARG EXPORT_DIFF_VERSION=20.2.1.1
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
