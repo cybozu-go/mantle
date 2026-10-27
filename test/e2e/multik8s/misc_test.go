@@ -49,7 +49,51 @@ var _ = Describe("metrics tests", func() {
 			fmt.Sprintf(`mantle_backup_snapshot_duration_seconds_count{persistentvolumeclaim=%q,resource_namespace=%q}`,
 				pvcName, namespace)),
 		Entry(`mantle_backup_exported_diff_size_bytes`, `mantle_backup_exported_diff_size_bytes`),
+		Entry(`mantle_backup_last_creation_timestamp_seconds of the PVC`,
+			fmt.Sprintf(`mantle_backup_last_creation_timestamp_seconds{persistentvolumeclaim=%q,resource_namespace=%q}`,
+				pvcName, namespace)),
+		Entry(`mantle_backup_last_snapshot_creation_timestamp_seconds of the PVC`,
+			fmt.Sprintf(`mantle_backup_last_snapshot_creation_timestamp_seconds{persistentvolumeclaim=%q,resource_namespace=%q}`,
+				pvcName, namespace)),
 	)
+
+	// This metric is only exported while a backup is unsynced, so the entries above cannot check it.
+	It("should expose mantle_backup_oldest_unsynced_creation_timestamp_seconds only while a backup is unsynced",
+		func(ctx SpecContext) {
+			unsyncedPVCName := util.GetUniqueName("pvc-")
+			unsyncedBackupName := util.GetUniqueName("mb-")
+			metricName := fmt.Sprintf(
+				`mantle_backup_oldest_unsynced_creation_timestamp_seconds{persistentvolumeclaim=%q,resource_namespace=%q}`,
+				unsyncedPVCName, namespace)
+			getMetrics := func(g Gomega) string {
+				controllerPod, err := GetControllerPodName(PrimaryK8sCluster)
+				g.Expect(err).NotTo(HaveOccurred())
+				stdout, _, err := Kubectl(PrimaryK8sCluster, nil, "exec", "-n", CephCluster1Namespace, controllerPod, "--",
+					"curl", "-s", "http://localhost:8080/metrics")
+				g.Expect(err).NotTo(HaveOccurred())
+
+				return string(stdout)
+			}
+
+			// Pause the object storage, so that the backup stops before it is synced.
+			PauseObjectStorage(ctx)
+			defer ResumeObjectStorage(ctx)
+
+			CreatePVC(ctx, PrimaryK8sCluster, namespace, unsyncedPVCName, SCName1)
+			CreateMantleBackup(PrimaryK8sCluster, namespace, unsyncedPVCName, unsyncedBackupName)
+			WaitMantleBackupSnapshotCaptured(PrimaryK8sCluster, namespace, unsyncedBackupName)
+
+			Eventually(ctx, func(g Gomega) {
+				g.Expect(strings.Contains(getMetrics(g), metricName)).To(BeTrue())
+			}).Should(Succeed())
+
+			ResumeObjectStorage(ctx)
+			WaitMantleBackupSynced(namespace, unsyncedBackupName)
+
+			Eventually(ctx, func(g Gomega) {
+				g.Expect(strings.Contains(getMetrics(g), metricName)).To(BeFalse())
+			}).Should(Succeed())
+		})
 })
 
 var _ = Describe("miscellaneous tests", func() {
