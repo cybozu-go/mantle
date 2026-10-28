@@ -296,7 +296,7 @@ var _ = Describe("MantleBackup controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			resMgr.WaitForBackupSnapshotCaptured(ctx, backup)
-			Expect(backup.GetLabels()[labelClusterID]).To(Equal(resMgr.ClusterID))
+			Expect(backup.GetLabels()[domain.LabelClusterID]).To(Equal(resMgr.ClusterID))
 		})
 
 		It("should capture snapshot", func(ctx SpecContext) {
@@ -1012,7 +1012,7 @@ var _ = Describe("checkManagedBackup", func() {
 				Spec: mantlev1.MantleBackupSpec{PVC: pvcName},
 			}
 			if labeled {
-				backup.SetLabels(map[string]string{labelClusterID: resMgr.ClusterID})
+				backup.SetLabels(map[string]string{domain.LabelClusterID: resMgr.ClusterID})
 			}
 
 			r := NewMantleBackupReconciler(
@@ -1192,8 +1192,8 @@ func createMantleBackupInClient(ctrlClient client.Client, backup *mantlev1.Mantl
 // testManagedCephClusterID, with overrides applied on top.
 func highPriorityLabels(overrides map[string]string) map[string]string {
 	l := map[string]string{
-		LabelBackupPriority: labelBackupPriorityHigh,
-		labelClusterID:      testManagedCephClusterID,
+		LabelBackupPriority:   labelBackupPriorityHigh,
+		domain.LabelClusterID: testManagedCephClusterID,
 	}
 	maps.Copy(l, overrides)
 
@@ -1260,7 +1260,7 @@ var _ = Describe("listHigherPriorityBackups", func() {
 		Entry("excludes a high priority MantleBackup from a different managed Ceph cluster",
 			[]*mantlev1.MantleBackup{
 				newMantleBackup("high1", "other-ns", nil,
-					highPriorityLabels(map[string]string{labelClusterID: "another-cluster"}), false, 1,
+					highPriorityLabels(map[string]string{domain.LabelClusterID: "another-cluster"}), false, 1,
 					metav1.ConditionTrue, metav1.ConditionFalse),
 			},
 			[]string{},
@@ -1350,7 +1350,7 @@ var _ = Describe("shouldWaitForHigherPriorityBackup", func() {
 				metav1.ConditionTrue, metav1.ConditionFalse),
 			[]*mantlev1.MantleBackup{
 				newMantleBackup("same-pvc-high", "other-ns", nil,
-					map[string]string{labelLocalBackupTargetPVCUID: "shared-pvc-uid", LabelBackupPriority: labelBackupPriorityHigh, labelClusterID: testManagedCephClusterID},
+					map[string]string{labelLocalBackupTargetPVCUID: "shared-pvc-uid", LabelBackupPriority: labelBackupPriorityHigh, domain.LabelClusterID: testManagedCephClusterID},
 					false, 1, metav1.ConditionTrue, metav1.ConditionFalse),
 			},
 			nil,
@@ -1363,7 +1363,7 @@ var _ = Describe("shouldWaitForHigherPriorityBackup", func() {
 				metav1.ConditionTrue, metav1.ConditionFalse),
 			[]*mantlev1.MantleBackup{
 				newMantleBackup("same-pvc-high", "other-ns", nil,
-					map[string]string{labelLocalBackupTargetPVCUID: "shared-pvc-uid", LabelBackupPriority: labelBackupPriorityHigh, labelClusterID: testManagedCephClusterID},
+					map[string]string{labelLocalBackupTargetPVCUID: "shared-pvc-uid", LabelBackupPriority: labelBackupPriorityHigh, domain.LabelClusterID: testManagedCephClusterID},
 					false, 1, metav1.ConditionTrue, metav1.ConditionFalse),
 				newMantleBackup("high1", "other-ns", nil, highPriorityLabels(nil), false, 1,
 					metav1.ConditionTrue, metav1.ConditionFalse),
@@ -1430,7 +1430,7 @@ var _ = Describe("shouldWaitForHigherPriorityImport", func() {
 				metav1.ConditionFalse, metav1.ConditionUnknown),
 			[]*mantlev1.MantleBackup{
 				newMantleBackup("same-pvc-high", "other-ns", nil,
-					map[string]string{labelLocalBackupTargetPVCUID: "shared-pvc-uid", LabelBackupPriority: labelBackupPriorityHigh, labelClusterID: testManagedCephClusterID},
+					map[string]string{labelLocalBackupTargetPVCUID: "shared-pvc-uid", LabelBackupPriority: labelBackupPriorityHigh, domain.LabelClusterID: testManagedCephClusterID},
 					false, 1, metav1.ConditionFalse, metav1.ConditionUnknown),
 			},
 			false,
@@ -1442,7 +1442,7 @@ var _ = Describe("shouldWaitForHigherPriorityImport", func() {
 				metav1.ConditionFalse, metav1.ConditionUnknown),
 			[]*mantlev1.MantleBackup{
 				newMantleBackup("same-pvc-high", "other-ns", nil,
-					map[string]string{labelLocalBackupTargetPVCUID: "shared-pvc-uid", LabelBackupPriority: labelBackupPriorityHigh, labelClusterID: testManagedCephClusterID},
+					map[string]string{labelLocalBackupTargetPVCUID: "shared-pvc-uid", LabelBackupPriority: labelBackupPriorityHigh, domain.LabelClusterID: testManagedCephClusterID},
 					false, 1, metav1.ConditionFalse, metav1.ConditionUnknown),
 				newMantleBackup("high1", "other-ns", nil, highPriorityLabels(nil), false, 1,
 					metav1.ConditionFalse, metav1.ConditionUnknown),
@@ -1899,7 +1899,7 @@ var _ = Describe("priority gate vs SnapID-ordering gate deadlock regression", fu
 
 		newUnsyncedBackup := func(name string, snapID int, extraLabels map[string]string) *mantlev1.MantleBackup {
 			backupLabels := map[string]string{
-				labelClusterID:               testManagedCephClusterID,
+				domain.LabelClusterID:        testManagedCephClusterID,
 				labelLocalBackupTargetPVCUID: testPVCUID,
 			}
 			maps.Copy(backupLabels, extraLabels)
@@ -1957,7 +1957,7 @@ var _ = Describe("priority gate vs SnapID-ordering gate deadlock regression", fu
 
 		newPVCBackup := func(pvcUID, name string, snapID int, extraLabels map[string]string) *mantlev1.MantleBackup {
 			backupLabels := map[string]string{
-				labelClusterID:               testManagedCephClusterID,
+				domain.LabelClusterID:        testManagedCephClusterID,
 				labelLocalBackupTargetPVCUID: pvcUID,
 			}
 			maps.Copy(backupLabels, extraLabels)
@@ -3187,7 +3187,7 @@ var _ = Describe("export and upload", func() {
 				createBackup := func(name string, highPriority bool) *mantlev1.MantleBackup {
 					GinkgoHelper()
 
-					newLabels := map[string]string{labelClusterID: nsController}
+					newLabels := map[string]string{domain.LabelClusterID: nsController}
 					if highPriority {
 						newLabels[LabelBackupPriority] = labelBackupPriorityHigh
 					}

@@ -51,13 +51,6 @@ import (
 const (
 	MantleBackupFinalizerName = "mantlebackup.mantle.cybozu.io/finalizer"
 
-	// labelClusterID identifies the controller that should reconcile the
-	// MantleBackup, guaranteeing there is never a MantleBackup that has a
-	// non-nil deletionTimestamp but no controller responsible for it. To
-	// uphold this guarantee, the label is attached at the same time as the
-	// finalizer, and any cleanup that must run (e.g. deleting the RBD snapshot)
-	// is only performed after both this label and the finalizer are attached.
-	labelClusterID                = "mantle.cybozu.io/cluster-id"
 	labelLocalBackupTargetPVCUID  = "mantle.cybozu.io/local-backup-target-pvc-uid"
 	labelRemoteBackupTargetPVCUID = "mantle.cybozu.io/remote-backup-target-pvc-uid"
 	LabelBackupPriority           = "mantle.cybozu.io/backup-priority"
@@ -490,7 +483,7 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 func (r *MantleBackupReconciler) checkManagedBackup(ctx context.Context, backup *mantlev1.MantleBackup) *reconcile.Result {
 	// If the MantleBackup resource has a label indicating that it is managed by this controller.
 	if backup.Labels != nil {
-		if clusterID, ok := backup.Labels[labelClusterID]; ok {
+		if clusterID, ok := backup.Labels[domain.LabelClusterID]; ok {
 			if clusterID == r.managedCephClusterID {
 				return nil
 			}
@@ -544,8 +537,8 @@ func (r *MantleBackupReconciler) reconcileLocalBackup(ctx context.Context, backu
 	if backup.Labels == nil {
 		backup.Labels = make(map[string]string)
 	}
-	if _, ok := backup.Labels[labelClusterID]; !ok {
-		backup.Labels[labelClusterID] = r.managedCephClusterID
+	if _, ok := backup.Labels[domain.LabelClusterID]; !ok {
+		backup.Labels[domain.LabelClusterID] = r.managedCephClusterID
 		updated = true
 	}
 	// Attach local-backup-target-pvc-uid label before trying to create a RBD
@@ -850,8 +843,8 @@ func (r *MantleBackupReconciler) listHigherPriorityBackups(
 	var backupList mantlev1.MantleBackupList
 	if err := r.List(ctx, &backupList, &client.ListOptions{
 		LabelSelector: labels.SelectorFromSet(map[string]string{
-			LabelBackupPriority: labelBackupPriorityHigh,
-			labelClusterID:      r.managedCephClusterID,
+			LabelBackupPriority:   labelBackupPriorityHigh,
+			domain.LabelClusterID: r.managedCephClusterID,
 		}),
 	}); err != nil {
 		return nil, fmt.Errorf("failed to list high priority MantleBackup resources: %w", err)
@@ -1083,7 +1076,7 @@ func (r *MantleBackupReconciler) replicateManifests(
 		domain.AnnotRemoteUID: string(backup.GetUID()),
 	})
 	backupSentLabels := map[string]string{
-		labelClusterID:                r.managedCephClusterID,
+		domain.LabelClusterID:         r.managedCephClusterID,
 		labelLocalBackupTargetPVCUID:  resp.GetUid(),
 		labelRemoteBackupTargetPVCUID: string(pvc.GetUID()),
 	}

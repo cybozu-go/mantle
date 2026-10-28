@@ -157,10 +157,10 @@ func (s *SecondaryServer) CreateMantleBackup(
 			backupReceived.GetName(), backupReceived.GetNamespace())
 	}
 
-	primaryClusterID, ok := backupReceived.Labels[labelClusterID]
+	primaryClusterID, ok := backupReceived.Labels[domain.LabelClusterID]
 	if !ok {
 		return nil, fmt.Errorf("label not found in the received MantleBackup: %s: %s: %s",
-			labelClusterID, backupReceived.GetName(), backupReceived.GetNamespace())
+			domain.LabelClusterID, backupReceived.GetName(), backupReceived.GetNamespace())
 	}
 	if primaryClusterID != s.managedCephClusterID {
 		return nil, fmt.Errorf("cluster-id not matched: %s: %s: %s",
