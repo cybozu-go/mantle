@@ -9,6 +9,7 @@ import (
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/ceph"
+	"github.com/cybozu-go/mantle/internal/controller/infra"
 	corev1 "k8s.io/api/core/v1"
 	aerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -118,7 +119,7 @@ func (r *MantleRestoreReconciler) restore(ctx context.Context, restore *mantlev1
 	}
 
 	// check if the PVC is managed by the target Ceph cluster
-	clusterID, err := getCephClusterIDFromPVC(ctx, r.client, &pvc)
+	clusterID, err := infra.GetCephClusterIDFromPVC(ctx, r.client, &pvc)
 	if err != nil {
 		logger.Error(err, "failed to get Ceph cluster ID")
 
