@@ -2,6 +2,7 @@ package controller
 
 import (
 	"github.com/cybozu-go/mantle/internal/ceph"
+	"github.com/cybozu-go/mantle/internal/controller/infra"
 	"github.com/cybozu-go/mantle/test/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -169,7 +170,7 @@ var _ = Describe("util.createCloneByPV", func() {
 	)
 })
 
-var _ = Describe("util.getCephClusterIDFromPVC", func() {
+var _ = Describe("infra.GetCephClusterIDFromPVC", func() {
 	var namespace string
 	storageClassName := util.GetUniqueName("sc-")
 
@@ -189,7 +190,7 @@ var _ = Describe("util.getCephClusterIDFromPVC", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// test main
-			clusterID, err := getCephClusterIDFromPVC(ctx, k8sClient, pvc)
+			clusterID, err := infra.GetCephClusterIDFromPVC(ctx, k8sClient, pvc)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(clusterID).To(Equal(expectedClusterID))
 
