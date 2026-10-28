@@ -503,7 +503,7 @@ func (r *MantleBackupReconciler) checkManagedBackup(ctx context.Context, backup 
 		return reconcile.Failed("failed to get the PVC specified in the MantleBackup resource: %w", err)
 	}
 
-	clusterID, err := getCephClusterIDFromPVC(ctx, r.Client, &pvc)
+	clusterID, err := infra.GetCephClusterIDFromPVC(ctx, r.Client, &pvc)
 	if err != nil {
 		return reconcile.Failed("failed to get the Ceph cluster ID from the PVC: %w", err)
 	}
