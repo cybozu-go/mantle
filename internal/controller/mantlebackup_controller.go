@@ -200,9 +200,9 @@ func NewMantleBackupReconciler(
 		proxySettings:          proxySettings,
 		backupTransferPartSize: backupTransferPartSize,
 		exportedDiffSizeCache:  map[types.UID]exportedDiffSizeCacheEntry{},
-		reconcileMBStandalone:  usecase.NewReconcileMBStandalone(k8sClient),
-		reconcileMBPrimary:     usecase.NewReconcileMBPrimary(k8sClient),
-		reconcileMBSecondary:   usecase.NewReconcileMBSecondary(k8sClient),
+		reconcileMBStandalone:  usecase.NewReconcileMBStandalone(k8sClient, managedCephClusterID),
+		reconcileMBPrimary:     usecase.NewReconcileMBPrimary(k8sClient, managedCephClusterID),
+		reconcileMBSecondary:   usecase.NewReconcileMBSecondary(k8sClient, managedCephClusterID),
 	}
 }
 
@@ -445,11 +445,6 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	logger = logger.WithValues("backupUID", string(backup.GetUID()))
 	ctx = log.IntoContext(ctx, logger)
 
-	if result := r.checkManagedBackup(ctx, &backup); result.ShouldReturn() {
-		return result.ToCtrlResult()
-	}
-	logger.Info("starting reconciliation")
-
 	var result *reconcile.Result
 
 	switch r.role {
@@ -477,44 +472,6 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	panic("unreachable")
-}
-
-// checkManagedBackup checks if the MantleBackup resource is managed by this controller.
-func (r *MantleBackupReconciler) checkManagedBackup(ctx context.Context, backup *mantlev1.MantleBackup) *reconcile.Result {
-	// If the MantleBackup resource has a label indicating that it is managed by this controller.
-	if backup.Labels != nil {
-		if clusterID, ok := backup.Labels[domain.LabelClusterID]; ok {
-			if clusterID == r.managedCephClusterID {
-				return nil
-			}
-			// The MantleBackup resource is managed by a different controller, so we return a successful reconcile result to stop further processing.
-			return reconcile.Succeeded()
-		}
-	}
-
-	var pvc corev1.PersistentVolumeClaim
-	if err := r.Get(ctx, types.NamespacedName{Namespace: backup.Namespace, Name: backup.Spec.PVC}, &pvc); err != nil {
-		if aerrors.IsNotFound(err) {
-			log.FromContext(ctx).Info("waiting for the PVC specified in the MantleBackup to be created", "pvc", backup.Spec.PVC)
-
-			return reconcile.Requeue()
-		}
-
-		return reconcile.Failed("failed to get the PVC specified in the MantleBackup resource: %w", err)
-	}
-
-	clusterID, err := infra.GetCephClusterIDFromPVC(ctx, r.Client, &pvc)
-	if err != nil {
-		return reconcile.Failed("failed to get the Ceph cluster ID from the PVC: %w", err)
-	}
-
-	// If the cluster ID of the PVC does not match the managed Ceph cluster ID, it means that the PVC is not managed by this controller.
-	// In this case, we return a successful reconcile result to stop further processing.
-	if clusterID != r.managedCephClusterID {
-		return reconcile.Succeeded()
-	}
-
-	return nil
 }
 
 func (r *MantleBackupReconciler) reconcileLocalBackup(ctx context.Context, backup *mantlev1.MantleBackup) *reconcile.Result {

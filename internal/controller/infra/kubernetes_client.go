@@ -28,6 +28,10 @@ func NewKubernetesClient(c client.Client) *KubernetesClient {
 	return &KubernetesClient{c}
 }
 
+func (c *KubernetesClient) GetCephClusterIDFromPVC(ctx context.Context, pvc *corev1.PersistentVolumeClaim) (string, error) {
+	return GetCephClusterIDFromPVC(ctx, c.Client, pvc)
+}
+
 func (c *KubernetesClient) ApplyReconcilerOperations(ctx context.Context, operations []domain.Operation) error {
 	logger := log.FromContext(ctx)
 	var dispatchError error
