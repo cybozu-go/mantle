@@ -79,14 +79,15 @@ type mbReconciler interface {
 }
 
 // runMBReconciler runs the domain reconciler of MantleBackup. It fetches the
-// MantleBackup, checks if it is managed, and calls Provision or Finalize based on
-// the deletion timestamp.
+// MantleBackup, checks if it is managed, calls Provision or Finalize based on the
+// deletion timestamp, and applies the operations that the reconciler issued.
 func runMBReconciler(
 	ctx context.Context,
 	k8sClient KubernetesClient,
 	managedCephClusterID string,
 	backupNamespacedName types.NamespacedName,
 	reconciler mbReconciler,
+	operations *domain.ReconcilerOperations,
 ) *reconcile.Result {
 	backup, err := getResource[mantlev1.MantleBackup](
 		ctx, k8sClient, backupNamespacedName.Name, backupNamespacedName.Namespace,
@@ -105,9 +106,19 @@ func runMBReconciler(
 
 	log.FromContext(ctx).Info("starting reconciliation")
 
+	_ = operations.TakeAll()
+
+	var result *reconcile.Result
 	if backup.DeletionTimestamp.IsZero() {
-		return reconciler.Provision(ctx, backup)
+		result = reconciler.Provision(ctx, backup)
+	} else {
+		result = reconciler.Finalize(ctx, backup)
 	}
 
-	return reconciler.Finalize(ctx, backup)
+	err = k8sClient.ApplyReconcilerOperations(ctx, operations.TakeAll())
+	if err != nil {
+		return reconcile.Failed("failed to apply reconciler operations: %w", err)
+	}
+
+	return result
 }

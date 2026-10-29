@@ -29,5 +29,7 @@ func (r *ReconcileMBSecondary) Run(
 	ctx context.Context,
 	backupNamespacedName types.NamespacedName,
 ) *reconcile.Result {
-	return runMBReconciler(ctx, r.k8sClient, r.managedCephClusterID, backupNamespacedName, r.reconciler)
+	return runMBReconciler(
+		ctx, r.k8sClient, r.managedCephClusterID, backupNamespacedName, r.reconciler, r.reconciler.Operations,
+	)
 }
