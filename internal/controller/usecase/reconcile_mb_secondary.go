@@ -17,9 +17,9 @@ type ReconcileMBSecondary struct {
 }
 
 // NewReconcileMBSecondary creates a new ReconcileMBSecondary.
-func NewReconcileMBSecondary(k8sClient KubernetesClient) *ReconcileMBSecondary {
+func NewReconcileMBSecondary(k8sClient KubernetesClient, managedCephClusterID string) *ReconcileMBSecondary {
 	return &ReconcileMBSecondary{
-		reconciler: domain.NewMBSecondaryReconciler(),
+		reconciler: domain.NewMBSecondaryReconciler(managedCephClusterID, k8sClient),
 		k8sClient:  k8sClient,
 	}
 }
