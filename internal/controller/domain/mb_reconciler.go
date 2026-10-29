@@ -8,6 +8,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+// MBKubernetesClient is the Kubernetes client that the domain reconcilers of MantleBackup use.
+type MBKubernetesClient interface { //nolint:iface // It gets more methods as more reconciliation moves here.
+	PVCClusterIDGetter
+}
+
 // isCreatedWhenMantleControllerWasSecondary returns true iff the MantleBackup
 // is created by the secondary mantle.
 func isCreatedWhenMantleControllerWasSecondary(backup *mantlev1.MantleBackup) bool {

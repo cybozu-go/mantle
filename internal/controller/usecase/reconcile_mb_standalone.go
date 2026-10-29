@@ -17,9 +17,9 @@ type ReconcileMBStandalone struct {
 }
 
 // NewReconcileMBStandalone creates a new ReconcileMBStandalone.
-func NewReconcileMBStandalone(k8sClient KubernetesClient) *ReconcileMBStandalone {
+func NewReconcileMBStandalone(k8sClient KubernetesClient, managedCephClusterID string) *ReconcileMBStandalone {
 	return &ReconcileMBStandalone{
-		reconciler: domain.NewMBStandaloneReconciler(),
+		reconciler: domain.NewMBStandaloneReconciler(managedCephClusterID, k8sClient),
 		k8sClient:  k8sClient,
 	}
 }

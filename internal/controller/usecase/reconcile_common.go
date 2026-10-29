@@ -12,6 +12,7 @@ import (
 // KubernetesClient is an interface for Kubernetes client operations used by reconcilers.
 type KubernetesClient interface {
 	client.Client
+	domain.MBKubernetesClient
 	ApplyReconcilerOperations(ctx context.Context, operations []domain.Operation) error
 }
 
