@@ -10,17 +10,15 @@ import (
 
 // ReconcileMBSecondary reconciles MantleBackup resources on a secondary cluster.
 type ReconcileMBSecondary struct {
-	reconciler           *domain.MBSecondaryReconciler
-	k8sClient            KubernetesClient
-	managedCephClusterID string
+	reconciler *domain.MBSecondaryReconciler
+	k8sClient  KubernetesClient
 }
 
 // NewReconcileMBSecondary creates a new ReconcileMBSecondary.
 func NewReconcileMBSecondary(k8sClient KubernetesClient, managedCephClusterID string) *ReconcileMBSecondary {
 	return &ReconcileMBSecondary{
-		reconciler:           domain.NewMBSecondaryReconciler(),
-		k8sClient:            k8sClient,
-		managedCephClusterID: managedCephClusterID,
+		reconciler: domain.NewMBSecondaryReconciler(managedCephClusterID, k8sClient),
+		k8sClient:  k8sClient,
 	}
 }
 
@@ -29,7 +27,5 @@ func (r *ReconcileMBSecondary) Run(
 	ctx context.Context,
 	backupNamespacedName types.NamespacedName,
 ) *reconcile.Result {
-	return runMBReconciler(
-		ctx, r.k8sClient, r.managedCephClusterID, backupNamespacedName, r.reconciler, r.reconciler.Operations,
-	)
+	return runMBReconciler(ctx, r.k8sClient, backupNamespacedName, r.reconciler, r.reconciler.Operations)
 }

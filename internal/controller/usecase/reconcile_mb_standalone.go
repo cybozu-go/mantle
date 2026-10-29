@@ -10,17 +10,15 @@ import (
 
 // ReconcileMBStandalone reconciles MantleBackup resources on a standalone cluster.
 type ReconcileMBStandalone struct {
-	reconciler           *domain.MBStandaloneReconciler
-	k8sClient            KubernetesClient
-	managedCephClusterID string
+	reconciler *domain.MBStandaloneReconciler
+	k8sClient  KubernetesClient
 }
 
 // NewReconcileMBStandalone creates a new ReconcileMBStandalone.
 func NewReconcileMBStandalone(k8sClient KubernetesClient, managedCephClusterID string) *ReconcileMBStandalone {
 	return &ReconcileMBStandalone{
-		reconciler:           domain.NewMBStandaloneReconciler(),
-		k8sClient:            k8sClient,
-		managedCephClusterID: managedCephClusterID,
+		reconciler: domain.NewMBStandaloneReconciler(managedCephClusterID, k8sClient),
+		k8sClient:  k8sClient,
 	}
 }
 
@@ -29,7 +27,5 @@ func (r *ReconcileMBStandalone) Run(
 	ctx context.Context,
 	backupNamespacedName types.NamespacedName,
 ) *reconcile.Result {
-	return runMBReconciler(
-		ctx, r.k8sClient, r.managedCephClusterID, backupNamespacedName, r.reconciler, r.reconciler.Operations,
-	)
+	return runMBReconciler(ctx, r.k8sClient, backupNamespacedName, r.reconciler, r.reconciler.Operations)
 }

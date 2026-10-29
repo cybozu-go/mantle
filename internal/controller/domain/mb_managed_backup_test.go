@@ -3,6 +3,7 @@ package domain_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/cybozu-go/mantle/internal/controller/domain"
@@ -46,8 +47,10 @@ type checkManagedBackupTestCase struct {
 	opts []optionMB
 	// pvcClusterID is the Ceph cluster ID of the PVC. A nil pvcClusterID means
 	// that the PVC does not exist.
-	pvcClusterID    *string
-	getterErr       error
+	pvcClusterID *string
+	getterErr    error
+	// expected is the result of the reconciliation. A nil expected means that the
+	// MantleBackup is managed and is left to the legacy reconciliation.
 	expected        *reconcile.Result
 	expectedFailed  bool
 	expectedLookups []string
@@ -141,36 +144,72 @@ func unlabeledCheckManagedBackupTestCases() []checkManagedBackupTestCase {
 	}
 }
 
-func TestCheckManagedBackup(t *testing.T) {
-	t.Parallel()
+// newManagedPVCClusterIDGetter returns a PVCClusterIDGetter that reports the PVC of
+// newMB belongs to the managed Ceph cluster, so that a MantleBackup built by newMB
+// passes the check of whether it is managed.
+func newManagedPVCClusterIDGetter() *fakePVCClusterIDGetter {
+	return &fakePVCClusterIDGetter{
+		pvcClusterIDs: map[string]string{newMB().Spec.PVC: managedCephClusterID},
+		err:           nil,
+		lookups:       nil,
+	}
+}
+
+// testManagedBackupCheck checks that both Provision and Finalize of the reconciler
+// stop the reconciliation of a MantleBackup that is not managed, and leave a managed
+// one to the legacy reconciliation. baseOpts are applied to every MantleBackup so
+// that it passes the ownership guard of the reconciler.
+func testManagedBackupCheck(
+	t *testing.T,
+	newReconciler func(pvcClusterIDGetter domain.PVCClusterIDGetter) mbReconciler,
+	baseOpts []optionMB,
+) {
+	t.Helper()
 
 	testCases := append(labeledCheckManagedBackupTestCases(), unlabeledCheckManagedBackupTestCases()...)
-	for _, testCase := range testCases {
-		t.Run(testCase.name, func(t *testing.T) {
-			t.Parallel()
+	for _, method := range []string{"Provision", "Finalize"} {
+		for _, testCase := range testCases {
+			t.Run(method+"/"+testCase.name, func(t *testing.T) {
+				t.Parallel()
 
-			// Arrange
-			backup := newMB(testCase.opts...)
-			origBackup := backup.DeepCopy()
-			getter := &fakePVCClusterIDGetter{pvcClusterIDs: map[string]string{}, err: testCase.getterErr, lookups: nil}
+				// Arrange
+				opts := append(slices.Clone(baseOpts), testCase.opts...)
+				if method == "Finalize" {
+					opts = append(opts, mbBeingDeleted())
+				}
 
-			if testCase.pvcClusterID != nil {
-				getter.pvcClusterIDs[backup.Spec.PVC] = *testCase.pvcClusterID
-			}
+				backup := newMB(opts...)
+				origBackup := backup.DeepCopy()
+				getter := &fakePVCClusterIDGetter{pvcClusterIDs: map[string]string{}, err: testCase.getterErr, lookups: nil}
 
-			// Act
-			result := domain.CheckManagedBackup(t.Context(), backup, managedCephClusterID, getter)
+				if testCase.pvcClusterID != nil {
+					getter.pvcClusterIDs[backup.Spec.PVC] = *testCase.pvcClusterID
+				}
 
-			// Assert
-			if testCase.expectedFailed {
-				_, err := result.ToCtrlResult()
-				require.ErrorIs(t, err, testCase.getterErr)
-			} else {
-				require.Equal(t, testCase.expected, result)
-			}
+				reconciler := newReconciler(getter)
 
-			require.Equal(t, testCase.expectedLookups, getter.lookups)
-			require.Equal(t, origBackup, backup)
-		})
+				// Act
+				var result *reconcile.Result
+				if method == "Provision" {
+					result = reconciler.Provision(t.Context(), backup)
+				} else {
+					result = reconciler.Finalize(t.Context(), backup)
+				}
+
+				// Assert
+				switch {
+				case testCase.expectedFailed:
+					_, err := result.ToCtrlResult()
+					require.ErrorIs(t, err, testCase.getterErr)
+				case testCase.expected == nil:
+					require.Equal(t, reconcile.ContinueWithLegacyReconcile(), result)
+				default:
+					require.Equal(t, testCase.expected, result)
+				}
+
+				require.Equal(t, testCase.expectedLookups, getter.lookups)
+				require.Equal(t, origBackup, backup)
+			})
+		}
 	}
 }

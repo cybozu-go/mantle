@@ -16,13 +16,14 @@ type PVCClusterIDGetter interface {
 	GetCephClusterIDOfPVC(ctx context.Context, namespace, name string) (clusterID string, found bool, err error)
 }
 
-// CheckManagedBackup checks if the MantleBackup is managed by the controller in charge of
-// the Ceph cluster managedCephClusterID. It returns nil if the MantleBackup is managed,
-// and a successful result to stop further processing if it is not.
+// checkManagedBackup checks if the MantleBackup is managed by the controller in charge of
+// the Ceph cluster managedCephClusterID. It returns nil and logs the start of the
+// reconciliation if the MantleBackup is managed, and returns a successful result to stop
+// further processing if it is not.
 //
 // If the MantleBackup doesn't have the cluster-id label, the Ceph cluster ID of the PVC
 // specified in the MantleBackup decides it. pvcClusterIDGetter is called only in this case.
-func CheckManagedBackup(
+func checkManagedBackup(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
 	managedCephClusterID string,
@@ -30,7 +31,7 @@ func CheckManagedBackup(
 ) *reconcile.Result {
 	if clusterID, ok := backup.Labels[LabelClusterID]; ok {
 		if clusterID == managedCephClusterID {
-			return nil
+			return startReconciliation(ctx)
 		}
 
 		return reconcile.Succeeded()
@@ -50,6 +51,12 @@ func CheckManagedBackup(
 	if pvcClusterID != managedCephClusterID {
 		return reconcile.Succeeded()
 	}
+
+	return startReconciliation(ctx)
+}
+
+func startReconciliation(ctx context.Context) *reconcile.Result {
+	log.FromContext(ctx).Info("starting reconciliation")
 
 	return nil
 }

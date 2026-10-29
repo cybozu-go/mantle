@@ -10,7 +10,6 @@ import (
 	aerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // KubernetesClient is an interface for Kubernetes client operations used by reconcilers.
@@ -49,12 +48,11 @@ type mbReconciler interface {
 }
 
 // runMBReconciler runs the domain reconciler of MantleBackup. It fetches the
-// MantleBackup, checks if it is managed, calls Provision or Finalize based on the
-// deletion timestamp, and applies the operations that the reconciler issued.
+// MantleBackup, calls Provision or Finalize based on the deletion timestamp, and
+// applies the operations that the reconciler issued.
 func runMBReconciler(
 	ctx context.Context,
 	k8sClient KubernetesClient,
-	managedCephClusterID string,
 	backupNamespacedName types.NamespacedName,
 	reconciler mbReconciler,
 	operations *domain.ReconcilerOperations,
@@ -69,12 +67,6 @@ func runMBReconciler(
 
 		return reconcile.Failed("failed to get MantleBackup: %w", err)
 	}
-
-	if result := domain.CheckManagedBackup(ctx, backup, managedCephClusterID, k8sClient); result.ShouldReturn() {
-		return result
-	}
-
-	log.FromContext(ctx).Info("starting reconciliation")
 
 	_ = operations.TakeAll()
 
