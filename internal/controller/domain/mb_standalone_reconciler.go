@@ -9,11 +9,14 @@ import (
 
 // MBStandaloneReconciler reconciles MantleBackup resources on a standalone cluster.
 type MBStandaloneReconciler struct {
+	Operations *ReconcilerOperations
 }
 
 // NewMBStandaloneReconciler creates a new MBStandaloneReconciler.
 func NewMBStandaloneReconciler() *MBStandaloneReconciler {
-	return &MBStandaloneReconciler{}
+	return &MBStandaloneReconciler{
+		Operations: NewReconcilerOperations(),
+	}
 }
 
 // Provision handles the provisioning logic for a MantleBackup resource.

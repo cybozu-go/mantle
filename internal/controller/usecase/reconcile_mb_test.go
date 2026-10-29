@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
@@ -25,6 +26,8 @@ const (
 	mbPVCName              = "pvc-name"
 )
 
+var errApply = errors.New("apply error")
+
 // fakeMBKubernetesClient is a usecase.KubernetesClient backed by the fake client of
 // controller-runtime. It records the calls that the use case makes to it.
 type fakeMBKubernetesClient struct {
@@ -32,12 +35,13 @@ type fakeMBKubernetesClient struct {
 
 	pvcClusterIDs    map[string]string
 	clusterIDLookups []string
+	applyErr         error
 }
 
 var _ usecase.KubernetesClient = (*fakeMBKubernetesClient)(nil)
 
 func (c *fakeMBKubernetesClient) ApplyReconcilerOperations(context.Context, []domain.Operation) error {
-	return nil
+	return c.applyErr
 }
 
 // GetCephClusterIDOfPVC returns the Ceph cluster ID of the PVC from pvcClusterIDs.
@@ -128,6 +132,7 @@ func newFakeMBKubernetesClient(t *testing.T, objects ...client.Object) *fakeMBKu
 			Build(),
 		pvcClusterIDs:    map[string]string{},
 		clusterIDLookups: nil,
+		applyErr:         nil,
 	}
 }
 
@@ -223,5 +228,29 @@ func TestReconcileMB_Run_ManagedBackupCheck(t *testing.T) {
 				require.Equal(t, testCase.expectedClusterIDLookups, k8sClient.clusterIDLookups)
 			})
 		}
+	}
+}
+
+func TestReconcileMB_Run_ApplyOperationsFailure(t *testing.T) {
+	t.Parallel()
+
+	for _, role := range mbRoles() {
+		t.Run(role.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Arrange
+			k8sClient := newFakeMBKubernetesClient(t, newTestMB(role, withMBClusterIDLabel(mbManagedCephClusterID)))
+			k8sClient.applyErr = errApply
+			runner := role.newRunner(k8sClient)
+
+			// Act
+			result := runner.Run(t.Context(), types.NamespacedName{Namespace: mbNamespace, Name: mbName})
+
+			// Assert
+			require.False(t, result.ShouldContinueWithLegacyReconcile())
+
+			_, err := result.ToCtrlResult()
+			require.ErrorIs(t, err, errApply)
+		})
 	}
 }

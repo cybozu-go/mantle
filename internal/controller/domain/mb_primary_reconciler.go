@@ -9,11 +9,14 @@ import (
 
 // MBPrimaryReconciler reconciles MantleBackup resources on a primary cluster.
 type MBPrimaryReconciler struct {
+	Operations *ReconcilerOperations
 }
 
 // NewMBPrimaryReconciler creates a new MBPrimaryReconciler.
 func NewMBPrimaryReconciler() *MBPrimaryReconciler {
-	return &MBPrimaryReconciler{}
+	return &MBPrimaryReconciler{
+		Operations: NewReconcilerOperations(),
+	}
 }
 
 // Provision handles the provisioning logic for a MantleBackup resource.
