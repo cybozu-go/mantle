@@ -28,6 +28,10 @@ func (r *MBPrimaryReconciler) Provision(
 		return skipBackupCreatedAsSecondary(ctx)
 	}
 
+	if result := expire(ctx, backup, r.Operations); result.ShouldReturn() {
+		return result.WrapIfError("failed to expire backup")
+	}
+
 	return reconcile.ContinueWithLegacyReconcile()
 }
 

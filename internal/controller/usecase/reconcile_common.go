@@ -17,6 +17,8 @@ import (
 // KubernetesClient is an interface for Kubernetes client operations used by reconcilers.
 type KubernetesClient interface {
 	client.Client
+	// ApplyReconcilerOperations executes the operations in the given order, and stops at
+	// the first failure without executing the remaining operations.
 	ApplyReconcilerOperations(ctx context.Context, operations []domain.Operation) error
 	// GetCephClusterIDFromPVC returns the Ceph cluster ID of the PVC, or an empty string
 	// if the PVC is not managed by any Ceph cluster.

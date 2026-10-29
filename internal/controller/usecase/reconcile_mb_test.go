@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/controller/domain"
@@ -34,14 +35,17 @@ var errApply = errors.New("apply error")
 type fakeMBKubernetesClient struct {
 	client.Client
 
-	pvcClusterIDs    map[string]string
-	clusterIDLookups []string
-	applyErr         error
+	pvcClusterIDs     map[string]string
+	clusterIDLookups  []string
+	appliedOperations []domain.Operation
+	applyErr          error
 }
 
 var _ usecase.KubernetesClient = (*fakeMBKubernetesClient)(nil)
 
-func (c *fakeMBKubernetesClient) ApplyReconcilerOperations(context.Context, []domain.Operation) error {
+func (c *fakeMBKubernetesClient) ApplyReconcilerOperations(_ context.Context, operations []domain.Operation) error {
+	c.appliedOperations = append(c.appliedOperations, operations...)
+
 	return c.applyErr
 }
 
@@ -101,7 +105,8 @@ func newTestMB(role mbRole, opts ...func(*mantlev1.MantleBackup)) *mantlev1.Mant
 			Annotations: map[string]string{},
 		},
 		Spec: mantlev1.MantleBackupSpec{
-			PVC: mbPVCName,
+			PVC:    mbPVCName,
+			Expire: "2w",
 		},
 	}
 	for _, opt := range append(role.opts, opts...) {
@@ -114,6 +119,19 @@ func newTestMB(role mbRole, opts ...func(*mantlev1.MantleBackup)) *mantlev1.Mant
 func withMBClusterIDLabel(clusterID string) func(*mantlev1.MantleBackup) {
 	return func(backup *mantlev1.MantleBackup) {
 		backup.Labels[domain.LabelClusterID] = clusterID
+	}
+}
+
+func withMBExpired(expired bool) func(*mantlev1.MantleBackup) {
+	return func(backup *mantlev1.MantleBackup) {
+		createdAt := time.Now().UTC().Add(-14 * 24 * time.Hour)
+		if expired {
+			createdAt = createdAt.Add(-time.Hour)
+		} else {
+			createdAt = createdAt.Add(time.Hour)
+		}
+
+		backup.Status.CreatedAt = metav1.NewTime(createdAt)
 	}
 }
 
@@ -139,10 +157,37 @@ func newFakeMBKubernetesClient(t *testing.T, objects ...client.Object) *fakeMBKu
 			WithObjects(objects...).
 			WithStatusSubresource(&mantlev1.MantleBackup{}).
 			Build(),
-		pvcClusterIDs:    map[string]string{},
-		clusterIDLookups: nil,
-		applyErr:         nil,
+		pvcClusterIDs:     map[string]string{},
+		clusterIDLookups:  nil,
+		appliedOperations: nil,
+		applyErr:          nil,
 	}
+}
+
+// operationSummary describes an applied operation by its type and the name of
+// the target MantleBackup, so that the test does not depend on the other fields.
+type operationSummary struct {
+	kind string
+	name string
+}
+
+func summarizeOperations(t *testing.T, operations []domain.Operation) []operationSummary {
+	t.Helper()
+
+	summaries := []operationSummary{}
+
+	for _, operation := range operations {
+		switch op := operation.(type) {
+		case *domain.DeleteMantleBackupOperation:
+			summaries = append(summaries, operationSummary{kind: "delete", name: op.Backup.Name})
+		case *domain.ScheduleExpireOperation:
+			summaries = append(summaries, operationSummary{kind: "schedule-expire", name: op.Backup.Name})
+		default:
+			require.Failf(t, "unexpected operation", "%T", operation)
+		}
+	}
+
+	return summaries
 }
 
 type managedBackupCheckTestCase struct {
@@ -155,6 +200,7 @@ type managedBackupCheckTestCase struct {
 	pvcClusterID             *string
 	expectedResult           *reconcile.Result
 	expectedClusterIDLookups []string
+	expectedOperations       []operationSummary
 }
 
 func managedBackupCheckTestCases() []managedBackupCheckTestCase {
@@ -165,45 +211,57 @@ func managedBackupCheckTestCases() []managedBackupCheckTestCase {
 			pvcClusterID:             nil,
 			expectedResult:           reconcile.Succeeded(),
 			expectedClusterIDLookups: nil,
+			expectedOperations:       []operationSummary{},
 		},
 		{
 			name: "skips the backup labeled for another cluster without the role-specific processing",
 			backupOpts: []func(*mantlev1.MantleBackup){
-				withMBClusterIDLabel(mbOtherCephClusterID),
+				withMBClusterIDLabel(mbOtherCephClusterID), withMBExpired(true),
 			},
 			pvcClusterID:             nil,
 			expectedResult:           reconcile.Succeeded(),
 			expectedClusterIDLookups: nil,
+			expectedOperations:       []operationSummary{},
 		},
 		{
-			name:                     "skips the unlabeled backup whose PVC belongs to another cluster",
-			backupOpts:               []func(*mantlev1.MantleBackup){},
+			name: "skips the unlabeled backup whose PVC belongs to another cluster",
+			backupOpts: []func(*mantlev1.MantleBackup){
+				withMBExpired(true),
+			},
 			pvcClusterID:             new(mbOtherCephClusterID),
 			expectedResult:           reconcile.Succeeded(),
 			expectedClusterIDLookups: []string{mbPVCName},
+			expectedOperations:       []operationSummary{},
 		},
 		{
-			name:                     "requeues the unlabeled backup whose PVC is not found",
-			backupOpts:               []func(*mantlev1.MantleBackup){},
+			name: "requeues the unlabeled backup whose PVC is not found",
+			backupOpts: []func(*mantlev1.MantleBackup){
+				withMBExpired(true),
+			},
 			pvcClusterID:             nil,
 			expectedResult:           reconcile.Requeue(),
 			expectedClusterIDLookups: nil,
+			expectedOperations:       []operationSummary{},
 		},
 		{
 			name: "processes the backup labeled for the managed cluster without looking up the PVC",
 			backupOpts: []func(*mantlev1.MantleBackup){
-				withMBClusterIDLabel(mbManagedCephClusterID),
+				withMBClusterIDLabel(mbManagedCephClusterID), withMBExpired(true),
 			},
 			pvcClusterID:             nil,
-			expectedResult:           reconcile.ContinueWithLegacyReconcile(),
+			expectedResult:           reconcile.Succeeded(),
 			expectedClusterIDLookups: nil,
+			expectedOperations:       []operationSummary{{kind: "delete", name: mbName}},
 		},
 		{
-			name:                     "processes the unlabeled backup whose PVC belongs to the managed cluster",
-			backupOpts:               []func(*mantlev1.MantleBackup){},
+			name: "processes the unlabeled backup whose PVC belongs to the managed cluster",
+			backupOpts: []func(*mantlev1.MantleBackup){
+				withMBExpired(false),
+			},
 			pvcClusterID:             new(mbManagedCephClusterID),
 			expectedResult:           reconcile.ContinueWithLegacyReconcile(),
 			expectedClusterIDLookups: []string{mbPVCName},
+			expectedOperations:       []operationSummary{{kind: "schedule-expire", name: mbName}},
 		},
 	}
 }
@@ -239,6 +297,7 @@ func TestReconcileMB_Run_ManagedBackupCheck(t *testing.T) {
 				// Assert
 				require.Equal(t, testCase.expectedResult, result)
 				require.Equal(t, testCase.expectedClusterIDLookups, k8sClient.clusterIDLookups)
+				require.Equal(t, testCase.expectedOperations, summarizeOperations(t, k8sClient.appliedOperations))
 			})
 		}
 	}
@@ -252,7 +311,9 @@ func TestReconcileMB_Run_ApplyOperationsFailure(t *testing.T) {
 			t.Parallel()
 
 			// Arrange
-			k8sClient := newFakeMBKubernetesClient(t, newTestMB(role, withMBClusterIDLabel(mbManagedCephClusterID)))
+			k8sClient := newFakeMBKubernetesClient(t, newTestMB(role,
+				withMBClusterIDLabel(mbManagedCephClusterID), withMBExpired(false),
+			))
 			k8sClient.applyErr = errApply
 			runner := role.newRunner(k8sClient)
 

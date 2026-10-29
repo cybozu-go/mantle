@@ -69,8 +69,6 @@ const (
 	labelComponentZeroOutVolume   = "zeroout-volume"
 	annotDiffFrom                 = "mantle.cybozu.io/diff-from"
 	annotDiffTo                   = "mantle.cybozu.io/diff-to"
-	annotRetainIfExpired          = "mantle.cybozu.io/retain-if-expired"
-	annotRetainIfExpiredValue     = "true"
 	annotSyncMode                 = "mantle.cybozu.io/sync-mode"
 
 	MantleExportJobPrefix     = "mantle-export-"
@@ -183,9 +181,7 @@ func NewMantleBackupReconciler(
 	proxySettings *ProxySettings,
 	backupTransferPartSize resource.Quantity,
 ) *MantleBackupReconciler {
-	k8sClient := infra.NewKubernetesClient(client)
-
-	return &MantleBackupReconciler{
+	r := &MantleBackupReconciler{
 		Client:                 client,
 		Scheme:                 scheme,
 		ceph:                   ceph.NewCephCmd(),
@@ -200,10 +196,18 @@ func NewMantleBackupReconciler(
 		proxySettings:          proxySettings,
 		backupTransferPartSize: backupTransferPartSize,
 		exportedDiffSizeCache:  map[types.UID]exportedDiffSizeCacheEntry{},
-		reconcileMBStandalone:  usecase.NewReconcileMBStandalone(k8sClient, managedCephClusterID),
-		reconcileMBPrimary:     usecase.NewReconcileMBPrimary(k8sClient, managedCephClusterID),
-		reconcileMBSecondary:   usecase.NewReconcileMBSecondary(k8sClient, managedCephClusterID),
 	}
+
+	// Read r.expireQueueCh on every send instead of capturing the channel here,
+	// so that the operations are sent to the channel the reconciler holds at that time.
+	k8sClient := infra.NewKubernetesClient(client, infra.WithExpireQueue(func(evt event.GenericEvent) {
+		r.expireQueueCh <- evt
+	}))
+	r.reconcileMBStandalone = usecase.NewReconcileMBStandalone(k8sClient, managedCephClusterID)
+	r.reconcileMBPrimary = usecase.NewReconcileMBPrimary(k8sClient, managedCephClusterID)
+	r.reconcileMBSecondary = usecase.NewReconcileMBSecondary(k8sClient, managedCephClusterID)
+
+	return r
 }
 
 func (r *MantleBackupReconciler) removeRBDSnapshot(ctx context.Context, poolName, imageName, snapshotName string) *reconcile.Result {
@@ -361,51 +365,6 @@ func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *
 	return &snapshotTarget{&pvc, &pv, imageName, poolName}, nil
 }
 
-// expire deletes the backup if expired, or schedules deletion via expireQueueCh if not yet.
-func (r *MantleBackupReconciler) expire(ctx context.Context, backup *mantlev1.MantleBackup) *reconcile.Result {
-	logger := log.FromContext(ctx)
-	if backup.Status.CreatedAt.IsZero() {
-		// the RBD snapshot has not be taken yet, do nothing.
-		return nil
-	}
-
-	if !backup.DeletionTimestamp.IsZero() {
-		// DeletionTimestamp is already set; let the caller handle finalization.
-		return nil
-	}
-
-	if v, ok := backup.Annotations[annotRetainIfExpired]; ok && v == annotRetainIfExpiredValue {
-		// retain this backup.
-		// If the annotation is deleted, reconciliation will run, so no need to schedule.
-		return nil
-	}
-
-	expire, err := strfmt.ParseDuration(backup.Spec.Expire)
-	if err != nil {
-		return reconcile.Failed("failed to parse expire duration: %w", err)
-	}
-	expireAt := backup.Status.CreatedAt.Add(expire)
-	if time.Now().UTC().After(expireAt) {
-		// already expired, delete it immediately.
-		logger.Info("delete expired backup", "createdAt", backup.Status.CreatedAt, "expire", expire)
-
-		if err := r.Delete(ctx, backup); err != nil && !aerrors.IsNotFound(err) {
-			return reconcile.Failed("failed to delete expired backup: %w", err)
-		}
-
-		return reconcile.Succeeded()
-	}
-
-	// not expired yet. schedule deletion.
-	// The event may be sent many times, but it is safe because workqueue AddAfter
-	// deduplicates events for same object.
-	r.expireQueueCh <- event.GenericEvent{
-		Object: backup,
-	}
-
-	return nil
-}
-
 //+kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlebackups,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlebackups/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlebackupconfigs,verbs=list;watch
@@ -476,10 +435,6 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 func (r *MantleBackupReconciler) reconcileLocalBackup(ctx context.Context, backup *mantlev1.MantleBackup) *reconcile.Result {
 	logger := log.FromContext(ctx)
-
-	if result := r.expire(ctx, backup); result.ShouldReturn() {
-		return result.WrapIfError("failed to expire backup")
-	}
 
 	if !backup.DeletionTimestamp.IsZero() {
 		return r.finalizeStandalone(ctx, backup)
@@ -824,10 +779,6 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 		return result.WrapIfError("failed to prepare object storage client")
 	}
 
-	if result := r.expire(ctx, backup); result.ShouldReturn() {
-		return result.WrapIfError("failed to expire backup")
-	}
-
 	if !backup.DeletionTimestamp.IsZero() {
 		return r.finalizeSecondary(ctx, backup)
 	}
@@ -857,7 +808,7 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 
 func scheduleExpire(_ context.Context, evt event.TypedGenericEvent[client.Object], q workqueue.TypedRateLimitingInterface[ctrl.Request]) {
 	backup := evt.Object.(*mantlev1.MantleBackup)
-	// the parse never fails because expire method checked it.
+	// the parse never fails because the expiration in the domain layer checked it.
 	expire, _ := strfmt.ParseDuration(backup.Spec.Expire)
 	q.AddAfter(
 		ctrl.Request{

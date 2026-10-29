@@ -14,3 +14,15 @@ func TestMBPrimaryReconciler_SkipBackupCreatedAsSecondary(t *testing.T) {
 		nil,
 	)
 }
+
+func TestMBPrimaryReconciler_Expire(t *testing.T) {
+	t.Parallel()
+	testExpire(t,
+		func() (mbReconciler, *domain.ReconcilerOperations) {
+			reconciler := domain.NewMBPrimaryReconciler()
+
+			return reconciler, reconciler.Operations
+		},
+		nil,
+	)
+}
