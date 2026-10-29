@@ -17,6 +17,8 @@ import (
 type KubernetesClient interface {
 	client.Client
 	domain.PVCClusterIDGetter
+	// ApplyReconcilerOperations executes the operations in the given order, and stops at
+	// the first failure without executing the remaining operations.
 	ApplyReconcilerOperations(ctx context.Context, operations []domain.Operation) error
 }
 

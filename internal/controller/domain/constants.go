@@ -14,4 +14,7 @@ const (
 	// finalizer, and any cleanup that must run (e.g. deleting the RBD snapshot)
 	// is only performed after both this label and the finalizer are attached.
 	LabelClusterID = "mantle.cybozu.io/cluster-id"
+
+	annotRetainIfExpired      = "mantle.cybozu.io/retain-if-expired"
+	annotRetainIfExpiredValue = "true"
 )

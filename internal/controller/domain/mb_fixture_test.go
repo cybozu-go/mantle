@@ -1,6 +1,8 @@
 package domain_test
 
 import (
+	"time"
+
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/controller/domain"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,6 +19,24 @@ func mbWithRemoteUID() optionMB {
 func mbWithClusterIDLabel(clusterID string) optionMB {
 	return func(backup *mantlev1.MantleBackup) {
 		backup.Labels[domain.LabelClusterID] = clusterID
+	}
+}
+
+func mbWithAnnotation(key, value string) optionMB {
+	return func(backup *mantlev1.MantleBackup) {
+		backup.Annotations[key] = value
+	}
+}
+
+func mbWithExpire(expire string) optionMB {
+	return func(backup *mantlev1.MantleBackup) {
+		backup.Spec.Expire = expire
+	}
+}
+
+func mbWithCreatedAt(createdAt time.Time) optionMB {
+	return func(backup *mantlev1.MantleBackup) {
+		backup.Status.CreatedAt = metav1.NewTime(createdAt)
 	}
 }
 
