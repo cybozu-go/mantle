@@ -39,9 +39,9 @@ var _ = Describe("metrics tests", func() {
 			}).Should(Succeed())
 		},
 		Entry(`mantle_mantlebackupconfig_info`, `mantle_mantlebackupconfig_info`),
-		Entry(`mantle_backup_duration_seconds_bucket`, `mantle_backup_duration_seconds_bucket`),
-		Entry(`mantle_backup_duration_seconds_sum`, `mantle_backup_duration_seconds_sum`),
-		Entry(`mantle_backup_duration_seconds_count`, `mantle_backup_duration_seconds_count`),
+		Entry(`mantle_backup_sync_duration_seconds_bucket`, `mantle_backup_sync_duration_seconds_bucket`),
+		Entry(`mantle_backup_sync_duration_seconds_sum`, `mantle_backup_sync_duration_seconds_sum`),
+		Entry(`mantle_backup_sync_duration_seconds_count`, `mantle_backup_sync_duration_seconds_count`),
 		Entry(`mantle_backup_snapshot_duration_seconds_bucket`, `mantle_backup_snapshot_duration_seconds_bucket`),
 		Entry(`mantle_backup_snapshot_duration_seconds_sum`, `mantle_backup_snapshot_duration_seconds_sum`),
 		Entry(`mantle_backup_snapshot_duration_seconds_count`, `mantle_backup_snapshot_duration_seconds_count`),

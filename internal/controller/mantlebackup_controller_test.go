@@ -967,7 +967,7 @@ var _ = Describe("MantleBackup controller", func() {
 					"resource_namespace":    "",
 				})).NotTo(BeNil())
 			},
-			Entry("mantle_backup_duration_seconds", "mantle_backup_duration_seconds"),
+			Entry("mantle_backup_sync_duration_seconds", "mantle_backup_sync_duration_seconds"),
 			Entry("mantle_backup_snapshot_duration_seconds", "mantle_backup_snapshot_duration_seconds"),
 		)
 
