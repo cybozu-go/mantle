@@ -414,10 +414,10 @@ do_test: $(GINKGO)
 	$(GINKGO) --fail-fast -v $(GINKGO_FLAGS) singlek8s; \
 	if [ "$$?" -ne 0 ]; then \
 		echo "Controller logs for $(CEPH_CLUSTER1_NAMESPACE) namespace:"; \
-		$(KUBECTL) logs --tail 100 -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle -c mantle; \
+		$(KUBECTL) logs --tail 1000 -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle -c mantle; \
 		echo ""; \
 		echo "Controller logs for $(CEPH_CLUSTER2_NAMESPACE) namespace:"; \
-		$(KUBECTL) logs --tail 100 -n $(CEPH_CLUSTER2_NAMESPACE) -l app.kubernetes.io/name=mantle -c mantle; \
+		$(KUBECTL) logs --tail 1000 -n $(CEPH_CLUSTER2_NAMESPACE) -l app.kubernetes.io/name=mantle -c mantle; \
 		# Explicitly fail the test to mark the CI job as failed. \
 		exit 1; \
 	fi
