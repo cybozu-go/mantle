@@ -1049,6 +1049,11 @@ func (r *MantleBackupReconciler) replicateManifests(
 		domain.AnnotRemoteUID: string(pvc.GetUID()),
 	})
 	pvcSent.Spec = *pvc.Spec.DeepCopy()
+	// Set the size of the PVC sent to the secondary mantle to the size of the
+	// snapshot associated with this MantleBackup. If the snapshot were smaller
+	// than the PVC sent to the secondary mantle, the volume on the secondary
+	// could end up smaller than its PVC size. It might cause unexpected behavior
+	// when the volume is used.
 	capacity, err := resource.ParseQuantity(strconv.FormatInt(*backup.Status.SnapSize, 10))
 	if err != nil {
 		return reconcile.Failed("failed to parse quantity: %w", err)

@@ -108,6 +108,9 @@ func (s *SecondaryServer) CreateOrUpdatePVC(
 			pvc.Spec.Resources.Requests = pvcReceived.Spec.Resources.Requests
 		} else {
 			// Make sure the remote-uids are equal.
+			// The remote-uid is the UID of the PVC on the primary. Verifying it
+			// prevents creating a wrong backup when a PVC with the same name is
+			// recreated on the primary.
 			errMsg := ""
 			if pvc.Annotations == nil {
 				errMsg = "annotations field is nil in pvc"
