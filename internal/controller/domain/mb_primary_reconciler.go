@@ -9,11 +9,14 @@ import (
 
 // MBPrimaryReconciler reconciles MantleBackup resources on a primary cluster.
 type MBPrimaryReconciler struct {
+	Operations *ReconcilerOperations
 }
 
 // NewMBPrimaryReconciler creates a new MBPrimaryReconciler.
 func NewMBPrimaryReconciler() *MBPrimaryReconciler {
-	return &MBPrimaryReconciler{}
+	return &MBPrimaryReconciler{
+		Operations: NewReconcilerOperations(),
+	}
 }
 
 // Provision handles the provisioning logic for a MantleBackup resource.
@@ -23,6 +26,10 @@ func (r *MBPrimaryReconciler) Provision(
 ) *reconcile.Result {
 	if isCreatedWhenMantleControllerWasSecondary(backup) {
 		return skipBackupCreatedAsSecondary(ctx)
+	}
+
+	if result := expire(ctx, backup, r.Operations); result.ShouldReturn() {
+		return result.WrapIfError("failed to expire backup")
 	}
 
 	return reconcile.ContinueWithLegacyReconcile()

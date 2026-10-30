@@ -51,13 +51,6 @@ import (
 const (
 	MantleBackupFinalizerName = "mantlebackup.mantle.cybozu.io/finalizer"
 
-	// labelClusterID identifies the controller that should reconcile the
-	// MantleBackup, guaranteeing there is never a MantleBackup that has a
-	// non-nil deletionTimestamp but no controller responsible for it. To
-	// uphold this guarantee, the label is attached at the same time as the
-	// finalizer, and any cleanup that must run (e.g. deleting the RBD snapshot)
-	// is only performed after both this label and the finalizer are attached.
-	labelClusterID                = "mantle.cybozu.io/cluster-id"
 	labelLocalBackupTargetPVCUID  = "mantle.cybozu.io/local-backup-target-pvc-uid"
 	labelRemoteBackupTargetPVCUID = "mantle.cybozu.io/remote-backup-target-pvc-uid"
 	LabelBackupPriority           = "mantle.cybozu.io/backup-priority"
@@ -76,8 +69,6 @@ const (
 	labelComponentZeroOutVolume   = "zeroout-volume"
 	annotDiffFrom                 = "mantle.cybozu.io/diff-from"
 	annotDiffTo                   = "mantle.cybozu.io/diff-to"
-	annotRetainIfExpired          = "mantle.cybozu.io/retain-if-expired"
-	annotRetainIfExpiredValue     = "true"
 	annotSyncMode                 = "mantle.cybozu.io/sync-mode"
 
 	MantleExportJobPrefix     = "mantle-export-"
@@ -190,9 +181,7 @@ func NewMantleBackupReconciler(
 	proxySettings *ProxySettings,
 	backupTransferPartSize resource.Quantity,
 ) *MantleBackupReconciler {
-	k8sClient := infra.NewKubernetesClient(client)
-
-	return &MantleBackupReconciler{
+	r := &MantleBackupReconciler{
 		Client:                 client,
 		Scheme:                 scheme,
 		ceph:                   ceph.NewCephCmd(),
@@ -207,10 +196,18 @@ func NewMantleBackupReconciler(
 		proxySettings:          proxySettings,
 		backupTransferPartSize: backupTransferPartSize,
 		exportedDiffSizeCache:  map[types.UID]exportedDiffSizeCacheEntry{},
-		reconcileMBStandalone:  usecase.NewReconcileMBStandalone(k8sClient),
-		reconcileMBPrimary:     usecase.NewReconcileMBPrimary(k8sClient),
-		reconcileMBSecondary:   usecase.NewReconcileMBSecondary(k8sClient),
 	}
+
+	// Read r.expireQueueCh on every send instead of capturing the channel here,
+	// so that the operations are sent to the channel the reconciler holds at that time.
+	k8sClient := infra.NewKubernetesClient(client, infra.WithExpireQueue(func(evt event.GenericEvent) {
+		r.expireQueueCh <- evt
+	}))
+	r.reconcileMBStandalone = usecase.NewReconcileMBStandalone(k8sClient, managedCephClusterID)
+	r.reconcileMBPrimary = usecase.NewReconcileMBPrimary(k8sClient, managedCephClusterID)
+	r.reconcileMBSecondary = usecase.NewReconcileMBSecondary(k8sClient, managedCephClusterID)
+
+	return r
 }
 
 func (r *MantleBackupReconciler) removeRBDSnapshot(ctx context.Context, poolName, imageName, snapshotName string) *reconcile.Result {
@@ -368,51 +365,6 @@ func (r *MantleBackupReconciler) getSnapshotTarget(ctx context.Context, backup *
 	return &snapshotTarget{&pvc, &pv, imageName, poolName}, nil
 }
 
-// expire deletes the backup if expired, or schedules deletion via expireQueueCh if not yet.
-func (r *MantleBackupReconciler) expire(ctx context.Context, backup *mantlev1.MantleBackup) *reconcile.Result {
-	logger := log.FromContext(ctx)
-	if backup.Status.CreatedAt.IsZero() {
-		// the RBD snapshot has not be taken yet, do nothing.
-		return nil
-	}
-
-	if !backup.DeletionTimestamp.IsZero() {
-		// DeletionTimestamp is already set; let the caller handle finalization.
-		return nil
-	}
-
-	if v, ok := backup.Annotations[annotRetainIfExpired]; ok && v == annotRetainIfExpiredValue {
-		// retain this backup.
-		// If the annotation is deleted, reconciliation will run, so no need to schedule.
-		return nil
-	}
-
-	expire, err := strfmt.ParseDuration(backup.Spec.Expire)
-	if err != nil {
-		return reconcile.Failed("failed to parse expire duration: %w", err)
-	}
-	expireAt := backup.Status.CreatedAt.Add(expire)
-	if time.Now().UTC().After(expireAt) {
-		// already expired, delete it immediately.
-		logger.Info("delete expired backup", "createdAt", backup.Status.CreatedAt, "expire", expire)
-
-		if err := r.Delete(ctx, backup); err != nil && !aerrors.IsNotFound(err) {
-			return reconcile.Failed("failed to delete expired backup: %w", err)
-		}
-
-		return reconcile.Succeeded()
-	}
-
-	// not expired yet. schedule deletion.
-	// The event may be sent many times, but it is safe because workqueue AddAfter
-	// deduplicates events for same object.
-	r.expireQueueCh <- event.GenericEvent{
-		Object: backup,
-	}
-
-	return nil
-}
-
 //+kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlebackups,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlebackups/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=mantle.cybozu.io,resources=mantlebackupconfigs,verbs=list;watch
@@ -452,11 +404,6 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	logger = logger.WithValues("backupUID", string(backup.GetUID()))
 	ctx = log.IntoContext(ctx, logger)
 
-	if result := r.checkManagedBackup(ctx, &backup); result.ShouldReturn() {
-		return result.ToCtrlResult()
-	}
-	logger.Info("starting reconciliation")
-
 	var result *reconcile.Result
 
 	switch r.role {
@@ -486,50 +433,8 @@ func (r *MantleBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	panic("unreachable")
 }
 
-// checkManagedBackup checks if the MantleBackup resource is managed by this controller.
-func (r *MantleBackupReconciler) checkManagedBackup(ctx context.Context, backup *mantlev1.MantleBackup) *reconcile.Result {
-	// If the MantleBackup resource has a label indicating that it is managed by this controller.
-	if backup.Labels != nil {
-		if clusterID, ok := backup.Labels[labelClusterID]; ok {
-			if clusterID == r.managedCephClusterID {
-				return nil
-			}
-			// The MantleBackup resource is managed by a different controller, so we return a successful reconcile result to stop further processing.
-			return reconcile.Succeeded()
-		}
-	}
-
-	var pvc corev1.PersistentVolumeClaim
-	if err := r.Get(ctx, types.NamespacedName{Namespace: backup.Namespace, Name: backup.Spec.PVC}, &pvc); err != nil {
-		if aerrors.IsNotFound(err) {
-			log.FromContext(ctx).Info("waiting for the PVC specified in the MantleBackup to be created", "pvc", backup.Spec.PVC)
-
-			return reconcile.Requeue()
-		}
-
-		return reconcile.Failed("failed to get the PVC specified in the MantleBackup resource: %w", err)
-	}
-
-	clusterID, err := getCephClusterIDFromPVC(ctx, r.Client, &pvc)
-	if err != nil {
-		return reconcile.Failed("failed to get the Ceph cluster ID from the PVC: %w", err)
-	}
-
-	// If the cluster ID of the PVC does not match the managed Ceph cluster ID, it means that the PVC is not managed by this controller.
-	// In this case, we return a successful reconcile result to stop further processing.
-	if clusterID != r.managedCephClusterID {
-		return reconcile.Succeeded()
-	}
-
-	return nil
-}
-
 func (r *MantleBackupReconciler) reconcileLocalBackup(ctx context.Context, backup *mantlev1.MantleBackup) *reconcile.Result {
 	logger := log.FromContext(ctx)
-
-	if result := r.expire(ctx, backup); result.ShouldReturn() {
-		return result.WrapIfError("failed to expire backup")
-	}
 
 	if !backup.DeletionTimestamp.IsZero() {
 		return r.finalizeStandalone(ctx, backup)
@@ -544,8 +449,8 @@ func (r *MantleBackupReconciler) reconcileLocalBackup(ctx context.Context, backu
 	if backup.Labels == nil {
 		backup.Labels = make(map[string]string)
 	}
-	if _, ok := backup.Labels[labelClusterID]; !ok {
-		backup.Labels[labelClusterID] = r.managedCephClusterID
+	if _, ok := backup.Labels[domain.LabelClusterID]; !ok {
+		backup.Labels[domain.LabelClusterID] = r.managedCephClusterID
 		updated = true
 	}
 	// Attach local-backup-target-pvc-uid label before trying to create a RBD
@@ -850,8 +755,8 @@ func (r *MantleBackupReconciler) listHigherPriorityBackups(
 	var backupList mantlev1.MantleBackupList
 	if err := r.List(ctx, &backupList, &client.ListOptions{
 		LabelSelector: labels.SelectorFromSet(map[string]string{
-			LabelBackupPriority: labelBackupPriorityHigh,
-			labelClusterID:      r.managedCephClusterID,
+			LabelBackupPriority:   labelBackupPriorityHigh,
+			domain.LabelClusterID: r.managedCephClusterID,
 		}),
 	}); err != nil {
 		return nil, fmt.Errorf("failed to list high priority MantleBackup resources: %w", err)
@@ -872,10 +777,6 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 
 	if result := r.prepareObjectStorageClient(ctx); result.ShouldReturn() {
 		return result.WrapIfError("failed to prepare object storage client")
-	}
-
-	if result := r.expire(ctx, backup); result.ShouldReturn() {
-		return result.WrapIfError("failed to expire backup")
 	}
 
 	if !backup.DeletionTimestamp.IsZero() {
@@ -907,7 +808,7 @@ func (r *MantleBackupReconciler) reconcileAsSecondary(ctx context.Context, backu
 
 func scheduleExpire(_ context.Context, evt event.TypedGenericEvent[client.Object], q workqueue.TypedRateLimitingInterface[ctrl.Request]) {
 	backup := evt.Object.(*mantlev1.MantleBackup)
-	// the parse never fails because expire method checked it.
+	// the parse never fails because the expiration in the domain layer checked it.
 	expire, _ := strfmt.ParseDuration(backup.Spec.Expire)
 	q.AddAfter(
 		ctrl.Request{
@@ -1088,7 +989,7 @@ func (r *MantleBackupReconciler) replicateManifests(
 		domain.AnnotRemoteUID: string(backup.GetUID()),
 	})
 	backupSentLabels := map[string]string{
-		labelClusterID:                r.managedCephClusterID,
+		domain.LabelClusterID:         r.managedCephClusterID,
 		labelLocalBackupTargetPVCUID:  resp.GetUid(),
 		labelRemoteBackupTargetPVCUID: string(pvc.GetUID()),
 	}

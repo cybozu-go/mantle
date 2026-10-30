@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 
+	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/controller/domain"
 	"github.com/cybozu-go/mantle/internal/controller/usecase"
 	batchv1 "k8s.io/api/batch/v1"
@@ -15,22 +16,48 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+var errExpireQueueNotConfigured = errors.New("expire queue is not configured")
+
 type KubernetesClient struct {
 	client.Client
+	enqueueExpire func(event.GenericEvent)
 }
 
 var _ usecase.KubernetesClient = (*KubernetesClient)(nil)
 
-func NewKubernetesClient(c client.Client) *KubernetesClient {
-	return &KubernetesClient{c}
+// KubernetesClientOption configures a KubernetesClient.
+type KubernetesClientOption func(*KubernetesClient)
+
+// WithExpireQueue sets the function that ScheduleExpireOperation uses to enqueue
+// a MantleBackup to be reconciled when it expires.
+func WithExpireQueue(enqueue func(event.GenericEvent)) KubernetesClientOption {
+	return func(c *KubernetesClient) {
+		c.enqueueExpire = enqueue
+	}
 }
 
+func NewKubernetesClient(c client.Client, opts ...KubernetesClientOption) *KubernetesClient {
+	k8sClient := &KubernetesClient{Client: c}
+	for _, opt := range opts {
+		opt(k8sClient)
+	}
+
+	return k8sClient
+}
+
+func (c *KubernetesClient) GetCephClusterIDFromPVC(ctx context.Context, pvc *corev1.PersistentVolumeClaim) (string, error) {
+	return GetCephClusterIDFromPVC(ctx, c.Client, pvc)
+}
+
+// ApplyReconcilerOperations executes the operations in the given order. It stops at
+// the first failure and doesn't execute the remaining operations, because a later
+// operation may depend on the success of an earlier one.
 func (c *KubernetesClient) ApplyReconcilerOperations(ctx context.Context, operations []domain.Operation) error {
 	logger := log.FromContext(ctx)
-	var dispatchError error
 
 	for _, i := range operations {
 		var err error
@@ -54,14 +81,41 @@ func (c *KubernetesClient) ApplyReconcilerOperations(ctx context.Context, operat
 				"name", operation.CronJobName, "namespace", operation.CronJobNamespace)
 			err = c.createOrUpdateMBCCronJob(ctx, operation)
 
+		case *domain.DeleteMantleBackupOperation:
+			err = c.deleteMantleBackup(ctx, operation.Backup)
+
+		case *domain.ScheduleExpireOperation:
+			err = c.scheduleExpire(operation.Backup)
+
 		default:
 			err = fmt.Errorf("unknown operation type: %T", i)
 		}
 
-		dispatchError = errors.Join(dispatchError, err)
+		if err != nil {
+			return err
+		}
 	}
 
-	return dispatchError
+	return nil
+}
+
+func (c *KubernetesClient) deleteMantleBackup(ctx context.Context, backup *mantlev1.MantleBackup) error {
+	err := c.Delete(ctx, backup)
+	if err != nil && !aerrors.IsNotFound(err) {
+		return fmt.Errorf("failed to delete MantleBackup: %s/%s: %w", backup.Namespace, backup.Name, err)
+	}
+
+	return nil
+}
+
+func (c *KubernetesClient) scheduleExpire(backup *mantlev1.MantleBackup) error {
+	if c.enqueueExpire == nil {
+		return errExpireQueueNotConfigured
+	}
+
+	c.enqueueExpire(event.GenericEvent{Object: backup})
+
+	return nil
 }
 
 func (c *KubernetesClient) createOrUpdateMBCCronJob(ctx context.Context, op *domain.CreateOrUpdateMBCCronJobOperation) error {
