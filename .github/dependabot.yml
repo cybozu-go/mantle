@@ -27,3 +27,4 @@ updates:
     ignore:
       - dependency-name: "k8s.io/*"
       - dependency-name: "sigs.k8s.io/controller-runtime"
+      - dependency-name: "github.com/prometheus/*"
