@@ -1718,6 +1718,62 @@ var _ = Describe("updateBackupTimestampMetrics", func() {
 		)
 	})
 
+	Context("when initializing at startup", func() {
+		labelAsManaged := func(b *mantlev1.MantleBackup, clusterID string) {
+			GinkgoHelper()
+			b.Labels[labelClusterID] = clusterID
+			Expect(ctrlClient.Update(context.Background(), b)).To(Succeed())
+		}
+
+		It("exports the gauges of a PVC without reconciling any of its MantleBackups", func() {
+			createPVC(pvcUID)
+			labelAsManaged(createBackup(0, backupSpec{hoursAfterBase: 0, captured: true, synced: true}), testManagedCephClusterID)
+			labelAsManaged(createBackup(1, backupSpec{hoursAfterBase: 2, captured: true}), testManagedCephClusterID)
+
+			mbr := NewMantleBackupReconciler(
+				ctrlClient,
+				ctrlClient.Scheme(),
+				testManagedCephClusterID,
+				RolePrimary,
+				nil,
+				nil,
+				"dummy image",
+				"",
+				nil,
+				nil,
+				resource.MustParse("1Gi"),
+			)
+			Expect(mbr.initBackupTimestampMetrics(context.Background())).To(Succeed())
+
+			expectGauge(lastCreationMetric, new(creationTime(2)))
+			expectGauge(lastSnapshotMetric, new(snapshotTime(2)))
+			expectGauge(oldestUnsyncedCreationMetric, new(creationTime(2)))
+		})
+
+		It("skips MantleBackups managed by another controller", func() {
+			createPVC(pvcUID)
+			labelAsManaged(createBackup(0, backupSpec{hoursAfterBase: 0, captured: true}), "other-cluster-id")
+
+			mbr := NewMantleBackupReconciler(
+				ctrlClient,
+				ctrlClient.Scheme(),
+				testManagedCephClusterID,
+				RolePrimary,
+				nil,
+				nil,
+				"dummy image",
+				"",
+				nil,
+				nil,
+				resource.MustParse("1Gi"),
+			)
+			Expect(mbr.initBackupTimestampMetrics(context.Background())).To(Succeed())
+
+			expectGauge(lastCreationMetric, nil)
+			expectGauge(lastSnapshotMetric, nil)
+		})
+	})
+
 	Context("when the PVC is deleted or re-created", func() {
 		It("does not update the series once the PVC is deleted", func() {
 			// Values from before the PVC was deleted, which must stay as they are.
