@@ -9,8 +9,32 @@ import (
 func TestMBPrimaryReconciler_SkipBackupCreatedAsSecondary(t *testing.T) {
 	t.Parallel()
 	testOwnershipGuard(t,
-		func() mbReconciler { return domain.NewMBPrimaryReconciler() },
+		func() mbReconciler {
+			return domain.NewMBPrimaryReconciler(managedCephClusterID, newManagedPVCClusterIDGetter())
+		},
 		[]optionMB{mbWithRemoteUID()},
+		nil,
+	)
+}
+
+func TestMBPrimaryReconciler_Expire(t *testing.T) {
+	t.Parallel()
+	testExpire(t,
+		func() (mbReconciler, *domain.ReconcilerOperations) {
+			reconciler := domain.NewMBPrimaryReconciler(managedCephClusterID, newManagedPVCClusterIDGetter())
+
+			return reconciler, reconciler.Operations
+		},
+		nil,
+	)
+}
+
+func TestMBPrimaryReconciler_CheckManagedBackup(t *testing.T) {
+	t.Parallel()
+	testManagedBackupCheck(t,
+		func(pvcClusterIDGetter domain.PVCClusterIDGetter) mbReconciler {
+			return domain.NewMBPrimaryReconciler(managedCephClusterID, pvcClusterIDGetter)
+		},
 		nil,
 	)
 }

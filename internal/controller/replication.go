@@ -8,6 +8,7 @@ import (
 
 	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/controller/domain"
+	"github.com/cybozu-go/mantle/internal/controller/infra"
 	"github.com/cybozu-go/mantle/pkg/controller/proto"
 	"google.golang.org/grpc"
 	corev1 "k8s.io/api/core/v1"
@@ -84,7 +85,7 @@ func (s *SecondaryServer) CreateOrUpdatePVC(
 	}
 
 	// Check cluster-id of the PVC in the request.
-	pvcClusterID, err := getCephClusterIDFromPVC(ctx, s.client, &pvcReceived)
+	pvcClusterID, err := infra.GetCephClusterIDFromPVC(ctx, s.client, &pvcReceived)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ceph cluster ID from the received PVC: %w", err)
 	}
@@ -160,10 +161,10 @@ func (s *SecondaryServer) CreateMantleBackup(
 			backupReceived.GetName(), backupReceived.GetNamespace())
 	}
 
-	primaryClusterID, ok := backupReceived.Labels[labelClusterID]
+	primaryClusterID, ok := backupReceived.Labels[domain.LabelClusterID]
 	if !ok {
 		return nil, fmt.Errorf("label not found in the received MantleBackup: %s: %s: %s",
-			labelClusterID, backupReceived.GetName(), backupReceived.GetNamespace())
+			domain.LabelClusterID, backupReceived.GetName(), backupReceived.GetNamespace())
 	}
 	if primaryClusterID != s.managedCephClusterID {
 		return nil, fmt.Errorf("cluster-id not matched: %s: %s: %s",

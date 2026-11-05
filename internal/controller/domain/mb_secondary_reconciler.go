@@ -10,11 +10,22 @@ import (
 
 // MBSecondaryReconciler reconciles MantleBackup resources on a secondary cluster.
 type MBSecondaryReconciler struct {
+	Operations           *ReconcilerOperations
+	managedCephClusterID string
+	pvcClusterIDGetter   PVCClusterIDGetter
 }
 
-// NewMBSecondaryReconciler creates a new MBSecondaryReconciler.
-func NewMBSecondaryReconciler() *MBSecondaryReconciler {
-	return &MBSecondaryReconciler{}
+// NewMBSecondaryReconciler creates a new MBSecondaryReconciler that reconciles MantleBackups
+// managed by the controller in charge of the Ceph cluster managedCephClusterID.
+func NewMBSecondaryReconciler(
+	managedCephClusterID string,
+	pvcClusterIDGetter PVCClusterIDGetter,
+) *MBSecondaryReconciler {
+	return &MBSecondaryReconciler{
+		Operations:           NewReconcilerOperations(),
+		managedCephClusterID: managedCephClusterID,
+		pvcClusterIDGetter:   pvcClusterIDGetter,
+	}
 }
 
 // Provision handles the provisioning logic for a MantleBackup resource.
@@ -22,8 +33,16 @@ func (r *MBSecondaryReconciler) Provision(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
 ) *reconcile.Result {
+	if result := checkManagedBackup(ctx, backup, r.managedCephClusterID, r.pvcClusterIDGetter); result.ShouldReturn() {
+		return result
+	}
+
 	if !isCreatedWhenMantleControllerWasSecondary(backup) {
 		return skipBackupNotCreatedAsSecondary(ctx)
+	}
+
+	if result := expire(ctx, backup, r.Operations); result.ShouldReturn() {
+		return result.WrapIfError("failed to expire backup")
 	}
 
 	return reconcile.ContinueWithLegacyReconcile()
@@ -34,6 +53,10 @@ func (r *MBSecondaryReconciler) Finalize(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
 ) *reconcile.Result {
+	if result := checkManagedBackup(ctx, backup, r.managedCephClusterID, r.pvcClusterIDGetter); result.ShouldReturn() {
+		return result
+	}
+
 	if !isCreatedWhenMantleControllerWasSecondary(backup) {
 		return skipBackupNotCreatedAsSecondary(ctx)
 	}
