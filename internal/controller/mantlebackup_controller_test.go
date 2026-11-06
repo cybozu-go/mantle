@@ -1503,7 +1503,8 @@ var _ = Describe("replicateManifests", func() {
 			},
 		}
 
-		ctrlClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+		ctrlClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).
+			WithIndex(&mantlev1.MantleBackup{}, backupPVCUIDIndex, backupPVCUIDIndexValues).Build()
 
 		grpcClient.EXPECT().CreateOrUpdatePVC(gomock.Any(), gomock.Any()).Times(1).
 			Return(&proto.CreateOrUpdatePVCResponse{Uid: testPVCUID}, nil)
@@ -1568,7 +1569,8 @@ var _ = Describe("updateBackupTimestampMetrics", func() {
 	BeforeEach(func() {
 		namespace = "ns-" + string(uuid.NewUUID())
 		metricLabels = map[string]string{"persistentvolumeclaim": pvcName, "resource_namespace": namespace}
-		ctrlClient = fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+		ctrlClient = fake.NewClientBuilder().WithScheme(scheme.Scheme).
+			WithIndex(&mantlev1.MantleBackup{}, backupPVCUIDIndex, backupPVCUIDIndexValues).Build()
 		// The metrics are registered globally, so drop the series a test leaves behind.
 		DeferCleanup(func() {
 			metrics.BackupLastCreationTimestampSeconds.Delete(metricLabels)
@@ -1916,7 +1918,8 @@ var _ = Describe("priority gate vs SnapID-ordering gate deadlock regression", fu
 			}
 		}
 
-		ctrlClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+		ctrlClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).
+			WithIndex(&mantlev1.MantleBackup{}, backupPVCUIDIndex, backupPVCUIDIndexValues).Build()
 
 		// A: older SnapID, no priority label. B: newer SnapID, high priority label,
 		// targeting the same PVC as A.
