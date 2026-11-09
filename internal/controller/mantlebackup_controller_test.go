@@ -4168,6 +4168,25 @@ var _ = Describe("import", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.IsZero()).To(BeTrue())
 		})
+
+		It("should complete successfully when the diff origin no longer exists", func(ctx SpecContext) {
+			// Arrange: "target" still has the diff-from annotation, but its diff
+			// origin "source" is already gone. This happens when a previous
+			// cleanup removed the diff-to annotation from "source" but failed to
+			// update "target", and "source" was finalized in between.
+			backup := createTargetBackup(ctx, "target", new("source"), new("uid"))
+
+			// Act
+			res, err := mbr.secondaryCleanup(ctx, backup, false).ToCtrlResult()
+
+			// Assert: cleanup completes, and "target" no longer refers to "source".
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.IsZero()).To(BeTrue())
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: backup.GetName(), Namespace: backup.GetNamespace()}, backup)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(backup.GetAnnotations()).NotTo(HaveKey(annotDiffFrom))
+			Expect(backup.GetAnnotations()).NotTo(HaveKey(annotSyncMode))
+		})
 	})
 
 	Context("isAnyImportOrZeroOutJobUnfinished", func() {
@@ -4319,6 +4338,78 @@ var _ = Describe("import", func() {
 			_, err = rr.ToCtrlResult()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(locked).To(BeTrue())
+		})
+
+		It("should keep protecting the diff origin while the import Jobs are unfinished, "+
+			"even if the diff origin is being deleted", func(ctx SpecContext) {
+			getMB := func(name string) *mantlev1.MantleBackup {
+				GinkgoHelper()
+				var mb mantlev1.MantleBackup
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, &mb)
+				Expect(err).NotTo(HaveOccurred())
+
+				return &mb
+			}
+			expectMBNotFound := func(name string) {
+				GinkgoHelper()
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, &mantlev1.MantleBackup{})
+				Expect(aerrors.IsNotFound(err)).To(BeTrue())
+			}
+
+			// Arrange: "source" is the diff origin of "target", and is being
+			// deleted (e.g. it has expired). Its diff-to annotation keeps it
+			// from being finalized.
+			source, err := createMantleBackupUsingDummyPVC(ctx, "source", ns)
+			Expect(err).NotTo(HaveOccurred())
+			source.SetAnnotations(map[string]string{annotDiffTo: "target"})
+			err = k8sClient.Update(ctx, source)
+			Expect(err).NotTo(HaveOccurred())
+			err = createSnapshotForMantleBackupUsingDummyPVC(ctx, mbr.ceph, source, defaultTransferPartSize)
+			Expect(err).NotTo(HaveOccurred())
+			err = k8sClient.Delete(ctx, source)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Arrange: "target" is being deleted while its import Job, which
+			// applies the diff from "source", has not finished yet.
+			target := createTargetBackup(ctx, "target", new("source"), new("uid"))
+			createJob(ctx, MakeImportJobName(target, 0))
+			err = k8sClient.Delete(ctx, target)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Act
+			res, err := mbr.finalizeSecondary(ctx, getMB("target")).ToCtrlResult()
+
+			// Assert: "target" waits for the import Job.
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res).To(Equal(reconcile.RequeueAfter()))
+
+			// Act: "source" is reconciled while "target" is waiting.
+			res, err = mbr.finalizeSecondary(ctx, getMB("source")).ToCtrlResult()
+
+			// Assert: "source" is still protected by its diff-to annotation.
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.IsZero()).To(BeTrue())
+			source = getMB("source")
+			Expect(source.GetAnnotations()).To(HaveKeyWithValue(annotDiffTo, "target"))
+			Expect(controllerutil.ContainsFinalizer(source, MantleBackupFinalizerName)).To(BeTrue())
+
+			// Act: the import Job finishes, and "target" is reconciled again.
+			completeJob(ctx, nsController, MakeImportJobName(target, 0))
+			res, err = mbr.finalizeSecondary(ctx, getMB("target")).ToCtrlResult()
+
+			// Assert: "target" is finalized, and "source" is no longer protected.
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.IsZero()).To(BeTrue())
+			expectMBNotFound("target")
+			Expect(getMB("source").GetAnnotations()).NotTo(HaveKey(annotDiffTo))
+
+			// Act
+			res, err = mbr.finalizeSecondary(ctx, getMB("source")).ToCtrlResult()
+
+			// Assert: "source" can now be finalized.
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.IsZero()).To(BeTrue())
+			expectMBNotFound("source")
 		})
 
 		It("should not check for active Jobs or the lock once the backup already finished importing", func(ctx SpecContext) {
