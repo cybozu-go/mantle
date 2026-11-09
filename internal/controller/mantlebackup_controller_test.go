@@ -35,6 +35,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/kube-openapi/pkg/validation/strfmt"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -1503,7 +1504,10 @@ var _ = Describe("replicateManifests", func() {
 			},
 		}
 
-		ctrlClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+		ctrlClient := fake.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithIndex(&mantlev1.MantleBackup{}, backupPVCUIDIndex, backupPVCUIDIndexValues).
+			Build()
 
 		grpcClient.EXPECT().CreateOrUpdatePVC(gomock.Any(), gomock.Any()).Times(1).
 			Return(&proto.CreateOrUpdatePVCResponse{Uid: testPVCUID}, nil)
@@ -1568,7 +1572,10 @@ var _ = Describe("updateBackupTimestampMetrics", func() {
 	BeforeEach(func() {
 		namespace = "ns-" + string(uuid.NewUUID())
 		metricLabels = map[string]string{"persistentvolumeclaim": pvcName, "resource_namespace": namespace}
-		ctrlClient = fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+		ctrlClient = fake.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithIndex(&mantlev1.MantleBackup{}, backupPVCUIDIndex, backupPVCUIDIndexValues).
+			Build()
 		// The metrics are registered globally, so drop the series a test leaves behind.
 		DeferCleanup(func() {
 			metrics.BackupLastCreationTimestampSeconds.Delete(metricLabels)
@@ -1916,7 +1923,10 @@ var _ = Describe("priority gate vs SnapID-ordering gate deadlock regression", fu
 			}
 		}
 
-		ctrlClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+		ctrlClient := fake.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithIndex(&mantlev1.MantleBackup{}, backupPVCUIDIndex, backupPVCUIDIndexValues).
+			Build()
 
 		// A: older SnapID, no priority label. B: newer SnapID, high priority label,
 		// targeting the same PVC as A.
@@ -2042,7 +2052,10 @@ var _ = Describe("prepareForDataSynchronization", func() {
 				MantleBackupList: data,
 			}, nil)
 
-		ctrlClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+		ctrlClient := fake.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithIndex(&mantlev1.MantleBackup{}, backupPVCUIDIndex, backupPVCUIDIndexValues).
+			Build()
 		Expect(ctrlClient).NotTo(BeNil())
 		primaryBackups := append(primaryBackupsWithoutTarget, backup.DeepCopy())
 		for _, backup := range primaryBackups {
@@ -2567,10 +2580,27 @@ func makeTestAffinity(nodeRole string) *corev1.Affinity {
 	}
 }
 
+// mantleBackupCacheClient lists MantleBackups from reader, which has the PVC UID
+// index, since the API server rejects a field selector on a custom field. The other
+// reads stay direct, so that tests need not wait for a cache to catch up.
+type mantleBackupCacheClient struct {
+	client.Client
+	reader client.Reader
+}
+
+func (c *mantleBackupCacheClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	if _, ok := list.(*mantlev1.MantleBackupList); ok {
+		return c.reader.List(ctx, list, opts...)
+	}
+
+	return c.Client.List(ctx, list, opts...)
+}
+
 var _ = Describe("export and upload", func() {
 	var mockCtrl *gomock.Controller
 	var grpcClient *proto.MockMantleServiceClient
 	var mbr *MantleBackupReconciler
+	var mbCache cache.Cache
 	var nsController, ns string
 
 	createAndExportMantleBackup := func(
@@ -2746,6 +2776,18 @@ var _ = Describe("export and upload", func() {
 		mockObjectStorage.EXPECT().GetSize(gomock.Any(), gomock.Any()).
 			Return(int64(0), nil).AnyTimes()
 		mbr.objectStorageClient = mockObjectStorage
+
+		var err error
+		mbCache, err = cache.New(cfg, cache.Options{Scheme: scheme.Scheme})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(mbCache.IndexField(context.Background(), &mantlev1.MantleBackup{},
+			backupPVCUIDIndex, backupPVCUIDIndexValues)).To(Succeed())
+		cacheCtx, stopCache := context.WithCancel(context.Background())
+		DeferCleanup(stopCache)
+		go func() { _ = mbCache.Start(cacheCtx) }()
+		_, err = mbCache.GetInformer(cacheCtx, &mantlev1.MantleBackup{})
+		Expect(err).NotTo(HaveOccurred())
+		mbr.Client = &mantleBackupCacheClient{Client: k8sClient, reader: mbCache}
 
 		ns = resMgr.CreateNamespace()
 	})
@@ -3202,6 +3244,14 @@ var _ = Describe("export and upload", func() {
 						ctx, mbr.ceph, backup, mbr.backupTransferPartSize)).To(Succeed())
 
 					nameByPVCUID[pvcUID] = name
+
+					// The SnapID is written through the API server but read through the
+					// cache, so wait until the cache has it.
+					Eventually(ctx, func(g Gomega) {
+						var cached mantlev1.MantleBackup
+						g.Expect(mbCache.Get(ctx, client.ObjectKeyFromObject(backup), &cached)).To(Succeed())
+						g.Expect(cached.Status.SnapID).NotTo(BeNil())
+					}).Should(Succeed())
 
 					return backup
 				}
