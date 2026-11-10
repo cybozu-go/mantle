@@ -38,9 +38,9 @@ MantleBackupConfig コントローラで実施済みの PoC（ https://github.co
 ストラングラーフィグパターンに基づき、次の方針で進める。
 
 1. **最初に最終形と同じ呼び出し経路（`Reconcile` → `usecase.Run` → 管理対象の事前判定 → `domain.Provision`/`Finalize`）を骨組みとして導入する**（PR 2・3）。ドメイン層の関数を旧コードから直接呼ぶ中間状態は作らず、ドメイン化された処理は常にユースケース層経由で実行される。管理対象の事前判定は PR 5 でこの経路に追加する。
-2. 移行が完了していない状況では、`Provision`/`Finalize` が「旧コードに委譲する」ことを表す一時的な戻り値（**legacy 委譲シグナル**。`internal/controller/internal/reconcile` の `Result` が持つ）を返す。`Run` は、ドメイン層がそこまでに行ったリコンサイル対象の変更を永続化し、Operations を適用してから、シグナルを呼び出し元へ伝える。`Reconcile` はシグナルを受けて旧コード経路を実行する。この仕組みは PR 16 で削除する。
+2. 移行が完了していない状況では、`Provision`/`Finalize` が「旧コードに委譲する」ことを表す一時的な戻り値（**legacy 委譲シグナル**。`internal/controller/internal/reconcile` の `Result` が持つ）を返す。`Run` は、ドメイン層がそこまでに発行した Operations を適用してから、シグナルを呼び出し元へ伝える。`Reconcile` はシグナルを受けて旧コード経路を実行する。この仕組みは PR 16 で削除する。
 3. サブフローを 1 つずつドメイン化し、`Provision`/`Finalize` の逐次 `if` に追記していく。ドメイン化したサブフローの旧コードは同じ PR で削除する。あるロールの全サブフローが揃ったら、そのロールの legacy 委譲シグナルと旧コード経路を削除する。
-4. Operation 型・インフラ層の Operation 実行器・ドメイン interface のインフラ実装、定数・ヘルパ、`Run` の Operations 引き渡し機構（PR 5）と永続化機構（PR 6）は、先行 PR でまとめて導入せず、**それらを使用するコンポーネントを移す PR で一緒に移動・追加する**。
+4. Operation 型・インフラ層の Operation 実行器・ドメイン interface のインフラ実装、定数・ヘルパ、`Run` の Operations 引き渡し機構（PR 5）とリコンサイル対象の更新 Operation（PR 6）は、先行 PR でまとめて導入せず、**それらを使用するコンポーネントを移す PR で一緒に移動・追加する**。
 5. ロールは standalone → primary → secondary の順に完成させる。standalone のフローは primary の部分集合（ローカルバックアップ＋verify＋cleanup）なので、共有部分のドメイン化がそのまま primary の下準備になる。
 
 依存関係は原則「番号順」だが、PR 10〜13（primary 系）と PR 14〜15（secondary 系）は互いに独立しており並行して進められる。双方が使用するオブジェクトストレージクライアントのインフラ層コンポーネントは PR 7 で導入済みとする（<<d5>>）。
@@ -71,7 +71,7 @@ MantleBackupConfig コントローラで実施済みの PoC（ https://github.co
 === PR 3: legacy 委譲シグナルと Run の骨組みの実装
 
 状態:: 実装済み（`c9ae507` / https://github.com/cybozu-go/mantle/pull/332[PR #332]。PR 2 と同一の PR）
-内容:: legacy 委譲シグナルを `internal/controller/internal/reconcile` の `Result` に導入し、この時点の `Provision`/`Finalize` はそれを返すだけとする。`Run` には「リコンサイル対象の取得 → `DeletionTimestamp` による `Provision`/`Finalize` の呼び分け → legacy 委譲シグナルの伝播」の骨組みを実装し、`Reconcile` はシグナルを受けた場合に旧コード経路へ委譲する。**スケルトンは `Provision`・`Finalize` を呼び出すコードパスを作ることだけを目的とし、それ以外のものは含めない。** リコンサイル対象の永続化機構は PR 6、Operations の引き渡し機構は PR 5 へ繰り延べる。
+内容:: legacy 委譲シグナルを `internal/controller/internal/reconcile` の `Result` に導入し、この時点の `Provision`/`Finalize` はそれを返すだけとする。`Run` には「リコンサイル対象の取得 → `DeletionTimestamp` による `Provision`/`Finalize` の呼び分け → legacy 委譲シグナルの伝播」の骨組みを実装し、`Reconcile` はシグナルを受けた場合に旧コード経路へ委譲する。**スケルトンは `Provision`・`Finalize` を呼び出すコードパスを作ることだけを目的とし、それ以外のものは含めない。** リコンサイル対象の更新 Operation は PR 6、Operations の引き渡し機構は PR 5 へ繰り延べる。
 テスト:: 不要（この規模では不要と判断した）。コンパイルと既存テストの通過のみ確認する。
 
 .当初の計画から変更した点
@@ -116,17 +116,17 @@ MantleBackupConfig コントローラで実施済みの PoC（ https://github.co
 +
 --
 * `reconcileLocalBackup` のうち、ラベル（cluster-id / local-backup-target-pvc-uid）と finalizer の付与、`getSnapshotTarget` の判定部分（PVC UID 照合、`checkPVCBound`、PV からの image/pool 抽出）をドメイン化する。PVC・PV の取得はユースケース層が行いドメイン層へ渡す。
-* `provisionRBDSnapshot` を「2 周のリコンサイル」に分解してドメイン化する。第 1 周はラベル・finalizer・PVC/PV マニフェスト（status）をメモリ上でセットして requeue（永続化はユースケース層）、第 2 周はこれらの永続化済みを確認してから `CreateAndFindRBDSnapshot` interface（この PR でドメイン層に定義、インフラ層で `ceph.CephCmd` により実装）でスナップショットを作成し、SnapID・CreatedAt・SnapSize・conditions をメモリ上で更新する。
-* `Run` の永続化機構をこの PR で導入する（PR 3 から繰り延べられた分）。`Provision`/`Finalize` の呼び出し前に DeepCopy を取り、メタデータ・spec と status の dirty 判定を独立に行う。メタデータ・spec に差分がある場合だけ `Update`、status に差分がある場合だけ `Status().Update` を行い、両方に差分がある場合はこの順序で実行して更新後の resourceVersion を引き継ぐ。先行する永続化に失敗した場合は後続の永続化と Operations を実行しない。現行コードが競合対策として用いている再取得つき status 更新・`Patch` に相当する競合時の方針（conflict エラーを requeue に任せる、再取得してリトライする等）もこの PR で定める。
+* `provisionRBDSnapshot` を「2 周のリコンサイル」に分解してドメイン化する。第 1 周はラベル・finalizer・PVC/PV マニフェスト（status）をメモリ上でセットして requeue（永続化はリコンサイル対象の更新 Operation）、第 2 周はこれらの永続化済みを確認してから `CreateAndFindRBDSnapshot` interface（この PR でドメイン層に定義、インフラ層で `ceph.CephCmd` により実装）でスナップショットを作成し、SnapID・CreatedAt・SnapSize・conditions をメモリ上で更新する。
+* リコンサイル対象の更新 Operation をこの PR で導入する（PR 3 から繰り延べられた分）。`Provision`/`Finalize` の呼び出し前に DeepCopy を取り、メタデータ・spec と status の dirty 判定を独立に行う。メタデータ・spec に差分がある場合だけ `Update`、status に差分がある場合だけ `Status().Update` を行い、両方に差分がある場合はこの順序で実行して更新後の resourceVersion を引き継ぐ。先行する永続化に失敗した場合は後続の永続化と Operations を実行しない。現行コードが競合対策として用いている再取得つき status 更新・`Patch` に相当する競合時の方針（conflict エラーを requeue に任せる、再取得してリトライする等）もこの PR で定める。
 * 以上を standalone・primary の `Provision` の `if` として追記し、旧コードの該当部分を削除する。
 --
-テスト:: ラベル・finalizer 付与、マニフェスト未保存時の requeue、スナップショット作成後の status 更新、fake interface を使った作成失敗時の挙動。`Run` の永続化機構については、メタデータ・spec のみの変更では `Update` だけを呼ぶこと、status のみの変更では `Status().Update` だけを呼ぶこと、両方の変更では `Update` → `Status().Update` の順序で実行し resourceVersion を引き継ぐこと、先行する永続化が失敗したら後続の永続化と Operations を実行しないこと、finalizer 除去だけのパスで `Status().Update` を呼ばないこと。
+テスト:: ラベル・finalizer 付与、マニフェスト未保存時の requeue、スナップショット作成後の status 更新、fake interface を使った作成失敗時の挙動。リコンサイル対象の更新 Operation については、メタデータ・spec のみの変更では `Update` だけを呼ぶこと、status のみの変更では `Status().Update` だけを呼ぶこと、両方の変更では `Update` → `Status().Update` の順序で実行し resourceVersion を引き継ぐこと、先行する永続化が失敗したら後続の永続化と Operations を実行しないこと、finalizer 除去だけのパスで `Status().Update` を呼ばないこと。
 注意点::
 +
 --
-* **「永続化してから外部操作」の順序不変条件を壊さない。** `provisionRBDSnapshot` は「PVC/PV マニフェストを status に永続化した後に RBD スナップショットを作成する」ことでクラッシュ時の孤児スナップショットを防いでいる。同種の不変条件として「ラベル（local-backup-target-pvc-uid）・finalizer を永続化した後にスナップショットを作成する」もある。「変更をメモリ上に溜めて `Run` の最後に一括永続化」する標準パターンではこれが壊れるため、上記のとおり 2 周に分解する。外部から見た状態遷移の順序は変わらない。
+* **「永続化してから外部操作」の順序不変条件を壊さない。** `provisionRBDSnapshot` は「PVC/PV マニフェストを status に永続化した後に RBD スナップショットを作成する」ことでクラッシュ時の孤児スナップショットを防いでいる。同種の不変条件として「ラベル（local-backup-target-pvc-uid）・finalizer を永続化した後にスナップショットを作成する」もある。「変更をメモリ上に溜めて更新 Operation で一括永続化」する標準パターンではこれが壊れるため、上記のとおり 2 周に分解する。外部から見た状態遷移の順序は変わらない。
 * **`Run` に下請けヘルパを追加する際、legacy 委譲シグナルを取りこぼさない。** `reconcile.Result.ShouldReturn()` は legacy 委譲シグナルを見ないため、`if result.ShouldReturn() { return result }` だけで受けるとシグナルが「継続」として素通りし、`ToCtrlResult()` で「完了・エラーなし」に変換されて、リコンサイルが何も報告せずに打ち切られる。legacy を伝播させるヘルパでは `ShouldContinueWithLegacyReconcile()` も併せて確認する。
-* **legacy 委譲時に旧コードが古いオブジェクトを触らないようにする。** `Reconcile` と `usecase.Run` はそれぞれ独立に `MantleBackup` を取得している。この PR から `Run` が永続化を行うため、`Run` が更新後のオブジェクトを呼び出し元へ返すか、legacy 委譲時に `Reconcile` 側で再取得するかを決める。
+* **legacy 委譲時に旧コードが古いオブジェクトを触らないようにする。** `Reconcile` と `usecase.Run` はそれぞれ独立に `MantleBackup` を取得している。この PR から `Run` がリコンサイル対象の更新 Operation を適用するため、`Run` が更新後のオブジェクトを呼び出し元へ返すか、legacy 委譲時に `Reconcile` 側で再取得するかを決める。
 * requeue が増える（許容例外）。2 周分解によりスナップショット作成までのリコンサイルが 1 周増える。また逐次 `if` の「処理を実行したら return する」構造により、従来 1 パス内で連続実行されていたサブフローの境界（スナップショット作成 → verify 開始など）でもそれぞれ 1 周増える。
 * `syncPriorityLabelFromMBC` による優先度ラベルの同期は、この PR の対象ラベルではなく primary の未同期分岐の中の処理なので PR 12 で扱う。
 --
@@ -194,7 +194,7 @@ MantleBackupConfig コントローラで実施済みの PoC（ https://github.co
 --
 * `startUpload` 系（upload Job の作成判定、完了 upload Job の処理によるアップロード完了確認と part リソースの解放）をドメイン化する。アップロード完了確認は K8s 上の完了 upload Job の状態で行う（オブジェクトストレージの `Exists` は primary 経路では使わない）。完了した全 part（最新を含む）の export-data PVC を削除し、最新完了 part では進捗管理用の export/upload Job を残したまま両 Job の Pod を削除する処理を、<<d8>> の順序を維持する Operation として追加する。Pod の DeleteCollection に必要な既存 RBAC 権限も維持する。Job spec 構築（`createOrUpdateUploadJobs`）はインフラ層の Operation 実行器としてこの PR で追加する。
 * upload 完了に伴うメトリクス設定は PR 7 でユースケース層へ移した `exportedDiffSizeCache`・メトリクス復元処理・オブジェクトストレージクライアントを再利用し、<<d5>> の責務分担で未取得 part だけを取得する。オブジェクト名は `spec.transferCompression` に依存する（<<d4>>）。クライアント初期化または `GetSize` に失敗した場合は、ログを出してメトリクス更新だけをスキップし、リコンサイル処理は継続する。
-* `syncPriorityLabelFromMBC`（MantleBackupConfig の優先度ラベルを対象 backup へ反映する処理）をドメイン化する。対象 backup のラベルをメモリ上で変更して PR 6 で導入した `Run` の永続化に委ね、現行の `Patch` は廃止する。MantleBackupConfig は、`MantleBackupConfigUID` ラベルがある場合だけドメイン層定義の interface を介して取得する。
+* `syncPriorityLabelFromMBC`（MantleBackupConfig の優先度ラベルを対象 backup へ反映する処理）をドメイン化する。対象 backup のラベルをメモリ上で変更して PR 6 で導入したリコンサイル対象の更新 Operation に委ね、現行の `Patch` は廃止する。MantleBackupConfig は、`MantleBackupConfigUID` ラベルがある場合だけドメイン層定義の interface を介して取得する。
 * `shouldWaitForHigherPriorityBackup` をドメイン層の純粋関数とする。入力（削除中を除く高優先度 backup の一覧、対象 backup が export-data PVC を保有しているか）はユースケース層が事前取得する。判定が真のときは `SlowRequeue` を返す。
 * PR 10・11 のドメイン関数と合わせて primary の `Provision` の「同期されていない」`if` 分岐を構成・配線し、旧 `replicate` 系コードを削除する。
 --
@@ -272,10 +272,10 @@ MantleBackupConfig コントローラで実施済みの PoC（ https://github.co
 リファクタリング完了後の構成は次の通り。
 
 ドメイン層（`internal/controller/domain`）::
-ロールごとのドメインリコンサイラ `MBStandaloneReconciler`・`MBPrimaryReconciler`・`MBSecondaryReconciler` を定義する。それぞれが `Provision`・`Finalize` メソッドを持つ。standalone と primary が共有するローカルバックアップ処理は、ドメイン層内の共通関数（または両者に埋め込む共通構造体）として括り出す。リコンサイル対象の `MantleBackup` への変更はメモリ上で行い、それ以外の外部作用はドメインイベント（`domain.Operation`）として `ReconcilerOperations` に蓄積するか、ドメイン層で定義した narrow interface を介して行う（使い分けは <<d3>>）。
+ロールごとのドメインリコンサイラ `MBStandaloneReconciler`・`MBPrimaryReconciler`・`MBSecondaryReconciler` を定義する。それぞれが `Provision`・`Finalize` メソッドを持つ。standalone と primary が共有するローカルバックアップ処理は、ドメイン層内の共通関数（または両者に埋め込む共通構造体）として括り出す。リコンサイル対象の `MantleBackup` への変更はメモリ上で行い、その更新をドメインイベント（`domain.Operation`）として `ReconcilerOperations` に蓄積する。それ以外の外部作用は Operation として蓄積するか、ドメイン層で定義した narrow interface を介して行う（使い分けは <<d3>>）。
 
 ユースケース層（`internal/controller/usecase`）::
-ロールごとに `ReconcileMBStandalone`・`ReconcileMBPrimary`・`ReconcileMBSecondary` を定義する。それぞれの `Run` は「リコンサイル対象の取得 → <<managed-backup-preflight,管理対象の事前判定>> → その他の必要リソースの取得 → `DeletionTimestamp` による `Provision`/`Finalize` の呼び分け → 変更された `MantleBackup` の永続化 → Operations のインフラ層への引き渡し」を行う。
+ロールごとに `ReconcileMBStandalone`・`ReconcileMBPrimary`・`ReconcileMBSecondary` を定義する。それぞれの `Run` は「リコンサイル対象の取得 → <<managed-backup-preflight,管理対象の事前判定>> → その他の必要リソースの取得 → `DeletionTimestamp` による `Provision`/`Finalize` の呼び分け → Operations のインフラ層への引き渡し」を行う。
 
 インフラ層（`internal/controller/infra` ほか）::
 `infra.KubernetesClient.ApplyReconcilerOperations` に MantleBackup 用の Operation の実行を追加する。Ceph 操作は既存の `ceph.CephCmd`（インターフェース＋gomock 生成済み）、オブジェクトストレージ操作は既存の `objectstorage.Bucket`（インターフェース＋モックあり）、gRPC 操作は `proto.MantleServiceClient` をそれぞれ実装として利用する。`mantlebackup_controller.go` は最終的に、struct 定義・`SetupWithManager`（`WatchesRawSource` の配線を含む）・ロールに応じてユースケース層の `Run` を呼ぶだけの薄い `Reconcile`・ユースケース層の初期化のみになる。
@@ -322,7 +322,7 @@ MB-C のラベル・アノテーション・sync-mode・名前プレフィック
 | 外部アクセス | 方式 | 備考
 
 | リコンサイル対象 `MantleBackup` の変更（ラベル・finalizer・アノテーション・status・conditions）
-| メモリ上で変更し、ユースケース層が永続化
+| メモリ上で変更し、その更新を Operation として発行
 | 元のオブジェクトとの比較はメタデータ・spec と status で独立に行い、差分がある側だけ `Update` / `Status().Update` を呼ぶ。両方に差分がある場合は `Update` を先に行い、その応答の resourceVersion を使って `Status().Update` を行う。先行する永続化に失敗した場合は後続の永続化と Operation 適用を行わない（PR 6）
 
 | Job・Pod・PVC・PV の作成／削除、他の `MantleBackup` の更新（diff-from アノテーションなど）、期限切れ backup の削除
@@ -354,7 +354,7 @@ MB-C のラベル・アノテーション・sync-mode・名前プレフィック
 | 削除の成功が対象 backup のアノテーション更新へ進む条件になるため Operation にはしない。Provision の通常 cleanup でのみ同期的に実行し、全 part の削除が成功した場合だけ後続へ進む。失敗時は対象 backup を変更せず、次回のリコンサイルで再試行する（<<d9>>）
 
 | MantleBackupConfig の優先度ラベルの同期（`syncPriorityLabelFromMBC`）
-| メモリ上で変更し、ユースケース層が永続化
+| メモリ上で変更し、その更新を Operation として発行
 | リコンサイル対象自身のラベル変更なので上記 1 行目と同じ扱いにする（現行の `Patch` は廃止する）。MantleBackupConfig は、`MantleBackupConfigUID` ラベルがある場合だけドメイン層定義の interface を介して取得する（PR 12）
 
 | 高優先度 backup の待ち判定（`shouldWaitForHigherPriorityBackup`・`shouldWaitForHigherPriorityImport`）
@@ -488,7 +488,7 @@ primary の `--max-export-data-pvcs` は、managed Ceph cluster の namespace �
 * source backup の diff-to アノテーション削除は、対象 backup の diff-from アノテーション削除（の永続化）より前に行う。逆順にすると、間でクラッシュや Operation の失敗が起きた場合に diff-from が先に消え、以降のリコンサイルは source を特定できなくなる。source には diff-to が残り続け、`finalize*` は diff-to があると何もしないため、source の finalize が永久にブロックされる。
 * finalizer の除去は、Job・PVC・PV と RBD スナップショットの削除がすべて完了した後に永続化する。逆順にすると、finalizer 除去の永続化と同時に MantleBackup が消滅するため、その後の削除 Operation が失敗・クラッシュした場合にリソースが孤児になり、それを再試行するリコンサイルも存在しなくなる。
 
-ユースケース層の `Run` の標準的な順序は「対象の永続化 → Operations の適用」なので、素朴に 1 パスでドメイン化するとこの順序が逆転する。そこで cleanup・finalize は次のように**複数パスに分解**する。
+素朴に 1 パスでドメイン化すると、他リソースの削除が完了する前に対象の更新 Operation が実行され、この順序が崩れる。そこで cleanup・finalize は次のように**複数パスに分解**する。
 
 . 削除対象（source の diff-to アノテーション、cleanup 対象の Job・PVC・PV）が事前取得データ上に残っている間は、削除 Operation を発行して requeue し、対象 backup 自身は変更しない。
 . それらがすべて消えたことを確認できたパスで、secondary の Provision cleanup ではオブジェクトストレージ上のエクスポートデータを interface で同期的に削除する。全 part の削除に成功した場合だけ、対象 backup 自身の変更（diff-from・sync-mode アノテーションの削除）へ進んで requeue する。削除に失敗した場合は対象を変更せずエラーを返す。Finalize ではオブジェクトストレージ削除を行わずに対象アノテーションを削除して requeue する。
