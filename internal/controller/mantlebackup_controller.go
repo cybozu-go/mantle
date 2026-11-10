@@ -50,6 +50,7 @@ import (
 
 const (
 	MantleBackupFinalizerName = "mantlebackup.mantle.cybozu.io/finalizer"
+	backupPVCUIDIndex         = "mantlebackup.pvcUID"
 
 	// labelClusterID identifies the controller that should reconcile the
 	// MantleBackup, guaranteeing there is never a MantleBackup that has a
@@ -763,13 +764,20 @@ func isHighPriority(backup *mantlev1.MantleBackup) bool {
 	return backup.GetLabels()[LabelBackupPriority] == labelBackupPriorityHigh
 }
 
+func backupPVCUIDIndexValues(obj client.Object) []string {
+	uid, ok := obj.GetLabels()[labelLocalBackupTargetPVCUID]
+	if !ok {
+		return nil
+	}
+
+	return []string{uid}
+}
+
 func (r *MantleBackupReconciler) listMantleBackupsByPVCUID(
 	ctx context.Context, pvcUID string,
 ) ([]mantlev1.MantleBackup, error) {
 	var backupList mantlev1.MantleBackupList
-	if err := r.List(ctx, &backupList, &client.ListOptions{
-		LabelSelector: labels.SelectorFromSet(map[string]string{labelLocalBackupTargetPVCUID: pvcUID}),
-	}); err != nil {
+	if err := r.List(ctx, &backupList, client.MatchingFields{backupPVCUIDIndex: pvcUID}); err != nil {
 		return nil, fmt.Errorf("failed to list MantleBackup resources for the same PVC: %w", err)
 	}
 
@@ -932,6 +940,10 @@ func newMantleBackupReconcilerRateLimiter[T comparable]() workqueue.TypedRateLim
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *MantleBackupReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &mantlev1.MantleBackup{}, backupPVCUIDIndex, backupPVCUIDIndexValues); err != nil {
+		return fmt.Errorf("failed to index MantleBackups by PVC UID: %w", err)
+	}
+
 	// Ensure zero-value metrics are exported even if no MantleBackup exists.
 	metrics.BackupSyncDurationSeconds.With(prometheus.Labels{
 		metrics.LabelPersistentVolumeClaim: "",
@@ -1483,10 +1495,10 @@ func (r *MantleBackupReconciler) prepareForDataSynchronization(
 
 	var primaryBackupList mantlev1.MantleBackupList
 	// TODO: Perhaps, we may have to use the client without cache.
-	if err := r.List(ctx, &primaryBackupList, &client.ListOptions{
-		LabelSelector: labels.SelectorFromSet(map[string]string{labelLocalBackupTargetPVCUID: exportTargetPVCUID}),
-		Namespace:     backup.GetNamespace(),
-	}); err != nil {
+	if err := r.List(ctx, &primaryBackupList,
+		client.InNamespace(backup.GetNamespace()),
+		client.MatchingFields{backupPVCUIDIndex: exportTargetPVCUID},
+	); err != nil {
 		return nil, reconcile.Failed("failed to list primary MantleBackup: %w", err)
 	}
 
