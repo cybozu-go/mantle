@@ -98,14 +98,13 @@ MantleBackupConfig コントローラで実施済みの PoC（ https://github.co
 * `expire` の判定ロジック（CreatedAt 未設定・deletionTimestamp・retain-if-expired アノテーション・期限計算）をドメイン化し、削除は `DeleteMantleBackupOperation`、遅延 requeue は `ScheduleExpireOperation` として発行する。`if` は全ロールの `Provision` の所有権ガードの後へ追記する。deletionTimestamp が付いた backup では何もしないため `Finalize` への追記は不要。未失効の場合は `ScheduleExpireOperation` を発行した上で後続の `if` へ処理を続ける（return しない継続処理。Operation の発行のみで判定には影響しないため許容する）。
 * `checkManagedBackup` の判定部分（ラベル一致・cluster ID 照合）をドメイン層の判定関数とし、<<managed-backup-preflight>> のとおり `Run` が `Provision`/`Finalize` より前に呼び出す。`Reconcile` にある `checkManagedBackup` の呼び出しは削除して `Run` へ移す。`labelClusterID` が付いていない場合だけ、判定関数がドメイン層で定義したインターフェースを通じて PVC の cluster ID を取得する。その実装には、インフラ層へ移動した `getCephClusterIDFromPVC` を用いる（<<d6>>。`mantlerestore_controller.go`・`replication.go`・既存テストの参照は機械的に修正する）。PVC の NotFound はエラーとせず、インターフェースの戻り値でドメイン層へ伝える（無条件に取得し、NotFound を requeue にすると、PVC が削除済みの backup の finalize が進まなくなるため）。管理対象外なら、ロール固有の事前取得を行わずに成功扱いで終了する。
 * `Run` の Operations 引き渡し機構（ドメイン層の `ReconcilerOperations` フィールド、ユースケース層が定義する適用インターフェース）、両 Operation の型、インフラ層の実行器（`expireQueueCh` の注入を含む）をこの PR で追加する（PR 3 から繰り延べられた分）。
-* MB 用の Operation 適用は「**発行順に実行し、失敗したら残りを打ち切る**」契約とする。MB には「diff-to アノテーションの付与 → `SetSynchronizing` → export Job 作成」のように、先行の失敗時に後続を実行してはならない順序依存の Operation 列があるため。PoC の `infra.KubernetesClient.ApplyReconcilerOperations` は失敗しても `errors.Join` で後続を続けるので、MBC 側の既存挙動を変えないこと（実行器を分けるか、MBC も打ち切りセマンティクスへ統一して問題ないかはこの PR で判断する）。
+* MB 用の Operation も、失敗したものがあっても発行順にすべて実行する。「diff-to アノテーションの付与 → `SetSynchronizing` → export Job 作成」のように、先の Operation が失敗したら後続を実行してはならない Operation 列は、1 つの Operation にまとめる。
 * 上記の処理が使用する定数・純粋ヘルパは同じ PR でドメイン層へ移動する（<<d2>>）。旧 `expire`・`checkManagedBackup` は削除する。
 --
-テスト:: 「管理対象外ならロール固有の事前取得を行わず成功する」「管理対象の secondary では S3 初期化より先に管理対象判定を行う」「期限切れなら削除 Operation を発行する」「retain-if-expired なら何もしない」「未期限なら schedule Operation を発行する」「PVC NotFound なら requeue する」。加えて Operations 引き渡し機構の「発行順に実行される」「途中で失敗したら残りを打ち切る」。
+テスト:: 「管理対象外ならロール固有の事前取得を行わず成功する」「管理対象の secondary では S3 初期化より先に管理対象判定を行う」「期限切れなら削除 Operation を発行する」「retain-if-expired なら何もしない」「未期限なら schedule Operation を発行する」「PVC NotFound なら requeue する」。加えて Operations 引き渡し機構の「発行順に実行される」「途中で失敗しても残りを実行する」。
 注意点::
 +
 --
-* 打ち切り契約は link:new-architecture.adoc[Mantle（再）設計案]の「渡されたイベントが複数ある場合、エラーの有無に関わらず全てのイベントの実行を試行する」からの意図的な逸脱である。この PR で契約を定める際、同ドキュメントにも「順序依存の Operation 列を持つリコンサイラでは失敗時の打ち切りを許容する」旨の例外を追記する。
 * MB 用のユニットテストはこの PR が最初になる。`domain/mbc_primary_reconciler_test.go` のスタイル（<<dod>>）を MB 用にも確立する。
 --
 
@@ -117,10 +116,10 @@ MantleBackupConfig コントローラで実施済みの PoC（ https://github.co
 --
 * `reconcileLocalBackup` のうち、ラベル（cluster-id / local-backup-target-pvc-uid）と finalizer の付与、`getSnapshotTarget` の判定部分（PVC UID 照合、`checkPVCBound`、PV からの image/pool 抽出）をドメイン化する。PVC・PV の取得はユースケース層が行いドメイン層へ渡す。
 * `provisionRBDSnapshot` を「2 周のリコンサイル」に分解してドメイン化する。第 1 周はラベル・finalizer・PVC/PV マニフェスト（status）をメモリ上でセットして requeue（永続化はリコンサイル対象の更新 Operation）、第 2 周はこれらの永続化済みを確認してから `CreateAndFindRBDSnapshot` interface（この PR でドメイン層に定義、インフラ層で `ceph.CephCmd` により実装）でスナップショットを作成し、SnapID・CreatedAt・SnapSize・conditions をメモリ上で更新する。
-* リコンサイル対象の更新 Operation をこの PR で導入する（PR 3 から繰り延べられた分）。`Provision`/`Finalize` の呼び出し前に DeepCopy を取り、メタデータ・spec と status の dirty 判定を独立に行う。メタデータ・spec に差分がある場合だけ `Update`、status に差分がある場合だけ `Status().Update` を行い、両方に差分がある場合はこの順序で実行して更新後の resourceVersion を引き継ぐ。先行する永続化に失敗した場合は後続の永続化と Operations を実行しない。現行コードが競合対策として用いている再取得つき status 更新・`Patch` に相当する競合時の方針（conflict エラーを requeue に任せる、再取得してリトライする等）もこの PR で定める。
+* リコンサイル対象の更新 Operation をこの PR で導入する（PR 3 から繰り延べられた分）。`Provision`/`Finalize` の呼び出し前に DeepCopy を取り、メタデータ・spec と status の dirty 判定を独立に行う。メタデータ・spec に差分がある場合だけ `Update`、status に差分がある場合だけ `Status().Update` を行い、両方に差分がある場合はこの順序で実行して更新後の resourceVersion を引き継ぐ。`Update` と `Status().Update` は 1 つの Operation で行い、`Update` に失敗したら `Status().Update` は実行しない。現行コードが競合対策として用いている再取得つき status 更新・`Patch` に相当する競合時の方針（conflict エラーを requeue に任せる、再取得してリトライする等）もこの PR で定める。
 * 以上を standalone・primary の `Provision` の `if` として追記し、旧コードの該当部分を削除する。
 --
-テスト:: ラベル・finalizer 付与、マニフェスト未保存時の requeue、スナップショット作成後の status 更新、fake interface を使った作成失敗時の挙動。リコンサイル対象の更新 Operation については、メタデータ・spec のみの変更では `Update` だけを呼ぶこと、status のみの変更では `Status().Update` だけを呼ぶこと、両方の変更では `Update` → `Status().Update` の順序で実行し resourceVersion を引き継ぐこと、先行する永続化が失敗したら後続の永続化と Operations を実行しないこと、finalizer 除去だけのパスで `Status().Update` を呼ばないこと。
+テスト:: ラベル・finalizer 付与、マニフェスト未保存時の requeue、スナップショット作成後の status 更新、fake interface を使った作成失敗時の挙動。リコンサイル対象の更新 Operation については、メタデータ・spec のみの変更では `Update` だけを呼ぶこと、status のみの変更では `Status().Update` だけを呼ぶこと、両方の変更では `Update` → `Status().Update` の順序で実行し resourceVersion を引き継ぐこと、`Update` が失敗したら `Status().Update` を実行しないこと、finalizer 除去だけのパスで `Status().Update` を呼ばないこと。
 注意点::
 +
 --
@@ -323,7 +322,7 @@ MB-C のラベル・アノテーション・sync-mode・名前プレフィック
 
 | リコンサイル対象 `MantleBackup` の変更（ラベル・finalizer・アノテーション・status・conditions）
 | メモリ上で変更し、その更新を Operation として発行
-| 元のオブジェクトとの比較はメタデータ・spec と status で独立に行い、差分がある側だけ `Update` / `Status().Update` を呼ぶ。両方に差分がある場合は `Update` を先に行い、その応答の resourceVersion を使って `Status().Update` を行う。先行する永続化に失敗した場合は後続の永続化と Operation 適用を行わない（PR 6）
+| 元のオブジェクトとの比較はメタデータ・spec と status で独立に行い、差分がある側だけ `Update` / `Status().Update` を呼ぶ。両方に差分がある場合は `Update` を先に行い、その応答の resourceVersion を使って `Status().Update` を行う。この 2 つは 1 つの Operation で行い、`Update` に失敗したら `Status().Update` は行わない（PR 6）
 
 | Job・Pod・PVC・PV の作成／削除、他の `MantleBackup` の更新（diff-from アノテーションなど）、期限切れ backup の削除
 | Operation
