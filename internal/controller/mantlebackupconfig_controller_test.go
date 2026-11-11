@@ -70,6 +70,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 			resMgr.ClusterID,
 			"",
 			RoleStandalone,
+			nil,
 		)
 		err := reconciler.SetupWithManager(mgrUtil.GetManager())
 		Expect(err).NotTo(HaveOccurred())

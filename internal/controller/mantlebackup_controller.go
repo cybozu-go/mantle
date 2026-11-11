@@ -160,6 +160,7 @@ type MantleBackupReconciler struct {
 	objectStorageClient    objectstorage.Bucket
 	proxySettings          *ProxySettings
 	backupTransferPartSize resource.Quantity
+	jobPodLabels           map[string]string // The labels added to the Pods of the Jobs created by this reconciler.
 
 	exportedDiffSizeCache map[types.UID]exportedDiffSizeCacheEntry
 
@@ -190,6 +191,7 @@ func NewMantleBackupReconciler(
 	objectStorageSettings *ObjectStorageSettings,
 	proxySettings *ProxySettings,
 	backupTransferPartSize resource.Quantity,
+	jobPodLabels map[string]string,
 ) *MantleBackupReconciler {
 	k8sClient := infra.NewKubernetesClient(client)
 
@@ -207,6 +209,7 @@ func NewMantleBackupReconciler(
 		objectStorageSettings:  objectStorageSettings,
 		proxySettings:          proxySettings,
 		backupTransferPartSize: backupTransferPartSize,
+		jobPodLabels:           jobPodLabels,
 		exportedDiffSizeCache:  map[types.UID]exportedDiffSizeCacheEntry{},
 		reconcileMBStandalone:  usecase.NewReconcileMBStandalone(k8sClient),
 		reconcileMBPrimary:     usecase.NewReconcileMBPrimary(k8sClient),
@@ -2381,6 +2384,16 @@ func ExtractPartNumFromImportJobName(jobName string, backup *mantlev1.MantleBack
 	return ExtractPartNumFromComponentJobName(MantleImportJobPrefix, jobName, backup)
 }
 
+// setJobPodLabels sets r.jobPodLabels to the Pod template of job. The Pod
+// template of a Job is immutable, so call this only when the Job is created.
+func (r *MantleBackupReconciler) setJobPodLabels(job *batchv1.Job) {
+	if len(r.jobPodLabels) == 0 {
+		return
+	}
+
+	job.Spec.Template.Labels = maps.Clone(r.jobPodLabels)
+}
+
 func (r *MantleBackupReconciler) createOrUpdateExportJob(
 	ctx context.Context,
 	target *mantlev1.MantleBackup,
@@ -2426,6 +2439,8 @@ func (r *MantleBackupReconciler) createOrUpdateExportJob(
 		if !job.CreationTimestamp.IsZero() {
 			return nil
 		}
+		r.setJobPodLabels(&job)
+
 		job.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
 			FSGroup:      new(nonRootFSGroup),
 			RunAsGroup:   new(nonRootGroupID),
@@ -2605,6 +2620,8 @@ func (r *MantleBackupReconciler) createOrUpdateUploadJobs(
 			if !job.CreationTimestamp.IsZero() {
 				return nil
 			}
+			r.setJobPodLabels(&job)
+
 			job.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
 				FSGroup:      new(nonRootFSGroup),
 				RunAsGroup:   new(nonRootGroupID),
@@ -3242,6 +3259,8 @@ func (r *MantleBackupReconciler) createOrUpdateZeroOutJob(
 		if !job.CreationTimestamp.IsZero() {
 			return nil
 		}
+		r.setJobPodLabels(&job)
+
 		job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
 
 		job.Spec.Template.Spec.Containers = []corev1.Container{
@@ -3308,6 +3327,8 @@ func (r *MantleBackupReconciler) createOrUpdateVerifyJob(ctx context.Context, jo
 		if !job.CreationTimestamp.IsZero() {
 			return nil
 		}
+		r.setJobPodLabels(&job)
+
 		/*
 			According to the e2fsck man page:
 
@@ -3520,6 +3541,8 @@ func (r *MantleBackupReconciler) createOrUpdateImportJob(
 		if !job.CreationTimestamp.IsZero() {
 			return nil
 		}
+		r.setJobPodLabels(&job)
+
 		job.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
 			RunAsGroup:   new(nonRootGroupID),
 			RunAsNonRoot: new(true),

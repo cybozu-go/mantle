@@ -65,6 +65,7 @@ func (test *mantleRestoreControllerUnitTest) setupEnv() {
 			nil,
 			nil,
 			resource.MustParse("1Gi"),
+			nil,
 		)
 		backupReconciler.ceph = testutil.NewFakeRBD()
 		err := backupReconciler.SetupWithManager(test.mgrUtil.GetManager())

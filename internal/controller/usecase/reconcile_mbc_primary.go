@@ -26,6 +26,7 @@ type ReconcileMBCPrimary struct {
 }
 
 // NewReconcileMBCPrimary creates a new ReconcileMBCPrimary instance.
+// jobPodLabels are the labels added to the Pods created by the CronJobs.
 func NewReconcileMBCPrimary(
 	managedCephClusterID string,
 	k8sClient KubernetesClient,
@@ -33,6 +34,7 @@ func NewReconcileMBCPrimary(
 	overwriteMBCSchedule string,
 	serviceAccountName string,
 	image string,
+	jobPodLabels map[string]string,
 ) *ReconcileMBCPrimary {
 	return &ReconcileMBCPrimary{
 		reconciler: domain.NewMBCPrimaryReconciler(
@@ -41,6 +43,7 @@ func NewReconcileMBCPrimary(
 			cronJobNamespace,
 			serviceAccountName,
 			image,
+			jobPodLabels,
 		),
 		k8sClient:        k8sClient,
 		cronJobNamespace: cronJobNamespace,

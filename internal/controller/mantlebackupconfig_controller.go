@@ -30,6 +30,7 @@ type MantleBackupConfigReconciler struct {
 	managedCephClusterID string
 	overwriteMBCSchedule string
 	role                 string
+	jobPodLabels         map[string]string
 	uc                   *usecase.ReconcileMBCPrimary
 
 	// ucOnce guards the lazy initialization of uc. We cannot initialize uc in
@@ -41,12 +42,15 @@ type MantleBackupConfigReconciler struct {
 	ucOnce sync.Once
 }
 
+// NewMantleBackupConfigReconciler returns a MantleBackupConfigReconciler.
+// jobPodLabels are the labels added to the Pods created by the CronJobs.
 func NewMantleBackupConfigReconciler(
 	cli client.Client,
 	scheme *runtime.Scheme,
 	managedCephClusterID string,
 	overwriteMBCSchedule string,
 	role string,
+	jobPodLabels map[string]string,
 ) *MantleBackupConfigReconciler {
 	return &MantleBackupConfigReconciler{
 		Client:               cli,
@@ -54,6 +58,7 @@ func NewMantleBackupConfigReconciler(
 		role:                 role,
 		managedCephClusterID: managedCephClusterID,
 		overwriteMBCSchedule: overwriteMBCSchedule,
+		jobPodLabels:         jobPodLabels,
 		uc:                   nil,
 	}
 }
@@ -95,6 +100,7 @@ func (r *MantleBackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.R
 			r.overwriteMBCSchedule,
 			cronJobInfo.serviceAccountName,
 			cronJobInfo.image,
+			r.jobPodLabels,
 		)
 	})
 
