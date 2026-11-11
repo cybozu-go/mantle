@@ -10,11 +10,20 @@ import (
 
 // MBSecondaryReconciler reconciles MantleBackup resources on a secondary cluster.
 type MBSecondaryReconciler struct {
+	managedCephClusterID string
+	k8sClient            MBKubernetesClient
 }
 
-// NewMBSecondaryReconciler creates a new MBSecondaryReconciler.
-func NewMBSecondaryReconciler() *MBSecondaryReconciler {
-	return &MBSecondaryReconciler{}
+// NewMBSecondaryReconciler creates a new MBSecondaryReconciler that reconciles MantleBackups
+// managed by the controller in charge of the Ceph cluster managedCephClusterID.
+func NewMBSecondaryReconciler(
+	managedCephClusterID string,
+	k8sClient MBKubernetesClient,
+) *MBSecondaryReconciler {
+	return &MBSecondaryReconciler{
+		managedCephClusterID: managedCephClusterID,
+		k8sClient:            k8sClient,
+	}
 }
 
 // Provision handles the provisioning logic for a MantleBackup resource.
@@ -22,6 +31,12 @@ func (r *MBSecondaryReconciler) Provision(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
 ) *reconcile.Result {
+	if result := checkManagedBackup(ctx, backup, r.managedCephClusterID, r.k8sClient); result.ShouldReturn() {
+		return result
+	}
+
+	log.FromContext(ctx).Info("starting reconciliation")
+
 	if !isCreatedWhenMantleControllerWasSecondary(backup) {
 		return skipBackupNotCreatedAsSecondary(ctx)
 	}
@@ -34,6 +49,12 @@ func (r *MBSecondaryReconciler) Finalize(
 	ctx context.Context,
 	backup *mantlev1.MantleBackup,
 ) *reconcile.Result {
+	if result := checkManagedBackup(ctx, backup, r.managedCephClusterID, r.k8sClient); result.ShouldReturn() {
+		return result
+	}
+
+	log.FromContext(ctx).Info("starting reconciliation")
+
 	if !isCreatedWhenMantleControllerWasSecondary(backup) {
 		return skipBackupNotCreatedAsSecondary(ctx)
 	}

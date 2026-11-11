@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	aerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -26,6 +27,24 @@ var _ usecase.KubernetesClient = (*KubernetesClient)(nil)
 
 func NewKubernetesClient(c client.Client) *KubernetesClient {
 	return &KubernetesClient{c}
+}
+
+func (c *KubernetesClient) GetCephClusterIDOfPVC(ctx context.Context, namespace, name string) (string, bool, error) {
+	var pvc corev1.PersistentVolumeClaim
+	if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &pvc); err != nil {
+		if aerrors.IsNotFound(err) {
+			return "", false, nil
+		}
+
+		return "", false, fmt.Errorf("failed to get PVC: %s/%s: %w", namespace, name, err)
+	}
+
+	clusterID, err := GetCephClusterIDFromPVC(ctx, c.Client, &pvc)
+	if err != nil {
+		return "", false, fmt.Errorf("failed to get the Ceph cluster ID from the PVC: %s/%s: %w", namespace, name, err)
+	}
+
+	return clusterID, true, nil
 }
 
 func (c *KubernetesClient) ApplyReconcilerOperations(ctx context.Context, operations []domain.Operation) error {
