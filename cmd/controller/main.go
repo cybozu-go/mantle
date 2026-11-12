@@ -66,6 +66,7 @@ var (
 	exportJobAffinity            string
 	uploadJobAffinity            string
 	importJobAffinity            string
+	jobPodLabels                 string
 	envSecret                    string
 	objectStorageBucketName      string
 	objectStorageEndpoint        string
@@ -133,6 +134,9 @@ func init() {
 	flags.StringVar(&importJobAffinity, "import-job-affinity", "",
 		"The affinity of the Pods of import Jobs, specified as a JSON representation of corev1.Affinity. "+
 			"If this is empty, no affinity is set. Only used when --role is 'secondary'.")
+	flags.StringVar(&jobPodLabels, "job-pod-labels", "",
+		"Labels added to the Pods of all the Jobs and CronJobs that this controller creates, "+
+			"specified as a JSON object. If this is empty, no labels are added.")
 	flags.StringVar(&envSecret, "env-secret", "",
 		"The name of the Secret resource that contains environment variables related to the controller and Jobs.")
 	flags.StringVar(&objectStorageBucketName, "object-storage-bucket-name", "",
@@ -281,17 +285,19 @@ func parseAffinity(flagName, value string) (*corev1.Affinity, error) {
 	return &affinity, nil
 }
 
-func parseAnnotations(flagName, value string) (map[string]string, error) {
+// parseStringMap parses a JSON object whose values are strings, such as labels
+// and annotations, specified by the flag flagName. It returns nil if value is empty.
+func parseStringMap(flagName, value string) (map[string]string, error) {
 	if value == "" {
 		return nil, nil
 	}
 
-	annotations := map[string]string{}
-	if err := json.Unmarshal([]byte(value), &annotations); err != nil {
+	stringMap := map[string]string{}
+	if err := json.Unmarshal([]byte(value), &stringMap); err != nil {
 		return nil, fmt.Errorf("failed to parse %s: %w", flagName, err)
 	}
 
-	return annotations, nil
+	return stringMap, nil
 }
 
 func getManagedCephClusterID() (string, error) {
@@ -353,6 +359,13 @@ func setupReconcilers(
 		return fmt.Errorf("failed to parse backup-transfer-part-size: %w", err)
 	}
 
+	parsedJobPodLabels, err := parseStringMap("--job-pod-labels", jobPodLabels)
+	if err != nil {
+		setupLog.Error(err, "failed to parse the labels of the Pods of Jobs")
+
+		return err
+	}
+
 	backupReconciler := controller.NewMantleBackupReconciler(
 		mgr.GetClient(),
 		mgr.GetScheme(),
@@ -374,6 +387,7 @@ func setupReconcilers(
 			NoProxy:    noProxy,
 		},
 		parsedBackupTransferPartSize,
+		parsedJobPodLabels,
 	)
 	if err := backupReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MantleBackup")
@@ -399,6 +413,7 @@ func setupReconcilers(
 		managedCephClusterID,
 		overwriteMBCSchedule,
 		role,
+		parsedJobPodLabels,
 	).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MantleBackupConfig")
 
@@ -500,7 +515,7 @@ func setupPrimary(ctx context.Context, mgr manager.Manager, wg *sync.WaitGroup) 
 
 		return err
 	}
-	parsedExportDataPVCAnnotations, err := parseAnnotations(
+	parsedExportDataPVCAnnotations, err := parseStringMap(
 		"--export-data-pvc-annotations", exportDataPVCAnnotations,
 	)
 	if err != nil {

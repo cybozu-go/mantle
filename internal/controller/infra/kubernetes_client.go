@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 
 	"github.com/cybozu-go/mantle/internal/controller/domain"
@@ -77,6 +78,16 @@ func (c *KubernetesClient) createOrUpdateMBCCronJob(ctx context.Context, op *dom
 		cronJob.Spec.StartingDeadlineSeconds = &startingDeadlineSeconds
 		var backoffLimit int32 = 10
 		cronJob.Spec.JobTemplate.Spec.BackoffLimit = &backoffLimit
+
+		// Add the labels to the existing ones instead of replacing them all,
+		// so that the labels set by others are kept.
+		if len(op.PodLabels) > 0 {
+			podTemplate := &cronJob.Spec.JobTemplate.Spec.Template
+			if podTemplate.Labels == nil {
+				podTemplate.Labels = make(map[string]string, len(op.PodLabels))
+			}
+			maps.Copy(podTemplate.Labels, op.PodLabels)
+		}
 
 		podSpec := &cronJob.Spec.JobTemplate.Spec.Template.Spec
 		podSpec.ServiceAccountName = op.ServiceAccountName

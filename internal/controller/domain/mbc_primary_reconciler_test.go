@@ -73,6 +73,7 @@ func newReconciler(storageClass *storagev1.StorageClass, opts ...func(*reconcile
 		cronJobNamespace:     "",
 		serviceAccountName:   "",
 		image:                "",
+		jobPodLabels:         nil,
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -84,6 +85,7 @@ func newReconciler(storageClass *storagev1.StorageClass, opts ...func(*reconcile
 		cfg.cronJobNamespace,
 		cfg.serviceAccountName,
 		cfg.image,
+		cfg.jobPodLabels,
 	)
 }
 
@@ -92,6 +94,7 @@ type reconcilerConfig struct {
 	cronJobNamespace     string
 	serviceAccountName   string
 	image                string
+	jobPodLabels         map[string]string
 }
 
 func withOverwriteSchedule(schedule string) func(*reconcilerConfig) {
@@ -115,6 +118,12 @@ func withServiceAccountName(sa string) func(*reconcilerConfig) {
 func withImage(image string) func(*reconcilerConfig) {
 	return func(cfg *reconcilerConfig) {
 		cfg.image = image
+	}
+}
+
+func withJobPodLabels(labels map[string]string) func(*reconcilerConfig) {
+	return func(cfg *reconcilerConfig) {
+		cfg.jobPodLabels = labels
 	}
 }
 
@@ -205,6 +214,7 @@ func TestMBCPrimaryReconciler_Provision_CreateOrUpdateCronJob(t *testing.T) {
 		withCronJobNamespace("cronjob-ns"),
 		withServiceAccountName("sa-name"),
 		withImage("controller-image"),
+		withJobPodLabels(map[string]string{"example.com/test-label": "test-value"}),
 	)
 	mbc := newMBC(mbcWithAnnotAndFinalizer(storageClass))
 
@@ -225,6 +235,7 @@ func TestMBCPrimaryReconciler_Provision_CreateOrUpdateCronJob(t *testing.T) {
 	require.Equal(t, mbc.Spec.Suspend, operation.Suspend)
 	require.Equal(t, "sa-name", operation.ServiceAccountName)
 	require.Equal(t, "controller-image", operation.Image)
+	require.Equal(t, map[string]string{"example.com/test-label": "test-value"}, operation.PodLabels)
 	require.Equal(t, mbc.Name, operation.MBCName)
 	require.Equal(t, mbc.Namespace, operation.MBCNamespace)
 }

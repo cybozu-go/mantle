@@ -39,6 +39,7 @@ type CreateOrUpdateMBCCronJobOperation struct {
 	Suspend            bool
 	ServiceAccountName string
 	Image              string
+	PodLabels          map[string]string // The labels added to the Pods created by the CronJob.
 	MBCName            string
 	MBCNamespace       string
 }
@@ -64,16 +65,19 @@ type MBCPrimaryReconciler struct {
 	cronJobNamespace     string
 	serviceAccountName   string
 	image                string
+	jobPodLabels         map[string]string
 	Operations           *ReconcilerOperations
 }
 
 // NewMBCPrimaryReconciler creates a new MBCPrimaryReconciler instance.
+// jobPodLabels are the labels added to the Pods created by the CronJobs.
 func NewMBCPrimaryReconciler(
 	managedCephClusterID string,
 	overwriteMBCSchedule string,
 	cronJobNamespace string,
 	serviceAccountName string,
 	image string,
+	jobPodLabels map[string]string,
 ) *MBCPrimaryReconciler {
 	return &MBCPrimaryReconciler{
 		managedCephClusterID: managedCephClusterID,
@@ -81,6 +85,7 @@ func NewMBCPrimaryReconciler(
 		cronJobNamespace:     cronJobNamespace,
 		serviceAccountName:   serviceAccountName,
 		image:                image,
+		jobPodLabels:         jobPodLabels,
 		Operations:           NewReconcilerOperations(),
 	}
 }
@@ -223,6 +228,7 @@ func (r *MBCPrimaryReconciler) createOrUpdateCronJob(mbc *mantlev1.MantleBackupC
 		Suspend:            mbc.Spec.Suspend,
 		ServiceAccountName: r.serviceAccountName,
 		Image:              r.image,
+		PodLabels:          r.jobPodLabels,
 		MBCName:            mbc.Name,
 		MBCNamespace:       mbc.Namespace,
 	})

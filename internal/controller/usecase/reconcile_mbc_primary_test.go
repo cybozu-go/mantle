@@ -75,7 +75,27 @@ func TestMain(m *testing.M) {
 	m.Run()
 }
 
-func newUsecase(cephClusterID, cronJobNamespace string) *usecase.ReconcileMBCPrimary {
+// usecaseConfig holds the parameters of newUsecase that optionUsecase can change.
+type usecaseConfig struct {
+	jobPodLabels map[string]string
+}
+
+type optionUsecase func(*usecaseConfig)
+
+func withJobPodLabels(jobPodLabels map[string]string) optionUsecase {
+	return func(cfg *usecaseConfig) {
+		cfg.jobPodLabels = jobPodLabels
+	}
+}
+
+func newUsecase(cephClusterID, cronJobNamespace string, opts ...optionUsecase) *usecase.ReconcileMBCPrimary {
+	cfg := &usecaseConfig{
+		jobPodLabels: nil,
+	}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
 	return usecase.NewReconcileMBCPrimary(
 		cephClusterID,
 		infra.NewKubernetesClient(k8sClient),
@@ -83,6 +103,7 @@ func newUsecase(cephClusterID, cronJobNamespace string) *usecase.ReconcileMBCPri
 		"",
 		"sa-name",
 		"controller-image",
+		cfg.jobPodLabels,
 	)
 }
 
@@ -260,6 +281,40 @@ func TestRun_ProvisionPath_FullLifecycle(t *testing.T) {
 		cronJob.Spec.JobTemplate.Spec.Template.Spec.ServiceAccountName)
 	require.Equal(t, "controller-image",
 		cronJob.Spec.JobTemplate.Spec.Template.Spec.Containers[0].Image)
+	require.Empty(t, cronJob.Spec.JobTemplate.Spec.Template.Labels)
+}
+
+func TestRun_ProvisionPath_JobPodLabels(t *testing.T) {
+	t.Parallel()
+
+	cephClusterID := util.GetUniqueName("ceph-cluster-id")
+	fixture := setupTestEnv(t, cephClusterID)
+	mbc := fixture.createMBC(t)
+
+	// Create a CronJob without the labels first to check that an existing
+	// CronJob is updated as well.
+	fixture.provisionMBC(t, newUsecase(cephClusterID, fixture.cronJobNamespace))
+
+	cronJobNN := types.NamespacedName{
+		Name:      domain.GetMBCCronJobName(mbc),
+		Namespace: fixture.cronJobNamespace,
+	}
+
+	var cronJob batchv1.CronJob
+
+	err := k8sClient.Get(t.Context(), cronJobNN, &cronJob)
+	require.NoError(t, err)
+	require.Empty(t, cronJob.Spec.JobTemplate.Spec.Template.Labels)
+
+	jobPodLabels := map[string]string{"example.com/test-label": "test-value"}
+	useCase := newUsecase(cephClusterID, fixture.cronJobNamespace, withJobPodLabels(jobPodLabels))
+
+	err = useCase.Run(t.Context(), fixture.mbcNN())
+	require.NoError(t, err)
+
+	err = k8sClient.Get(t.Context(), cronJobNN, &cronJob)
+	require.NoError(t, err)
+	require.Equal(t, jobPodLabels, cronJob.Spec.JobTemplate.Spec.Template.Labels)
 }
 
 func TestRun_ProvisionPath_NotResponsibleCluster(t *testing.T) {

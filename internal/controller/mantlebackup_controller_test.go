@@ -258,6 +258,7 @@ var _ = Describe("MantleBackup controller", func() {
 				nil,
 				nil,
 				resource.MustParse("1Gi"),
+				nil,
 			)
 			reconciler.ceph = testutil.NewFakeRBD()
 			err := reconciler.SetupWithManager(mgrUtil.GetManager())
@@ -632,6 +633,7 @@ var _ = Describe("MantleBackup controller", func() {
 				},
 				proxySettings,
 				resource.MustParse("1Gi"),
+				nil,
 			)
 			reconciler.ceph = testutil.NewFakeRBD()
 
@@ -1019,6 +1021,7 @@ var _ = Describe("checkManagedBackup", func() {
 			r := NewMantleBackupReconciler(
 				k8sClient, scheme.Scheme, managedID, RoleStandalone,
 				nil, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"),
+				nil,
 			)
 
 			assert(r.checkManagedBackup(ctx, backup))
@@ -1234,7 +1237,7 @@ var _ = Describe("listHigherPriorityBackups", func() {
 		}
 
 		mbr := NewMantleBackupReconciler(ctrlClient,
-			ctrlClient.Scheme(), testManagedCephClusterID, RolePrimary, nil, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"))
+			ctrlClient.Scheme(), testManagedCephClusterID, RolePrimary, nil, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"), nil)
 
 		backups, err := mbr.listHigherPriorityBackups(context.Background())
 		Expect(err).NotTo(HaveOccurred())
@@ -1292,7 +1295,7 @@ var _ = Describe("shouldWaitForHigherPriorityBackup", func() {
 		}
 
 		mbr := NewMantleBackupReconciler(ctrlClient,
-			ctrlClient.Scheme(), testManagedCephClusterID, RolePrimary, nil, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"))
+			ctrlClient.Scheme(), testManagedCephClusterID, RolePrimary, nil, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"), nil)
 
 		wait, err := mbr.shouldWaitForHigherPriorityBackup(context.Background(), target)
 		Expect(err).NotTo(HaveOccurred())
@@ -1393,7 +1396,7 @@ var _ = Describe("shouldWaitForHigherPriorityImport", func() {
 		}
 
 		mbr := NewMantleBackupReconciler(ctrlClient,
-			ctrlClient.Scheme(), testManagedCephClusterID, RoleSecondary, nil, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"))
+			ctrlClient.Scheme(), testManagedCephClusterID, RoleSecondary, nil, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"), nil)
 
 		wait, err := mbr.shouldWaitForHigherPriorityImport(context.Background(), target)
 		Expect(err).NotTo(HaveOccurred())
@@ -1525,7 +1528,7 @@ var _ = Describe("replicateManifests", func() {
 			})
 
 		mbr := NewMantleBackupReconciler(ctrlClient, ctrlClient.Scheme(), "test-cluster", RolePrimary,
-			&PrimarySettings{Client: grpcClient}, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"))
+			&PrimarySettings{Client: grpcClient}, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"), nil)
 
 		result := mbr.replicateManifests(context.Background(), backup)
 		_, err = result.ToCtrlResult()
@@ -1631,7 +1634,7 @@ var _ = Describe("updateBackupTimestampMetrics", func() {
 
 	update := func(role string, backup *mantlev1.MantleBackup) {
 		mbr := NewMantleBackupReconciler(ctrlClient,
-			ctrlClient.Scheme(), testManagedCephClusterID, role, nil, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"))
+			ctrlClient.Scheme(), testManagedCephClusterID, role, nil, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"), nil)
 		mbr.updateBackupTimestampMetrics(context.Background(), backup)
 	}
 
@@ -1821,7 +1824,7 @@ var _ = Describe("syncPriorityLabelFromMBC", func() {
 		createMantleBackupInClient(ctrlClient, backup)
 
 		mbr := NewMantleBackupReconciler(ctrlClient,
-			ctrlClient.Scheme(), testManagedCephClusterID, RolePrimary, nil, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"))
+			ctrlClient.Scheme(), testManagedCephClusterID, RolePrimary, nil, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"), nil)
 
 		err := mbr.syncPriorityLabelFromMBC(context.Background(), backup)
 		Expect(err).NotTo(HaveOccurred())
@@ -1936,7 +1939,7 @@ var _ = Describe("priority gate vs SnapID-ordering gate deadlock regression", fu
 		Expect(ctrlClient.Create(ctx, backupB)).To(Succeed())
 
 		mbr := NewMantleBackupReconciler(ctrlClient, ctrlClient.Scheme(), testManagedCephClusterID, RolePrimary,
-			&PrimarySettings{Client: grpcClient}, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"))
+			&PrimarySettings{Client: grpcClient}, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"), nil)
 
 		By("A no longer waits on B's priority, since they share a PVC")
 		waitA, err := mbr.shouldWaitForHigherPriorityBackup(ctx, backupA)
@@ -2003,7 +2006,7 @@ var _ = Describe("priority gate vs SnapID-ordering gate deadlock regression", fu
 		Expect(ctrlClient.Create(ctx, backupB2)).To(Succeed())
 
 		mbr := NewMantleBackupReconciler(ctrlClient,
-			ctrlClient.Scheme(), testManagedCephClusterID, RolePrimary, nil, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"))
+			ctrlClient.Scheme(), testManagedCephClusterID, RolePrimary, nil, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"), nil)
 
 		waitA1, err := mbr.shouldWaitForHigherPriorityBackup(ctx, backupA1)
 		Expect(err).NotTo(HaveOccurred())
@@ -2084,7 +2087,7 @@ var _ = Describe("prepareForDataSynchronization", func() {
 		}
 
 		mbr := NewMantleBackupReconciler(ctrlClient,
-			ctrlClient.Scheme(), "test", RolePrimary, nil, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"))
+			ctrlClient.Scheme(), "test", RolePrimary, nil, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"), nil)
 
 		ret, rr := mbr.prepareForDataSynchronization(context.Background(),
 			backup, grpcClient)
@@ -2558,6 +2561,12 @@ var (
 	defaultTransferPartSize = resource.MustParse("1Gi")
 )
 
+// The label used to test the labels of the Pods of the Jobs.
+const (
+	testJobPodLabelKey   = "example.com/test-label"
+	testJobPodLabelValue = "test-value"
+)
+
 // makeTestAffinity returns an affinity that requires Pods to be scheduled onto
 // the nodes whose "role" label is nodeRole.
 func makeTestAffinity(nodeRole string) *corev1.Affinity {
@@ -2769,6 +2778,7 @@ var _ = Describe("export and upload", func() {
 				NoProxy:    "",
 			},
 			resource.MustParse("1Gi"),
+			nil,
 		)
 		mbr.ceph = testutil.NewFakeRBD()
 
@@ -2798,7 +2808,7 @@ var _ = Describe("export and upload", func() {
 		}
 	})
 
-	Context("affinity of export and upload Jobs", func() {
+	Context("Pod template of export and upload Jobs", func() {
 		getJob := func(ctx SpecContext, jobName string) batchv1.Job {
 			GinkgoHelper()
 
@@ -2840,6 +2850,35 @@ var _ = Describe("export and upload", func() {
 
 			uploadJob := getJob(ctx, MakeUploadJobName(target, 0))
 			Expect(uploadJob.Spec.Template.Spec.Affinity).To(BeNil())
+		})
+
+		It("should set the specified labels to the Pods of the export and upload Jobs", func(ctx SpecContext) {
+			mbr.jobPodLabels = map[string]string{testJobPodLabelKey: testJobPodLabelValue}
+
+			target := createAndExportMantleBackup(ctx, mbr, "target-pod-labels", ns, false, false, nil)
+
+			exportJob := getJob(ctx, MakeExportJobName(target, 0))
+			Expect(exportJob.Spec.Template.Labels).To(HaveKeyWithValue(testJobPodLabelKey, testJobPodLabelValue))
+
+			// An upload Job is created after the export Job of the same part completes.
+			completeJob(ctx, MakeExportJobName(target, 0))
+			runStartExportAndUpload(ctx, target)
+
+			uploadJob := getJob(ctx, MakeUploadJobName(target, 0))
+			Expect(uploadJob.Spec.Template.Labels).To(HaveKeyWithValue(testJobPodLabelKey, testJobPodLabelValue))
+		})
+
+		It("should not set the labels to the Pods if they aren't specified", func(ctx SpecContext) {
+			target := createAndExportMantleBackup(ctx, mbr, "target-no-pod-labels", ns, false, false, nil)
+
+			exportJob := getJob(ctx, MakeExportJobName(target, 0))
+			Expect(exportJob.Spec.Template.Labels).NotTo(HaveKey(testJobPodLabelKey))
+
+			completeJob(ctx, MakeExportJobName(target, 0))
+			runStartExportAndUpload(ctx, target)
+
+			uploadJob := getJob(ctx, MakeUploadJobName(target, 0))
+			Expect(uploadJob.Spec.Template.Labels).NotTo(HaveKey(testJobPodLabelKey))
 		})
 	})
 
@@ -2937,6 +2976,7 @@ var _ = Describe("export and upload", func() {
 				nil,
 				nil,
 				resource.MustParse("1Gi"),
+				nil,
 			)
 			mbr2.ceph = testutil.NewFakeRBD()
 			ns2 := resMgr.CreateNamespace()
@@ -3033,6 +3073,7 @@ var _ = Describe("export and upload", func() {
 				nil,
 				nil,
 				resource.MustParse("1Gi"),
+				nil,
 			)
 			mbr2.ceph = testutil.NewFakeRBD()
 			ns2 := resMgr.CreateNamespace()
@@ -3456,6 +3497,7 @@ var _ = Describe("import", func() {
 			&ObjectStorageSettings{},
 			nil,
 			resource.MustParse("1Gi"),
+			nil,
 		)
 		mbr.objectStorageClient = mockObjectStorage
 		mbr.ceph = testutil.NewFakeRBD()
@@ -3526,7 +3568,7 @@ var _ = Describe("import", func() {
 		Entry("error", false, true, false, true),
 	)
 
-	Context("affinity of import Jobs", func() {
+	Context("Pod template of import Jobs", func() {
 		createImportJob := func(ctx SpecContext, name string) *batchv1.Job {
 			GinkgoHelper()
 
@@ -3572,6 +3614,18 @@ var _ = Describe("import", func() {
 		It("should not set any affinity if it isn't specified", func(ctx SpecContext) {
 			importJob := createImportJob(ctx, "target-no-affinity")
 			Expect(importJob.Spec.Template.Spec.Affinity).To(BeNil())
+		})
+
+		It("should set the specified labels to the Pod of the import Job", func(ctx SpecContext) {
+			mbr.jobPodLabels = map[string]string{testJobPodLabelKey: testJobPodLabelValue}
+
+			importJob := createImportJob(ctx, "target-pod-labels")
+			Expect(importJob.Spec.Template.Labels).To(HaveKeyWithValue(testJobPodLabelKey, testJobPodLabelValue))
+		})
+
+		It("should not set the labels to the Pod if they aren't specified", func(ctx SpecContext) {
+			importJob := createImportJob(ctx, "target-no-pod-labels")
+			Expect(importJob.Spec.Template.Labels).NotTo(HaveKey(testJobPodLabelKey))
 		})
 	})
 
@@ -3645,6 +3699,7 @@ var _ = Describe("import", func() {
 				&ObjectStorageSettings{},
 				nil,
 				resource.MustParse("1Gi"),
+				nil,
 			)
 			mbr.objectStorageClient = mockObjectStorage
 			mbr.ceph = testutil.NewFakeRBD()
@@ -3695,6 +3750,7 @@ var _ = Describe("import", func() {
 				&ObjectStorageSettings{},
 				nil,
 				resource.MustParse("1Gi"),
+				nil,
 			)
 			mbr2.objectStorageClient = mockObjectStorage
 			mbr2.ceph = testutil.NewFakeRBD()
@@ -4733,6 +4789,24 @@ blkdiscard -z /dev/zeroout-rbd
 		})
 	})
 
+	Context("createOrUpdateZeroOutJob", func() {
+		It("should set the specified labels to the Pod of the zeroout Job", func(ctx SpecContext) {
+			mbr.jobPodLabels = map[string]string{testJobPodLabelKey: testJobPodLabelValue}
+
+			backup, err := createMantleBackupUsingDummyPVC(ctx, "target", ns)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, err = mbr.createOrUpdateZeroOutJob(ctx, backup).ToCtrlResult()
+			Expect(err).NotTo(HaveOccurred())
+
+			var job batchv1.Job
+			err = k8sClient.Get(ctx,
+				types.NamespacedName{Name: MakeZeroOutJobName(backup), Namespace: nsController}, &job)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(job.Spec.Template.Labels).To(HaveKeyWithValue(testJobPodLabelKey, testJobPodLabelValue))
+		})
+	})
+
 	Context("handleCompletedImportJobs", func() {
 		DescribeTable(
 			"Deletion of completed import Jobs",
@@ -4858,7 +4932,7 @@ var _ = Describe("MantleBackupReconciler", func() {
 		}
 
 		It("setup", func(ctx SpecContext) {
-			reconciler = NewMantleBackupReconciler(nil, nil, "", "", nil, nil, "", "", nil, nil, resource.Quantity{})
+			reconciler = NewMantleBackupReconciler(nil, nil, "", "", nil, nil, "", "", nil, nil, resource.Quantity{}, nil)
 			cephCmd = testutil.NewFakeRBD()
 			reconciler.ceph = cephCmd
 		})
@@ -4895,7 +4969,7 @@ var _ = Describe("MantleBackupReconciler", func() {
 		var cephCmd *testutil.FakeRBD
 
 		It("setup", func(ctx SpecContext) {
-			reconciler = NewMantleBackupReconciler(nil, nil, "", "", nil, nil, "", "", nil, nil, resource.Quantity{})
+			reconciler = NewMantleBackupReconciler(nil, nil, "", "", nil, nil, "", "", nil, nil, resource.Quantity{}, nil)
 			cephCmd = testutil.NewFakeRBD()
 			reconciler.ceph = cephCmd
 		})
@@ -5118,6 +5192,7 @@ set -eux -o pipefail
 				nil,                 // unused
 				nil,                 // unused
 				resource.Quantity{}, // unused
+				nil,
 			)
 			reconciler.ceph = testutil.NewFakeRBD()
 			// Don't execute reconciler by manager since we want to call verify method directly.
@@ -5263,6 +5338,20 @@ set -eux -o pipefail
 			condStatus := getVerifyCondition(ctx, backupFail)
 			Expect(condStatus).NotTo(BeNil())
 			Expect(*condStatus).To(Equal(metav1.ConditionFalse))
+		})
+
+		It("should set the specified labels to the Pod of the verify Job", func(ctx SpecContext) {
+			reconciler.jobPodLabels = map[string]string{testJobPodLabelKey: testJobPodLabelValue}
+			DeferCleanup(func() { reconciler.jobPodLabels = nil })
+
+			jobName := util.GetUniqueName("verify-job-")
+			_, err := reconciler.createOrUpdateVerifyJob(ctx, jobName, "dummy-pvc").ToCtrlResult()
+			Expect(err).NotTo(HaveOccurred())
+
+			var job batchv1.Job
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: podNamespace}, &job)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(job.Spec.Template.Labels).To(HaveKeyWithValue(testJobPodLabelKey, testJobPodLabelValue))
 		})
 
 		It("quit", func(ctx SpecContext) {
