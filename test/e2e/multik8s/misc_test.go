@@ -240,12 +240,12 @@ var _ = Describe("miscellaneous tests", func() {
 			SetupNamespaces(namespace)
 
 			script := fmt.Sprintf(`#!/bin/bash
-s5cmd_path=$(which s5cmd)
-s5cmd(){
+aws_path=$(which aws)
+aws(){
 	if [ ${PART_NUM} -eq %d ]; then
 		sleep 60
 	fi
-	${s5cmd_path} "$@"
+	${aws_path} "$@"
 }
 %s`, partNumSlow, controller.EmbedJobUploadScript)
 			ChangeComponentJobScript(
@@ -325,12 +325,12 @@ rbd(){
 	fi
 }
 
-s5cmd_path=$(which s5cmd)
-s5cmd(){
+aws_path=$(which aws)
+aws(){
 	if [ ! -f /mantle/ready-to-succeed -a ${PART_NUM} -eq %d ]; then
 		return 1
 	else
-		${s5cmd_path} "$@"
+		${aws_path} "$@"
 	fi
 }
 %s`, partNumFailed, partNumFailed, originalScript)

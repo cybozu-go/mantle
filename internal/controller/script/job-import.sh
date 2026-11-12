@@ -62,15 +62,16 @@ rbd_import() {
     echo "start import"
     if [ "${CERT_FILE}" != "" ]; then
         if [ "${TRANSFER_COMPRESSION}" = "zstd" ]; then
-            s5cmd --endpoint-url "${OBJECT_STORAGE_ENDPOINT}" --credentials-file ${CERT_FILE} cat "s3://${BUCKET_NAME}/${OBJ_NAME}" | zstd -d -q -c | rbd import-diff -p ${POOL_NAME} - ${DST_IMAGE_NAME}
+            # --region ceph is necessary to avoid AWS CLI trying to fetch the region from EC2 metadata service.
+            aws --endpoint-url "${OBJECT_STORAGE_ENDPOINT}" --region ceph --ca-bundle "${CERT_FILE}" s3 cp "s3://${BUCKET_NAME}/${OBJ_NAME}" - | zstd -d -q -c | rbd import-diff -p ${POOL_NAME} - ${DST_IMAGE_NAME}
         else
-            s5cmd --endpoint-url "${OBJECT_STORAGE_ENDPOINT}" --credentials-file ${CERT_FILE} cat "s3://${BUCKET_NAME}/${OBJ_NAME}" | rbd import-diff -p ${POOL_NAME} - ${DST_IMAGE_NAME}
+            aws --endpoint-url "${OBJECT_STORAGE_ENDPOINT}" --region ceph --ca-bundle "${CERT_FILE}" s3 cp "s3://${BUCKET_NAME}/${OBJ_NAME}" - | rbd import-diff -p ${POOL_NAME} - ${DST_IMAGE_NAME}
         fi
     else
         if [ "${TRANSFER_COMPRESSION}" = "zstd" ]; then
-            s5cmd --endpoint-url "${OBJECT_STORAGE_ENDPOINT}" cat "s3://${BUCKET_NAME}/${OBJ_NAME}" | zstd -d -q -c | rbd import-diff -p ${POOL_NAME} - ${DST_IMAGE_NAME}
+            aws --endpoint-url "${OBJECT_STORAGE_ENDPOINT}" --region ceph s3 cp "s3://${BUCKET_NAME}/${OBJ_NAME}" - | zstd -d -q -c | rbd import-diff -p ${POOL_NAME} - ${DST_IMAGE_NAME}
         else
-            s5cmd --endpoint-url "${OBJECT_STORAGE_ENDPOINT}" cat "s3://${BUCKET_NAME}/${OBJ_NAME}" | rbd import-diff -p ${POOL_NAME} - ${DST_IMAGE_NAME}
+            aws --endpoint-url "${OBJECT_STORAGE_ENDPOINT}" --region ceph s3 cp "s3://${BUCKET_NAME}/${OBJ_NAME}" - | rbd import-diff -p ${POOL_NAME} - ${DST_IMAGE_NAME}
         fi
     fi
     echo "finish import"

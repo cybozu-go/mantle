@@ -28,20 +28,14 @@ COPY pkg/ pkg/
 RUN --mount=type=secret,id=netrc,target=/root/.netrc,required=false \
     CGO_ENABLED=0 go build -o manager main.go
 
-# Build s5cmd
-FROM golang:1.26 AS s5cmd-builder
-ARG GOPROXY
-WORKDIR /workspace
-## https://github.com/peak/s5cmd/releases
-## use v2.3.0
-RUN --mount=type=secret,id=netrc,target=/root/.netrc,required=false \
-    go install github.com/peak/s5cmd/v2@991c9fbc16709341b4bac04513232a1445941f63
-
 # Download and install custom RBD command
 # cf. https://github.com/cybozu/neco-containers/blob/a504569e337e41d3a9c7e0b6c0fc0482c2a31008/ceph/Dockerfile
 FROM ubuntu:24.04 AS custom-ceph
 
 ARG EXPORT_DIFF_VERSION=20.2.1.1
+
+# https://github.com/aws/aws-cli/blob/v2/CHANGELOG.rst
+ARG AWS_CLI_VERSION=2.40.1
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
@@ -77,6 +71,13 @@ RUN apt-get update && \
     find / -xdev \( -name "*.pyc" -o -name "*.pyo" \) -exec rm -f {} \; && \
     mkdir -p /usr/local/share/doc/ceph
 
+# Install AWS CLI
+RUN cd /tmp && \
+    curl -fsSL -o awscliv2.zip "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m)-${AWS_CLI_VERSION}.zip" && \
+    unzip -q awscliv2.zip && \
+    ./aws/install && \
+    rm -rf /tmp/*
+
 # Squash the layers
 FROM scratch
 
@@ -84,7 +85,6 @@ COPY --from=custom-ceph / /
 
 WORKDIR /
 COPY --from=builder /workspace/manager .
-COPY --from=s5cmd-builder /go/bin/s5cmd /usr/bin/s5cmd
 USER 65532:65532
 
 ENTRYPOINT ["/manager"]

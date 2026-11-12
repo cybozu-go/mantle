@@ -55,7 +55,7 @@ For minikube, after choosing a Minikube version, check the Kubernetes versions i
 
 Update the following versions in Dockerfile, if necessary, too:
 
-- [s5cmd](https://github.com/peak/s5cmd/releases)
+- [AWS CLI](https://raw.githubusercontent.com/aws/aws-cli/v2/CHANGELOG.rst)
 
 #### Depending modules
 
