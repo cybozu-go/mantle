@@ -35,6 +35,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/kube-openapi/pkg/validation/strfmt"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -44,6 +45,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
@@ -852,6 +854,28 @@ func (r *MantleBackupReconciler) updateBackupTimestampMetrics(ctx context.Contex
 	metrics.SetOrDeleteTimestamp(metrics.BackupOldestUnsyncedCreationTimestampSeconds, metricLabels, oldestUnsyncedCreatedAt)
 }
 
+// initBackupTimestampMetrics initializes PVC timestamp metrics at startup,
+// so they are available before each backup is reconciled.
+func (r *MantleBackupReconciler) initBackupTimestampMetrics(ctx context.Context) error {
+	var backupList mantlev1.MantleBackupList
+	if err := r.List(ctx, &backupList, client.MatchingLabels{labelClusterID: r.managedCephClusterID}); err != nil {
+		return fmt.Errorf("failed to list MantleBackup resources: %w", err)
+	}
+
+	seen := sets.New[string]()
+	for _, backup := range backupList.Items {
+		pvcUID := backup.GetLabels()[labelLocalBackupTargetPVCUID]
+		if seen.Has(pvcUID) {
+			continue
+		}
+		seen.Insert(pvcUID)
+
+		r.updateBackupTimestampMetrics(ctx, &backup)
+	}
+
+	return nil
+}
+
 // listHigherPriorityBackups returns the high priority MantleBackups. MantleBackups
 // being deleted are excluded, since they are no longer making progress and would
 // make lower priority ones wait for nothing.
@@ -956,6 +980,18 @@ func (r *MantleBackupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		metrics.LabelPersistentVolumeClaim: "",
 		metrics.LabelResourceNamespace:     "",
 	})
+
+	if r.role != RoleSecondary {
+		if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+			if err := r.initBackupTimestampMetrics(ctx); err != nil {
+				log.FromContext(ctx).Error(err, "failed to initialize backup timestamp metrics")
+			}
+
+			return nil
+		})); err != nil {
+			return fmt.Errorf("failed to add the backup timestamp metrics initializer: %w", err)
+		}
+	}
 
 	return ctrl.NewControllerManagedBy(mgr).
 		WithOptions(controller.TypedOptions[ctrlreconcile.Request]{
