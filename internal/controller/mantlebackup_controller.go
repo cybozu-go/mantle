@@ -3941,22 +3941,6 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 	logger := log.FromContext(ctx)
 	logger.Info("starting cleanup in secondary", "deleteExportData", deleteExportData)
 
-	diffFrom, ok := target.GetAnnotations()[annotDiffFrom]
-	if ok {
-		var source mantlev1.MantleBackup
-		if err := r.Get(
-			ctx,
-			types.NamespacedName{Name: diffFrom, Namespace: target.GetNamespace()},
-			&source,
-		); err != nil {
-			return reconcile.Failed("failed to get source MantleBackup: %w", err)
-		}
-		delete(source.GetAnnotations(), annotDiffTo)
-		if err := r.Update(ctx, &source); err != nil {
-			return reconcile.Failed("failed to update source MantleBackup: %w", err)
-		}
-	}
-
 	// Defensively release any RBD lock startImport may still be holding, or
 	// it would be stranded forever once this MantleBackup is deleted. Check
 	// whether the Jobs have reached a terminal state (rather than deleting
@@ -4034,6 +4018,34 @@ func (r *MantleBackupReconciler) secondaryCleanup(
 	if deleteExportData {
 		if result := r.deleteAllExportedData(ctx, target); result.ShouldReturn() {
 			return result.WrapIfError("failed to delete exported data in the object storage")
+		}
+	}
+
+	// Remove the diff-to annotation from the diff origin only here, after the
+	// zeroout and import Jobs have finished above: until then, an import Job
+	// may still use the snapshot of the diff origin.
+	diffFrom, ok := target.GetAnnotations()[annotDiffFrom]
+	if ok {
+		var source mantlev1.MantleBackup
+		err := r.Get(
+			ctx,
+			types.NamespacedName{Name: diffFrom, Namespace: target.GetNamespace()},
+			&source,
+		)
+		switch {
+		case aerrors.IsNotFound(err):
+			// A previous cleanup removed the diff-to annotation from the diff
+			// origin but failed to update the target below, and the diff
+			// origin was finalized in between. There is nothing left to
+			// remove from it, so go on to update the target.
+			logger.Info("the diff origin MantleBackup no longer exists", "diffFrom", diffFrom)
+		case err != nil:
+			return reconcile.Failed("failed to get source MantleBackup: %w", err)
+		default:
+			delete(source.GetAnnotations(), annotDiffTo)
+			if err := r.Update(ctx, &source); err != nil {
+				return reconcile.Failed("failed to update source MantleBackup: %w", err)
+			}
 		}
 	}
 
