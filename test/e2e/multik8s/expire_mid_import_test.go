@@ -14,7 +14,7 @@ import (
 )
 
 var _ = Describe("expire during multi-part import", Label("lock"), func() {
-	It("should release the lock and let a later MantleBackup for the same image proceed "+
+	It("should stop the import Job, release the lock, and let a later MantleBackup for the same image proceed "+
 		"after a multi-part MantleBackup expires while its import Job is still running", func(ctx SpecContext) {
 		namespace := util.GetUniqueName("ns-")
 		pvcName := util.GetUniqueName("pvc-")
@@ -24,12 +24,13 @@ var _ = Describe("expire during multi-part import", Label("lock"), func() {
 
 		SetupNamespaces(namespace)
 
-		// Make part=1's import Job sleep for a while, so that we can reliably
-		// catch the secondary MantleBackup mid-transfer (part 0 imported,
-		// part 1 still running) before it finishes.
+		// Make part=1's import Job hang, so that we can reliably catch the
+		// secondary MantleBackup mid-transfer (part 0 imported, part 1 still
+		// running). The Job never finishes by itself, so the MantleBackup can
+		// be finalized only if the controller stops the Job.
 		script := fmt.Sprintf(`#!/bin/bash
 if [ "${PART_NUM}" -eq %d ]; then
-	sleep 60
+	sleep infinity
 fi
 %s`, partNumSlow, controller.EmbedJobImportScript)
 		ChangeComponentJobScript(
@@ -64,13 +65,33 @@ fi
 		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName0)
 
 		// Wait until part=1's import Job is created on the secondary cluster,
-		// i.e. part 0 has already been imported and part 1 is now (slowly)
-		// in progress.
+		// i.e. part 0 has already been imported and part 1 is now in progress.
 		WaitImportJobCreated(ctx, SecondaryK8sCluster, namespace, backupName0, partNumSlow)
 
 		secondaryMB0, err := GetMB(SecondaryK8sCluster, namespace, backupName0)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(secondaryMB0.IsSnapshotCaptured()).To(BeFalse())
+
+		importJobName := controller.MakeImportJobName(secondaryMB0, partNumSlow)
+		getImportPods := func() []corev1.Pod {
+			GinkgoHelper()
+			stdout, _, err := Kubectl(SecondaryK8sCluster, nil, "get", "pod", "-n", CephCluster1Namespace,
+				"-l", "batch.kubernetes.io/job-name="+importJobName, "-o", "json")
+			Expect(err).NotTo(HaveOccurred())
+			var pods corev1.PodList
+			err = json.Unmarshal(stdout, &pods)
+			Expect(err).NotTo(HaveOccurred())
+
+			return pods.Items
+		}
+
+		// Wait until the Pod of part=1's import Job is running, so that the
+		// import is really in progress when the MantleBackup expires below.
+		Eventually(ctx, func(g Gomega) {
+			pods := getImportPods()
+			g.Expect(pods).To(HaveLen(1))
+			g.Expect(pods[0].Status.Phase).To(Equal(corev1.PodRunning))
+		}).Should(Succeed())
 
 		var pvStored corev1.PersistentVolume
 		err = json.Unmarshal([]byte(secondaryMB0.Status.PVManifest), &pvStored)
@@ -109,15 +130,34 @@ fi
 		// still incomplete.
 		ExpireMantleBackupNow(SecondaryK8sCluster, namespace, backupName0)
 
-		// The secondary MantleBackup should eventually be finalized (this
-		// only happens once part=1's import Job reaches a terminal state,
-		// i.e. after the injected sleep finishes and the import completes).
+		// The secondary MantleBackup should eventually be finalized, although
+		// part=1's import Job never finishes by itself. This happens only if
+		// the controller deletes the Job in the middle of the import instead
+		// of waiting for it to finish.
 		WaitMantleBackupDeleted(ctx, SecondaryK8sCluster, namespace, backupName0)
+
+		// The Job and its Pod must be already gone at this point: the
+		// controller has to stop them before it finalizes the MantleBackup,
+		// so that nothing writes to the volume after the lock is released.
+		Expect(CheckJobExist(SecondaryK8sCluster, CephCluster1Namespace, importJobName)).To(BeFalse())
+		Expect(getImportPods()).To(BeEmpty())
 
 		// The lock should have been released as part of that finalization.
 		Eventually(ctx, func(g Gomega) {
 			g.Expect(getLocks()).To(BeEmpty())
 		}).Should(Succeed())
+
+		// Let the import Jobs run the original script again. Otherwise,
+		// part=1's import Job of backupName1 would hang, too.
+		ChangeComponentJobScript(
+			ctx,
+			SecondaryK8sCluster,
+			controller.EnvImportJobScript,
+			namespace,
+			backupName0,
+			partNumSlow,
+			nil,
+		)
 
 		// A later MantleBackup for the same PVC should now be able to take
 		// the lock and complete normally, proving it is not permanently
