@@ -20,7 +20,7 @@ LOSETUP := losetup
 LOOP_FILE := loop.img
 LOOP_FILE2 := loop2.img
 CNI_PLUGIN_INSTALL_DIR := /opt/cni/bin
-POLLING_INTERVAL := 30
+POLLING_INTERVAL := 5
 TIMEOUT_SECS := 900
 LOOP_DEV := /dev/loop0
 LOOP_DEV2 := /dev/loop1
@@ -276,14 +276,20 @@ fake-rook-ceph-cluster2:
 .PHONY: wait-ceph-ready
 wait-ceph-ready:
 	is_ok="false"; \
-	for ((i=0;i<$(TIMEOUT_SECS);i+=$(POLLING_INTERVAL))); do \
-		$(KUBECTL) -n $(NAMESPACE) exec deploy/rook-ceph-tools -- ceph -s && \
-		$(KUBECTL) -n $(NAMESPACE) exec deploy/rook-ceph-tools -- ceph osd stat | grep -qE "[1-9][0-9]* up" && { \
-			echo "ceph -s succeeded in namespace $(NAMESPACE)"; \
-			is_ok="true"; \
-			break; \
-		}; \
-		$(KUBECTL) -n $(NAMESPACE) rollout restart deploy rook-ceph-tools; \
+	deadline=$$((SECONDS + $(TIMEOUT_SECS))); \
+	while [ $$SECONDS -lt $$deadline ]; do \
+		if osd_stat=$$($(KUBECTL) -n $(NAMESPACE) exec deploy/rook-ceph-tools -- ceph osd stat); then \
+			echo "$${osd_stat}"; \
+			if echo "$${osd_stat}" | grep -qE "[1-9][0-9]* up" && \
+				$(KUBECTL) -n $(NAMESPACE) exec deploy/rook-ceph-tools -- ceph -s; then \
+				echo "ceph -s succeeded in namespace $(NAMESPACE)"; \
+				is_ok="true"; \
+				break; \
+			fi; \
+		else \
+			$(KUBECTL) -n $(NAMESPACE) rollout restart deploy rook-ceph-tools; \
+			$(KUBECTL) -n $(NAMESPACE) rollout status deploy rook-ceph-tools --timeout=1m; \
+		fi; \
 		echo "waiting for ceph -s to succeed in namespace $(NAMESPACE)" > /dev/stderr; \
 		sleep $(POLLING_INTERVAL); \
 	done; \
