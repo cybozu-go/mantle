@@ -37,6 +37,11 @@ jobs:
           #    LICENSE: http://www.apache.org/licenses/LICENSE-2.0
           #    Copyright 2019-2025, Shiguredo Inc.
           df -h
+          avail_gib=$(df --output=avail -BG / | tail -n 1 | tr -dc '0-9')
+          if [ "${avail_gib}" -ge 50 ]; then
+            echo "Skip the cleanup because ${avail_gib} GiB is available."
+            exit 0
+          fi
           sudo rm -rf /usr/share/swift
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
