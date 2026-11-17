@@ -10,6 +10,7 @@ HELM := $(BINDIR)/helm
 KUBECTL := $(BINDIR)/kubectl-$(KUBERNETES_VERSION)
 MINIKUBE_HOME = $(BINDIR)
 MINIKUBE_CPUS := 2
+IMG := controller:latest
 CEPH_CLUSTER1_NAMESPACE := rook-ceph
 CEPH_CLUSTER2_NAMESPACE := rook-ceph2
 NODE_NAME := minikube-worker
@@ -393,8 +394,10 @@ minikube-profile-secondary:
 
 .PHONY: image-build
 image-build:
-	eval $$($(MINIKUBE) docker-env); \
-	$(MAKE) -C ../.. docker-build
+	$(MAKE) -C ../.. docker-build IMG=$(IMG)
+	set -o pipefail; \
+	docker_env=$$($(MINIKUBE) docker-env) && \
+	docker save $(IMG) | (eval "$${docker_env}" && docker load)
 	$(MINIKUBE) ssh -- docker images
 
 .PHONY: install-mantle-cluster-wide
