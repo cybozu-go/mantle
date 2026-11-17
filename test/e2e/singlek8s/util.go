@@ -450,7 +450,8 @@ func writeTestData(namespace, pvc string, data []byte) error {
 		return fmt.Errorf("kubectl wait pod failed. err: %w", err)
 	}
 
-	_, _, err = execAtPod(namespace, podName, "sh", nil, "-c", fmt.Sprintf("echo -n %q > /mnt/%s", data, testDataFilename))
+	_, _, err = execAtPod(namespace, podName, "sh", nil, "-c",
+		fmt.Sprintf("echo -n %q > /mnt/%s && sync", data, testDataFilename))
 	if err != nil {
 		return fmt.Errorf("write file failed. err: %w", err)
 	}
