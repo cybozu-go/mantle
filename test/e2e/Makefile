@@ -26,6 +26,10 @@ LOOP_DEV := /dev/loop0
 LOOP_DEV2 := /dev/loop1
 MINIKUBE_PROFILE_PRIMARY=profile1
 MINIKUBE_PROFILE_SECONDARY=profile2
+MINIKUBE_PROFILE :=
+PROFILE_MINIKUBE = $(MINIKUBE)$(if $(MINIKUBE_PROFILE), -p $(MINIKUBE_PROFILE))
+PROFILE_KUBECTL = $(KUBECTL)$(if $(MINIKUBE_PROFILE), --context=$(MINIKUBE_PROFILE))
+PROFILE_HELM = $(HELM)$(if $(MINIKUBE_PROFILE), --kube-context=$(MINIKUBE_PROFILE))
 TMPDIR := tmp
 BACKUP_TRANSFER_PART_SIZE := 3Mi # smaller than the PVC size (10Mi)
 MAKEFILE_DIR := $(shell pwd)
@@ -44,6 +48,8 @@ define retry
 	if [ $$success -ne 1 ]; then exit 1; fi
 endef
 
+run-with-prefix = set -o pipefail; $(2) 2>&1 | sed -u 's/^/[$(1)] /'
+
 .PHONY: setup
 setup:
 	$(MAKE) $(GINKGO)
@@ -59,7 +65,9 @@ test:
 
 .PHONY: launch-single-k8s-cluster
 launch-single-k8s-cluster:
+	$(MAKE) docker-build
 	$(MAKE) launch-minikube MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_PRIMARY)
+	$(MINIKUBE) profile $(MINIKUBE_PROFILE_PRIMARY)
 	$(MAKE) install-rook-ceph-operator
 	$(MAKE) install-rook-ceph-cluster1
 	$(MAKE) install-rook-ceph-cluster2
@@ -78,23 +86,10 @@ test-multiple-k8s-clusters:
 
 .PHONY: launch-multiple-k8s-clusters
 launch-multiple-k8s-clusters:
-# set up a k8s cluster for secondary mantle
-	$(MAKE) launch-minikube MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_SECONDARY)
-	$(MAKE) install-rook-ceph-operator
-	$(MAKE) install-rook-ceph-cluster1
-	$(MAKE) fake-rook-ceph-cluster2
-	$(MAKE) install-ceph-object-store
-	$(MAKE) install-ceph-object-store-secret
-	$(MAKE) install-cert-manager
-	$(MAKE) install-mantle-cluster-wide
-# set up a k8s cluster for primary mantle
-	$(MAKE) launch-minikube MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_PRIMARY)
-	$(MAKE) install-rook-ceph-operator
-	$(MAKE) install-rook-ceph-cluster1
-	$(MAKE) fake-rook-ceph-cluster2
-	$(MAKE) install-ceph-object-store-secret # copy secret from secondary
-	$(MAKE) install-cert-manager
-	$(MAKE) install-mantle-cluster-wide
+# set up k8s clusters for secondary and primary mantle in parallel
+	$(MAKE) -j 2 multik8s-launch-secondary multik8s-launch-primary
+# copy secret from secondary
+	$(MAKE) install-ceph-object-store-secret MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_PRIMARY)
 # prepare TLS certificates
 	$(MAKE) minikube-profile-primary
 	$(MAKE) install-selfsigned-issuer
@@ -165,6 +160,45 @@ launch-multiple-k8s-clusters:
 		NAMESPACE=$(CEPH_CLUSTER2_NAMESPACE) \
 		VALUES_YAML=testdata/values-mantle-primary-2.yaml
 
+# Runs only once for both multik8s-launch-* targets.
+.PHONY: multik8s-build-image
+multik8s-build-image:
+	$(call run-with-prefix,build-image,$(MAKE) docker-build)
+
+# Runs only once for both multik8s-launch-* targets, and starts the VMs one by one.
+.PHONY: multik8s-start-vms
+multik8s-start-vms:
+	$(call run-with-prefix,start-vms,$(MAKE) do-minikube-start MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_SECONDARY))
+	$(call run-with-prefix,start-vms,$(MAKE) do-minikube-start MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_PRIMARY))
+
+.PHONY: multik8s-launch-secondary
+multik8s-launch-secondary: multik8s-build-image multik8s-start-vms
+	$(call run-with-prefix,$(MINIKUBE_PROFILE_SECONDARY),$(MAKE) do-multik8s-launch-secondary MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_SECONDARY))
+
+.PHONY: do-multik8s-launch-secondary
+do-multik8s-launch-secondary:
+	$(MAKE) launch-minikube
+	$(MAKE) install-rook-ceph-operator
+	$(MAKE) install-rook-ceph-cluster1
+	$(MAKE) fake-rook-ceph-cluster2
+	$(MAKE) install-ceph-object-store
+	$(MAKE) install-ceph-object-store-secret
+	$(MAKE) install-cert-manager
+	$(MAKE) install-mantle-cluster-wide
+
+.PHONY: multik8s-launch-primary
+multik8s-launch-primary: multik8s-build-image multik8s-start-vms
+	$(call run-with-prefix,$(MINIKUBE_PROFILE_PRIMARY),$(MAKE) do-multik8s-launch-primary MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_PRIMARY))
+
+.PHONY: do-multik8s-launch-primary
+do-multik8s-launch-primary:
+	$(MAKE) launch-minikube
+	$(MAKE) install-rook-ceph-operator
+	$(MAKE) install-rook-ceph-cluster1
+	$(MAKE) fake-rook-ceph-cluster2
+	$(MAKE) install-cert-manager
+	$(MAKE) install-mantle-cluster-wide
+
 .PHONY: clean
 clean:
 	$(MINIKUBE) delete --all || true
@@ -191,21 +225,21 @@ $(HELM): | $(BINDIR)
 .PHONY: launch-minikube
 launch-minikube:
 	$(MAKE) do-minikube-start
-	$(MINIKUBE) profile $(MINIKUBE_PROFILE)
-	$(MAKE) image-build
+	$(MAKE) image-load
 	$(MAKE) create-loop-dev
+	set -o pipefail; \
 	sed \
 		-e "s%{LOOP_DEV}%$(LOOP_DEV)%" \
 		-e "s%{LOOP_DEV2}%$(LOOP_DEV2)%" \
 		-e "s%{NODE_NAME}%$(NODE_NAME)%" \
 		testdata/persistentvolumes-template.yaml \
-		> testdata/persistentvolumes.yaml
-	$(KUBECTL) apply -f testdata/persistentvolumes.yaml
+		| $(PROFILE_KUBECTL) apply -f -
 
 .PHONY: do-minikube-start
 do-minikube-start:
-	# TODO: Is there any better way to verify whether k8s cluster is available or not?
-	if $(MINIKUBE) profile $(MINIKUBE_PROFILE) |& grep "not found" > /dev/null; then \
+# start minikube only if the profile doesn't exist yet
+	if ! $(MINIKUBE) profile list -o json \
+		| jq -e --arg profile $(MINIKUBE_PROFILE) '[.valid[]?, .invalid[]?] | any(.Name == $$profile)' > /dev/null; then \
 		ok=0; \
 		for i in $(shell seq 1 3) ; do \
 			if [ "$$ok" -eq 0 ]; then \
@@ -235,29 +269,29 @@ do-minikube-start:
 
 .PHONY: create-loop-dev
 create-loop-dev:
-	$(MINIKUBE) ssh -- $(DD) if=/dev/zero of=$(LOOP_FILE) bs=1G seek=32 count=0
-	$(MINIKUBE) ssh -- $(SUDO) $(LOSETUP) $(LOOP_DEV) $(LOOP_FILE) || :
-	$(MINIKUBE) ssh $(DD) if=/dev/zero of=$(LOOP_FILE2) bs=1G seek=32 count=0
-	$(MINIKUBE) ssh -- $(SUDO) $(LOSETUP) $(LOOP_DEV2) $(LOOP_FILE2) || :
-	$(MINIKUBE) ssh -- lsblk
+	$(PROFILE_MINIKUBE) ssh -- $(DD) if=/dev/zero of=$(LOOP_FILE) bs=1G seek=32 count=0
+	$(PROFILE_MINIKUBE) ssh -- $(SUDO) $(LOSETUP) $(LOOP_DEV) $(LOOP_FILE) || :
+	$(PROFILE_MINIKUBE) ssh $(DD) if=/dev/zero of=$(LOOP_FILE2) bs=1G seek=32 count=0
+	$(PROFILE_MINIKUBE) ssh -- $(SUDO) $(LOSETUP) $(LOOP_DEV2) $(LOOP_FILE2) || :
+	$(PROFILE_MINIKUBE) ssh -- lsblk
 
 .PHONY: install-rook-ceph-operator
 install-rook-ceph-operator:
-	$(call retry,$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
+	$(call retry,$(PROFILE_HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
 		--create-namespace --namespace $(CEPH_CLUSTER1_NAMESPACE) -f testdata/values.yaml --wait \
 		rook-ceph rook-ceph)
-	$(KUBECTL) wait --timeout=60s --for=condition=available -n $(CEPH_CLUSTER1_NAMESPACE) deployment/rook-ceph-operator
+	$(PROFILE_KUBECTL) wait --timeout=60s --for=condition=available -n $(CEPH_CLUSTER1_NAMESPACE) deployment/rook-ceph-operator
 
 .PHONY: install-rook-ceph-cluster1
 install-rook-ceph-cluster1:
-	$(call retry,$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
+	$(call retry,$(PROFILE_HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
 		--namespace $(CEPH_CLUSTER1_NAMESPACE) -f testdata/values-cluster.yaml \
 		--wait --force-conflicts rook-ceph-cluster rook-ceph-cluster)
 	$(MAKE) wait-ceph-ready NAMESPACE=$(CEPH_CLUSTER1_NAMESPACE)
 
 .PHONY: install-rook-ceph-cluster2
 install-rook-ceph-cluster2:
-	$(call retry,$(HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
+	$(call retry,$(PROFILE_HELM) upgrade --install --version $(ROOK_CHART_VERSION) --repo https://charts.rook.io/release \
 		--create-namespace --namespace $(CEPH_CLUSTER2_NAMESPACE) -f testdata/values-cluster.yaml \
 		--set cephClusterSpec.dataDirHostPath=/var/lib/rook2 \
 		--wait --force-conflicts rook-ceph-cluster2 rook-ceph-cluster)
@@ -265,89 +299,89 @@ install-rook-ceph-cluster2:
 
 .PHONY: fake-rook-ceph-cluster2
 fake-rook-ceph-cluster2:
-	$(KUBECTL) get namespace $(CEPH_CLUSTER2_NAMESPACE) || $(KUBECTL) create namespace $(CEPH_CLUSTER2_NAMESPACE)
-	$(KUBECTL) get configmap -n $(CEPH_CLUSTER1_NAMESPACE) rook-ceph-mon-endpoints -o yaml \
+	$(PROFILE_KUBECTL) get namespace $(CEPH_CLUSTER2_NAMESPACE) || $(PROFILE_KUBECTL) create namespace $(CEPH_CLUSTER2_NAMESPACE)
+	$(PROFILE_KUBECTL) get configmap -n $(CEPH_CLUSTER1_NAMESPACE) rook-ceph-mon-endpoints -o yaml \
 	  | yq '{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "rook-ceph-mon-endpoints"}, "data": .data}' \
-	  | $(KUBECTL) apply -n $(CEPH_CLUSTER2_NAMESPACE) -f -
-	$(KUBECTL) get secret -n $(CEPH_CLUSTER1_NAMESPACE) rook-ceph-mon -o yaml \
+	  | $(PROFILE_KUBECTL) apply -n $(CEPH_CLUSTER2_NAMESPACE) -f -
+	$(PROFILE_KUBECTL) get secret -n $(CEPH_CLUSTER1_NAMESPACE) rook-ceph-mon -o yaml \
 	  | yq '{"apiVersion": "v1", "kind": "Secret", "metadata": {"name": "rook-ceph-mon"}, "data": .data}' \
-	  | $(KUBECTL) apply -n $(CEPH_CLUSTER2_NAMESPACE) -f -
+	  | $(PROFILE_KUBECTL) apply -n $(CEPH_CLUSTER2_NAMESPACE) -f -
 
 .PHONY: wait-ceph-ready
 wait-ceph-ready:
 	is_ok="false"; \
 	deadline=$$((SECONDS + $(TIMEOUT_SECS))); \
 	while [ $$SECONDS -lt $$deadline ]; do \
-		if osd_stat=$$($(KUBECTL) -n $(NAMESPACE) exec deploy/rook-ceph-tools -- ceph osd stat); then \
+		if osd_stat=$$($(PROFILE_KUBECTL) -n $(NAMESPACE) exec deploy/rook-ceph-tools -- ceph osd stat); then \
 			echo "$${osd_stat}"; \
 			if echo "$${osd_stat}" | grep -qE "[1-9][0-9]* up" && \
-				$(KUBECTL) -n $(NAMESPACE) exec deploy/rook-ceph-tools -- ceph -s; then \
+				$(PROFILE_KUBECTL) -n $(NAMESPACE) exec deploy/rook-ceph-tools -- ceph -s; then \
 				echo "ceph -s succeeded in namespace $(NAMESPACE)"; \
 				is_ok="true"; \
 				break; \
 			fi; \
 		else \
-			$(KUBECTL) -n $(NAMESPACE) rollout restart deploy rook-ceph-tools; \
-			$(KUBECTL) -n $(NAMESPACE) rollout status deploy rook-ceph-tools --timeout=1m; \
+			$(PROFILE_KUBECTL) -n $(NAMESPACE) rollout restart deploy rook-ceph-tools; \
+			$(PROFILE_KUBECTL) -n $(NAMESPACE) rollout status deploy rook-ceph-tools --timeout=1m; \
 		fi; \
 		echo "waiting for ceph -s to succeed in namespace $(NAMESPACE)" > /dev/stderr; \
 		sleep $(POLLING_INTERVAL); \
 	done; \
 	if [ "$$is_ok" = "false" ]; then \
 		echo "ceph -s failed to become ready in namespace $(NAMESPACE)" > /dev/stderr; \
-		$(KUBECTL) -n $(NAMESPACE) exec deploy/rook-ceph-tools -- ceph -s ; \
+		$(PROFILE_KUBECTL) -n $(NAMESPACE) exec deploy/rook-ceph-tools -- ceph -s ; \
 		echo ; \
 		echo "=== Pod ===" ; \
-		$(KUBECTL) get -A pod ; \
+		$(PROFILE_KUBECTL) get -A pod ; \
 		echo ; \
 		echo "=== Job ===" ; \
-		$(KUBECTL) get -A job ; \
+		$(PROFILE_KUBECTL) get -A job ; \
 		echo ; \
 		echo "=== PVC ===" ; \
-		$(KUBECTL) get -A pvc ; \
+		$(PROFILE_KUBECTL) get -A pvc ; \
 		echo ; \
 		echo "=== PV ===" ; \
-		$(KUBECTL) get pv ; \
+		$(PROFILE_KUBECTL) get pv ; \
 		echo ; \
 		echo "=== Node ===" ; \
-		$(KUBECTL) get node ; \
+		$(PROFILE_KUBECTL) get node ; \
 		echo ; \
 		echo "=== Service ===" ; \
-		$(KUBECTL) get -A svc ; \
+		$(PROFILE_KUBECTL) get -A svc ; \
 		exit 1; \
 	fi
 
 .PHONY: install-ceph-object-store
 install-ceph-object-store:
-	$(KUBECTL) apply -f testdata/objectstorage.yaml
-	$(KUBECTL) wait -n rook-ceph cephobjectstore/ceph-object-store --for=jsonpath='{.status.phase}'=Ready --timeout=$(TIMEOUT_SECS)s
-	$(KUBECTL) wait -n rook-ceph deploy/rook-ceph-rgw-ceph-object-store-a --for=condition=Available --timeout=$(TIMEOUT_SECS)s
-	$(KUBECTL) apply -f testdata/objectbucketclaims.yaml
-	until $(KUBECTL) get -n rook-ceph cm export-data-1 &> /dev/null && $(KUBECTL) get -n rook-ceph cm export-data-2 &> /dev/null; do sleep 3 ; done
-	$(KUBECTL) get -n rook-ceph configmap export-data-1 -o json \
+	$(PROFILE_KUBECTL) apply -f testdata/objectstorage.yaml
+	$(PROFILE_KUBECTL) wait -n rook-ceph cephobjectstore/ceph-object-store --for=jsonpath='{.status.phase}'=Ready --timeout=$(TIMEOUT_SECS)s
+	$(PROFILE_KUBECTL) wait -n rook-ceph deploy/rook-ceph-rgw-ceph-object-store-a --for=condition=Available --timeout=$(TIMEOUT_SECS)s
+	$(PROFILE_KUBECTL) apply -f testdata/objectbucketclaims.yaml
+	until $(PROFILE_KUBECTL) get -n rook-ceph cm export-data-1 &> /dev/null && $(PROFILE_KUBECTL) get -n rook-ceph cm export-data-2 &> /dev/null; do sleep 3 ; done
+	$(PROFILE_KUBECTL) get -n rook-ceph configmap export-data-1 -o json \
 	  | jq -r --arg NS $(CEPH_CLUSTER1_NAMESPACE) \
 	  '{ apiVersion: "v1", kind: "ConfigMap", metadata: { name: "export-data", namespace: $$NS }, data: .data }' \
 	  > $(TMPDIR)/cm-export-data-1.json
-	$(KUBECTL) get -n rook-ceph configmap export-data-2 -o json \
+	$(PROFILE_KUBECTL) get -n rook-ceph configmap export-data-2 -o json \
 	  | jq -r --arg NS $(CEPH_CLUSTER2_NAMESPACE) \
 	  '{ apiVersion: "v1", kind: "ConfigMap", metadata: { name: "export-data", namespace: $$NS }, data: .data }' \
 	  > $(TMPDIR)/cm-export-data-2.json
-	until $(KUBECTL) get -n rook-ceph secret export-data-1 &> /dev/null && $(KUBECTL) get -n rook-ceph secret export-data-2 &> /dev/null; do sleep 3 ; done
-	$(KUBECTL) get -n rook-ceph secret export-data-1 -o json | jq -r --arg NS $(CEPH_CLUSTER1_NAMESPACE) \
+	until $(PROFILE_KUBECTL) get -n rook-ceph secret export-data-1 &> /dev/null && $(PROFILE_KUBECTL) get -n rook-ceph secret export-data-2 &> /dev/null; do sleep 3 ; done
+	$(PROFILE_KUBECTL) get -n rook-ceph secret export-data-1 -o json | jq -r --arg NS $(CEPH_CLUSTER1_NAMESPACE) \
 	  '{ apiVersion: "v1", kind: "Secret", metadata: { name: "export-data", namespace: $$NS }, type: "Opaque", data: .data }' \
 	  > $(TMPDIR)/secret-export-data-1.json
-	$(KUBECTL) get -n rook-ceph secret export-data-2 -o json | jq -r --arg NS $(CEPH_CLUSTER2_NAMESPACE) \
+	$(PROFILE_KUBECTL) get -n rook-ceph secret export-data-2 -o json | jq -r --arg NS $(CEPH_CLUSTER2_NAMESPACE) \
 	  '{ apiVersion: "v1", kind: "Secret", metadata: { name: "export-data", namespace: $$NS }, type: "Opaque", data: .data }' \
 	  > $(TMPDIR)/secret-export-data-2.json
 
 .PHONY: install-ceph-object-store-secret
 install-ceph-object-store-secret:
-	$(KUBECTL) apply -f $(TMPDIR)/secret-export-data-1.json
-	$(KUBECTL) apply -f $(TMPDIR)/secret-export-data-2.json
+	$(PROFILE_KUBECTL) apply -f $(TMPDIR)/secret-export-data-1.json
+	$(PROFILE_KUBECTL) apply -f $(TMPDIR)/secret-export-data-2.json
 
 .PHONY: install-cert-manager
 install-cert-manager:
-	$(call retry,$(HELM) upgrade --install --version $(CERT_MANAGER_VERSION) --repo https://charts.jetstack.io \
+	$(call retry,$(PROFILE_HELM) upgrade --install --version $(CERT_MANAGER_VERSION) --repo https://charts.jetstack.io \
 		--create-namespace --namespace cert-manager --set crds.enabled=true --wait \
 		cert-manager cert-manager)
 
@@ -401,17 +435,24 @@ minikube-profile-primary:
 minikube-profile-secondary:
 	$(MINIKUBE) profile $(MINIKUBE_PROFILE_SECONDARY)
 
-.PHONY: image-build
-image-build:
+.PHONY: docker-build
+docker-build:
 	$(MAKE) -C ../.. docker-build IMG=$(IMG)
+
+.PHONY: image-build
+image-build: docker-build
+	$(MAKE) image-load
+
+.PHONY: image-load
+image-load:
 	set -o pipefail; \
-	docker_env=$$($(MINIKUBE) docker-env) && \
+	docker_env=$$($(PROFILE_MINIKUBE) docker-env) && \
 	docker save $(IMG) | (eval "$${docker_env}" && docker load)
-	$(MINIKUBE) ssh -- docker images
+	$(PROFILE_MINIKUBE) ssh -- docker images
 
 .PHONY: install-mantle-cluster-wide
 install-mantle-cluster-wide:
-	$(HELM) upgrade --install mantle-cluster-wide ../../charts/mantle-cluster-wide/ --wait
+	$(PROFILE_HELM) upgrade --install mantle-cluster-wide ../../charts/mantle-cluster-wide/ --wait
 
 .PHONY: install-mantle
 install-mantle:
