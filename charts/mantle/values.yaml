@@ -32,6 +32,9 @@ controller:
   # controller.extraArgs -- Additional command line arguments passed to the controller. Each element is
   #   passed as is, so it must be a complete argument such as "--gc-interval=1h".
   extraArgs: []
+  readinessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 10
   mtls:
     # controller.mtls.serverCACertConfigMap –- ConfigMap name containing the CA certificate for server mTLS. Only used when the role is primary.
     serverCACertConfigMap: ""
