@@ -25,6 +25,9 @@ jobs:
         kubernetes-version:
           - 1.36.4
           - 1.35.8
+        label-filter:
+          - restore
+          - "!restore"
     runs-on: "ubuntu-22.04"
     timeout-minutes: 60
     steps:
@@ -56,4 +59,8 @@ jobs:
       - run: sudo apt-get update
       - uses: ./.github/actions/set-up-kvm-for-e2e-tests
       - run: make -C test/e2e setup KUBERNETES_VERSION=${{ matrix.kubernetes-version }}
-      - run: make -C test/e2e test KUBERNETES_VERSION=${{ matrix.kubernetes-version }} MINIKUBE_CPUS=4
+      - run: |
+          make -C test/e2e test \
+            KUBERNETES_VERSION=${{ matrix.kubernetes-version }} \
+            GINKGO_FLAGS=--label-filter='${{ matrix.label-filter }}' \
+            MINIKUBE_CPUS=4
