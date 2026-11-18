@@ -87,7 +87,8 @@ test-multiple-k8s-clusters:
 .PHONY: launch-multiple-k8s-clusters
 launch-multiple-k8s-clusters:
 # set up k8s clusters for secondary and primary mantle in parallel
-	$(MAKE) -j 2 multik8s-launch-secondary multik8s-launch-primary
+	$(MAKE) -j 4 multik8s-launch-secondary multik8s-launch-primary \
+		multik8s-install-cert-manager-secondary multik8s-install-cert-manager-primary
 # copy secret from secondary
 	$(MAKE) install-ceph-object-store-secret MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_PRIMARY)
 # prepare TLS certificates
@@ -183,7 +184,6 @@ do-multik8s-launch-secondary:
 	$(MAKE) fake-rook-ceph-cluster2
 	$(MAKE) install-ceph-object-store
 	$(MAKE) install-ceph-object-store-secret
-	$(MAKE) install-cert-manager
 	$(MAKE) install-mantle-cluster-wide
 
 .PHONY: multik8s-launch-primary
@@ -196,8 +196,15 @@ do-multik8s-launch-primary:
 	$(MAKE) install-rook-ceph-operator
 	$(MAKE) install-rook-ceph-cluster1
 	$(MAKE) fake-rook-ceph-cluster2
-	$(MAKE) install-cert-manager
 	$(MAKE) install-mantle-cluster-wide
+
+.PHONY: multik8s-install-cert-manager-secondary
+multik8s-install-cert-manager-secondary: multik8s-start-vms
+	$(call run-with-prefix,$(MINIKUBE_PROFILE_SECONDARY)-cert-manager,$(MAKE) install-cert-manager MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_SECONDARY))
+
+.PHONY: multik8s-install-cert-manager-primary
+multik8s-install-cert-manager-primary: multik8s-start-vms
+	$(call run-with-prefix,$(MINIKUBE_PROFILE_PRIMARY)-cert-manager,$(MAKE) install-cert-manager MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_PRIMARY))
 
 .PHONY: clean
 clean:
