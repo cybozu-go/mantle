@@ -323,6 +323,9 @@ wait-ceph-ready:
 .PHONY: install-ceph-object-store
 install-ceph-object-store:
 	$(KUBECTL) apply -f testdata/objectstorage.yaml
+	$(KUBECTL) wait -n rook-ceph cephobjectstore/ceph-object-store --for=jsonpath='{.status.phase}'=Ready --timeout=$(TIMEOUT_SECS)s
+	$(KUBECTL) wait -n rook-ceph deploy/rook-ceph-rgw-ceph-object-store-a --for=condition=Available --timeout=$(TIMEOUT_SECS)s
+	$(KUBECTL) apply -f testdata/objectbucketclaims.yaml
 	until $(KUBECTL) get -n rook-ceph cm export-data-1 &> /dev/null && $(KUBECTL) get -n rook-ceph cm export-data-2 &> /dev/null; do sleep 3 ; done
 	$(KUBECTL) get -n rook-ceph configmap export-data-1 -o json \
 	  | jq -r --arg NS $(CEPH_CLUSTER1_NAMESPACE) \
