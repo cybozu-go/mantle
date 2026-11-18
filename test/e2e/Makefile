@@ -67,7 +67,8 @@ setup:
 
 .PHONY: test
 test:
-	$(MAKE) launch-single-k8s-cluster
+	$(MAKE) -j 2 singlek8s-build-image singlek8s-start-vm
+	$(MAKE) -j 2 singlek8s-launch singlek8s-build-test
 	$(MAKE) do_test
 
 .PHONY: launch-single-k8s-cluster
@@ -84,6 +85,22 @@ launch-single-k8s-cluster:
 	$(MAKE) install-mantle \
 		NAMESPACE=$(CEPH_CLUSTER2_NAMESPACE) \
 		VALUES_YAML=testdata/values-mantle2.yaml
+
+.PHONY: singlek8s-build-image
+singlek8s-build-image:
+	$(call run-with-prefix,build-image,$(MAKE) docker-build)
+
+.PHONY: singlek8s-start-vm
+singlek8s-start-vm:
+	$(call run-with-prefix,start-vm,$(MAKE) do-minikube-start MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_PRIMARY))
+
+.PHONY: singlek8s-launch
+singlek8s-launch:
+	$(call run-with-prefix,$(MINIKUBE_PROFILE_PRIMARY),$(MAKE) launch-single-k8s-cluster)
+
+.PHONY: singlek8s-build-test
+singlek8s-build-test: $(GINKGO)
+	$(call run-with-prefix,build-test,$(GINKGO) build singlek8s)
 
 .PHONY: test-multiple-k8s-clusters
 test-multiple-k8s-clusters:
@@ -476,12 +493,12 @@ install-mantle:
 	$(KUBECTL) rollout restart -n $(NAMESPACE) deploy/mantle-controller
 
 .PHONY: do_test
-do_test: $(GINKGO)
+do_test: $(GINKGO) singlek8s-build-test
 	env \
 	PATH=${PATH} \
 	E2ETEST=1 \
 	KUBECTL=$(KUBECTL) \
-	$(GINKGO) --fail-fast -v $(GINKGO_FLAGS) singlek8s; \
+	$(GINKGO) --fail-fast -v $(GINKGO_FLAGS) singlek8s/singlek8s.test; \
 	if [ "$$?" -ne 0 ]; then \
 		echo "Controller logs for $(CEPH_CLUSTER1_NAMESPACE) namespace:"; \
 		$(KUBECTL) logs --tail 1000 -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle -c mantle; \
