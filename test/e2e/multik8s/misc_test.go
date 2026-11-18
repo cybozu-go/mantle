@@ -97,52 +97,54 @@ var _ = Describe("metrics tests", func() {
 })
 
 var _ = Describe("miscellaneous tests", func() {
-	It("should succeed to back up if backup-transfer-part-size is changed during uploading", func(ctx SpecContext) {
-		namespace := util.GetUniqueName("ns-")
-		pvcName := util.GetUniqueName("pvc-")
-		backupName := util.GetUniqueName("mb-")
-		restoreName := util.GetUniqueName("mr-")
+	It("should succeed to back up if backup-transfer-part-size is changed during uploading", Label("multi-part"),
+		func(ctx SpecContext) {
+			namespace := util.GetUniqueName("ns-")
+			pvcName := util.GetUniqueName("pvc-")
+			backupName := util.GetUniqueName("mb-")
+			restoreName := util.GetUniqueName("mr-")
 
-		SetupNamespaces(namespace)
+			SetupNamespaces(namespace)
 
-		// Pause the object storage to make upload Jobs fail.
-		PauseObjectStorage(ctx)
-		defer ResumeObjectStorage(ctx)
+			// Pause the object storage to make upload Jobs fail.
+			PauseObjectStorage(ctx)
+			defer ResumeObjectStorage(ctx)
 
-		// Create MantleBackup M0.
-		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
-		writtenDataHash := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
-		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
+			// Create MantleBackup M0.
+			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
+			writtenDataHash := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
+			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
 
-		// Wait until an upload Job is created.
-		WaitUploadJobCreated(ctx, PrimaryK8sCluster, namespace, backupName, 0)
+			// Wait until an upload Job is created.
+			WaitUploadJobCreated(ctx, PrimaryK8sCluster, namespace, backupName, 0)
 
-		// Get the expected number of the backup parts before changing backup-transfer-part-size.
-		pvc, err := GetPVC(PrimaryK8sCluster, namespace, pvcName)
-		Expect(err).NotTo(HaveOccurred())
-		numParts, err := GetNumberOfBackupParts(pvc.Spec.Resources.Requests.Storage())
-		Expect(err).NotTo(HaveOccurred())
+			// Get the expected number of the backup parts before changing backup-transfer-part-size.
+			pvc, err := GetPVC(PrimaryK8sCluster, namespace, pvcName)
+			Expect(err).NotTo(HaveOccurred())
+			numParts, err := GetNumberOfBackupParts(pvc.Spec.Resources.Requests.Storage())
+			Expect(err).NotTo(HaveOccurred())
 
-		// Change backup-transfer-part-size
-		originalBackupTransferPartSize, err := GetBackupTransferPartSize()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(originalBackupTransferPartSize.String()).To(Equal("3Mi"))
-		ChangeBackupTransferPartSize("7Mi")
-		defer ChangeBackupTransferPartSize(originalBackupTransferPartSize.String())
-		newNumParts, err := GetNumberOfBackupParts(pvc.Spec.Resources.Requests.Storage())
-		Expect(err).NotTo(HaveOccurred())
-		Expect(newNumParts).NotTo(Equal(numParts))
+			// Change backup-transfer-part-size
+			originalBackupTransferPartSize, err := GetBackupTransferPartSize()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(originalBackupTransferPartSize.String()).To(Equal("3Mi"))
+			ChangeBackupTransferPartSize("7Mi")
+			defer ChangeBackupTransferPartSize(originalBackupTransferPartSize.String())
+			newNumParts, err := GetNumberOfBackupParts(pvc.Spec.Resources.Requests.Storage())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(newNumParts).NotTo(Equal(numParts))
 
-		// Resume the process.
-		ResumeObjectStorage(ctx)
+			// Resume the process.
+			ResumeObjectStorage(ctx)
 
-		// Wait for MB to be synced.
-		WaitMantleBackupSynced(namespace, backupName)
+			// Wait for MB to be synced.
+			WaitMantleBackupSynced(namespace, backupName)
 
-		// Make sure backups are correct.
-		EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
-		EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
-	})
+			// Make sure backups are correct.
+			EnsureCorrectRestoration(PrimaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
+			EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName, restoreName, writtenDataHash)
+		},
+	)
 
 	It("should succeed to back up two MantleBackups in parallel", func(ctx SpecContext) {
 		namespace := util.GetUniqueName("ns-")
@@ -197,38 +199,40 @@ var _ = Describe("miscellaneous tests", func() {
 		EnsureCorrectRestoration(SecondaryK8sCluster, ctx, namespace, backupName2, restoreName2, writtenDataHash2)
 	})
 
-	It("should complete a multi-part backup even when max-export-data-pvcs is 1", func(ctx SpecContext) {
-		namespace := util.GetUniqueName("ns-")
-		pvcName := util.GetUniqueName("pvc-")
-		backupName := util.GetUniqueName("mb-")
+	It("should complete a multi-part backup even when max-export-data-pvcs is 1", Label("multi-part"),
+		func(ctx SpecContext) {
+			namespace := util.GetUniqueName("ns-")
+			pvcName := util.GetUniqueName("pvc-")
+			backupName := util.GetUniqueName("mb-")
 
-		SetupNamespaces(namespace)
+			SetupNamespaces(namespace)
 
-		maxExportDataPVCs := 1
-		ChangeMaxExportDataPVCs(&maxExportDataPVCs)
-		defer ChangeMaxExportDataPVCs(nil)
+			maxExportDataPVCs := 1
+			ChangeMaxExportDataPVCs(&maxExportDataPVCs)
+			defer ChangeMaxExportDataPVCs(nil)
 
-		CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
-		_ = WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
+			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
+			_ = WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
 
-		// Make sure the backup will be split into multiple parts.
-		pvc, err := GetPVC(PrimaryK8sCluster, namespace, pvcName)
-		Expect(err).NotTo(HaveOccurred())
-		numParts, err := GetNumberOfBackupParts(pvc.Spec.Resources.Requests.Storage())
-		Expect(err).NotTo(HaveOccurred())
-		Expect(numParts).To(BeNumerically(">", 1))
+			// Make sure the backup will be split into multiple parts.
+			pvc, err := GetPVC(PrimaryK8sCluster, namespace, pvcName)
+			Expect(err).NotTo(HaveOccurred())
+			numParts, err := GetNumberOfBackupParts(pvc.Spec.Resources.Requests.Storage())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(numParts).To(BeNumerically(">", 1))
 
-		CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
-		WaitMantleBackupSynced(namespace, backupName)
+			CreateMantleBackup(PrimaryK8sCluster, namespace, pvcName, backupName)
+			WaitMantleBackupSynced(namespace, backupName)
 
-		primaryMB, err := GetMB(PrimaryK8sCluster, namespace, backupName)
-		Expect(err).NotTo(HaveOccurred())
-		secondaryMB, err := GetMB(SecondaryK8sCluster, namespace, backupName)
-		Expect(err).NotTo(HaveOccurred())
-		WaitTemporaryResourcesDeleted(ctx, primaryMB, secondaryMB)
-	})
+			primaryMB, err := GetMB(PrimaryK8sCluster, namespace, backupName)
+			Expect(err).NotTo(HaveOccurred())
+			secondaryMB, err := GetMB(SecondaryK8sCluster, namespace, backupName)
+			Expect(err).NotTo(HaveOccurred())
+			WaitTemporaryResourcesDeleted(ctx, primaryMB, secondaryMB)
+		},
+	)
 
-	It("should succeed in backup even if part=0 upload Job completes after part=1 upload Job does",
+	It("should succeed in backup even if part=0 upload Job completes after part=1 upload Job does", Label("multi-part"),
 		func(ctx SpecContext) {
 			namespace := util.GetUniqueName("ns-")
 			pvcName := util.GetUniqueName("pvc-")
@@ -293,7 +297,7 @@ s5cmd(){
 		},
 	)
 
-	DescribeTable("Backups should succeed even if component Jobs temporarily fail",
+	DescribeTable("Backups should succeed even if component Jobs temporarily fail", Label("job-failure"),
 		func(
 			ctx SpecContext,
 			clusterOfJob int,
