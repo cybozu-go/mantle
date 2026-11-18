@@ -87,8 +87,9 @@ test-multiple-k8s-clusters:
 .PHONY: launch-multiple-k8s-clusters
 launch-multiple-k8s-clusters:
 # set up k8s clusters for secondary and primary mantle in parallel
-	$(MAKE) -j 4 multik8s-launch-secondary multik8s-launch-primary \
-		multik8s-install-cert-manager-secondary multik8s-install-cert-manager-primary
+	$(MAKE) -j 5 multik8s-launch-secondary multik8s-launch-primary \
+		multik8s-install-cert-manager-secondary multik8s-install-cert-manager-primary \
+		multik8s-build-test
 # copy secret from secondary
 	$(MAKE) install-ceph-object-store-secret MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_PRIMARY)
 # prepare TLS certificates
@@ -141,6 +142,14 @@ multik8s-install-cert-manager-secondary: multik8s-start-vms
 .PHONY: multik8s-install-cert-manager-primary
 multik8s-install-cert-manager-primary: multik8s-start-vms
 	$(call run-with-prefix,$(MINIKUBE_PROFILE_PRIMARY)-cert-manager,$(MAKE) install-cert-manager MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_PRIMARY))
+
+.PHONY: multik8s-build-test
+multik8s-build-test: multik8s-build-image
+	$(call run-with-prefix,build-test,$(MAKE) do-multik8s-build-test)
+
+.PHONY: do-multik8s-build-test
+do-multik8s-build-test: $(GINKGO)
+	$(GINKGO) build multik8s
 
 .PHONY: multik8s-install-mantle1
 multik8s-install-mantle1:
@@ -456,13 +465,13 @@ do_test: $(GINKGO)
 	fi
 
 .PHONY: do-test-multik8s
-do-test-multik8s: $(GINKGO)
+do-test-multik8s: do-multik8s-build-test
 	export KUBECTL_PRIMARY="$(MINIKUBE) -p $(MINIKUBE_PROFILE_PRIMARY) kubectl -- "; \
 	export KUBECTL_SECONDARY="$(MINIKUBE) -p $(MINIKUBE_PROFILE_SECONDARY) kubectl -- "; \
 	env \
 	PATH=${PATH} \
 	E2ETEST=1 \
-	$(GINKGO) --fail-fast -v $(GINKGO_FLAGS) multik8s; \
+	$(GINKGO) --fail-fast -v $(GINKGO_FLAGS) multik8s/multik8s.test; \
 	if [ "$$?" -ne 0 ]; then \
 		echo "Controller logs for $(MINIKUBE_PROFILE_PRIMARY):"; \
 		$${KUBECTL_PRIMARY} logs --tail 1000 -n $(CEPH_CLUSTER1_NAMESPACE) -l app.kubernetes.io/name=mantle,app.kubernetes.io/component=controller -c mantle; \
