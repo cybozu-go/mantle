@@ -94,67 +94,7 @@ launch-multiple-k8s-clusters:
 # prepare TLS certificates
 	$(MAKE) install-selfsigned-issuer MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_PRIMARY)
 	$(MAKE) install-selfsigned-issuer MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_SECONDARY)
-	$(MAKE) install-tls-certificates NAMESPACE=$(CEPH_CLUSTER1_NAMESPACE)
-	$(MAKE) install-tls-certificates NAMESPACE=$(CEPH_CLUSTER2_NAMESPACE)
-# install mantle-controller in the secondary cluster
-# install for CEPH_CLUSTER1_NAMESPACE
-	sed \
-		-e "s%{OBJECT_STORAGE_BUCKET_NAME}%$$(cat $(TMPDIR)/cm-export-data-1.json | jq -r .data.BUCKET_NAME)%" \
-		-e "s%{OBJECT_STORAGE_ENDPOINT}%http://$$(cat $(TMPDIR)/cm-export-data-1.json | jq -r .data.BUCKET_HOST)%" \
-		testdata/values-mantle-secondary-1-template.yaml \
-		> testdata/values-mantle-secondary-1.yaml
-	$(MAKE) install-mantle MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_SECONDARY) \
-		NAMESPACE=$(CEPH_CLUSTER1_NAMESPACE) \
-		VALUES_YAML=testdata/values-mantle-secondary-1.yaml
-# install for CEPH_CLUSTER2_NAMESPACE
-	sed \
-		-e "s%{OBJECT_STORAGE_BUCKET_NAME}%$$(cat $(TMPDIR)/cm-export-data-2.json | jq -r .data.BUCKET_NAME)%" \
-		-e "s%{OBJECT_STORAGE_ENDPOINT}%http://$$(cat $(TMPDIR)/cm-export-data-2.json | jq -r .data.BUCKET_HOST)%" \
-		testdata/values-mantle-secondary-2-template.yaml \
-		> testdata/values-mantle-secondary-2.yaml
-	$(MAKE) install-mantle MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_SECONDARY) \
-		NAMESPACE=$(CEPH_CLUSTER2_NAMESPACE) \
-		VALUES_YAML=testdata/values-mantle-secondary-2.yaml
-# update the TLS certificates to include IP SAN of the secondary mantle-controller endpoint
-	$(MAKE) install-tls-certificates NAMESPACE=$(CEPH_CLUSTER1_NAMESPACE)
-	$(MAKE) install-tls-certificates NAMESPACE=$(CEPH_CLUSTER2_NAMESPACE)
-	$(MINIKUBE) -p $(MINIKUBE_PROFILE_SECONDARY) kubectl -- rollout restart -n $(CEPH_CLUSTER1_NAMESPACE) deploy/mantle-controller
-	$(MINIKUBE) -p $(MINIKUBE_PROFILE_SECONDARY) kubectl -- rollout restart -n $(CEPH_CLUSTER2_NAMESPACE) deploy/mantle-controller
-# install mantle-controller in the primary cluster
-# install for CEPH_CLUSTER1_NAMESPACE
-	sed \
-		-e "s%{ENDPOINT}%$$($(MINIKUBE) service list -p $(MINIKUBE_PROFILE_SECONDARY) -o json \
-		  | jq -r --arg NS $(CEPH_CLUSTER1_NAMESPACE) \
-		  '.[] | select(.Name == "mantle-replication" and .Namespace == $$NS) | .URLs | select(. | length > 0)[]' \
-		  | head -1 | sed -r 's/^http:\/\///')%" \
-		-e "s%{OBJECT_STORAGE_BUCKET_NAME}%$$(cat $(TMPDIR)/cm-export-data-1.json | jq -r .data.BUCKET_NAME)%" \
-		-e "s%{OBJECT_STORAGE_ENDPOINT}%$$($(MINIKUBE) service list -p $(MINIKUBE_PROFILE_SECONDARY) -o json \
-		  | jq -r --arg NS $(CEPH_CLUSTER1_NAMESPACE) \
-		  '.[] | select(.Name == "rook-ceph-rgw-ceph-object-store-node-port" and .Namespace == $$NS) | .URLs | select(. | length > 0)[]' \
-		  | head -1)%" \
-		-e "s%{BACKUP_TRANSFER_PART_SIZE}%$(BACKUP_TRANSFER_PART_SIZE)%" \
-		testdata/values-mantle-primary-template.yaml \
-		> testdata/values-mantle-primary-1.yaml
-	$(MAKE) install-mantle MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_PRIMARY) \
-		NAMESPACE=$(CEPH_CLUSTER1_NAMESPACE) \
-		VALUES_YAML=testdata/values-mantle-primary-1.yaml
-# install for CEPH_CLUSTER2_NAMESPACE
-	sed \
-		-e "s%{ENDPOINT}%$$($(MINIKUBE) service list -p $(MINIKUBE_PROFILE_SECONDARY) -o json \
-		  | jq -r --arg NS $(CEPH_CLUSTER2_NAMESPACE) \
-		  '.[] | select(.Name == "mantle-replication" and .Namespace == $$NS) | .URLs | select(. | length > 0)[]' \
-		  | head -1 | sed -r 's/^http:\/\///')%" \
-		-e "s%{OBJECT_STORAGE_BUCKET_NAME}%$$(cat $(TMPDIR)/cm-export-data-2.json | jq -r .data.BUCKET_NAME)%" \
-		-e "s%{OBJECT_STORAGE_ENDPOINT}%$$($(MINIKUBE) service list -p $(MINIKUBE_PROFILE_SECONDARY) -o json \
-		  | jq -r --arg NS $(CEPH_CLUSTER1_NAMESPACE) \
-		  '.[] | select(.Name == "rook-ceph-rgw-ceph-object-store-node-port" and .Namespace == $$NS) | .URLs | select(. | length > 0)[]' \
-		  | head -1)%" \
-		-e "s%{BACKUP_TRANSFER_PART_SIZE}%$(BACKUP_TRANSFER_PART_SIZE)%" \
-		testdata/values-mantle-primary-template.yaml \
-		> testdata/values-mantle-primary-2.yaml
-	$(MAKE) install-mantle MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_PRIMARY) \
-		NAMESPACE=$(CEPH_CLUSTER2_NAMESPACE) \
-		VALUES_YAML=testdata/values-mantle-primary-2.yaml
+	$(MAKE) -j 2 multik8s-install-mantle1 multik8s-install-mantle2
 	$(MAKE) minikube-profile-primary
 
 # Runs only once for both multik8s-launch-* targets.
@@ -201,6 +141,45 @@ multik8s-install-cert-manager-secondary: multik8s-start-vms
 .PHONY: multik8s-install-cert-manager-primary
 multik8s-install-cert-manager-primary: multik8s-start-vms
 	$(call run-with-prefix,$(MINIKUBE_PROFILE_PRIMARY)-cert-manager,$(MAKE) install-cert-manager MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_PRIMARY))
+
+.PHONY: multik8s-install-mantle1
+multik8s-install-mantle1:
+	$(call run-with-prefix,$(CEPH_CLUSTER1_NAMESPACE),$(MAKE) do-multik8s-install-mantle NAMESPACE=$(CEPH_CLUSTER1_NAMESPACE) CEPH_CLUSTER_NO=1)
+
+.PHONY: multik8s-install-mantle2
+multik8s-install-mantle2:
+	$(call run-with-prefix,$(CEPH_CLUSTER2_NAMESPACE),$(MAKE) do-multik8s-install-mantle NAMESPACE=$(CEPH_CLUSTER2_NAMESPACE) CEPH_CLUSTER_NO=2)
+
+.PHONY: do-multik8s-install-mantle
+do-multik8s-install-mantle:
+	$(MAKE) install-tls-certificates
+# install mantle-controller in the secondary cluster
+	sed \
+		-e "s%{OBJECT_STORAGE_BUCKET_NAME}%$$(cat $(TMPDIR)/cm-export-data-$(CEPH_CLUSTER_NO).json | jq -r .data.BUCKET_NAME)%" \
+		-e "s%{OBJECT_STORAGE_ENDPOINT}%http://$$(cat $(TMPDIR)/cm-export-data-$(CEPH_CLUSTER_NO).json | jq -r .data.BUCKET_HOST)%" \
+		testdata/values-mantle-secondary-$(CEPH_CLUSTER_NO)-template.yaml \
+		> testdata/values-mantle-secondary-$(CEPH_CLUSTER_NO).yaml
+	$(MAKE) install-mantle MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_SECONDARY) \
+		VALUES_YAML=testdata/values-mantle-secondary-$(CEPH_CLUSTER_NO).yaml
+# update the TLS certificates to include IP SAN of the secondary mantle-controller endpoint
+	$(MAKE) install-tls-certificates
+	$(MINIKUBE) -p $(MINIKUBE_PROFILE_SECONDARY) kubectl -- rollout restart -n $(NAMESPACE) deploy/mantle-controller
+# install mantle-controller in the primary cluster
+	sed \
+		-e "s%{ENDPOINT}%$$($(MINIKUBE) service list -p $(MINIKUBE_PROFILE_SECONDARY) -o json \
+		  | jq -r --arg NS $(NAMESPACE) \
+		  '.[] | select(.Name == "mantle-replication" and .Namespace == $$NS) | .URLs | select(. | length > 0)[]' \
+		  | head -1 | sed -r 's/^http:\/\///')%" \
+		-e "s%{OBJECT_STORAGE_BUCKET_NAME}%$$(cat $(TMPDIR)/cm-export-data-$(CEPH_CLUSTER_NO).json | jq -r .data.BUCKET_NAME)%" \
+		-e "s%{OBJECT_STORAGE_ENDPOINT}%$$($(MINIKUBE) service list -p $(MINIKUBE_PROFILE_SECONDARY) -o json \
+		  | jq -r --arg NS $(CEPH_CLUSTER1_NAMESPACE) \
+		  '.[] | select(.Name == "rook-ceph-rgw-ceph-object-store-node-port" and .Namespace == $$NS) | .URLs | select(. | length > 0)[]' \
+		  | head -1)%" \
+		-e "s%{BACKUP_TRANSFER_PART_SIZE}%$(BACKUP_TRANSFER_PART_SIZE)%" \
+		testdata/values-mantle-primary-template.yaml \
+		> testdata/values-mantle-primary-$(CEPH_CLUSTER_NO).yaml
+	$(MAKE) install-mantle MINIKUBE_PROFILE=$(MINIKUBE_PROFILE_PRIMARY) \
+		VALUES_YAML=testdata/values-mantle-primary-$(CEPH_CLUSTER_NO).yaml
 
 .PHONY: clean
 clean:
@@ -401,8 +380,8 @@ install-tls-certificates:
 # Wait until a Secret for the certificates is created.
 	until $(KUBECTL) --context=$(MINIKUBE_PROFILE_PRIMARY) get secret -n $(NAMESPACE) cert-mantle-replication >/dev/null ; do sleep 1; done
 # Dump ca.crt in the secret to import it to the secondary cluster.
-	$(KUBECTL) --context=$(MINIKUBE_PROFILE_PRIMARY) get secret -n $(NAMESPACE) cert-mantle-replication -o json | jq -r '.data."ca.crt"' | base64 -d > $(TMPDIR)/primary-ca.crt
-	$(KUBECTL) --context=$(MINIKUBE_PROFILE_SECONDARY) create cm mantle-primary-ca-crt -n $(NAMESPACE) --from-file=ca.crt=$(TMPDIR)/primary-ca.crt \
+	$(KUBECTL) --context=$(MINIKUBE_PROFILE_PRIMARY) get secret -n $(NAMESPACE) cert-mantle-replication -o json | jq -r '.data."ca.crt"' | base64 -d > $(TMPDIR)/primary-ca-$(NAMESPACE).crt
+	$(KUBECTL) --context=$(MINIKUBE_PROFILE_SECONDARY) create cm mantle-primary-ca-crt -n $(NAMESPACE) --from-file=ca.crt=$(TMPDIR)/primary-ca-$(NAMESPACE).crt \
 		--output yaml --dry-run=client | $(KUBECTL) --context=$(MINIKUBE_PROFILE_SECONDARY) apply -f -
 # Create a TLS certificate in the secondary cluster.
 #
@@ -417,15 +396,15 @@ install-tls-certificates:
 			IPADDR=$$($(MINIKUBE) service list -p $(MINIKUBE_PROFILE_SECONDARY) -o json | jq -r --arg NS $(NAMESPACE) '.[] | select(.Name == "mantle-replication" and .Namespace == $$NS) | .URLs | select(. | length > 0)[]' | head -1 | sed -r 's/^http:\/\/([^:]+).*$$/\1/'); \
 			if [ "$$IPADDR" = "" ]; then echo -n ""; else echo -n "\"$${IPADDR}\""; fi)%g" \
 		testdata/cert-secondary-template.yaml \
-		> $(TMPDIR)/cert-secondary.yaml
-	$(KUBECTL) --context=$(MINIKUBE_PROFILE_SECONDARY) apply -n $(NAMESPACE) -f $(TMPDIR)/cert-secondary.yaml
+		> $(TMPDIR)/cert-secondary-$(NAMESPACE).yaml
+	$(KUBECTL) --context=$(MINIKUBE_PROFILE_SECONDARY) apply -n $(NAMESPACE) -f $(TMPDIR)/cert-secondary-$(NAMESPACE).yaml
 # In order to get the regenerated Secret for sure, delete the existing secret if any.
 	$(KUBECTL) --context=$(MINIKUBE_PROFILE_SECONDARY) delete secret -n $(NAMESPACE) cert-mantle-replication || true
 # Wait until a Secret for the certificates is created.
 	until $(KUBECTL) --context=$(MINIKUBE_PROFILE_SECONDARY) get secret -n $(NAMESPACE) cert-mantle-replication >/dev/null ; do sleep 1; done
 # Dump ca.crt in the secret to import it to the primary cluster.
-	$(KUBECTL) --context=$(MINIKUBE_PROFILE_SECONDARY) get secret -n $(NAMESPACE) cert-mantle-replication -o json | jq -r '.data."ca.crt"' | base64 -d > $(TMPDIR)/secondary-ca.crt
-	$(KUBECTL) --context=$(MINIKUBE_PROFILE_PRIMARY) create cm mantle-secondary-ca-crt -n $(NAMESPACE) --from-file=ca.crt=$(TMPDIR)/secondary-ca.crt \
+	$(KUBECTL) --context=$(MINIKUBE_PROFILE_SECONDARY) get secret -n $(NAMESPACE) cert-mantle-replication -o json | jq -r '.data."ca.crt"' | base64 -d > $(TMPDIR)/secondary-ca-$(NAMESPACE).crt
+	$(KUBECTL) --context=$(MINIKUBE_PROFILE_PRIMARY) create cm mantle-secondary-ca-crt -n $(NAMESPACE) --from-file=ca.crt=$(TMPDIR)/secondary-ca-$(NAMESPACE).crt \
 		--output yaml --dry-run=client | $(KUBECTL) --context=$(MINIKUBE_PROFILE_PRIMARY) apply -f -
 
 .PHONY: minikube-profile-primary
