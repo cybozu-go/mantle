@@ -355,7 +355,11 @@ var _ = Describe("MantleBackupConfig controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 		err = k8sClient.Delete(ctx, &cronJob)
 		Expect(err).NotTo(HaveOccurred())
-		testutil.CheckDeletedEventually[batchv1.CronJob](ctx, k8sClient, cronJobName, controllerNs)
-		testutil.CheckCreatedEventually[batchv1.CronJob](ctx, k8sClient, cronJobName, controllerNs)
+		Eventually(ctx, func(g Gomega, ctx SpecContext) {
+			var recreated batchv1.CronJob
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: cronJobName, Namespace: controllerNs}, &recreated)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(recreated.GetUID()).NotTo(Equal(cronJob.GetUID()))
+		}).Should(Succeed())
 	})
 })
