@@ -73,4 +73,5 @@ jobs:
           make -C test/e2e test-multiple-k8s-clusters \
             KUBERNETES_VERSION=${{ matrix.kubernetes-version }} \
             BACKUP_TRANSFER_PART_SIZE=${{ matrix.backup-transfer-part-size }} \
-            GINKGO_FLAGS=--label-filter='${{ matrix.label-filter }}'
+            GINKGO_FLAGS=--label-filter='${{ matrix.label-filter }}' \
+            MINIKUBE_CPUS=6

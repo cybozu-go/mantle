@@ -9,6 +9,7 @@ MINIKUBE := $(BINDIR)/minikube
 HELM := $(BINDIR)/helm
 KUBECTL := $(BINDIR)/kubectl-$(KUBERNETES_VERSION)
 MINIKUBE_HOME = $(BINDIR)
+MINIKUBE_CPUS := 2
 CEPH_CLUSTER1_NAMESPACE := rook-ceph
 CEPH_CLUSTER2_NAMESPACE := rook-ceph2
 NODE_NAME := minikube-worker
@@ -215,7 +216,7 @@ do-minikube-start:
 					--driver=kvm2 \
 					--container-runtime=docker \
 					--memory 6g \
-					--cpus=2 \
+					--cpus=$(MINIKUBE_CPUS) \
 					--extra-config=kubeadm.node-name=$(NODE_NAME) \
 					--extra-config=kubelet.hostname-override=$(NODE_NAME) \
 					--network mantle-test \
