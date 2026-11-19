@@ -14,7 +14,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-const rollbackTestPVCSize = "100Mi"
+const rollbackTestPVCSize = "32Mi"
 
 var _ = Describe("import job rollback", Label("import-rollback"), func() {
 	// An import Job for an incremental backup must not corrupt the

@@ -6,6 +6,9 @@ image:
 controller:
   overwriteMBCSchedule: "* * * * *"
   gcInterval: 1s
+  readinessProbe:
+    initialDelaySeconds: 0
+    periodSeconds: 1
   env:
     - name: REQUEUE_RECONCILIATION_AFTER
       value: "1s"

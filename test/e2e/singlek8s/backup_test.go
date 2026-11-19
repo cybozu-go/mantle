@@ -284,9 +284,11 @@ func (test *backupTest) testCase1() {
 
 func (test *backupTest) testCase2() {
 	It("should create MantleBackups from MantleBackupConfig", func() {
-		By("Creating MantleBackupConfig")
-		err := applyMantleBackupConfigTemplate(test.tenantNamespace, test.pvcName1, test.mantleBackupConfigName[2])
-		Expect(err).NotTo(HaveOccurred())
+		By("Creating MantleBackupConfigs")
+		for _, name := range []string{test.mantleBackupConfigName[2], test.mantleBackupConfigName[4]} {
+			err := applyMantleBackupConfigTemplate(test.tenantNamespace, test.pvcName1, name)
+			Expect(err).NotTo(HaveOccurred())
+		}
 
 		By("Waiting for a CronJob to be created")
 		mbc, err := getMBC(test.tenantNamespace, test.mantleBackupConfigName[2])
@@ -316,9 +318,6 @@ func (test *backupTest) testCase2() {
 	})
 
 	It("should not delete the MantleBackups even when the MantleBackupConfig is deleted", func() {
-		By("Creating MantleBackupConfig")
-		err := applyMantleBackupConfigTemplate(test.tenantNamespace, test.pvcName1, test.mantleBackupConfigName[4])
-		Expect(err).NotTo(HaveOccurred())
 		mbc, err := getMBC(test.tenantNamespace, test.mantleBackupConfigName[4])
 		Expect(err).NotTo(HaveOccurred())
 
