@@ -491,6 +491,13 @@ var _ = Describe("MantleBackup controller", func() {
 
 				expectCreatedAt := backup.Status.CreatedAt.Time
 
+				By("waiting for the backup to be queued for expiration")
+				Eventually(ctx, func() bool {
+					_, ok := lastExpireQueuedBackups.Load(types.NamespacedName{Namespace: backup.Namespace, Name: backup.Name})
+
+					return ok
+				}).Should(BeTrue())
+
 				By("simulate backup expiration")
 				newCreatedAt := simulateExpire(ctx, backup, offset)
 
