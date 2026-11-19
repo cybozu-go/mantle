@@ -147,7 +147,7 @@ var _ = Describe("MantleBackupConfig controller", func() {
 					Suspend:  false,
 				},
 			}
-			err := k8sClient.Create(ctx, &mbc)
+			err := k8sClient.Create(ctx, &mbc, client.DryRunAll)
 			Expect(err).NotTo(HaveOccurred())
 		}
 	})
