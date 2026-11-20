@@ -1731,7 +1731,7 @@ var _ = Describe("updateBackupTimestampMetrics", func() {
 	Context("when initializing at startup", func() {
 		labelAsManaged := func(b *mantlev1.MantleBackup, clusterID string) {
 			GinkgoHelper()
-			b.Labels[labelClusterID] = clusterID
+			b.Labels[domain.LabelClusterID] = clusterID
 			Expect(ctrlClient.Update(context.Background(), b)).To(Succeed())
 		}
 
