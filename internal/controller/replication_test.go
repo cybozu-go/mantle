@@ -202,7 +202,7 @@ func (test *replicationUnitTest) newMantleBackup() *mantlev1.MantleBackup {
 			Name:      util.GetUniqueName("test-mb-"),
 			Namespace: test.ns,
 			Labels: map[string]string{
-				labelClusterID:                resMgr.ClusterID,
+				domain.LabelClusterID:         resMgr.ClusterID,
 				labelRemoteBackupTargetPVCUID: util.GetUniqueName("test-remote-pvc-uid-"),
 				labelLocalBackupTargetPVCUID:  util.GetUniqueName("test-local-pvc-uid-"),
 			},
@@ -417,10 +417,10 @@ func (test *replicationUnitTest) testCreateMantleBackup() {
 			Expect(err).To(HaveOccurred())
 		},
 		Entry("without the cluster ID label",
-			func(mb *mantlev1.MantleBackup) { delete(mb.Labels, labelClusterID) }),
+			func(mb *mantlev1.MantleBackup) { delete(mb.Labels, domain.LabelClusterID) }),
 		Entry("with a different cluster ID label",
 			func(mb *mantlev1.MantleBackup) {
-				mb.Labels[labelClusterID] = util.GetUniqueName("test-different-cluster-id-")
+				mb.Labels[domain.LabelClusterID] = util.GetUniqueName("test-different-cluster-id-")
 			}),
 		Entry("without the remote PVC UID label",
 			func(mb *mantlev1.MantleBackup) { delete(mb.Labels, labelRemoteBackupTargetPVCUID) }),
