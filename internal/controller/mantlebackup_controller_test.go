@@ -1759,6 +1759,81 @@ var _ = Describe("updateBackupTimestampMetrics", func() {
 	})
 })
 
+var _ = Describe("updateBackupMetrics", func() {
+	const (
+		creationMetric = "mantle_backup_creation_timestamp_seconds"
+		pvcName        = "pvc"
+	)
+	creationTime := time.Unix(1700000000, 0)
+
+	var (
+		namespace     string
+		reconcilerFor func(role string) *MantleBackupReconciler
+	)
+	labelsOf := func(name string) map[string]string {
+		return map[string]string{
+			"persistentvolumeclaim": pvcName, "resource_namespace": namespace, "mantlebackup": name,
+		}
+	}
+	newBackup := func(name string, createdAt time.Time, deleting bool) *mantlev1.MantleBackup {
+		b := newMantleBackup(name, namespace, nil, nil, deleting, 1, metav1.ConditionTrue, metav1.ConditionFalse)
+		b.Spec.PVC = pvcName
+		b.CreationTimestamp = metav1.NewTime(createdAt)
+
+		return b
+	}
+	// A nil want means the series is absent.
+	expectGauge := func(name, backupName string, want *time.Time) {
+		GinkgoHelper()
+		v, ok := gatherGaugeValue(name, labelsOf(backupName))
+		if want == nil {
+			Expect(ok).To(BeFalse())
+
+			return
+		}
+		Expect(ok).To(BeTrue())
+		Expect(v).To(Equal(float64(want.Unix())))
+	}
+
+	BeforeEach(func() {
+		namespace = "ns-" + string(uuid.NewUUID())
+		ctrlClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+		reconcilerFor = func(role string) *MantleBackupReconciler {
+			return NewMantleBackupReconciler(ctrlClient,
+				ctrlClient.Scheme(), testManagedCephClusterID, role, nil, nil, "dummy image", "", nil, nil, resource.MustParse("1Gi"))
+		}
+		// The metrics are registered globally, so drop the series a test leaves behind.
+		DeferCleanup(func() {
+			for _, name := range []string{"mb-a", "mb-b"} {
+				metrics.BackupCreationTimestampSeconds.Delete(labelsOf(name))
+			}
+		})
+	})
+
+	It("exports the metrics of each MantleBackup independently", func() {
+		r := reconcilerFor(RolePrimary)
+		r.updateBackupMetrics(newBackup("mb-a", creationTime, false))
+		r.updateBackupMetrics(newBackup("mb-b", creationTime.Add(time.Hour), false))
+
+		expectGauge(creationMetric, "mb-a", new(creationTime))
+		expectGauge(creationMetric, "mb-b", new(creationTime.Add(time.Hour)))
+	})
+
+	It("does not export the metrics on the standalone", func() {
+		reconcilerFor(RoleStandalone).updateBackupMetrics(newBackup("mb-a", creationTime, false))
+
+		expectGauge(creationMetric, "mb-a", nil)
+	})
+
+	It("removes the series when the MantleBackup is being deleted", func() {
+		r := reconcilerFor(RolePrimary)
+		r.updateBackupMetrics(newBackup("mb-a", creationTime, false))
+		r.updateBackupMetrics(newBackup("mb-a", creationTime, true))
+
+		expectGauge(creationMetric, "mb-a", nil)
+	})
+})
+
 var _ = Describe("isHighPriority", func() {
 	DescribeTable("decides whether a MantleBackup has the priority label set to high",
 		func(labels map[string]string, want bool) {

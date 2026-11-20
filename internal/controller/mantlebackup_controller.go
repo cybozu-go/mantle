@@ -601,6 +601,7 @@ func (r *MantleBackupReconciler) reconcileAsStandalone(ctx context.Context, back
 
 func (r *MantleBackupReconciler) reconcileAsPrimary(ctx context.Context, backup *mantlev1.MantleBackup) *reconcile.Result {
 	defer r.updateBackupTimestampMetrics(ctx, backup)
+	defer r.updateBackupMetrics(backup)
 
 	if result := r.reconcileLocalBackup(ctx, backup); result.ShouldReturn() {
 		return result.WrapIfError("failed to reconcile local backup")
@@ -839,6 +840,28 @@ func (r *MantleBackupReconciler) updateBackupTimestampMetrics(ctx context.Contex
 	metrics.SetOrDeleteTimestamp(metrics.BackupLastCreationTimestampSeconds, metricLabels, lastCreatedAt)
 	metrics.SetOrDeleteTimestamp(metrics.BackupLastSnapshotCreationTimestampSeconds, metricLabels, lastSnapshotAt)
 	metrics.SetOrDeleteTimestamp(metrics.BackupOldestUnsyncedCreationTimestampSeconds, metricLabels, oldestUnsyncedCreatedAt)
+}
+
+// updateBackupMetrics exports the metrics of backup itself, and removes them once it is being deleted.
+// They are exported only by the primary, as the other roles never sync backups.
+func (r *MantleBackupReconciler) updateBackupMetrics(backup *mantlev1.MantleBackup) {
+	if r.role != RolePrimary {
+		return
+	}
+
+	metricLabels := prometheus.Labels{
+		metrics.LabelPersistentVolumeClaim: backup.Spec.PVC,
+		metrics.LabelResourceNamespace:     backup.GetNamespace(),
+		metrics.LabelMantleBackup:          backup.GetName(),
+	}
+
+	if !backup.DeletionTimestamp.IsZero() {
+		_ = metrics.BackupCreationTimestampSeconds.Delete(metricLabels)
+
+		return
+	}
+
+	metrics.SetOrDeleteTimestamp(metrics.BackupCreationTimestampSeconds, metricLabels, backup.CreationTimestamp.Time)
 }
 
 // listHigherPriorityBackups returns the high priority MantleBackups. MantleBackups
