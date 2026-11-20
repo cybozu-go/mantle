@@ -851,7 +851,7 @@ func (r *MantleBackupReconciler) updateBackupTimestampMetrics(ctx context.Contex
 // so they are available before each backup is reconciled.
 func (r *MantleBackupReconciler) initBackupTimestampMetrics(ctx context.Context) error {
 	var backupList mantlev1.MantleBackupList
-	if err := r.List(ctx, &backupList, client.MatchingLabels{labelClusterID: r.managedCephClusterID}); err != nil {
+	if err := r.List(ctx, &backupList, client.MatchingLabels{domain.LabelClusterID: r.managedCephClusterID}); err != nil {
 		return fmt.Errorf("failed to list MantleBackup resources: %w", err)
 	}
 
