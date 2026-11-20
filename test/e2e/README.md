@@ -4,6 +4,8 @@
 
 To set up the test environment, you'll need Minikube with the KVM2 driver enabled, so make sure to enable KVM2 beforehand. Don't worry about installing Minikube yourself; it will be installed automatically.
 
+You'll also need Docker on the host, because the image of Mantle is built on the host and then loaded into the Minikube VMs.
+
 ## Usage
 
 First, install the necessary software by running:

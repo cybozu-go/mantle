@@ -10,6 +10,7 @@ HELM := $(BINDIR)/helm
 KUBECTL := $(BINDIR)/kubectl-$(KUBERNETES_VERSION)
 MINIKUBE_HOME = $(BINDIR)
 MINIKUBE_CPUS := 2
+IMAGE := controller:latest
 CEPH_CLUSTER1_NAMESPACE := rook-ceph
 CEPH_CLUSTER2_NAMESPACE := rook-ceph2
 NODE_NAME := minikube-worker
@@ -19,8 +20,9 @@ LOSETUP := losetup
 LOOP_FILE := loop.img
 LOOP_FILE2 := loop2.img
 CNI_PLUGIN_INSTALL_DIR := /opt/cni/bin
-POLLING_INTERVAL := 30
+POLLING_INTERVAL := 5
 TIMEOUT_SECS := 900
+TOOLBOX_RESTART_INTERVAL := 15
 LOOP_DEV := /dev/loop0
 LOOP_DEV2 := /dev/loop1
 MINIKUBE_PROFILE_PRIMARY=profile1
@@ -275,14 +277,22 @@ fake-rook-ceph-cluster2:
 .PHONY: wait-ceph-ready
 wait-ceph-ready:
 	is_ok="false"; \
-	for ((i=0;i<$(TIMEOUT_SECS);i+=$(POLLING_INTERVAL))); do \
-		$(KUBECTL) -n $(NAMESPACE) exec deploy/rook-ceph-tools -- ceph -s && \
-		$(KUBECTL) -n $(NAMESPACE) exec deploy/rook-ceph-tools -- ceph osd stat | grep -qE "[1-9][0-9]* up" && { \
-			echo "ceph -s succeeded in namespace $(NAMESPACE)"; \
-			is_ok="true"; \
-			break; \
-		}; \
-		$(KUBECTL) -n $(NAMESPACE) rollout restart deploy rook-ceph-tools; \
+	deadline=$$((SECONDS + $(TIMEOUT_SECS))); \
+	last_restart=$$((SECONDS - $(TOOLBOX_RESTART_INTERVAL))); \
+	while [ $$SECONDS -lt $$deadline ]; do \
+		if osd_stat=$$($(KUBECTL) -n $(NAMESPACE) exec deploy/rook-ceph-tools -- ceph osd stat); then \
+			echo "$${osd_stat}"; \
+			if echo "$${osd_stat}" | grep -qE "[1-9][0-9]* up" && \
+				$(KUBECTL) -n $(NAMESPACE) exec deploy/rook-ceph-tools -- ceph -s; then \
+				echo "ceph -s succeeded in namespace $(NAMESPACE)"; \
+				is_ok="true"; \
+				break; \
+			fi; \
+		elif [ $$((SECONDS - last_restart)) -ge $(TOOLBOX_RESTART_INTERVAL) ]; then \
+			$(KUBECTL) -n $(NAMESPACE) rollout restart deploy rook-ceph-tools; \
+			$(KUBECTL) -n $(NAMESPACE) rollout status deploy rook-ceph-tools --timeout=1m; \
+			last_restart=$$SECONDS; \
+		fi; \
 		echo "waiting for ceph -s to succeed in namespace $(NAMESPACE)" > /dev/stderr; \
 		sleep $(POLLING_INTERVAL); \
 	done; \
@@ -313,6 +323,9 @@ wait-ceph-ready:
 .PHONY: install-ceph-object-store
 install-ceph-object-store:
 	$(KUBECTL) apply -f testdata/objectstorage.yaml
+	$(KUBECTL) wait -n rook-ceph cephobjectstore/ceph-object-store --for=jsonpath='{.status.phase}'=Ready --timeout=$(TIMEOUT_SECS)s
+	$(KUBECTL) wait -n rook-ceph deploy/rook-ceph-rgw-ceph-object-store-a --for=condition=Available --timeout=$(TIMEOUT_SECS)s
+	$(KUBECTL) apply -f testdata/objectbucketclaims.yaml
 	until $(KUBECTL) get -n rook-ceph cm export-data-1 &> /dev/null && $(KUBECTL) get -n rook-ceph cm export-data-2 &> /dev/null; do sleep 3 ; done
 	$(KUBECTL) get -n rook-ceph configmap export-data-1 -o json \
 	  | jq -r --arg NS $(CEPH_CLUSTER1_NAMESPACE) \
@@ -393,8 +406,10 @@ minikube-profile-secondary:
 
 .PHONY: image-build
 image-build:
-	eval $$($(MINIKUBE) docker-env); \
-	$(MAKE) -C ../.. docker-build
+	$(MAKE) -C ../.. docker-build IMG=$(IMAGE)
+	set -o pipefail; \
+	docker_env=$$($(MINIKUBE) docker-env) && \
+	docker save $(IMAGE) | (eval "$${docker_env}" && docker load)
 	$(MINIKUBE) ssh -- docker images
 
 .PHONY: install-mantle-cluster-wide
