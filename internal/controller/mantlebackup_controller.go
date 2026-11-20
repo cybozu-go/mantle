@@ -857,11 +857,18 @@ func (r *MantleBackupReconciler) updateBackupMetrics(backup *mantlev1.MantleBack
 
 	if !backup.DeletionTimestamp.IsZero() {
 		_ = metrics.BackupCreationTimestampSeconds.Delete(metricLabels)
+		_ = metrics.BackupSyncCompletionTimestampSeconds.Delete(metricLabels)
 
 		return
 	}
 
 	metrics.SetOrDeleteTimestamp(metrics.BackupCreationTimestampSeconds, metricLabels, backup.CreationTimestamp.Time)
+
+	var syncedAt time.Time
+	if cond := meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionSyncedToRemote); backup.IsSynced() && cond != nil {
+		syncedAt = cond.LastTransitionTime.Time
+	}
+	metrics.SetOrDeleteTimestamp(metrics.BackupSyncCompletionTimestampSeconds, metricLabels, syncedAt)
 }
 
 // listHigherPriorityBackups returns the high priority MantleBackups. MantleBackups

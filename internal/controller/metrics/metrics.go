@@ -92,6 +92,15 @@ var (
 		[]string{LabelPersistentVolumeClaim, LabelResourceNamespace, LabelMantleBackup},
 	)
 
+	BackupSyncCompletionTimestampSeconds = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Name:      "backup_sync_completion_timestamp_seconds",
+			Help:      "The time when the MantleBackup was synced to the secondary.",
+		},
+		[]string{LabelPersistentVolumeClaim, LabelResourceNamespace, LabelMantleBackup},
+	)
+
 	BackupLastCreationTimestampSeconds = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: namespace,
@@ -112,6 +121,7 @@ func init() {
 	runtimemetrics.Registry.MustRegister(BackupOldestUnsyncedCreationTimestampSeconds)
 	runtimemetrics.Registry.MustRegister(BackupLastCreationTimestampSeconds)
 	runtimemetrics.Registry.MustRegister(BackupCreationTimestampSeconds)
+	runtimemetrics.Registry.MustRegister(BackupSyncCompletionTimestampSeconds)
 }
 
 // SetOrDeleteTimestamp sets the series of gauge identified by labels to t in

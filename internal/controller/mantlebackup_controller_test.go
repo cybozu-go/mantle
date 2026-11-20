@@ -1761,10 +1761,12 @@ var _ = Describe("updateBackupTimestampMetrics", func() {
 
 var _ = Describe("updateBackupMetrics", func() {
 	const (
-		creationMetric = "mantle_backup_creation_timestamp_seconds"
-		pvcName        = "pvc"
+		creationMetric       = "mantle_backup_creation_timestamp_seconds"
+		syncCompletionMetric = "mantle_backup_sync_completion_timestamp_seconds"
+		pvcName              = "pvc"
 	)
 	creationTime := time.Unix(1700000000, 0)
+	syncedTime := creationTime.Add(3 * time.Hour)
 
 	var (
 		namespace     string
@@ -1775,10 +1777,18 @@ var _ = Describe("updateBackupMetrics", func() {
 			"persistentvolumeclaim": pvcName, "resource_namespace": namespace, "mantlebackup": name,
 		}
 	}
-	newBackup := func(name string, createdAt time.Time, deleting bool) *mantlev1.MantleBackup {
-		b := newMantleBackup(name, namespace, nil, nil, deleting, 1, metav1.ConditionTrue, metav1.ConditionFalse)
+	newBackup := func(name string, createdAt time.Time, synced, deleting bool) *mantlev1.MantleBackup {
+		syncedStatus := metav1.ConditionFalse
+		if synced {
+			syncedStatus = metav1.ConditionTrue
+		}
+		b := newMantleBackup(name, namespace, nil, nil, deleting, 1, metav1.ConditionTrue, syncedStatus)
 		b.Spec.PVC = pvcName
 		b.CreationTimestamp = metav1.NewTime(createdAt)
+		if synced {
+			meta.FindStatusCondition(b.Status.Conditions, mantlev1.BackupConditionSyncedToRemote).LastTransitionTime =
+				metav1.NewTime(syncedTime)
+		}
 
 		return b
 	}
@@ -1806,31 +1816,52 @@ var _ = Describe("updateBackupMetrics", func() {
 		DeferCleanup(func() {
 			for _, name := range []string{"mb-a", "mb-b"} {
 				metrics.BackupCreationTimestampSeconds.Delete(labelsOf(name))
+				metrics.BackupSyncCompletionTimestampSeconds.Delete(labelsOf(name))
 			}
 		})
 	})
 
-	It("exports the metrics of each MantleBackup independently", func() {
+	It("exports the metrics of each MantleBackup independently on the primary", func() {
 		r := reconcilerFor(RolePrimary)
-		r.updateBackupMetrics(newBackup("mb-a", creationTime, false))
-		r.updateBackupMetrics(newBackup("mb-b", creationTime.Add(time.Hour), false))
+		r.updateBackupMetrics(newBackup("mb-a", creationTime, true, false))
+		r.updateBackupMetrics(newBackup("mb-b", creationTime.Add(time.Hour), false, false))
 
 		expectGauge(creationMetric, "mb-a", new(creationTime))
+		expectGauge(syncCompletionMetric, "mb-a", &syncedTime)
 		expectGauge(creationMetric, "mb-b", new(creationTime.Add(time.Hour)))
+		expectGauge(syncCompletionMetric, "mb-b", nil)
 	})
 
 	It("does not export the metrics on the standalone", func() {
-		reconcilerFor(RoleStandalone).updateBackupMetrics(newBackup("mb-a", creationTime, false))
+		reconcilerFor(RoleStandalone).updateBackupMetrics(newBackup("mb-a", creationTime, true, false))
 
 		expectGauge(creationMetric, "mb-a", nil)
+		expectGauge(syncCompletionMetric, "mb-a", nil)
+	})
+
+	It("exports the sync completion time once the MantleBackup is synced", func() {
+		r := reconcilerFor(RolePrimary)
+		// A MantleBackup that has not been synced has no SyncedToRemote condition at all.
+		unsynced := newBackup("mb-a", creationTime, false, false)
+		unsynced.Status.Conditions = nil
+		r.updateBackupMetrics(unsynced)
+
+		expectGauge(creationMetric, "mb-a", new(creationTime))
+		expectGauge(syncCompletionMetric, "mb-a", nil)
+
+		r.updateBackupMetrics(newBackup("mb-a", creationTime, true, false))
+
+		expectGauge(creationMetric, "mb-a", new(creationTime))
+		expectGauge(syncCompletionMetric, "mb-a", &syncedTime)
 	})
 
 	It("removes the series when the MantleBackup is being deleted", func() {
 		r := reconcilerFor(RolePrimary)
-		r.updateBackupMetrics(newBackup("mb-a", creationTime, false))
-		r.updateBackupMetrics(newBackup("mb-a", creationTime, true))
+		r.updateBackupMetrics(newBackup("mb-a", creationTime, true, false))
+		r.updateBackupMetrics(newBackup("mb-a", creationTime, true, true))
 
 		expectGauge(creationMetric, "mb-a", nil)
+		expectGauge(syncCompletionMetric, "mb-a", nil)
 	})
 })
 

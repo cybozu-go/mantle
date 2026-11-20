@@ -139,6 +139,16 @@ These per-PVC timestamp metrics are not exported by the secondary. A series is a
 | `resource_namespace`    | The resource namespace. |
 | `mantlebackup`          | The MantleBackup name.  |
 
+### `mantle_backup_sync_completion_timestamp_seconds`
+
+`mantle_backup_sync_completion_timestamp_seconds` is a Gauge that indicates the time when the MantleBackup was synced to the secondary (`SyncedToRemote=True`). It is exported only by the primary. The series is absent while the MantleBackup is not synced, and is removed when the MantleBackup is being deleted.
+
+| Label                   | Description             |
+| ----------------------- | ----------------------- |
+| `persistentvolumeclaim` | The PVC name.           |
+| `resource_namespace`    | The resource namespace. |
+| `mantlebackup`          | The MantleBackup name.  |
+
 ## Development
 
 The following tools should be installed manually.

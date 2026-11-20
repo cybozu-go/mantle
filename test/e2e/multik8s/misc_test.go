@@ -56,6 +56,10 @@ var _ = Describe("metrics tests", func() {
 			fmt.Sprintf(`mantle_backup_creation_timestamp_seconds{`+
 				`mantlebackup=%q,persistentvolumeclaim=%q,resource_namespace=%q}`,
 				backupName, pvcName, namespace)),
+		Entry(`mantle_backup_sync_completion_timestamp_seconds of the MantleBackup`,
+			fmt.Sprintf(`mantle_backup_sync_completion_timestamp_seconds{`+
+				`mantlebackup=%q,persistentvolumeclaim=%q,resource_namespace=%q}`,
+				backupName, pvcName, namespace)),
 		Entry(`mantle_backup_last_snapshot_creation_timestamp_seconds of the PVC`,
 			fmt.Sprintf(`mantle_backup_last_snapshot_creation_timestamp_seconds{persistentvolumeclaim=%q,resource_namespace=%q}`,
 				pvcName, namespace)),
