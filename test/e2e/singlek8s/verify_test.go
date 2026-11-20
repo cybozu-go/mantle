@@ -3,13 +3,14 @@ package singlek8s
 import (
 	"encoding/json"
 	"fmt"
-	"slices"
 
+	mantlev1 "github.com/cybozu-go/mantle/api/v1"
 	"github.com/cybozu-go/mantle/internal/controller"
 	"github.com/cybozu-go/mantle/test/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 )
 
 type verifyTest struct {
@@ -64,31 +65,14 @@ func (test *verifyTest) testVerificationFailure(ctx SpecContext) {
 	Expect(err).NotTo(HaveOccurred())
 
 	By("confirming that the MantleBackup fails in verification")
-	// Get MB
 	mb, err := getMB(test.tenantNamespace, mantleBackupName)
 	Expect(err).NotTo(HaveOccurred())
-	Eventually(ctx, func(g Gomega) {
-		// List verify Pods
-		verifyJobName := controller.MakeVerifyJobName(mb)
-		stdout, _, err := kubectl("get", "pod", "-n", cephCluster1Namespace,
-			"-l", "batch.kubernetes.io/job-name="+verifyJobName, "-o", "json")
-		g.Expect(err).NotTo(HaveOccurred())
-		podList := corev1.PodList{}
-		err = json.Unmarshal(stdout, &podList)
-		g.Expect(err).NotTo(HaveOccurred())
-
-		// Find a Pod with Failed phase
-		index := slices.IndexFunc(podList.Items, func(p corev1.Pod) bool {
-			return p.Status.Phase == corev1.PodFailed
-		})
-		g.Expect(index).NotTo(Equal(-1))
-	}).Should(Succeed())
-
-	By("confirming that the MantleBackup has Verified=False condition eventually")
 	Eventually(ctx, func(g Gomega) {
 		mb, err := getMB(test.tenantNamespace, mantleBackupName)
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(mb.IsVerifiedFalse()).To(BeTrue())
+		condition := meta.FindStatusCondition(mb.Status.Conditions, mantlev1.BackupConditionVerified)
+		g.Expect(condition.Reason).To(Equal(mantlev1.ConditionReasonVerifiedFailed))
 	}).Should(Succeed())
 
 	By("confirming that the number of the verify Pods is equal to or less than 1", func() {
