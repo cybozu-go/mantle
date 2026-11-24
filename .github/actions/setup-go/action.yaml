@@ -40,3 +40,10 @@ runs:
         github.event_name == 'pull_request' &&
         github.event.pull_request.head.repo.full_name != github.repository
       uses: flatt-security/setup-takumi-guard-golang@1c8aa7498f7f635fbd6ad6a0f436d03092b3502d # v1.1.0
+    - name: "Retry Takumi Guard requests on errors"
+      shell: bash
+      # Retry requests that fail with 502 errors such as:
+      #   reading https://golang.flatt.tech/github.com/go-openapi/swag/conv/@v/v0.27.1.mod: 502 Bad Gateway
+      # Go doesn't retry them, but with "|" it tries the next entry on any
+      # error. The trailing slash avoids Go's cache keyed by proxy URL.
+      run: echo "GOPROXY=${GOPROXY}|${GOPROXY}/" >> "$GITHUB_ENV" # zizmor: ignore[github-env]
