@@ -21,6 +21,7 @@ import (
 	"github.com/cybozu-go/mantle/test/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
@@ -1824,6 +1825,81 @@ var _ = Describe("updateBackupTimestampMetrics", func() {
 				backupSpec{hoursAfterBase: 0, captured: true, deleting: true},
 			),
 		)
+	})
+})
+
+var _ = Describe("backupMetricsCollector", func() {
+	const (
+		creationMetric = "mantle_backup_creation_timestamp_seconds"
+		namespace      = "ns"
+		pvcName        = "pvc"
+	)
+	creationTime := time.Unix(1700000000, 0)
+
+	newBackup := func(name string, createdAt time.Time, clusterID string, deleting bool) *mantlev1.MantleBackup {
+		labels := map[string]string{}
+		if clusterID != "" {
+			labels[domain.LabelClusterID] = clusterID
+		}
+		b := newMantleBackup(name, namespace, nil, labels, deleting, 1, metav1.ConditionTrue, metav1.ConditionFalse)
+		b.Spec.PVC = pvcName
+		b.CreationTimestamp = metav1.NewTime(createdAt)
+
+		return b
+	}
+	// collect returns the value of each metric by the name of MantleBackup.
+	collect := func(backups ...*mantlev1.MantleBackup) map[string]map[string]float64 {
+		GinkgoHelper()
+		ctrlClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+		for _, b := range backups {
+			createMantleBackupInClient(ctrlClient, b)
+		}
+		registry := prometheus.NewPedanticRegistry()
+		Expect(registry.Register(newBackupMetricsCollector(ctrlClient, testManagedCephClusterID))).To(Succeed())
+		mfs, err := registry.Gather()
+		Expect(err).NotTo(HaveOccurred())
+
+		got := map[string]map[string]float64{}
+		for _, mf := range mfs {
+			got[mf.GetName()] = map[string]float64{}
+			for _, m := range mf.GetMetric() {
+				labels := map[string]string{}
+				for _, l := range m.GetLabel() {
+					labels[l.GetName()] = l.GetValue()
+				}
+				Expect(labels).To(HaveKeyWithValue("persistentvolumeclaim", pvcName))
+				Expect(labels).To(HaveKeyWithValue("resource_namespace", namespace))
+				got[mf.GetName()][labels["mantlebackup"]] = m.GetGauge().GetValue()
+			}
+		}
+
+		return got
+	}
+
+	It("exports the metrics of each MantleBackup independently", func() {
+		got := collect(
+			newBackup("mb-a", creationTime, testManagedCephClusterID, false),
+			newBackup("mb-b", creationTime.Add(time.Hour), testManagedCephClusterID, false),
+		)
+
+		Expect(got[creationMetric]).To(Equal(map[string]float64{
+			"mb-a": float64(creationTime.Unix()),
+			"mb-b": float64(creationTime.Add(time.Hour).Unix()),
+		}))
+	})
+
+	It("does not export unmanaged, secondary-received, or deleting MantleBackups", func() {
+		received := newBackup("mb-c", creationTime, testManagedCephClusterID, false)
+		received.Annotations = map[string]string{domain.AnnotRemoteUID: "remote-uid"}
+
+		got := collect(
+			newBackup("mb-a", creationTime, "", false),
+			newBackup("mb-b", creationTime, "other-cluster", false),
+			received,
+			newBackup("mb-d", creationTime, testManagedCephClusterID, true),
+		)
+
+		Expect(got).To(BeEmpty())
 	})
 })
 

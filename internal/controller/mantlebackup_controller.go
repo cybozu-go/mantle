@@ -986,6 +986,12 @@ func (r *MantleBackupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		}
 	}
 
+	if r.role == RolePrimary {
+		if err := mgr.Add(newBackupMetricsCollector(mgr.GetCache(), r.managedCephClusterID)); err != nil {
+			return fmt.Errorf("failed to add the backup metrics collector: %w", err)
+		}
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		WithOptions(controller.TypedOptions[ctrlreconcile.Request]{
 			RateLimiter: newMantleBackupReconcilerRateLimiter[ctrlreconcile.Request](),

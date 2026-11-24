@@ -91,6 +91,13 @@ var (
 		},
 		[]string{LabelPersistentVolumeClaim, LabelResourceNamespace},
 	)
+
+	BackupCreationTimestampSecondsDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "backup_creation_timestamp_seconds"),
+		"The creationTimestamp of the MantleBackup.",
+		[]string{LabelPersistentVolumeClaim, LabelResourceNamespace, LabelMantleBackup},
+		nil,
+	)
 )
 
 func init() {
