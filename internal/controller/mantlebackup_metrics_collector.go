@@ -8,6 +8,8 @@ import (
 	"github.com/cybozu-go/mantle/internal/controller/domain"
 	"github.com/cybozu-go/mantle/internal/controller/metrics"
 	"github.com/prometheus/client_golang/prometheus"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	runtimemetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
@@ -40,6 +42,7 @@ func (c *backupMetricsCollector) Start(ctx context.Context) error {
 
 func (c *backupMetricsCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- metrics.BackupCreationTimestampSecondsDesc
+	ch <- metrics.BackupSyncCompletionTimestampSecondsDesc
 }
 
 func (c *backupMetricsCollector) Collect(ch chan<- prometheus.Metric) {
@@ -63,5 +66,11 @@ func (c *backupMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 		labelValues := []string{backup.Spec.PVC, backup.GetNamespace(), backup.GetName()}
 		ch <- prometheus.MustNewConstMetric(metrics.BackupCreationTimestampSecondsDesc,
 			prometheus.GaugeValue, float64(backup.CreationTimestamp.Unix()), labelValues...)
+
+		cond := meta.FindStatusCondition(backup.Status.Conditions, mantlev1.BackupConditionSyncedToRemote)
+		if cond != nil && cond.Status == metav1.ConditionTrue {
+			ch <- prometheus.MustNewConstMetric(metrics.BackupSyncCompletionTimestampSecondsDesc,
+				prometheus.GaugeValue, float64(cond.LastTransitionTime.Unix()), labelValues...)
+		}
 	}
 }

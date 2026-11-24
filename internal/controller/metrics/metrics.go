@@ -98,6 +98,13 @@ var (
 		[]string{LabelPersistentVolumeClaim, LabelResourceNamespace, LabelMantleBackup},
 		nil,
 	)
+
+	BackupSyncCompletionTimestampSecondsDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "backup_sync_completion_timestamp_seconds"),
+		"The time when the MantleBackup was synced to the secondary.",
+		[]string{LabelPersistentVolumeClaim, LabelResourceNamespace, LabelMantleBackup},
+		nil,
+	)
 )
 
 func init() {

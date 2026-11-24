@@ -1830,20 +1830,28 @@ var _ = Describe("updateBackupTimestampMetrics", func() {
 
 var _ = Describe("backupMetricsCollector", func() {
 	const (
-		creationMetric = "mantle_backup_creation_timestamp_seconds"
-		namespace      = "ns"
-		pvcName        = "pvc"
+		creationMetric       = "mantle_backup_creation_timestamp_seconds"
+		syncCompletionMetric = "mantle_backup_sync_completion_timestamp_seconds"
+		namespace            = "ns"
+		pvcName              = "pvc"
 	)
 	creationTime := time.Unix(1700000000, 0)
+	syncedTime := creationTime.Add(3 * time.Hour)
 
-	newBackup := func(name string, createdAt time.Time, clusterID string, deleting bool) *mantlev1.MantleBackup {
+	newBackup := func(name string, createdAt time.Time, clusterID string, synced, deleting bool) *mantlev1.MantleBackup {
 		labels := map[string]string{}
 		if clusterID != "" {
 			labels[domain.LabelClusterID] = clusterID
 		}
-		b := newMantleBackup(name, namespace, nil, labels, deleting, 1, metav1.ConditionTrue, metav1.ConditionFalse)
+		syncedStatus := metav1.ConditionFalse
+		if synced {
+			syncedStatus = metav1.ConditionTrue
+		}
+		b := newMantleBackup(name, namespace, nil, labels, deleting, 1, metav1.ConditionTrue, syncedStatus)
 		b.Spec.PVC = pvcName
 		b.CreationTimestamp = metav1.NewTime(createdAt)
+		meta.FindStatusCondition(b.Status.Conditions, mantlev1.BackupConditionSyncedToRemote).LastTransitionTime =
+			metav1.NewTime(syncedTime)
 
 		return b
 	}
@@ -1878,25 +1886,28 @@ var _ = Describe("backupMetricsCollector", func() {
 
 	It("exports the metrics of each MantleBackup independently", func() {
 		got := collect(
-			newBackup("mb-a", creationTime, testManagedCephClusterID, false),
-			newBackup("mb-b", creationTime.Add(time.Hour), testManagedCephClusterID, false),
+			newBackup("mb-a", creationTime, testManagedCephClusterID, true, false),
+			newBackup("mb-b", creationTime.Add(time.Hour), testManagedCephClusterID, false, false),
 		)
 
 		Expect(got[creationMetric]).To(Equal(map[string]float64{
 			"mb-a": float64(creationTime.Unix()),
 			"mb-b": float64(creationTime.Add(time.Hour).Unix()),
 		}))
+		Expect(got[syncCompletionMetric]).To(Equal(map[string]float64{
+			"mb-a": float64(syncedTime.Unix()),
+		}))
 	})
 
 	It("does not export unmanaged, secondary-received, or deleting MantleBackups", func() {
-		received := newBackup("mb-c", creationTime, testManagedCephClusterID, false)
+		received := newBackup("mb-c", creationTime, testManagedCephClusterID, true, false)
 		received.Annotations = map[string]string{domain.AnnotRemoteUID: "remote-uid"}
 
 		got := collect(
-			newBackup("mb-a", creationTime, "", false),
-			newBackup("mb-b", creationTime, "other-cluster", false),
+			newBackup("mb-a", creationTime, "", true, false),
+			newBackup("mb-b", creationTime, "other-cluster", true, false),
 			received,
-			newBackup("mb-d", creationTime, testManagedCephClusterID, true),
+			newBackup("mb-d", creationTime, testManagedCephClusterID, true, true),
 		)
 
 		Expect(got).To(BeEmpty())
