@@ -14,6 +14,12 @@ func mbWithRemoteUID() optionMB {
 	}
 }
 
+func mbWithClusterIDLabel(clusterID string) optionMB {
+	return func(backup *mantlev1.MantleBackup) {
+		backup.Labels[domain.LabelClusterID] = clusterID
+	}
+}
+
 func mbBeingDeleted() optionMB {
 	return func(backup *mantlev1.MantleBackup) {
 		now := metav1.Now()
