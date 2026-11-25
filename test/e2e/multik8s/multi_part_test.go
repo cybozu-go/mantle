@@ -119,6 +119,15 @@ s5cmd(){
 				partNumSlow,
 				&script,
 			)
+			defer ChangeComponentJobScript(
+				ctx,
+				PrimaryK8sCluster,
+				controller.EnvUploadJobScript,
+				namespace,
+				backupName,
+				partNumSlow,
+				nil,
+			)
 
 			CreatePVC(ctx, PrimaryK8sCluster, namespace, pvcName, SCName1)
 			writtenDataHash := WriteRandomDataToPV(ctx, PrimaryK8sCluster, namespace, pvcName)
