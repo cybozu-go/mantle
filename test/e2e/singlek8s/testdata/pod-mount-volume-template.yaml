@@ -4,6 +4,7 @@ metadata:
   name: "%s"
   namespace: "%s"
 spec:
+  terminationGracePeriodSeconds: 1
   containers:
     - name: ubuntu
       image: ubuntu:22.04

@@ -14,7 +14,7 @@ controller:
   gcInterval: 1s
   env:
     - name: REQUEUE_RECONCILIATION_AFTER
-      value: "10s"
+      value: "1s"
   mtls:
     clientCACertConfigMap: mantle-primary-ca-crt
     serverTLSSecret: cert-mantle-replication
