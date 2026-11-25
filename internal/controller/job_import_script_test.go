@@ -57,11 +57,11 @@ import-diff)
 esac
 `
 
-// fakeS5cmdScript is a stub recording its arguments to ${CMD_LOG} and returning
+// fakeAWSScript is a stub recording its arguments to ${CMD_LOG} and returning
 // ${EXPORTED_DATA}.
-const fakeS5cmdScript = `#!/bin/bash
+const fakeAWSScript = `#!/bin/bash
 set -eu -o pipefail
-echo "s5cmd $*" >> "${CMD_LOG}"
+echo "aws $*" >> "${CMD_LOG}"
 printf '%s' "${EXPORTED_DATA}"
 `
 
@@ -84,13 +84,13 @@ const (
 	rbdRollbackInitialSnap = "rbd snap rollback pool/image@initialsnap"
 	rbdRmInitialSnap       = "rbd snap rm pool/image@initialsnap"
 
-	// The s5cmd and zstd invocations the script is expected to make.
-	s5cmdCat         = "s5cmd --endpoint-url http://localhost:9000 cat s3://bucket/obj"
-	s5cmdCatWithCert = "s5cmd --endpoint-url http://localhost:9000 --credentials-file /etc/cert/cert.json cat s3://bucket/obj"
-	zstdDecompress   = "zstd -d -q -c"
-	certFile         = "/etc/cert/cert.json"
+	// The aws and zstd invocations the script is expected to make.
+	awsS3Cp         = "aws --endpoint-url http://localhost:9000 --region ceph s3 cp s3://bucket/obj -"
+	awsS3CpWithCert = "aws --endpoint-url http://localhost:9000 --region ceph --ca-bundle /etc/cert/ca.crt s3 cp s3://bucket/obj -"
+	zstdDecompress  = "zstd -d -q -c"
+	certFile        = "/etc/cert/ca.crt"
 
-	// The exported data that the stubbed s5cmd emits.
+	// The exported data that the stubbed aws emits.
 	exportedData = "exported data"
 
 	// initialSnapLsOutput is an "rbd snap ls" output that contains initialsnap,
@@ -156,9 +156,9 @@ func runImportScript(t *testing.T, fromSnapName string, conf fakeRBDConfig) impo
 	binDir := filepath.Join(dir, "bin")
 	require.NoError(t, os.MkdirAll(binDir, 0o755))
 	for name, content := range map[string]string{
-		"rbd":   fakeRBDScript,
-		"s5cmd": fakeS5cmdScript,
-		"zstd":  fakeZstdScript,
+		"rbd":  fakeRBDScript,
+		"aws":  fakeAWSScript,
+		"zstd": fakeZstdScript,
 	} {
 		require.NoError(t, os.WriteFile(filepath.Join(binDir, name), []byte(content), 0o755))
 	}
@@ -268,7 +268,7 @@ func TestImportJobScriptRollback(t *testing.T) {
 		{
 			name:             "incremental: skip rollback if the image is identical to the snapshot",
 			fromSnapName:     "snap1",
-			wantCalls:        []string{rbdInfoImage, rbdInfoSnap1, rbdDiffSnap1, s5cmdCat, rbdImportDiff},
+			wantCalls:        []string{rbdInfoImage, rbdInfoSnap1, rbdDiffSnap1, awsS3Cp, rbdImportDiff},
 			wantOrderedCalls: []string{rbdInfoImage, rbdInfoSnap1, rbdDiffSnap1, rbdImportDiff},
 			wantOutput:       []string{"skip rollback: pool/image is already identical to snap1"},
 		},
@@ -277,7 +277,7 @@ func TestImportJobScriptRollback(t *testing.T) {
 			fromSnapName: "snap1",
 			conf:         fakeRBDConfig{diffJSON: someDiffJSON},
 			wantCalls: []string{
-				rbdInfoImage, rbdInfoSnap1, rbdDiffSnap1, rbdRollbackSnap1, s5cmdCat, rbdImportDiff,
+				rbdInfoImage, rbdInfoSnap1, rbdDiffSnap1, rbdRollbackSnap1, awsS3Cp, rbdImportDiff,
 			},
 			wantOrderedCalls: []string{rbdInfoImage, rbdInfoSnap1, rbdDiffSnap1, rbdRollbackSnap1, rbdImportDiff},
 			wantOutput: []string{
@@ -289,7 +289,7 @@ func TestImportJobScriptRollback(t *testing.T) {
 			name:             "incremental: roll back if the image is larger than the snapshot",
 			fromSnapName:     "snap1",
 			conf:             fakeRBDConfig{snapSize: smallSize},
-			wantCalls:        []string{rbdInfoImage, rbdInfoSnap1, rbdRollbackSnap1, s5cmdCat, rbdImportDiff},
+			wantCalls:        []string{rbdInfoImage, rbdInfoSnap1, rbdRollbackSnap1, awsS3Cp, rbdImportDiff},
 			wantOrderedCalls: []string{rbdInfoImage, rbdInfoSnap1, rbdRollbackSnap1, rbdImportDiff},
 			wantOutput: []string{
 				"rollback needed: pool/image differs from snap1: " +
@@ -323,14 +323,14 @@ func TestImportJobScriptRollback(t *testing.T) {
 		{
 			name:             "full: create initialsnap without rolling back if it doesn't exist",
 			fromSnapName:     "",
-			wantCalls:        []string{rbdSnapLs, rbdCreateInitialSnap, s5cmdCat, rbdImportDiff, rbdRmInitialSnap},
+			wantCalls:        []string{rbdSnapLs, rbdCreateInitialSnap, awsS3Cp, rbdImportDiff, rbdRmInitialSnap},
 			wantOrderedCalls: []string{rbdSnapLs, rbdCreateInitialSnap, rbdImportDiff, rbdRmInitialSnap},
 		},
 		{
 			name:             "full: roll back to initialsnap if it already exists",
 			fromSnapName:     "",
 			conf:             fakeRBDConfig{snapLsOutput: initialSnapLsOutput},
-			wantCalls:        []string{rbdSnapLs, rbdRollbackInitialSnap, s5cmdCat, rbdImportDiff, rbdRmInitialSnap},
+			wantCalls:        []string{rbdSnapLs, rbdRollbackInitialSnap, awsS3Cp, rbdImportDiff, rbdRmInitialSnap},
 			wantOrderedCalls: []string{rbdSnapLs, rbdRollbackInitialSnap, rbdImportDiff, rbdRmInitialSnap},
 		},
 	}
@@ -366,29 +366,29 @@ func TestImportJobScriptImportPaths(t *testing.T) {
 		wantCalls []string
 	}{
 		{
-			name:      "no credentials file and no compression",
-			wantCalls: []string{rbdInfoImage, rbdInfoSnap1, rbdDiffSnap1, s5cmdCat, rbdImportDiff},
+			name:      "no CA certificate file and no compression",
+			wantCalls: []string{rbdInfoImage, rbdInfoSnap1, rbdDiffSnap1, awsS3Cp, rbdImportDiff},
 		},
 		{
-			name:      "credentials file without compression",
+			name:      "CA certificate file without compression",
 			conf:      fakeRBDConfig{certFile: certFile},
-			wantCalls: []string{rbdInfoImage, rbdInfoSnap1, rbdDiffSnap1, s5cmdCatWithCert, rbdImportDiff},
+			wantCalls: []string{rbdInfoImage, rbdInfoSnap1, rbdDiffSnap1, awsS3CpWithCert, rbdImportDiff},
 		},
 		{
-			name: "zstd compression without credentials file",
+			name: "zstd compression without CA certificate file",
 			conf: fakeRBDConfig{transferCompression: "zstd"},
 			wantCalls: []string{
-				rbdInfoImage, rbdInfoSnap1, rbdDiffSnap1, s5cmdCat, zstdDecompress, rbdImportDiff,
+				rbdInfoImage, rbdInfoSnap1, rbdDiffSnap1, awsS3Cp, zstdDecompress, rbdImportDiff,
 			},
 		},
 		{
-			name: "credentials file with zstd compression",
+			name: "CA certificate file with zstd compression",
 			conf: fakeRBDConfig{
 				certFile:            certFile,
 				transferCompression: "zstd",
 			},
 			wantCalls: []string{
-				rbdInfoImage, rbdInfoSnap1, rbdDiffSnap1, s5cmdCatWithCert, zstdDecompress, rbdImportDiff,
+				rbdInfoImage, rbdInfoSnap1, rbdDiffSnap1, awsS3CpWithCert, zstdDecompress, rbdImportDiff,
 			},
 		},
 	}
