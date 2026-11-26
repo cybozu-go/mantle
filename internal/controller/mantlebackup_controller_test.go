@@ -188,7 +188,7 @@ var _ = Describe("MantleBackup controller", func() {
 			g.Expect(
 				backup.IsSnapshotCaptured(),
 			).To(BeFalse())
-		}, "10s", "1s").Should(Succeed())
+		}, "3s", "1s").Should(Succeed())
 	}
 
 	waitForHavingFinalizer := func(ctx context.Context, backup *mantlev1.MantleBackup) {
@@ -492,6 +492,13 @@ var _ = Describe("MantleBackup controller", func() {
 
 				expectCreatedAt := backup.Status.CreatedAt.Time
 
+				By("waiting for the backup to be queued for expiration")
+				Eventually(ctx, func() bool {
+					_, ok := lastExpireQueuedBackups.Load(types.NamespacedName{Namespace: backup.Namespace, Name: backup.Name})
+
+					return ok
+				}).Should(BeTrue())
+
 				By("simulate backup expiration")
 				newCreatedAt := simulateExpire(ctx, backup, offset)
 
@@ -510,7 +517,7 @@ var _ = Describe("MantleBackup controller", func() {
 				Expect(createdAt).To(BeTemporally("==", expectCreatedAt))
 			},
 			Entry("an already expired backup should be deleted immediately", -time.Hour),
-			Entry("a near expiring backup should be deleted after expiration", 10*time.Second),
+			Entry("a near expiring backup should be deleted after expiration", 5*time.Second),
 		)
 
 		It("should delete the backup even if the PVC is deleted before expiry", func(ctx SpecContext) {
@@ -2725,7 +2732,7 @@ var _ = Describe("export and upload", func() {
 			err := k8sClient.Get(ctx,
 				types.NamespacedName{Name: jobName, Namespace: nsController}, &job)
 			g.Expect(err).NotTo(HaveOccurred())
-		}, "3s", "1s").Should(Succeed())
+		}, "1s", "100ms").Should(Succeed())
 	}
 
 	getExportDataPVC := func(
@@ -5012,7 +5019,7 @@ blkdiscard -z /dev/zeroout-rbd
 					var job batchv1.Job
 					err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeImportJobName(backup1, 0), Namespace: nsController}, &job)
 					Expect(err).NotTo(HaveOccurred())
-				}, "3s", "1s").Should(Succeed())
+				}, "1s", "100ms").Should(Succeed())
 
 				// Create a new import Job for part number 2 of MantleBackup1, and make it Completed.
 				job2 := createImportJob(backup1, 1)
@@ -5037,7 +5044,7 @@ blkdiscard -z /dev/zeroout-rbd
 					var job batchv1.Job
 					err = k8sClient.Get(ctx, types.NamespacedName{Name: MakeImportJobName(backup2, 0), Namespace: nsController}, &job)
 					Expect(err).NotTo(HaveOccurred())
-				}, "3s", "1s").Should(Succeed())
+				}, "1s", "100ms").Should(Succeed())
 			},
 			Entry("snap size < transfer part size", int64(testutil.FakeRBDSnapshotSize)+1, 1),
 			Entry("snap size = transfer part size", int64(testutil.FakeRBDSnapshotSize), 1),

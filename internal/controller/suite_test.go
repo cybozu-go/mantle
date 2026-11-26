@@ -34,7 +34,7 @@ var resMgr *testutil.ResourceManager
 func TestControllers(t *testing.T) {
 	RegisterFailHandler(Fail)
 
-	SetDefaultEventuallyPollingInterval(time.Second)
+	SetDefaultEventuallyPollingInterval(100 * time.Millisecond)
 	SetDefaultEventuallyTimeout(3 * time.Minute)
 	EnforceDefaultTimeoutsWhenUsingContexts()
 
@@ -71,7 +71,7 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
 
-	err = os.Setenv("REQUEUE_RECONCILIATION_AFTER", "10s")
+	err = os.Setenv("REQUEUE_RECONCILIATION_AFTER", "1s")
 	Expect(err).NotTo(HaveOccurred())
 
 	err = os.Setenv("SLOW_REQUEUE_RECONCILIATION_AFTER", "1m")
