@@ -18,8 +18,8 @@ NODE_NAME := minikube-worker
 SUDO := sudo
 DD := dd
 LOSETUP := losetup
-LOOP_FILE := loop.img
-LOOP_FILE2 := loop2.img
+LOOP_FILE := /mnt/vda1/loop.img
+LOOP_FILE2 := /mnt/vda1/loop2.img
 CNI_PLUGIN_INSTALL_DIR := /opt/cni/bin
 POLLING_INTERVAL := 5
 TIMEOUT_SECS := 900
@@ -257,9 +257,9 @@ do-minikube-start:
 
 .PHONY: create-loop-dev
 create-loop-dev:
-	$(PROFILE_MINIKUBE) ssh -- $(DD) if=/dev/zero of=$(LOOP_FILE) bs=1G seek=32 count=0
+	$(PROFILE_MINIKUBE) ssh -- $(SUDO) $(DD) if=/dev/zero of=$(LOOP_FILE) bs=1G seek=32 count=0
 	$(PROFILE_MINIKUBE) ssh -- $(SUDO) $(LOSETUP) $(LOOP_DEV) $(LOOP_FILE) || :
-	$(PROFILE_MINIKUBE) ssh $(DD) if=/dev/zero of=$(LOOP_FILE2) bs=1G seek=32 count=0
+	$(PROFILE_MINIKUBE) ssh -- $(SUDO) $(DD) if=/dev/zero of=$(LOOP_FILE2) bs=1G seek=32 count=0
 	$(PROFILE_MINIKUBE) ssh -- $(SUDO) $(LOSETUP) $(LOOP_DEV2) $(LOOP_FILE2) || :
 	$(PROFILE_MINIKUBE) ssh -- lsblk
 

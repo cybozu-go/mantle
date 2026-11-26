@@ -113,5 +113,5 @@ jobs:
           for p in profile1 profile2; do
             echo "== Memory in ${p}"
             MINIKUBE_HOME="${GITHUB_WORKSPACE}/test/e2e/bin" "${GITHUB_WORKSPACE}/test/e2e/bin/minikube" -p "${p}" ssh -- \
-              'grep -E "^(MemTotal|MemFree|MemAvailable|Buffers|Cached|Shmem|AnonPages|Slab|SReclaimable|SUnreclaim|KernelStack|PageTables):" /proc/meminfo; df -h; ls -ls ~/loop*.img; ps -eo rss,comm | sort -rn | head -15' || true
+              'grep -E "^(MemTotal|MemFree|MemAvailable|Buffers|Cached|Shmem|AnonPages|Slab|SReclaimable|SUnreclaim|KernelStack|PageTables):" /proc/meminfo; df -h; ls -ls /mnt/vda1/loop*.img; ps -eo rss,comm | sort -rn | head -15' || true
           done
