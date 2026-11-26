@@ -60,6 +60,34 @@ jobs:
     runs-on: "ubuntu-22.04"
     timeout-minutes: 120
     steps:
+      - name: Record the resource usage in the background
+        run: |
+          nproc
+          free -m
+          df -h /
+          cat > "${RUNNER_TEMP}/record-usage.sh" <<'EOF'
+          #!/bin/bash
+          i=0
+          while true; do
+            mem=$(free -m | awk '/^Mem:/ {printf "mem_used=%d mem_avail=%d", $3, $7} /^Swap:/ {printf " swap_used=%d", $3}')
+            qemu=$(ps -eo rss=,comm= | awk '$2 ~ /^qemu-system/ {out = out sep int($1 / 1024); sep = ","} END {print out}')
+            cpu=$(awk '/^cpu / {print $2 + $3 "," $4 + $7 + $8 "," $5 "," $6 "," $9}' /proc/stat)
+            qemu_cpu=$(ps -eo times=,comm=,args= | awk '$2 ~ /^qemu-system/ && match($0, /guest=[^, ]+/) {out = out sep substr($0, RSTART + 6, RLENGTH - 6) ":" $1; sep = ","} END {print out}')
+            vm=""
+            if [ $((i % 4)) -eq 0 ]; then
+              for p in profile1 profile2; do
+                out=$(MINIKUBE_HOME="${GITHUB_WORKSPACE}/test/e2e/bin" timeout 20 "${GITHUB_WORKSPACE}/test/e2e/bin/minikube" -p "${p}" ssh -- free -m 2>/dev/null \
+                  | tr -d '\r' | awk -v p="${p}" '/^Mem:/ {print p "_used=" $3, p "_shared=" $5, p "_avail=" $7}')
+                if [ -n "${out}" ]; then vm="${vm} ${out}"; fi
+              done
+            fi
+            echo "$(date -u +%H:%M:%S) ${mem} load1=$(cut -d ' ' -f 1 /proc/loadavg) qemu_rss_mb=${qemu} cpu_jiffies=${cpu} qemu_cpu_s=${qemu_cpu}${vm}"
+            i=$((i + 1))
+            sleep 15
+          done
+          EOF
+          chmod +x "${RUNNER_TEMP}/record-usage.sh"
+          nohup "${RUNNER_TEMP}/record-usage.sh" > "${RUNNER_TEMP}/usage.log" 2>&1 &
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -75,3 +103,14 @@ jobs:
             KUBERNETES_VERSION=${{ matrix.kubernetes-version }} \
             BACKUP_TRANSFER_PART_SIZE=${{ matrix.backup-transfer-part-size }} \
             GINKGO_FLAGS=--label-filter='${{ matrix.label-filter }}'
+      - name: Show the resource usage
+        if: always()
+        run: |
+          cat "${RUNNER_TEMP}/usage.log"
+          awk '{ for (i = 1; i <= NF; i++) { split($i, kv, "="); if (kv[1] ~ /avail$/ && (!(kv[1] in min) || kv[2] + 0 < min[kv[1]])) min[kv[1]] = kv[2] + 0; if (kv[1] == "swap_used" && kv[2] + 0 > swap) swap = kv[2] + 0 } } END { for (k in min) print "min " k "=" min[k] " MiB"; print "max swap_used=" swap + 0 " MiB" }' "${RUNNER_TEMP}/usage.log" | sort
+          sudo dmesg | grep -i -E 'out of memory|oom-kill|killed process' || echo "No OOM kill found."
+          for p in profile1 profile2; do
+            echo "== Memory in ${p}"
+            MINIKUBE_HOME="${GITHUB_WORKSPACE}/test/e2e/bin" "${GITHUB_WORKSPACE}/test/e2e/bin/minikube" -p "${p}" ssh -- \
+              'grep -E "^(MemTotal|MemFree|MemAvailable|Buffers|Cached|Shmem|AnonPages|Slab|SReclaimable|SUnreclaim|KernelStack|PageTables):" /proc/meminfo; df -h; ls -ls ~/loop*.img; ps -eo rss,comm | sort -rn | head -15' || true
+          done
