@@ -10,6 +10,7 @@ HELM := $(BINDIR)/helm
 KUBECTL := $(BINDIR)/kubectl-$(KUBERNETES_VERSION)
 MINIKUBE_HOME = $(BINDIR)
 MINIKUBE_CPUS := 2
+MINIKUBE_MEMORY := 6g
 IMG := controller:latest
 CEPH_CLUSTER1_NAMESPACE := rook-ceph
 CEPH_CLUSTER2_NAMESPACE := rook-ceph2
@@ -233,7 +234,7 @@ do-minikube-start:
 					--kubernetes-version="v$(KUBERNETES_VERSION)" \
 					--driver=kvm2 \
 					--container-runtime=docker \
-					--memory 6g \
+					--memory $(MINIKUBE_MEMORY) \
 					--cpus=$(MINIKUBE_CPUS) \
 					--extra-config=kubeadm.node-name=$(NODE_NAME) \
 					--extra-config=kubelet.hostname-override=$(NODE_NAME) \
