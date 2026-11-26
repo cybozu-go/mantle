@@ -48,8 +48,9 @@ Edit the following files.
 
 #### Depending tools
 
-Update all the tools in `versions.mk` to their latest versions, except Rook.
+Update all the tools in `versions.mk` to their latest versions, except Rook and Ceph.
 To change their versions, edit `versions.mk`.
+Rook and Ceph are updated separately. See [How to update Rook and Ceph](#how-to-update-rook-and-ceph).
 
 For minikube, after choosing a Minikube version, check the Kubernetes versions it supports in `https://github.com/kubernetes/minikube/blob/<minikube-release-tag>/pkg/minikube/constants/constants_kubernetes_versions.go`. For each target Kubernetes minor, set its newest stable patch version in the `kubernetes-version` matrix in `.github/workflows/e2e.yaml` and `.github/workflows/e2e-multiple-k8s-clusters.yaml`. Also set `KUBERNETES_VERSION` in `versions.mk`.
 
@@ -88,3 +89,22 @@ $ make generate
 #### Final check
 
 `git grep <the kubernetes version which support will be dropped>`, `git grep image:`, `git grep -i VERSION` and looking `versions.mk` might help to avoid overlooking necessary changes.
+
+## How to update Rook and Ceph
+
+### Rook
+
+Check the [Rook release notes](https://github.com/rook/rook/releases) and update `ROOK_CHART_VERSION` in `versions.mk`.
+Update the minimum Rook version in `README.md` if Mantle no longer works with the version listed there.
+
+### Ceph
+
+Choose a Ceph version listed as supported in the Rook documentation for the target Rook version.
+
+1. In one PR, set the Ceph image tag (`v<x.y.z>`) in the following files, and update `ceph/Dockerfile` and `ceph/export-diff.patch` by following "Procedure to update" in [ceph/README.md](../ceph/README.md). `make -C ceph test` uses all of them.
+   - `test/e2e/testdata/values-cluster.yaml`
+   - `ceph/manifests/toolbox.yaml`
+   - `config/manager/manager.yaml`
+2. After the PR is merged, release the custom `ceph rbd export-diff` command by following [Release](../ceph/README.md#release).
+3. After the release, update `EXPORT_DIFF_VERSION` in `Dockerfile` to the released `ceph-export-diff` version (`<x.y.z.n>`) in another PR. Also update the `custom-ceph` stage if necessary by referring to the [Dockerfile in neco-containers](https://github.com/cybozu/neco-containers/blob/main/ceph/Dockerfile), and update the commit in the "cf." comment above the stage.
+4. Run `git grep -F <the old Ceph version>` (`<old x.y.z>`) to make sure no old version remains.

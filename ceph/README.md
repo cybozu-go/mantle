@@ -29,12 +29,8 @@ git push origin --tags
 
 ### Update Dockerfile
 
-1. Update `CEPH_TAG` to the desired version.
-2. If [`neco-containers/ceph/Dockerfile`](https://github.com/cybozu/neco-containers/blob/main/ceph/Dockerfile) or [`neco-containers/ceph/build.sh`](https://github.com/cybozu/neco-containers/blob/main/ceph/build.sh) is updated, update the Dockerfile in the same way.
-
-### Update the others
-
-Update other files that use the Ceph image. It can be find by running `git grep "quay\.io/ceph/ceph:"` on the top directory.
+1. Update `CEPH_TAG` in `ceph/Dockerfile` to the desired version.
+2. If [`neco-containers/ceph/Dockerfile`](https://github.com/cybozu/neco-containers/blob/main/ceph/Dockerfile) or [`neco-containers/ceph/build.sh`](https://github.com/cybozu/neco-containers/blob/main/ceph/build.sh) is updated, update `ceph/Dockerfile` in the same way.
 
 ### Update the patch
 **In the `cybozu/ceph` repository,** you checkout the target branch (`rbd-export-vx.y.z`). If it doesn't exist yet, it's necessary to create it and apply the newest patch as follows.
@@ -60,7 +56,7 @@ git diff tags/v$VERSION > export-diff.patch
 You store the up-to-date export-diff.patch as [`ceph/export-diff.patch`](https://github.com/cybozu-go/mantle/blob/main/ceph/export-diff.patch).
 
 ### Release
-**Works in the `cybozu-go/mantle` repository.**
+**Works in the `cybozu-go/mantle` repository.** Merge the changes made in the steps above to `main` before pushing the tag.
 
 1. The version is determined. The patch version is the same as the base ceph version. The fourth field starts at 0 for each ceph version and increases by 1 for each release.
   ```sh
@@ -79,7 +75,3 @@ You store the up-to-date export-diff.patch as [`ceph/export-diff.patch`](https:/
 6. Allow pushing to main branch by changing the value of "Enforcement status" to **Disabled** on [the corresponding ruleset](https://github.com/cybozu-go/mantle/settings/rules/3334068).
 7. Once a new tag is pushed, [GitHub Actions](https://github.com/cybozu-go/mantle/actions) automatically creates a draft release note for the tagged version, builds a tar archive for the new release, and attaches it to the release note.
   Visit [https://github.com/cybozu-go/mantle/releases] to check the result.
-
-### Apply new export-diff for mantle
-
-Update the `EXPORT_DIFF_VERSION` in the `Dockerfile` at the project root directory. Also, update `custom-ceph` stage if necessary by referring to the [Dockerfile in neco-containers](https://github.com/cybozu/neco-containers/blob/main/ceph/Dockerfile).
