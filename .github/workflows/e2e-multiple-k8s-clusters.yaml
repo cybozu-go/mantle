@@ -57,8 +57,7 @@ jobs:
           - kubernetes-version: 1.35.8
             backup-transfer-part-size: 3Mi
             label-filter: full-backup
-    #runs-on: "ubuntu-22.04"
-    runs-on: mantle_large_runner_16core
+    runs-on: "ubuntu-22.04"
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -75,5 +74,4 @@ jobs:
           make -C test/e2e test-multiple-k8s-clusters \
             KUBERNETES_VERSION=${{ matrix.kubernetes-version }} \
             BACKUP_TRANSFER_PART_SIZE=${{ matrix.backup-transfer-part-size }} \
-            GINKGO_FLAGS=--label-filter='${{ matrix.label-filter }}' \
-            MINIKUBE_CPUS=6
+            GINKGO_FLAGS=--label-filter='${{ matrix.label-filter }}'
