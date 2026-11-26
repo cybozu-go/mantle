@@ -4,7 +4,7 @@ image:
   repository: ghcr.io/cybozu-go/mantle
   pullPolicy:
   # The image reference: a tag and/or a digest (e.g. "1.2.3@sha256:...").
-  reference: 0.22.0@sha256:44d4af43c49ece97aff6f6130fccea49c710c0f2ab95170308754e1e2fa55697
+  reference: 0.23.0@sha256:05b970b56d60fbc54ad22cc76e518c1f2667669d02260388e98c1c87dfba27f4
 
 imagePullSecrets: []
 nameOverride: ""
