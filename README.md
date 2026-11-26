@@ -127,7 +127,27 @@ make undeploy
 | `persistentvolumeclaim` | The PVC name.           |
 | `resource_namespace`    | The resource namespace. |
 
-These timestamp metrics are not exported by the secondary. A series is absent when no MantleBackup matches, and keeps its last value while the PVC is missing or re-created.
+These per-PVC timestamp metrics are not exported by the secondary. A series is absent when no MantleBackup matches, and keeps its last value while the PVC is missing or re-created.
+
+### `mantle_backup_creation_timestamp_seconds`
+
+`mantle_backup_creation_timestamp_seconds` is a Gauge that indicates the creationTimestamp of each MantleBackup. It is exported only by the primary, and is absent while the MantleBackup is being deleted.
+
+| Label                   | Description             |
+| ----------------------- | ----------------------- |
+| `persistentvolumeclaim` | The PVC name.           |
+| `resource_namespace`    | The resource namespace. |
+| `mantlebackup`          | The MantleBackup name.  |
+
+### `mantle_backup_sync_completion_timestamp_seconds`
+
+`mantle_backup_sync_completion_timestamp_seconds` is a Gauge that indicates the time when each MantleBackup was synced to the secondary (`SyncedToRemote`). It is exported only by the primary, and is absent while the MantleBackup is not synced or is being deleted.
+
+| Label                   | Description             |
+| ----------------------- | ----------------------- |
+| `persistentvolumeclaim` | The PVC name.           |
+| `resource_namespace`    | The resource namespace. |
+| `mantlebackup`          | The MantleBackup name.  |
 
 ## Development
 
