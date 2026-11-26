@@ -82,7 +82,7 @@ launch-single-k8s-cluster:
 
 .PHONY: test-multiple-k8s-clusters
 test-multiple-k8s-clusters:
-	$(MAKE) launch-multiple-k8s-clusters
+	$(MAKE) -j 2 launch-multiple-k8s-clusters multik8s-build-tests
 	$(MAKE) do-test-multik8s
 
 .PHONY: launch-multiple-k8s-clusters
@@ -101,6 +101,10 @@ launch-multiple-k8s-clusters:
 .PHONY: multik8s-build-image
 multik8s-build-image:
 	$(call run-with-prefix,build-image,$(MAKE) docker-build)
+
+.PHONY: multik8s-build-tests
+multik8s-build-tests:
+	$(call run-with-prefix,build-tests,nice -n 19 go test -c -o /dev/null ./multik8s)
 
 # Runs only once for both multik8s-launch-* targets, and starts the VMs one by one.
 .PHONY: multik8s-start-vms
