@@ -40,6 +40,8 @@ jobs:
           - multi-controller
           - compression
           - import-rollback
+          - job-failure
+          - multi-part
           - "!//" # select unlabelled tests
         include:
           # testing various backup-transfer-part-size
