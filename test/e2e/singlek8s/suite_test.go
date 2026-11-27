@@ -32,7 +32,7 @@ func TestMtest(t *testing.T) {
 var _ = Describe("Mantle", Ordered, func() {
 	Context("operate after PVC deletion", opsAfterPVCDeletionTestSuite)
 	Context("backup", backupTestSuite)
-	Context("restore", restoreTestSuite)
+	Context("restore", Label("restore"), restoreTestSuite)
 	Context("verification", verifyTestSuite)
 	Context("multi Rook/Ceph env", multiRookCephTestSuite)
 
