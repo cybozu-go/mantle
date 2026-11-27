@@ -59,6 +59,8 @@ jobs:
             label-filter: full-backup
     runs-on: "ubuntu-22.04"
     timeout-minutes: 120
+    env:
+      APT_MIRRORS_FILE: /etc/apt/apt-mirrors.txt
     steps:
       - name: Record the resource usage in the background
         run: |

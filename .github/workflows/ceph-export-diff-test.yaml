@@ -11,6 +11,8 @@ jobs:
   test:
     runs-on: mantle_large_runner_16core
     timeout-minutes: 240
+    env:
+      APT_MIRRORS_FILE: /etc/apt/apt-mirrors.txt
     steps:
       - run: sudo apt-get update
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

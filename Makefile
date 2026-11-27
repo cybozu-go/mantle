@@ -167,6 +167,9 @@ DOCKER_BUILD_ARGS := --build-arg 'GOPROXY=$(GOPROXY)'
 ifneq ($(wildcard $(HOME)/.netrc),)
 DOCKER_BUILD_ARGS += --secret 'id=netrc,src=$(HOME)/.netrc'
 endif
+ifneq ($(wildcard $(APT_MIRRORS_FILE)),)
+DOCKER_BUILD_ARGS += --secret 'id=apt-mirrors,src=$(APT_MIRRORS_FILE)'
+endif
 
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
