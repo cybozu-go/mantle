@@ -27,6 +27,8 @@ jobs:
           - 1.35.8
     runs-on: "ubuntu-22.04"
     timeout-minutes: 60
+    env:
+      APT_MIRRORS_FILE: /etc/apt/apt-mirrors.txt
     steps:
       - name: Check the disk information
         run: lsblk

@@ -45,7 +45,16 @@ ARG EXPORT_DIFF_VERSION=20.2.1.1
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && \
+RUN --mount=type=secret,id=apt-mirrors,required=false \
+    # use the apt mirrors in the apt-mirrors secret, if given, only while installing the packages,
+    # so that the image is the same as the one built without them, such as the released one
+    if [ -s /run/secrets/apt-mirrors ]; then \
+        sed 's#^https://#http://#' /run/secrets/apt-mirrors > /etc/apt/apt-mirrors.txt && \
+        printf 'Acquire::Retries "0";\nAcquire::http::Timeout "15";\n' > /etc/apt/apt.conf.d/zz-apt-mirror && \
+        cp /etc/apt/sources.list.d/ubuntu.sources /tmp/ubuntu.sources && \
+        sed -i -E 's#http://(archive|security)\.ubuntu\.com/ubuntu/?$#mirror+file:/etc/apt/apt-mirrors.txt#' /etc/apt/sources.list.d/ubuntu.sources; \
+    fi && \
+    apt-get update && \
     apt-get install --no-install-recommends -y \
         libstdc++-11-dev jq kmod lvm2 gdisk ca-certificates e2fsprogs attr udev libgflags2.2 \
         curl unzip zstd &&\
@@ -56,6 +65,10 @@ RUN apt-get update && \
     cp /tmp/COPYING* /usr/local/share/doc/ceph && \
     mkdir -p /var/run/ceph && \
     apt-get install --no-install-recommends -y /tmp/*.deb && \
+    if [ -s /run/secrets/apt-mirrors ]; then \
+        mv /tmp/ubuntu.sources /etc/apt/sources.list.d/ubuntu.sources && \
+        rm /etc/apt/apt-mirrors.txt /etc/apt/apt.conf.d/zz-apt-mirror; \
+    fi && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
     rm -rf /tmp/*.deb && \
